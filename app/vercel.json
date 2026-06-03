@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "build": {
     "env": {
-      "VITE_API_BASE": "https://momome-api-production.up.railway.app"
+      "VITE_API_BASE": "https://momome-api-production.up.railway.app/api"
     }
   },
   "rewrites": [

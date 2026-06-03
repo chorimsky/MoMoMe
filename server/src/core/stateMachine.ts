@@ -232,7 +232,13 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
     if (Date.parse(p.updatedAt) > cutoff || !p.payInstruction.providerRef) continue;
     try {
       const s = await transactionStatus(p.payInstruction.providerRef);
-      if (s?.settled) await confirmInbound(p, p.payInstruction.amount); // LN = full lock
+      if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); continue; } // LN = full lock
+      // Expire an unpaid invoice (IBEX reports failed, or it's well past expiry)
+      // so it doesn't sit on "Waiting…" / "Pending" forever. No funds moved.
+      const expiredAt = Date.parse(p.payInstruction.expiresAt);
+      if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
+        transition(p, "FAILED", "invoice expired — not paid");
+      }
     } catch (e) { console.error("reconcile inbound", p.id, e); }
   }
 }

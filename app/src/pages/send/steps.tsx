@@ -313,6 +313,25 @@ export function PayStep({ payment, method, back, next, refresh, busy }: { paymen
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
   const { label, expired } = useExpiry(inst.expiresAt);
+
+  // Auto-advance: the inbound settles via the rail's webhook (real Lightning/
+  // on-chain). Poll for it and move to processing the moment it's detected, so
+  // the user never gets stuck on "Waiting for your payment". (In the sandbox
+  // demo the rail isn't actually paid — tap "I've paid" to simulate it.)
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const p = await api.getPayment(payment.id);
+        if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
+      } catch { /* keep polling */ }
+      if (active) setTimeout(poll, 2500);
+    };
+    const id = setTimeout(poll, 2500);
+    return () => { active = false; clearTimeout(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payment.id]);
+
   return (
     <FlowCard>
       <Stepper i={3} />

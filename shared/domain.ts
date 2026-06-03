@@ -36,7 +36,7 @@ export const METHOD_ASSET: Record<Method, InboundAsset> = {
 /** Flat platform fee shown to the user, on top of the FX spread. */
 export const FEE_PCT = 0.025;
 
-export const MIN_XAF = 500;
+export const MIN_XAF = 1; // lowered from 500 for testing (tiny real Lightning amounts)
 export const MAX_XAF = 5_000_000;
 
 /** Per-payout corridor caps (Mobile Money operator limits). */

@@ -30,6 +30,10 @@ export const config = {
     apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
     authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),
     audience: env("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
+    // Documented IBEX webhook sender IPs (sandbox vs prod) — used to allowlist
+    // inbound webhooks alongside the shared secret. Override via IBEX_WEBHOOK_IPS.
+    webhookIps: env("IBEX_WEBHOOK_IPS", sandbox ? "35.243.242.121,34.74.236.191" : "34.148.92.171,35.196.168.24")
+      .split(",").map((s) => s.trim()).filter(Boolean),
   }))(env("IBEX_ENV", "sandbox") !== "production"),
 
   pawapay: {
@@ -69,11 +73,19 @@ export function ibexConfigured(): boolean {
   return !!(config.ibex.clientId && config.ibex.clientSecret && config.ibex.accountId);
 }
 
-/** IBEX is all-or-nothing: reject a partial credential set at boot. */
+/** IBEX is all-or-nothing: reject a partial credential set at boot. In
+ *  production, also require a webhook secret and a reachable https PUBLIC_URL,
+ *  otherwise settlements can't be verified or delivered. */
 export function assertIbexConfig(): void {
   const parts = [config.ibex.clientId, config.ibex.clientSecret, config.ibex.accountId];
   if (parts.some(Boolean) && !parts.every(Boolean)) {
     throw new Error("Partial IBEX config: set IBEX_CLIENT_ID, IBEX_CLIENT_SECRET and IBEX_ACCOUNT_ID together (or none).");
+  }
+  if (ibexConfigured() && config.ibex.env === "production") {
+    const missing: string[] = [];
+    if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
+    if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
+    if (missing.length) throw new Error(`IBEX production requires: ${missing.join(", ")}.`);
   }
 }
 

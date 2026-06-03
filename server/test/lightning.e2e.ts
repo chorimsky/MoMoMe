@@ -112,7 +112,7 @@ async function main() {
 
   /* ---------------- Part B — live IBEX Lightning (fetch mocked) ---------------- */
   console.log("\nPart B — live IBEX Lightning path (fetch mocked)");
-  const { ibexAdapter } = await import("../src/adapters/ibex.js");
+  const { ibexAdapter, registerAccountWebhook, transactionStatus } = await import("../src/adapters/ibex.js");
   const storeMod = await import("../src/core/store.js");
   const { confirmInbound } = await import("../src/core/stateMachine.js");
   const { entriesFor } = await import("../src/core/ledger.js");
@@ -120,6 +120,7 @@ async function main() {
   const realFetch = globalThis.fetch;
   let sentInvoiceBody: any = null;
   let sentOnchainBody: any = null;
+  let sentWebhookReg: any = null;
   const BTC_IN = 0.00130414;
   const MSAT = Math.round(BTC_IN * 1e11);
   globalThis.fetch = (async (url: any, init: any) => {
@@ -134,6 +135,13 @@ async function main() {
     if (u.endsWith("/onchain/address")) {
       sentOnchainBody = JSON.parse(init.body);
       return new Response(JSON.stringify({ address: "bc1qtestaddr0000" }), { status: 200 });
+    }
+    if (u.includes("/webhooks") && u.includes("/accounts/")) {
+      sentWebhookReg = JSON.parse(init.body);
+      return new Response(null, { status: 204 });
+    }
+    if (u.includes("/transactions?")) {
+      return new Response(JSON.stringify([{ id: "tx_recon", status: "settled", amount: MSAT }]), { status: 200 });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -161,27 +169,39 @@ async function main() {
     ok("IBEX supports LIGHTNING + ONCHAIN", ibexAdapter.supports("LIGHTNING") && ibexAdapter.supports("ONCHAIN"));
     ok("IBEX does NOT advertise USDT", !ibexAdapter.supports("USDT"));
 
-    // 2. webhook auth — IBEX Hub echoes the per-invoice secret in the body
+    // 1c. account webhook registration (covers on-chain) + reconciliation lookup
+    await registerAccountWebhook();
+    ok("account webhook registered to /webhooks/ibex", String(sentWebhookReg.url).endsWith("/webhooks/ibex"));
+    ok("account webhook carries the secret", sentWebhookReg.secret === "whsec_test");
+    const st = await transactionStatus("tx_recon");
+    ok("reconciliation reports a settled tx", st?.settled === true);
+
+    // 2. webhook auth — IBEX Hub echoes the shared secret in the body (no HMAC)
     const now0 = new Date().toISOString();
-    const goodBody = JSON.stringify({ transaction: { id: "tx_live_001", status: "SETTLED", settledAt: now0, amount: BTC_IN }, secret: "whsec_test" });
+    // IBEX reports the amount in MSAT on a BTC account.
+    const goodBody = JSON.stringify({ transaction: { id: "tx_live_001", status: "settled", settledAt: now0, amount: MSAT }, secret: "whsec_test" });
     ok("valid webhook secret accepted", ibexAdapter.verifyWebhook(goodBody, {}));
     ok("wrong webhook secret rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ transaction: { id: "tx_live_001" }, secret: "nope" }), {}));
     ok("missing webhook secret rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ transaction: { id: "tx_live_001" } }), {}));
+    // sender-IP allowlist: a non-allowed forwarded IP is rejected even with a good secret
+    ok("disallowed sender IP rejected", !ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": "1.2.3.4" }));
+    ok("allowed sender IP accepted", ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": "35.243.242.121" }));
 
-    // 3. parse settled event (transaction → confirmed, amount in BTC)
+    // 3. parse settled event — amount converted MSAT → BTC (the 1e11 fix)
     const ev = ibexAdapter.parseEvent(JSON.parse(goodBody))!;
     ok("event parsed as confirmed", ev.kind === "confirmed");
     ok("event providerRef is the transaction id", ev.providerRef === "tx_live_001");
-    ok("event amount is the settled BTC amount", Math.abs(ev.amount! - BTC_IN) < 1e-9);
+    ok("event amount converted msat→BTC", Math.abs(ev.amount! - BTC_IN) < 1e-9);
+    ok("a failed/expired tx is ignored", ibexAdapter.parseEvent({ transaction: { id: "x", status: "failed" } }) === null);
 
     // helper to seed an AWAITING payment with a locked instruction
-    const seedPayment = (id: string, providerRef: string, amount: number) => {
+    const seedPayment = (id: string, providerRef: string, amount: number, method: any = "LIGHTNING") => {
       const now = new Date().toISOString();
       const pay: any = {
-        id, ref: id, quoteId: "q", state: "AWAITING_INBOUND", displayStatus: "Pending", method: "LIGHTNING",
+        id, ref: id, quoteId: "q", state: "AWAITING_INBOUND", displayStatus: "Pending", method,
         recipient: { phone: "6 70 12 34 56", country: "CM", provider: "MTN", name: "NANA JEAN PAUL", nameSource: "provider" },
         xaf: 50000, feeXaf: 1250, totalXaf: 51250, usd: 84.3,
-        payInstruction: { method: "LIGHTNING", code: "lnbc", qr: "LNBC", asset: "BTC", amount, amountLabel: "", expiresAt: now, providerRef, provider: "ibex" },
+        payInstruction: { method, code: "addr", qr: "QR", asset: "BTC", amount, amountLabel: "", expiresAt: now, providerRef, provider: "ibex" },
         events: [{ at: now, state: "AWAITING_INBOUND" }], createdAt: now, updatedAt: now,
       };
       storeMod.putPayment(pay); storeMod.indexProviderRef(providerRef, id);
@@ -199,25 +219,34 @@ async function main() {
     for (const e of entriesFor("pay_live_ok")) n[e.currency] = (n[e.currency] ?? 0) + (e.direction === "debit" ? e.amount : -e.amount);
     ok("live LN ledger balanced", Math.abs(n.BTC) < 1e-9 && Math.abs(n.XAF) < 1e-9);
 
-    // 5. underpayment guard uses the LOCKED amount (the bug we fixed)
-    seedPayment("pay_live_short", "h_short", BTC_IN);
-    await confirmInbound(storeMod.findByProviderRef("h_short")!, BTC_IN * 0.7);
-    ok("30%-short inbound → MANUAL_REVIEW", storeMod.getPayment("pay_live_short")!.state === "MANUAL_REVIEW");
+    // 4b. Lightning credits the LOCKED amount regardless of the webhook amount
+    //     (LN settles in full; protects the ledger from any unit error).
+    seedPayment("pay_ln_lock", "tx_ln_lock", BTC_IN);
+    await confirmInbound(storeMod.findByProviderRef("tx_ln_lock")!, BTC_IN * 0.5); // bogus low amount
+    const lockNets: Record<string, number> = {};
+    for (const e of entriesFor("pay_ln_lock")) lockNets[e.currency] = (lockNets[e.currency] ?? 0) + (e.direction === "debit" ? e.amount : -e.amount);
+    ok("LN settles in full despite a low webhook amount", storeMod.getPayment("pay_ln_lock")!.state === "DELIVERED");
+    ok("LN ledger uses the locked amount (balanced)", Math.abs(lockNets.BTC) < 1e-9 && Math.abs(lockNets.XAF) < 1e-9);
 
-    // 5b. a CORRECT payment never trips the guard even though spot drifts over time
-    seedPayment("pay_live_exact", "h_exact", BTC_IN);
-    await confirmInbound(storeMod.findByProviderRef("h_exact")!, BTC_IN); // exactly the locked amount
-    ok("exact locked amount settles (no false underpay)", storeMod.getPayment("pay_live_exact")!.state === "DELIVERED");
+    // 5. ON-CHAIN underpayment guard (on-chain CAN be partial, unlike LN)
+    seedPayment("pay_oc_short", "oc_short", BTC_IN, "ONCHAIN");
+    await confirmInbound(storeMod.findByProviderRef("oc_short")!, BTC_IN * 0.7);
+    ok("30%-short on-chain inbound → MANUAL_REVIEW", storeMod.getPayment("pay_oc_short")!.state === "MANUAL_REVIEW");
+
+    // 5b. a CORRECT on-chain payment never trips the guard
+    seedPayment("pay_oc_exact", "oc_exact", BTC_IN, "ONCHAIN");
+    await confirmInbound(storeMod.findByProviderRef("oc_exact")!, BTC_IN);
+    ok("exact on-chain amount settles (no false underpay)", storeMod.getPayment("pay_oc_exact")!.state === "DELIVERED");
 
     // 6. webhook idempotency
     const evCount = storeMod.getPayment("pay_live_ok")!.events.length;
     await confirmInbound(storeMod.findByProviderRef("tx_live_001")!, ev.amount);
     ok("replayed webhook does not double-settle", storeMod.getPayment("pay_live_ok")!.events.length === evCount);
 
-    // 7. confirmed inbound with NO amount is untrusted → MANUAL_REVIEW (not auto-paid)
-    seedPayment("pay_live_noamt", "h_noamt", BTC_IN);
-    await confirmInbound(storeMod.findByProviderRef("h_noamt")!, undefined);
-    ok("missing inbound amount → MANUAL_REVIEW", storeMod.getPayment("pay_live_noamt")!.state === "MANUAL_REVIEW");
+    // 7. confirmed ON-CHAIN inbound with NO amount is untrusted → MANUAL_REVIEW
+    seedPayment("pay_oc_noamt", "oc_noamt", BTC_IN, "ONCHAIN");
+    await confirmInbound(storeMod.findByProviderRef("oc_noamt")!, undefined);
+    ok("missing on-chain amount → MANUAL_REVIEW", storeMod.getPayment("pay_oc_noamt")!.state === "MANUAL_REVIEW");
 
     /* ---- Part C — admin retry / refund correctness (review fixes) ---- */
     console.log("\nPart C — refund & retry ledger correctness");

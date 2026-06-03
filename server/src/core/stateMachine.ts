@@ -16,6 +16,7 @@ import { isLive } from "../config.js";
 import { selectAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
+import { transactionStatus } from "../adapters/ibex.js";
 
 /** Available XAF payout float = base treasury − everything already paid out. */
 function availableFloatXaf(): number {
@@ -68,18 +69,25 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   const asset = p.payInstruction.asset;
   const expected = p.payInstruction.amount;
 
-  // A confirmed inbound with no verified amount is untrusted — never assume the
-  // expected amount arrived; hold for review. (Sandbox settle passes the amount.)
-  if (actualAmount == null) {
-    transition(p, "MANUAL_REVIEW", "inbound amount unverified");
-    return;
-  }
-  const received = actualAmount;
-
-  // Underpayment guard: never auto-pay a short inbound (BACKEND_DESIGN §1).
-  if (received < expected * 0.999) {
-    transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
-    return;
+  // Lightning invoices settle in full or not at all — a confirmed LN webhook
+  // means the locked amount arrived, so we credit the locked amount and never
+  // depend on the webhook's amount/units. On-chain can be partial, so verify
+  // the (correctly-scaled) received amount against the lock.
+  let received: number;
+  if (p.payInstruction.method === "LIGHTNING") {
+    received = expected;
+  } else {
+    // A confirmed inbound with no verified amount is untrusted — hold for review.
+    if (actualAmount == null) {
+      transition(p, "MANUAL_REVIEW", "inbound amount unverified");
+      return;
+    }
+    received = actualAmount;
+    // Underpayment guard: never auto-pay a short inbound (BACKEND_DESIGN §1).
+    if (received < expected * 0.999) {
+      transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
+      return;
+    }
   }
 
   transition(p, "INBOUND_CONFIRMED");
@@ -188,6 +196,23 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
     const status = await aggregatorByName(p.aggregator ?? "pawapay").queryStatus(p.ref);
     if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
+  }
+}
+
+/** Backstop for a lost inbound webhook: poll IBEX for Lightning payments still
+ *  awaiting inbound and settle any that IBEX reports paid. Idempotent — only
+ *  ever advances a genuinely-settled payment. (On-chain settles by address via
+ *  the account webhook; it isn't pollable by transaction id here.) */
+export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
+  const cutoff = Date.now() - maxAgeMs;
+  for (const p of listPayments()) {
+    if (p.payInstruction.provider !== "ibex" || p.payInstruction.method !== "LIGHTNING") continue;
+    if (p.state !== "AWAITING_INBOUND" && p.state !== "INBOUND_DETECTED") continue;
+    if (Date.parse(p.updatedAt) > cutoff || !p.payInstruction.providerRef) continue;
+    try {
+      const s = await transactionStatus(p.payInstruction.providerRef);
+      if (s?.settled) await confirmInbound(p, p.payInstruction.amount); // LN = full lock
+    } catch (e) { console.error("reconcile inbound", p.id, e); }
   }
 }
 

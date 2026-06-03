@@ -13,7 +13,7 @@ import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, hasDelivered, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive } from "../config.js";
-import { selectAggregator, aggregatorByName, recordExecution } from "./routing.js";
+import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { transactionStatus } from "../adapters/ibex.js";
@@ -123,8 +123,13 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
     return;
   }
 
-  // Route to an aggregator (PawaPay / Peexit) — invisible to the user.
-  const agg = selectAggregator(p.recipient.provider);
+  // Route to a FUNDED aggregator (PawaPay / Peexit) — the API with wallet
+  // balance picks up the payout. Invisible to the user.
+  const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
+  if (!agg) {
+    transition(p, "MANUAL_REVIEW", "no payout aggregator with sufficient balance");
+    return;
+  }
   p.aggregator = agg.name;
 
   // SUBMIT the payout — exactly once, keyed on the payment ref.
@@ -222,7 +227,10 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
  *  and posts the delivery ledger legs once. */
 export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
-  const agg = aggregatorByName(p.aggregator ?? selectAggregator(p.recipient.provider).name);
+  // Retry reuses the original aggregator (idempotent on the ref); if none was
+  // chosen yet, pick a funded one now.
+  const agg = p.aggregator ? aggregatorByName(p.aggregator) : await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
+  if (!agg) return false;
   const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf });
   if (!hasDelivered(p.id)) {
     recordTxn(p.id, [

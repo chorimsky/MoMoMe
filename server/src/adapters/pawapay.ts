@@ -143,6 +143,26 @@ export function refForPayoutId(payoutId: string): string | undefined {
   return byPayoutId.get(payoutId);
 }
 
+/** Available wallet balance (XAF) for a country — drives balance-aware routing.
+ *  null when PawaPay isn't configured (can't settle). Cached briefly. */
+let balCache: { at: number; map: Record<string, number> } | null = null;
+export async function availableBalanceXaf(country: CountryCode): Promise<number | null> {
+  if (!pawapayConfigured()) return null;
+  const iso = ISO3[country] ?? "CMR";
+  if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;
+  try {
+    const res = await fetch(`${config.pawapay.apiUrl}/v1/wallet-balances`, {
+      headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { balances?: Array<{ country?: string; balance?: string; currency?: string }> };
+    const map: Record<string, number> = {};
+    for (const b of data.balances ?? []) if (b.currency === "XAF" && b.country) map[b.country] = Number(b.balance ?? 0);
+    balCache = { at: Date.now(), map };
+    return map[iso] ?? 0;
+  } catch { return null; }
+}
+
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }

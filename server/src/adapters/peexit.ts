@@ -4,7 +4,7 @@
    routing engine can pick either one invisibly. Idempotent on the key.
    ============================================================ */
 import crypto from "node:crypto";
-import type { ProviderId } from "../../../shared/types.js";
+import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
 import { config, peexitConfigured } from "../config.js";
 import { register, touch } from "../core/persist.js";
@@ -51,6 +51,14 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
 
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
+}
+
+/** Available wallet balance (XAF) for balance-aware routing. null when Peexit
+ *  isn't configured — so it can't be chosen to settle a real payout. */
+export async function availableBalanceXaf(_country: CountryCode): Promise<number | null> {
+  if (!peexitConfigured()) return null;
+  // ---- CONFIRM Peexit balance endpoint when wired ----
+  return null;
 }
 
 export function verifyWebhook(rawBody: string, signature: string | undefined): boolean {

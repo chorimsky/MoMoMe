@@ -335,6 +335,13 @@ async function main() {
     routing.setAggregatorUp("peexit", true);
     ok("Orange returns to Peexit once healthy", routing.selectAggregator("ORANGE").name === "peexit");
 
+    // Balance-aware payout selection: the funded API picks up. With no real rail
+    // configured (test env), it routes by preference (simulated).
+    const fundedMtn = await routing.selectFundedAggregator("MTN", "CM", 100);
+    const fundedOrange = await routing.selectFundedAggregator("ORANGE", "CM", 100);
+    ok("balance-aware select (sandbox) → a usable aggregator", !!fundedMtn && !!fundedOrange);
+    ok("balance-aware select falls back to preference when no real rail", fundedMtn!.name === "pawapay" && fundedOrange!.name === "peexit");
+
     // Execution log feeds the snapshot.
     routing.recordExecution({ at: new Date().toISOString(), aggregator: "pawapay", ref: "X1", provider: "MTN", status: "COMPLETED", latencyMs: 120 });
     const snap = routing.routingSnapshot();

@@ -131,7 +131,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   transition(p, "PAYOUT_REQUESTED");
   let res;
   try {
-    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, phone: p.recipient.phone, xaf: p.xaf });
+    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf });
   } catch (e) {
     transition(p, "MANUAL_REVIEW", `payout submit failed: ${e instanceof Error ? e.message : "error"}`);
     return;
@@ -143,9 +143,10 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   p.payoutRef = res.providerRef;
   putPayment(p);
 
-  // CONFIRMATION is async. Live: the real /webhooks/pawapay callback drives it.
-  // Sandbox: simulate the provider's callback inline so the demo completes.
-  if (isLive()) return;
+  // CONFIRMATION is async. Real payout (aggregator configured): the provider's
+  // /webhooks/{aggregator} callback drives it. Simulated: fake the callback
+  // inline so the flow completes. Keyed off the disburse result, not RAILS_MODE.
+  if (!res.simulated) return;
   await wait(900);
   await onPayoutResult(p.ref, "COMPLETED", res.providerRef);
 }
@@ -222,7 +223,7 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
 export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
   const agg = aggregatorByName(p.aggregator ?? selectAggregator(p.recipient.provider).name);
-  const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, phone: p.recipient.phone, xaf: p.xaf });
+  const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf });
   if (!hasDelivered(p.id)) {
     recordTxn(p.id, [
       { account: "payout_float_XAF", direction: "debit", amount: p.xaf, currency: "XAF" },

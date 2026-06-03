@@ -36,11 +36,15 @@ export const config = {
       .split(",").map((s) => s.trim()).filter(Boolean),
   }))(env("IBEX_ENV", "sandbox") !== "production"),
 
-  pawapay: {
-    apiUrl: env("PAWAPAY_API_URL", "https://api.pawapay.io"),
+  /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
+   *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
+   *  derives from PAWAPAY_ENV (sandbox|production). */
+  pawapay: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
     apiKey: env("PAWAPAY_API_KEY"),
     webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
-  },
+  }))(env("PAWAPAY_ENV", "sandbox") !== "production"),
 
   /** Peexit — the SECOND Mobile Money payout aggregator (routing alternative to
    *  PawaPay). Distinct from the Peex intelligence layer above. */
@@ -72,6 +76,11 @@ export function isLive(): boolean {
 export function ibexConfigured(): boolean {
   return !!(config.ibex.clientId && config.ibex.clientSecret && config.ibex.accountId);
 }
+
+/** Real Mobile Money payout rails activate per-aggregator when their key is
+ *  set — independent of RAILS_MODE — so one can go live before the other. */
+export function pawapayConfigured(): boolean { return !!config.pawapay.apiKey; }
+export function peexitConfigured(): boolean { return !!config.peexit.apiKey; }
 
 /** IBEX is all-or-nothing: reject a partial credential set at boot. In
  *  production, also require a webhook secret and a reachable https PUBLIC_URL,

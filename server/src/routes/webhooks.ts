@@ -26,19 +26,22 @@ webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
   res.json({ ok: true });
 });
 
-// PawaPay payout callback — the async confirmation/failure of a Mobile Money
-// payout. Signature-verified; drives delivery or auto-refund. Acks fast.
+// PawaPay payout callback — async confirmation/failure of a Mobile Money payout.
+// We treat the callback as a trigger and confirm the AUTHORITATIVE status by
+// re-querying GET /payouts/{payoutId} (so we don't depend on verifying their
+// RFC-9421 callback signature). Acks fast, then settles/refunds in background.
 webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  const sig = req.headers["x-pawapay-signature"];
-  if (!pawapay.verifyWebhook(raw, Array.isArray(sig) ? sig[0] : sig)) {
-    return res.status(401).json({ error: "bad_signature" });
-  }
-  let event;
-  try { event = pawapay.parsePayoutEvent(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
-  if (!event) return res.json({ ok: true, ignored: true });
-  void onPayoutResult(event.ref, event.status).catch((e) => console.error("payout result", event!.ref, e));
+  let payoutId: string | undefined;
+  try { payoutId = (JSON.parse(raw) as { payoutId?: string }).payoutId; } catch { return res.status(400).json({ error: "bad_json" }); }
   res.json({ ok: true });
+  if (!payoutId) return;
+  const ref = pawapay.refForPayoutId(payoutId);
+  if (!ref) return;
+  void (async () => {
+    const status = await pawapay.queryStatusByPayoutId(payoutId!);
+    if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ref, status, payoutId);
+  })().catch((e) => console.error("pawapay callback", ref, e));
 });
 
 // Peex intelligence-layer webhook — signature-verified, logged. Registered

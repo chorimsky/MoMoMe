@@ -6,7 +6,7 @@
 import crypto from "node:crypto";
 import type { ProviderId } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
-import { config, isLive } from "../config.js";
+import { config, peexitConfigured } from "../config.js";
 import { register, touch } from "../core/persist.js";
 import type { DisburseRequest, DisburseResult, PayoutStatus } from "./pawapay.js";
 
@@ -16,8 +16,9 @@ register("peexit", () => [...byKey], (d: [string, DisburseResult][]) => { for (c
 export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
   const existing = byKey.get(req.idempotencyKey);
   if (existing) return { ...existing, status: "duplicate" };
-  const providerRef = isLive() ? await liveSubmit(req) : id("px");
-  const result: DisburseResult = { status: "accepted", providerRef };
+  const real = peexitConfigured();
+  const providerRef = real ? await liveSubmit(req) : id("px");
+  const result: DisburseResult = { status: "accepted", providerRef, simulated: !real };
   byKey.set(req.idempotencyKey, result);
   touch("peexit");
   return result;
@@ -38,7 +39,7 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;
-  if (!isLive()) return "COMPLETED";
+  if (local.simulated) return "COMPLETED";
   try {
     const res = await fetch(`${config.peexit.apiUrl}/v1/payouts/${idempotencyKey}`, { headers: { authorization: `Bearer ${config.peexit.apiKey}` } });
     if (!res.ok) return "PENDING";

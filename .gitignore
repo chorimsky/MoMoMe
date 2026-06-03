@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Runtime data / local DB
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets — only .env.example is committed
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.log
+
+# Misc
+.thumbnail

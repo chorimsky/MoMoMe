@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MoMo›Me — Admin Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="momome.css" />
+<style>
+  body { background: var(--paper-2); }
+  .admin { display: grid; grid-template-columns: 240px minmax(0,1fr); min-height: 100vh; }
+  .side { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); }
+  .side-brand { padding: 18px 18px 12px; }
+  .side-nav { flex: 1; overflow-y: auto; padding: 4px 12px; }
+  .side-grp { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; font-weight: 750; color: var(--ink-3); padding: 12px 10px 5px; }
+  .side-item { display: flex; align-items: center; gap: 11px; width: 100%; border: none; background: transparent; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 9px 10px; border-radius: 9px; text-align: left; transition: background .12s, color .12s; }
+  .side-item svg { flex: none; }
+  .side-lbl { white-space: nowrap; }
+  .side-item:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+  .side-item.on { background: var(--accent-wash); color: var(--accent); }
+  .side-item.on svg { color: var(--accent); }
+  .side-badge { margin-left: auto; background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .side-foot { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-top: 1px solid var(--line); }
+
+  .main { min-width: 0; display: flex; flex-direction: column; }
+  .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; padding: 11px 22px; background: color-mix(in oklab, var(--paper-2) 86%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .crumbs { font-size: 14px; white-space: nowrap; }
+  .search { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; width: 260px; max-width: 28vw; }
+  .search input { border: none; background: transparent; font: inherit; font-size: 13px; outline: none; width: 100%; color: var(--ink); }
+  .role-sel { appearance: none; cursor: pointer; padding: 9px 30px 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23999' fill='none' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 11px center; font: inherit; font-weight: 600; font-size: 13px; color: var(--ink); }
+  .content { padding: 24px 22px 64px; max-width: 1280px; }
+  .hamburger { display: none; }
+  .side-scrim { display: none; }
+
+  @media (max-width: 860px) {
+    .admin { grid-template-columns: 1fr; }
+    .side { position: fixed; left: 0; top: 0; width: 252px; transform: translateX(-100%); transition: transform .25s ease; z-index: 60; box-shadow: var(--shadow-lg); }
+    .side.open { transform: none; }
+    .side-scrim { display: block; position: fixed; inset: 0; background: oklch(0.2 0.01 64 / .4); z-index: 50; }
+    .hamburger { display: inline-grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; cursor: pointer; font-size: 18px; color: var(--ink); flex: none; }
+    .search { display: none; }
+    .content { padding: 18px 16px 56px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="admin-ui.jsx"></script>
+<script type="text/babel" src="admin-views.jsx"></script>
+<script type="text/babel" src="admin.jsx"></script>
+</body>
+</html>

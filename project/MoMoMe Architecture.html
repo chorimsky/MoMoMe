@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MoMo›Me — Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="momome.css" />
+<style>
+  body { background: var(--paper); }
+  .ar { max-width: 1180px; margin: 0 auto; padding: 16px clamp(16px,4vw,40px) 80px; }
+  .ar-top { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 30px; }
+  .ar-nav { display: flex; gap: 2px; }
+  .ar-nav a { font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none; padding: 7px 11px; border-radius: 8px; }
+  .ar-nav a:hover, .ar-nav a.on { background: var(--surface-2); color: var(--ink); }
+
+  .hero { display: grid; grid-template-columns: 1.5fr 1fr; gap: 40px; align-items: end; padding: 18px 0 46px; border-bottom: 1px solid var(--line); }
+  @media (max-width: 760px){ .hero { grid-template-columns: 1fr; gap: 22px; } }
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .display { font-family: var(--font-display); font-size: clamp(38px, 6vw, 68px); line-height: 0.98; letter-spacing: -0.03em; margin: 16px 0 0; }
+  .display em { font-family: "Instrument Serif", serif; font-style: italic; font-weight: 400; color: var(--accent); }
+  .lede { font-size: 16px; color: var(--ink-2); line-height: 1.55; max-width: 40ch; margin-top: 18px; }
+  .heroStats { display: flex; flex-direction: column; gap: 14px; }
+  .stat { border-left: 2px solid var(--accent); padding-left: 14px; }
+  .stat b { font-family: var(--font-mono); font-size: 24px; font-weight: 700; letter-spacing: -0.02em; display: block; }
+  .stat span { font-size: 12.5px; color: var(--ink-3); }
+
+  .sec-h { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; margin: 56px 0 6px; display:flex; align-items:center; gap:10px; }
+  .sec-h::after { content:""; flex:1; height:1px; background: var(--line); }
+  .sec-title { font-family: var(--font-display); font-size: 26px; letter-spacing: -0.02em; margin: 0 0 26px; }
+
+  /* diagram */
+  .board { background:
+      linear-gradient(var(--line-2) 1px, transparent 1px) 0 0/100% 26px,
+      var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 30px; overflow-x: auto; box-shadow: var(--shadow); }
+  .flow { display: flex; align-items: stretch; gap: 0; min-width: 940px; }
+  .stage { display: flex; flex-direction: column; justify-content: center; gap: 12px; flex: 1; }
+  .stage-lbl { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; text-align: center; margin-bottom: 2px; }
+  .node { background: var(--surface); border: 1.5px solid var(--line); border-radius: 13px; padding: 13px 14px; box-shadow: var(--shadow-sm); }
+  .node.warm { border-color: color-mix(in oklab, var(--send) 50%, var(--line)); background: var(--send-wash); }
+  .node.green { border-color: color-mix(in oklab, var(--recv) 45%, var(--line)); background: var(--recv-wash); }
+  .node.engine { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
+  .node .nt { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .node .ns { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+  .conn { display: flex; align-items: center; justify-content: center; width: 46px; flex: none; color: var(--ink-3); }
+  .glyph { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; color: #fff; flex: none; font-family: var(--font-mono); font-weight: 700; }
+
+  .chain { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 760px){ .chain { grid-template-columns: 1fr; } }
+  .why { padding: 22px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface); }
+  .why h4 { font-size: 17px; display: flex; align-items: center; gap: 9px; }
+  .why ul { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+  .why li { font-size: 13.5px; color: var(--ink-2); padding-left: 20px; position: relative; line-height: 1.45; }
+  .why li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+
+  .cov { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  @media (max-width: 860px){ .cov { grid-template-columns: repeat(2,1fr); } }
+  .cov-c { border: 1px solid var(--line); border-radius: var(--r); padding: 14px; background: var(--surface); }
+  .cov-c .cn { font-weight: 700; font-size: 14.5px; display:flex; align-items:center; gap:8px; }
+  .cov-c .cd { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin: 3px 0 10px; }
+  .cov-c .cp { font-size: 11.5px; color: var(--ink-2); }
+
+  .closing { margin-top: 64px; padding: 44px; border-radius: var(--r-xl); background: var(--ink); color: var(--paper); text-align: center; }
+  .closing h2 { font-family: var(--font-display); font-size: clamp(26px,4vw,42px); letter-spacing: -0.02em; color: var(--paper); line-height: 1.05; }
+  .closing h2 em { font-family: "Instrument Serif", serif; font-style: italic; font-weight: 400; color: var(--send); }
+  .closing p { color: color-mix(in oklab, var(--paper) 65%, var(--ink)); font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .1em; text-transform: uppercase; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="ar">
+  <div class="ar-top">
+    <span id="brand"></span>
+    <nav class="ar-nav">
+      <a href="MoMoMe Send Flow.html">Pay app</a>
+      <a href="MoMoMe Admin.html">Admin</a>
+      <a class="on" href="MoMoMe Architecture.html">Architecture</a>
+    </nav>
+  </div>
+
+  <!-- HERO -->
+  <header class="hero">
+    <div>
+      <div class="eyebrow">They see Mobile Money · we run the rails</div>
+      <h1 class="display">A payment app on top.<br />A <em>settlement network</em> underneath.</h1>
+      <p class="lede">To the user it is simply “Pay Mobile Money.” Underneath, MoMo›Me settles Bitcoin and USDT into XAF, pays out through MTN, Orange or Airtel — and quietly turns every number into a financial identity.</p>
+    </div>
+    <div class="heroStats">
+      <div class="stat"><b>3</b><span>inbound rails — Lightning, on-chain BTC &amp; USDT</span></div>
+      <div class="stat"><b>1</b><span>payout API — PawaPay, all of CEMAC</span></div>
+      <div class="stat"><b>1:1</b><span>every Mobile Money number → a financial identity</span></div>
+    </div>
+  </header>
+
+  <!-- DIAGRAM -->
+  <div class="sec-h">System map</div>
+  <h2 class="sec-title">Global value in, local value out</h2>
+  <div class="board">
+    <div class="flow">
+      <div class="stage">
+        <div class="stage-lbl">Sender</div>
+        <div class="node warm">
+          <div class="nt"><span class="glyph" style="background:var(--ink)">↗</span> Diaspora</div>
+          <div class="ns">“Pay Mobile Money”</div>
+        </div>
+      </div>
+
+      <div class="conn">→</div>
+
+      <div class="stage">
+        <div class="stage-lbl">Inbound rails</div>
+        <div class="node warm">
+          <div class="nt"><span class="glyph" style="background:var(--lightning)">⚡</span> IBEX</div>
+          <div class="ns">BTC · Lightning</div>
+        </div>
+        <div class="node warm">
+          <div class="nt"><span class="glyph" style="background:var(--lightning)">₿</span> Bitcoin</div>
+          <div class="ns">BTC · on-chain</div>
+        </div>
+        <div class="node warm">
+          <div class="nt"><span class="glyph" style="background:var(--tron)">₮</span> TRON</div>
+          <div class="ns">USDT · TRC20</div>
+        </div>
+      </div>
+
+      <div class="conn">→</div>
+
+      <div class="stage">
+        <div class="stage-lbl">Orchestration</div>
+        <div class="node engine">
+          <div class="nt"><span class="glyph" style="background:var(--accent)">⌘</span> Node.js Engine</div>
+          <div class="ns">confirm · route · ledger</div>
+        </div>
+        <div class="node engine">
+          <div class="nt"><span class="glyph" style="background:var(--info)">⇄</span> FX Engine</div>
+          <div class="ns">BTC/USDT → XAF</div>
+        </div>
+      </div>
+
+      <div class="conn">→</div>
+
+      <div class="stage">
+        <div class="stage-lbl">Payout</div>
+        <div class="node green">
+          <div class="nt"><span class="glyph" style="background:var(--recv)">◎</span> PawaPay</div>
+          <div class="ns">unified MoMo API</div>
+        </div>
+      </div>
+
+      <div class="conn">→</div>
+
+      <div class="stage">
+        <div class="stage-lbl">Recipient</div>
+        <div class="node green">
+          <div class="nt"><span class="glyph" style="background:oklch(0.83 0.16 92);color:#1a1400">$</span> Mobile money</div>
+          <div class="ns">MTN · Orange · Airtel</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHY THIS STACK -->
+  <div class="sec-h">Why this stack</div>
+  <h2 class="sec-title">Three primitives, one rail</h2>
+  <div class="chain">
+    <div class="why">
+      <h4><span class="glyph" style="background:var(--lightning)">₿</span> Bitcoin · two rails</h4>
+      <ul>
+        <li>Lightning (IBEX) — instant, low-fee, default</li>
+        <li>On-chain — large amounts, high finality</li>
+        <li>Engine auto-routes by amount</li>
+      </ul>
+    </div>
+    <div class="why">
+      <h4><span class="glyph" style="background:oklch(0.62 0.13 162)">₮</span> USDT · TRON</h4>
+      <ul>
+        <li>Stable-value inbound rail</li>
+        <li>Deep global liquidity</li>
+        <li>Low-cost TRC20 transfers</li>
+      </ul>
+    </div>
+    <div class="why">
+      <h4><span class="glyph" style="background:var(--recv)">◎</span> PawaPay</h4>
+      <ul>
+        <li>One API for African mobile money</li>
+        <li>MTN, Orange &amp; Airtel coverage</li>
+        <li>Replaces 3–10 direct integrations</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- IDENTITY LAYER -->
+  <div class="sec-h">The quiet part</div>
+  <h2 class="sec-title">Every number becomes an account</h2>
+  <div class="chain">
+    <div class="why">
+      <h4><span class="glyph" style="background:var(--accent)">+</span> Provisioned on first pay</h4>
+      <ul>
+        <li>Customer, custodial wallet &amp; ledger</li>
+        <li>No signup, no seed phrase</li>
+        <li>The number <em>is</em> the account</li>
+      </ul>
+    </div>
+    <div class="why">
+      <h4><span class="glyph" style="background:var(--recv)">✓</span> A name, not a number</h4>
+      <ul>
+        <li>Resolved from provider, history or input</li>
+        <li>Verified before every payment</li>
+        <li>Trust that kills wrong-number fraud</li>
+      </ul>
+    </div>
+    <div class="why">
+      <h4><span class="glyph" style="background:var(--lightning)">⚡</span> A Lightning identity</h4>
+      <ul>
+        <li>670…@momome.africa per number</li>
+        <li>Invisible today, claimable tomorrow</li>
+        <li>A network forming, payment by payment</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- COVERAGE -->
+  <div class="sec-h">Coverage · CEMAC</div>
+  <h2 class="sec-title">Built for the franc zone</h2>
+  <div class="cov" id="coverage"></div>
+
+  <!-- CLOSING -->
+  <div class="closing">
+    <h2>They think it's Mobile Money.<br />It's a <em>financial network</em>.</h2>
+    <p>Lightning · On-chain · USDT → FX → XAF → PawaPay → Mobile Money</p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel">
+  // brand mark
+  ReactDOM.createRoot(document.getElementById("brand")).render(<Logo size={24} />);
+  // coverage cards
+  const cov = Object.values(COUNTRIES);
+  ReactDOM.createRoot(document.getElementById("coverage")).render(
+    <>{cov.map((c) => (
+      <div className="cov-c" key={c.code}>
+        <div className="cn"><Flag country={c.code} size={16} /> {c.name}</div>
+        <div className="cd">{c.dial} · {c.ccy}</div>
+        <div className="cp">{c.providers.map((p) => PROVIDERS[p].name).join(" · ")}</div>
+      </div>
+    ))}</>
+  );
+</script>
+</body>
+</html>

@@ -2,6 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm --filter @momome/app build",
   "outputDirectory": "app/dist",
+  "build": {
+    "env": {
+      "VITE_API_BASE": "https://momome-api-production.up.railway.app"
+    }
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

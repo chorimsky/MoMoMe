@@ -148,12 +148,27 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   p.payoutRef = res.providerRef;
   putPayment(p);
 
-  // CONFIRMATION is async. Real payout (aggregator configured): the provider's
-  // /webhooks/{aggregator} callback drives it. Simulated: fake the callback
-  // inline so the flow completes. Keyed off the disburse result, not RAILS_MODE.
-  if (!res.simulated) return;
+  // CONFIRMATION is async. Real payout: settle on the FIRST of — the provider's
+  // /webhooks/{aggregator} callback, this active status poll, or the slower
+  // reconcile backstop. All idempotent. Simulated: fake the callback inline.
+  if (!res.simulated) { void pollPayout(p.ref); return; }
   await wait(900);
   await onPayoutResult(p.ref, "COMPLETED", res.providerRef);
+}
+
+/** Actively poll a real payout's status for fast settlement when the dashboard
+ *  callback isn't (yet) configured. Stops the moment the payment leaves
+ *  PAYOUT_REQUESTED (e.g. a callback already settled it). Idempotent. */
+async function pollPayout(ref: string): Promise<void> {
+  for (const delay of [3000, 5000, 8000, 15000, 30000]) {
+    await wait(delay);
+    const p = findPaymentByRef(ref);
+    if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved
+    try {
+      const status = await aggregatorByName(p.aggregator ?? "pawapay").queryStatus(ref);
+      if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(ref, status, p.payoutRef); return; }
+    } catch (e) { console.error("poll payout", ref, e); }
+  }
 }
 
 /**

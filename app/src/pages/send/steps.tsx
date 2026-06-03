@@ -34,10 +34,12 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
     let active = true;
     const id = setTimeout(async () => {
       try {
-        const r = await api.resolveRecipient(s.phone);
+        const r = await api.resolveRecipient(s.phone, s.country);
         if (!active) return;
-        if (r.status === "unknown") set({ recipientName: "", nameSource: "unknown" });
-        else set({ recipientName: r.name ?? "", nameSource: r.status });
+        // Anchor the operator to the number's prefix (overrides the manual pick).
+        const prov = r.provider && c.providers.includes(r.provider) ? { provider: r.provider } : {};
+        if (r.status === "unknown") set({ recipientName: "", nameSource: "unknown", ...prov });
+        else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
       } catch {
         if (active) set({ nameSource: "manual" });
       } finally {

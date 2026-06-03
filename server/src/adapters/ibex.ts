@@ -168,9 +168,15 @@ export const ibexAdapter: RailAdapter = {
   parseEvent(body: unknown): RailEvent | null {
     const t = (body as { transaction?: {
       id?: string; infoId?: string; amount?: number; status?: string; settledAt?: string | null;
+      transactionTypeId?: number; address?: string; metadata?: { address?: string };
     } }).transaction;
     if (!t) return null;
-    const providerRef = t.id ?? t.infoId;
+    // Lightning (typeId 1) is matched by the transaction id (= the invoice's
+    // transactionId we stored). On-chain DEPOSITS (typeId 7) were stored with the
+    // address as providerRef — match the address IBEX echoes (address creation
+    // returns no id), falling back to id/infoId. CONFIRM the deposit payload.
+    const addr = t.address ?? t.metadata?.address;
+    const providerRef = t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
     if (!providerRef) return null;
     const status = (t.status ?? "").toLowerCase();
     if (status === "failed") return null; // expired/failed invoice — ignore

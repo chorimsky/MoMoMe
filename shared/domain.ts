@@ -17,6 +17,30 @@ export const COUNTRIES: Record<CountryCode, Country> = {
   CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"] },
 };
 
+/** Local subscriber digits for a number (strips the country dial code). */
+export function localDigits(phone: string, country: CountryCode): string {
+  const d = phone.replace(/\D/g, "");
+  const dial = COUNTRIES[country].dial.replace(/\D/g, "");
+  return d.startsWith(dial) ? d.slice(dial.length) : d;
+}
+
+/** Map a Mobile Money number to its operator by prefix — the routing/identity
+ *  anchor (the customer's dropdown choice is only a hint). Cameroon allocation:
+ *  MTN 650-654 / 67x / 680-684, Orange 655-659 / 69x / 685-689. Returns null for
+ *  unknown/unsupported prefixes (e.g. Nexttel 66x, Camtel 62x) and short input. */
+export function detectProvider(phone: string, country: CountryCode): ProviderId | null {
+  const n = localDigits(phone, country);
+  if (country !== "CM") return COUNTRIES[country].providers[0] ?? null; // other CEMAC: single default
+  if (n.length < 3 || n[0] !== "6") return null;
+  const d2 = n[1];
+  const third = +n[2];
+  if (d2 === "7") return "MTN";
+  if (d2 === "9") return "ORANGE";
+  if (d2 === "5") return third <= 4 ? "MTN" : "ORANGE"; // 650-654 MTN, 655-659 Orange
+  if (d2 === "8") return third <= 4 ? "MTN" : "ORANGE"; // 680-684 MTN, 685-689 Orange
+  return null; // 66x Nexttel, 62x Camtel — not supported
+}
+
 /** XAF is pegged to EUR at this fixed rate (BACKEND_DESIGN §3). */
 export const EUR_XAF_PEG = 655.957;
 

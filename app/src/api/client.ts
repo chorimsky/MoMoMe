@@ -41,8 +41,8 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  resolveRecipient: (phone: string) =>
-    req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}`),
+  resolveRecipient: (phone: string, country: CountryCode = "CM") =>
+    req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),
 
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),

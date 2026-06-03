@@ -342,6 +342,14 @@ async function main() {
     ok("balance-aware select (sandbox) → a usable aggregator", !!fundedMtn && !!fundedOrange);
     ok("balance-aware select falls back to preference when no real rail", fundedMtn!.name === "pawapay" && fundedOrange!.name === "peexit");
 
+    // Operator detection from the number prefix (the routing/identity anchor).
+    const { detectProvider } = await import("../../shared/domain.js");
+    ok("677/650 → MTN", detectProvider("677000001", "CM") === "MTN" && detectProvider("650123456", "CM") === "MTN");
+    ok("699/655 → ORANGE", detectProvider("699000001", "CM") === "ORANGE" && detectProvider("655123456", "CM") === "ORANGE");
+    ok("Nexttel 66x → null (unsupported)", detectProvider("666123456", "CM") === null);
+    const rr = await (await import("../src/core/nameResolver.js")).resolveRecipient("699123456", "CM");
+    ok("resolve returns the detected operator", rr.provider === "ORANGE");
+
     // Execution log feeds the snapshot.
     routing.recordExecution({ at: new Date().toISOString(), aggregator: "pawapay", ref: "X1", provider: "MTN", status: "COMPLETED", latencyMs: 120 });
     const snap = routing.routingSnapshot();

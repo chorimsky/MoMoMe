@@ -34,6 +34,9 @@ export interface ResolveResult {
   name?: string;
   verified?: boolean;
   trustLevel?: TrustLevel;
+  /** Operator detected from the number's prefix (MTN/Orange) — the routing
+   *  anchor. null when the prefix is unknown/unsupported. */
+  provider?: ProviderId | null;
 }
 
 /* ---------- quotes ---------- */

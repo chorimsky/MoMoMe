@@ -4,7 +4,7 @@ import type {
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId,
 } from "../../../shared/types.js";
 import {
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX,
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { resolveRecipient } from "../core/nameResolver.js";
@@ -60,7 +60,8 @@ api.post("/quotes", (req, res) => {
 /* ---------- recipient name resolution ---------- */
 api.get("/recipients/resolve", async (req, res) => {
   const phone = String(req.query.phone ?? "");
-  res.json(await resolveRecipient(phone));
+  const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
+  res.json(await resolveRecipient(phone, country));
 });
 
 /* ---------- merchant identity resolution (MIG) ---------- */
@@ -136,6 +137,10 @@ api.post("/payments", async (req, res) => {
   ) {
     return res.status(400).json({ error: "bad_recipient", message: "Invalid recipient details." });
   }
+  // Anchor the operator to the NUMBER's prefix — the dropdown is only a hint, so
+  // the payout always routes to the operator that actually owns the number.
+  const detected = detectProvider(recipient.phone, recipient.country);
+  if (detected && country.providers.includes(detected)) recipient.provider = detected;
   const quote = store.getQuote(quoteId);
   if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or expired." });
   if (Date.now() > Date.parse(quote.expiresAt)) {

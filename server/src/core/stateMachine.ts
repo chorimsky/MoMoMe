@@ -136,7 +136,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   transition(p, "PAYOUT_REQUESTED");
   let res;
   try {
-    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf });
+    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
   } catch (e) {
     transition(p, "MANUAL_REVIEW", `payout submit failed: ${e instanceof Error ? e.message : "error"}`);
     return;
@@ -246,7 +246,7 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   // chosen yet, pick a funded one now.
   const agg = p.aggregator ? aggregatorByName(p.aggregator) : await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
   if (!agg) return false;
-  const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf });
+  const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
   if (!hasDelivered(p.id)) {
     recordTxn(p.id, [
       { account: "payout_float_XAF", direction: "debit", amount: p.xaf, currency: "XAF" },

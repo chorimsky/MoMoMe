@@ -15,7 +15,7 @@ export interface AggregatorAdapter {
   name: Aggregator;
   disburse: typeof pawapay.disburse;
   queryStatus: typeof pawapay.queryStatus;
-  balance: (country: CountryCode) => Promise<number | null>;
+  balance: (country: CountryCode, provider?: ProviderId) => Promise<number | null>;
 }
 
 const AGGREGATORS: Record<Aggregator, AggregatorAdapter> = {
@@ -84,7 +84,7 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
   if (real.length) {
     const funded: Array<{ a: Aggregator; bal: number }> = [];
     for (const a of real) {
-      const bal = await AGGREGATORS[a].balance(country);
+      const bal = await AGGREGATORS[a].balance(country, provider);
       if (bal != null && bal >= amountXaf) funded.push({ a, bal });
     }
     if (!funded.length) return null; // real rail(s) exist but none funded → manual review

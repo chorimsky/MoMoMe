@@ -46,13 +46,15 @@ export const config = {
     webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
   }))(env("PAWAPAY_ENV", "sandbox") !== "production"),
 
-  /** Peexit — the SECOND Mobile Money payout aggregator (routing alternative to
-   *  PawaPay). Distinct from the Peex intelligence layer above. */
-  peexit: {
-    apiUrl: env("PEEXIT_API_URL", "https://api.peexit.io"),
-    apiKey: env("PEEXIT_API_KEY"),
+  /** Peexit (Peex) — the SECOND Mobile Money payout aggregator. Real disbursement
+   *  via SECRETKEY-header auth; activates when PEEXIT_API_KEY is set. Distinct
+   *  from the Peex intelligence layer above. URL derives from PEEXIT_ENV. */
+  peexit: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://peexit.com/api/v1"),
+    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY
     webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
-  },
+  }))(env("PEEXIT_ENV", "sandbox") !== "production"),
 
   /** Peex — OPTIONAL intelligence / verification / metadata layer.
    *  "off" disables it entirely (MoMo›Me works identically); "sandbox"

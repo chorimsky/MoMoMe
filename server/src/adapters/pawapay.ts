@@ -23,6 +23,7 @@ export interface DisburseRequest {
   country: CountryCode;
   phone: string;
   xaf: number;
+  name?: string; // recipient name (some aggregators, e.g. Peexit, require it)
 }
 
 export interface DisburseResult {
@@ -146,7 +147,7 @@ export function refForPayoutId(payoutId: string): string | undefined {
 /** Available wallet balance (XAF) for a country — drives balance-aware routing.
  *  null when PawaPay isn't configured (can't settle). Cached briefly. */
 let balCache: { at: number; map: Record<string, number> } | null = null;
-export async function availableBalanceXaf(country: CountryCode): Promise<number | null> {
+export async function availableBalanceXaf(country: CountryCode, _provider?: ProviderId): Promise<number | null> {
   if (!pawapayConfigured()) return null;
   const iso = ISO3[country] ?? "CMR";
   if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;

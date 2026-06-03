@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "MoMo›Me — pay Mobile Money over crypto rails. Monorepo: React frontend + Node settlement backend.",
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "dev:app": "pnpm --filter @momome/app dev",

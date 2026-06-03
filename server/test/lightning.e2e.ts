@@ -66,7 +66,7 @@ async function main() {
     const inst = p.body.payInstruction;
     ok("instruction is Lightning", inst.method === "LIGHTNING");
     ok("invoice is a bolt11 (lnbc…)", typeof inst.code === "string" && inst.code.startsWith("lnbc"), inst.code.slice(0, 12) + "…");
-    ok("QR is uppercased bolt11 (LNBC…)", inst.qr.startsWith("LNBC"));
+    ok("QR is a lightning: BOLT11 URI", inst.qr.startsWith("lightning:lnbc"));
     ok("instruction amount == quote inbound (locked)", inst.amount === q.body.inboundAmount);
     ok("providerRef present (LN payment hash)", typeof inst.providerRef === "string" && inst.providerRef.length === 64);
     ok("provider is sandbox", inst.provider === "sandbox");
@@ -155,7 +155,7 @@ async function main() {
     ok("IBEX webhook url forwarded", sentInvoiceBody.webhookUrl === "https://app.test/webhooks/ibex");
     ok("IBEX per-invoice webhook secret forwarded", sentInvoiceBody.webhookSecret === "whsec_test");
     ok("instruction code is the bolt11", li.code === "lnbc1304140n1pjmocked");
-    ok("instruction QR is uppercased bolt11", li.qr === "LNBC1304140N1PJMOCKED");
+    ok("instruction QR is a lightning: URI", li.qr === "lightning:lnbc1304140n1pjmocked");
     ok("instruction providerRef is the transaction id", li.providerRef === "tx_live_001");
     ok("instruction asset BTC, amount preserved", li.asset === "BTC" && li.amount === BTC_IN);
 

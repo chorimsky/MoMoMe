@@ -61,8 +61,8 @@ export function Activity() {
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
                 <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--surface-2)", border: "1px solid var(--line)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, color: "var(--ink-2)", flex: "none" }}>{initials(r.recipient.name)}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 650, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.recipient.name}</div>
-                  <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{COUNTRIES[r.recipient.country].dial} {r.recipient.phone}</div>
+                  <div style={{ fontWeight: 650, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.recipient.name || "Recipient"}</div>
+                  <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{COUNTRIES[r.recipient.country]?.dial ?? ""} {r.recipient.phone}</div>
                 </div>
                 <div style={{ textAlign: "right", flex: "none" }}>
                   <div className="num" style={{ fontWeight: 700, fontSize: 14 }}>{fmt(r.xaf)} XAF</div>

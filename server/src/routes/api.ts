@@ -154,6 +154,9 @@ api.post("/payments", async (req, res) => {
   // the payout always routes to the operator that actually owns the number.
   const detected = detectProvider(recipient.phone, recipient.country);
   if (detected && country.providers.includes(detected)) recipient.provider = detected;
+  // Never store a null/blank name — fall back to the number so downstream UI
+  // (activity, receipts) and the identity layer always have a string.
+  if (typeof recipient.name !== "string" || !recipient.name.trim()) recipient.name = recipient.phone;
   const quote = store.getQuote(quoteId);
   if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or expired." });
   if (Date.now() > Date.parse(quote.expiresAt)) {

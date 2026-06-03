@@ -80,17 +80,16 @@ export async function registerAccountWebhook(): Promise<void> {
   }
 }
 
-/** Best-effort status lookup for reconciliation backstop. Uses the paginated
- *  transactions list (the single-transaction details endpoint omits status).
- *  Returns null if the transaction isn't in the recent window. */
+/** Reconciliation backstop: was this Lightning invoice actually PAID? The
+ *  /transactions LIST endpoint returns empty in sandbox, so we query the
+ *  per-transaction details — a positive `usdAmount` (or a settledAt) means the
+ *  inbound was received & FX'd. Returns null on lookup failure (don't act). */
 export async function transactionStatus(transactionId: string): Promise<{ settled: boolean; failed: boolean } | null> {
-  const res = await ibex(`/transactions?limit=25&page=0`, { method: "GET" });
+  const res = await ibex(`/v2/transaction/${transactionId}/details`, { method: "GET" });
   if (!res.ok) return null;
-  const rows = (await res.json()) as Array<{ id: string; status?: string }>;
-  const t = Array.isArray(rows) ? rows.find((r) => r.id === transactionId) : undefined;
-  if (!t) return null;
-  const s = (t.status ?? "").toLowerCase();
-  return { settled: ["settled", "completed", "succeeded", "confirmed", "paid"].includes(s), failed: s === "failed" };
+  const d = (await res.json()) as { usdAmount?: number; settledAt?: string | null; status?: string };
+  const settled = (typeof d.usdAmount === "number" && d.usdAmount > 0) || !!d.settledAt;
+  return { settled, failed: (d.status ?? "").toLowerCase() === "failed" };
 }
 
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded

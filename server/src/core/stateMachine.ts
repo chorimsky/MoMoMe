@@ -228,13 +228,17 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of listPayments()) {
     if (p.payInstruction.provider !== "ibex" || p.payInstruction.method !== "LIGHTNING") continue;
-    if (p.state !== "AWAITING_INBOUND" && p.state !== "INBOUND_DETECTED") continue;
-    if (Date.parse(p.updatedAt) > cutoff || !p.payInstruction.providerRef) continue;
+    // AWAITING/DETECTED settle; FAILED is re-checked to RECOVER an invoice that
+    // was really paid but wrongly expired (a lost webhook we couldn't reconcile).
+    const recoverable = p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED" || p.state === "FAILED";
+    if (!recoverable || !p.payInstruction.providerRef) continue;
+    if (Date.parse(p.updatedAt) > cutoff) continue;
+    if (p.state === "FAILED" && Date.now() - Date.parse(p.createdAt) > 72 * 3600_000) continue; // don't re-check ancient failures
     try {
       const s = await transactionStatus(p.payInstruction.providerRef);
-      if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); continue; } // LN = full lock
-      // Expire an unpaid invoice (IBEX reports failed, or it's well past expiry)
-      // so it doesn't sit on "Waiting…" / "Pending" forever. No funds moved.
+      if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); continue; } // settle / recover (LN = full lock)
+      // Genuinely unpaid + past expiry → expire so it doesn't sit on "Waiting…"
+      // forever. Only when NOT paid (settled check above ran first). No funds moved.
       const expiredAt = Date.parse(p.payInstruction.expiresAt);
       if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
         transition(p, "FAILED", "invoice expired — not paid");

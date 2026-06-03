@@ -140,8 +140,9 @@ async function main() {
       sentWebhookReg = JSON.parse(init.body);
       return new Response(null, { status: 204 });
     }
-    if (u.includes("/transactions?")) {
-      return new Response(JSON.stringify([{ id: "tx_recon", status: "settled", amount: MSAT }]), { status: 200 });
+    if (u.includes("/v2/transaction/") && u.endsWith("/details")) {
+      // reconcile backstop: positive usdAmount = the invoice was paid
+      return new Response(JSON.stringify({ usdAmount: 0.05, settledAt: "2026-06-04T00:00:00Z" }), { status: 200 });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;

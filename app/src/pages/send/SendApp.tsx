@@ -151,7 +151,7 @@ export function SendApp() {
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} />}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
-            {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} />}
+            {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}
             {step === "processing" && payment && <ProcessingStep paymentId={payment.id} method={s.method} onDone={() => go("success")} reset={reset} onViewActivity={() => { setTab("history"); }} />}
             {step === "success" && payment && <SuccessStep payment={payment} reset={reset} />}
 

@@ -309,7 +309,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
 }
 
 /* ============================================================ 4 — PAY */
-export function PayStep({ payment, method, back, next, refresh, busy }: { payment: Payment; method: Method; back: () => void; next: () => void; refresh: () => void; busy: boolean }) {
+export function PayStep({ payment, method, back, next, refresh, busy, demoMode }: { payment: Payment; method: Method; back: () => void; next: () => void; refresh: () => void; busy: boolean; demoMode?: boolean }) {
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
   const { label, expired } = useExpiry(inst.expiresAt);
@@ -339,9 +339,17 @@ export function PayStep({ payment, method, back, next, refresh, busy }: { paymen
       <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 18px", lineHeight: 1.5 }}>{ml(method, "payDesc")}</p>
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "6px 0 16px" }}>
-        <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
-          <QR value={inst.qr} size={186} />
-        </div>
+        {demoMode ? (
+          <div style={{ width: 210, padding: "22px 16px", borderRadius: 14, border: "1px dashed var(--warn)", background: "var(--send-wash)", textAlign: "center" }}>
+            <div style={{ fontSize: 26 }}>🧪</div>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>Sandbox demo</div>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>This is not a real invoice — don't pay it with a wallet. Tap <b>"{t("ive_paid")}"</b> below to simulate the payment.</div>
+          </div>
+        ) : (
+          <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
+            <QR value={inst.qr} size={186} />
+          </div>
+        )}
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("total_to_pay")}</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", whiteSpace: "nowrap", marginTop: 2 }}>{fmt(payment.totalXaf)} <span style={{ fontSize: 17, color: "var(--ink-3)" }}>XAF</span></div>
@@ -349,7 +357,7 @@ export function PayStep({ payment, method, back, next, refresh, busy }: { paymen
         </div>
       </div>
 
-      <CopyField label={ml(method, "codeLabel")} value={inst.code} />
+      {!demoMode && <CopyField label={ml(method, "codeLabel")} value={inst.code} />}
 
       {expired ? (
         <>

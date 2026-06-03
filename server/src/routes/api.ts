@@ -186,16 +186,19 @@ api.post("/payments", async (req, res) => {
 });
 
 /**
- * Sandbox rail: sender taps "I've paid" → simulate the rail confirming.
- * Real rails (e.g. IBEX): settlement is driven by the provider webhook, so
- * this is a no-op that returns current state. Keyed off the instruction's
- * provider — not RAILS_MODE — so real IBEX inbound isn't fake-settled even
- * when Mobile Money payout is still simulated.
+ * Sender taps "I've paid" → simulate the rail confirming the inbound.
+ * Simulatable rails: the sandbox rail, and IBEX in its SANDBOX environment
+ * (test invoices won't be paid for real, so this makes the whole send flow —
+ * inbound → FX → Mobile Money payout → delivered — testable click-through).
+ * Real IBEX (production) settles only via the provider webhook, so there this
+ * is a no-op that just returns current state.
  */
 api.post("/payments/:id/confirm", (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  if (p.payInstruction.provider === "sandbox" && p.state === "AWAITING_INBOUND") void settle(p);
+  const simulatable = p.payInstruction.provider === "sandbox"
+    || (p.payInstruction.provider === "ibex" && config.ibex.env === "sandbox");
+  if (simulatable && p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
 });
 

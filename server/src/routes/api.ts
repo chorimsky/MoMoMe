@@ -57,6 +57,19 @@ api.post("/quotes", (req, res) => {
   res.json(quote);
 });
 
+/* ---------- public app config (demo hints, never crypto) ---------- */
+api.get("/config", (_req, res) => {
+  const demoMode = config.pawapay.env !== "production" || config.peexit.env !== "production";
+  res.json({
+    demoMode,
+    // Sandbox payout outcomes are driven by the recipient number. Surfaced only
+    // in demo mode so testers' payments complete cleanly.
+    demoHint: demoMode
+      ? "Demo mode — payouts run on sandbox rails. For a successful payout use an MTN number ending in 789 (e.g. 677000789). Orange routes to a sandbox with no success number yet."
+      : "",
+  });
+});
+
 /* ---------- recipient name resolution ---------- */
 api.get("/recipients/resolve", async (req, res) => {
   const phone = String(req.query.phone ?? "");

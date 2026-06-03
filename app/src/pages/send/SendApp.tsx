@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
@@ -37,6 +37,8 @@ export function SendApp() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
+  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string } | null>(null);
+  useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
   const go = (to: Step) => { window.scrollTo({ top: 0 }); setStep(to); };
   const recipient = () => ({ phone: s.phone, country: s.country, provider: s.provider, name: s.recipientName, nameSource: s.nameSource });
@@ -125,6 +127,12 @@ export function SendApp() {
                 {l}
               </button>
             ))}
+          </div>
+        )}
+
+        {demo?.demoMode && tab === "pay" && step === "details" && (
+          <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>
+            <span style={{ fontWeight: 700, color: "var(--ink)" }}>🧪 Demo</span> · {demo.demoHint}
           </div>
         )}
 

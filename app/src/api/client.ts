@@ -41,6 +41,8 @@ export class ApiError extends Error {
 }
 
 export const api = {
+  getConfig: () => req<{ demoMode: boolean; demoHint: string }>("/config"),
+
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),
 

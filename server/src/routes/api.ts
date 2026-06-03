@@ -8,7 +8,7 @@ import {
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { resolveRecipient } from "../core/nameResolver.js";
-import { createInstruction } from "../adapters/index.js";
+import { createInstruction, providerFor } from "../adapters/index.js";
 import { settle, adminRetry, adminRefund } from "../core/stateMachine.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
@@ -149,7 +149,7 @@ api.post("/payments", async (req, res) => {
       method: quote.method,
       ref,
       amount: quote.inboundAmount,
-      callbackUrl: `${config.publicUrl}/webhooks/${isLive() ? "ibex" : "sandbox"}`,
+      callbackUrl: `${config.publicUrl}/webhooks/${providerFor(quote.method)}`,
     });
   } catch (e) {
     return res.status(502).json({ error: "rail_error", message: e instanceof Error ? e.message : "Rail provider error." });
@@ -186,14 +186,16 @@ api.post("/payments", async (req, res) => {
 });
 
 /**
- * Sandbox: sender taps "I've paid" → simulate the rail confirming.
- * Live: real settlement is driven by the provider webhook, so this is a
- * no-op that just returns current state (the inbound is what matters).
+ * Sandbox rail: sender taps "I've paid" → simulate the rail confirming.
+ * Real rails (e.g. IBEX): settlement is driven by the provider webhook, so
+ * this is a no-op that returns current state. Keyed off the instruction's
+ * provider — not RAILS_MODE — so real IBEX inbound isn't fake-settled even
+ * when Mobile Money payout is still simulated.
  */
 api.post("/payments/:id/confirm", (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  if (!isLive() && p.state === "AWAITING_INBOUND") void settle(p);
+  if (p.payInstruction.provider === "sandbox" && p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
 });
 

@@ -17,14 +17,20 @@ export const config = {
   publicUrl: env("PUBLIC_URL", "http://localhost:4000"),
   railsMode: (env("RAILS_MODE", "sandbox") as RailsMode),
 
-  /** IBEX — the single inbound settlement provider for Lightning,
-   *  on-chain BTC, and USDT (stablecoin), under one auth + webhook contract. */
-  ibex: {
-    apiUrl: env("IBEX_API_URL", "https://api.ibexmercado.com"),
-    refreshToken: env("IBEX_REFRESH_TOKEN"),
+  /** IBEX Hub (poweredbyibex.io) — crypto inbound for Lightning + on-chain BTC.
+   *  OAuth2 client-credentials (M2M). USDT/stablecoin receive is gated per
+   *  organization by IBEX (sandbox orgs get 403 until enabled). URLs derive
+   *  from IBEX_ENV (sandbox|production) but each is individually overridable. */
+  ibex: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    clientId: env("IBEX_CLIENT_ID"),
+    clientSecret: env("IBEX_CLIENT_SECRET"),
     accountId: env("IBEX_ACCOUNT_ID"),
     webhookSecret: env("IBEX_WEBHOOK_SECRET"),
-  },
+    apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
+    authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),
+    audience: env("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
+  }))(env("IBEX_ENV", "sandbox") !== "production"),
 
   pawapay: {
     apiUrl: env("PAWAPAY_API_URL", "https://api.pawapay.io"),
@@ -56,13 +62,26 @@ export function isLive(): boolean {
   return config.railsMode === "live";
 }
 
-/** Fail fast if live mode is on but a provider isn't configured. */
+/** True when IBEX Hub credentials are present — activates the real crypto
+ *  inbound rail (Lightning + on-chain BTC) independently of RAILS_MODE, so
+ *  you can run real IBEX inbound with simulated Mobile Money payout. */
+export function ibexConfigured(): boolean {
+  return !!(config.ibex.clientId && config.ibex.clientSecret && config.ibex.accountId);
+}
+
+/** IBEX is all-or-nothing: reject a partial credential set at boot. */
+export function assertIbexConfig(): void {
+  const parts = [config.ibex.clientId, config.ibex.clientSecret, config.ibex.accountId];
+  if (parts.some(Boolean) && !parts.every(Boolean)) {
+    throw new Error("Partial IBEX config: set IBEX_CLIENT_ID, IBEX_CLIENT_SECRET and IBEX_ACCOUNT_ID together (or none).");
+  }
+}
+
+/** Fail fast if live (Mobile Money payout) mode is on but a payout provider
+ *  isn't configured. IBEX is validated separately (assertIbexConfig). */
 export function assertLiveConfig(): void {
   if (!isLive()) return;
   const missing: string[] = [];
-  if (!config.ibex.refreshToken) missing.push("IBEX_REFRESH_TOKEN");
-  if (!config.ibex.accountId) missing.push("IBEX_ACCOUNT_ID");
-  if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
   if (!config.pawapay.apiKey) missing.push("PAWAPAY_API_KEY");
   if (!config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
   if (!config.peexit.apiKey) missing.push("PEEXIT_API_KEY");

@@ -14,8 +14,12 @@ import type { AddressInfo } from "node:net";
 // Env must be set before any module that reads config is imported → dynamic imports.
 process.env.DB_PATH = ":memory:"; // isolated, fresh DB per test run
 process.env.RAILS_MODE = "sandbox";
-process.env.IBEX_API_URL = "https://ibex.test";
-process.env.IBEX_REFRESH_TOKEN = "rt_test";
+// IBEX Hub: set the (mock) URLs + account/webhook secret, but NOT client_id/secret,
+// so ibexConfigured() stays false → Part A runs pure-sandbox, while Part B exercises
+// the IBEX adapter directly against mocked fetch.
+process.env.IBEX_ENV = "sandbox";
+process.env.IBEX_API_URL = "https://ibexhub.test";
+process.env.IBEX_AUTH_URL = "https://auth.test/oauth/token";
 process.env.IBEX_ACCOUNT_ID = "acct_test";
 process.env.IBEX_WEBHOOK_SECRET = "whsec_test";
 
@@ -115,59 +119,60 @@ async function main() {
 
   const realFetch = globalThis.fetch;
   let sentInvoiceBody: any = null;
-  let sentUsdtBody: any = null;
+  let sentOnchainBody: any = null;
   const BTC_IN = 0.00130414;
-  const SATS = Math.round(BTC_IN * 1e8);
+  const MSAT = Math.round(BTC_IN * 1e11);
   globalThis.fetch = (async (url: any, init: any) => {
     const u = String(url);
-    if (u.endsWith("/auth/refresh-access-token")) {
-      return new Response(JSON.stringify({ accessToken: "at_live", expiresAt: Date.now() + 600_000 }), { status: 200 });
+    if (u.endsWith("/oauth/token")) {
+      return new Response(JSON.stringify({ access_token: "at_live", token_type: "Bearer", expires_in: 3600 }), { status: 200 });
     }
-    if (u.endsWith("/v2/invoice/add")) {
+    if (u.endsWith("/invoice/add")) {
       sentInvoiceBody = JSON.parse(init.body);
-      return new Response(JSON.stringify({ bolt11: "lnbc1304140n1pjmocked", hash: "h_live_ln_001" }), { status: 200 });
+      return new Response(JSON.stringify({ transactionId: "tx_live_001", bolt11: "lnbc1304140n1pjmocked", hash: "h_live_001", expirationUtc: 1780000000 }), { status: 201 });
     }
-    if (u.endsWith("/stablecoin-address")) {
-      sentUsdtBody = JSON.parse(init.body);
-      return new Response(JSON.stringify({ address: "TUsdtDeposit9aBc" }), { status: 200 });
+    if (u.endsWith("/onchain/address")) {
+      sentOnchainBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ address: "bc1qtestaddr0000" }), { status: 200 });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 
   try {
-    // 1. createInstruction hits IBEX with sats + memo, parses bolt11 + hash
+    // 1. Lightning: OAuth → /invoice/add with amountMsat + memo → bolt11
     const li = await ibexAdapter.createInstruction({ method: "LIGHTNING", ref: "MMM-2026-LIVE", amount: BTC_IN, callbackUrl: "https://app.test/webhooks/ibex" });
-    ok("IBEX invoice amount sent in sats", sentInvoiceBody.amount === SATS, `${sentInvoiceBody.amount} sats`);
+    ok("IBEX invoice amount sent in MSAT", sentInvoiceBody.amountMsat === MSAT, `${sentInvoiceBody.amountMsat} msat`);
+    ok("IBEX invoice accountId sent", sentInvoiceBody.accountId === "acct_test");
     ok("IBEX invoice memo == payment ref", sentInvoiceBody.memo === "MMM-2026-LIVE");
     ok("IBEX webhook url forwarded", sentInvoiceBody.webhookUrl === "https://app.test/webhooks/ibex");
+    ok("IBEX per-invoice webhook secret forwarded", sentInvoiceBody.webhookSecret === "whsec_test");
     ok("instruction code is the bolt11", li.code === "lnbc1304140n1pjmocked");
     ok("instruction QR is uppercased bolt11", li.qr === "LNBC1304140N1PJMOCKED");
-    ok("instruction providerRef is the LN hash", li.providerRef === "h_live_ln_001");
+    ok("instruction providerRef is the transaction id", li.providerRef === "tx_live_001");
     ok("instruction asset BTC, amount preserved", li.asset === "BTC" && li.amount === BTC_IN);
 
-    // 1b. IBEX also issues USDT deposit addresses under the same route
-    const ui = await ibexAdapter.createInstruction({ method: "USDT", ref: "MMM-2026-USDT", amount: 84.3, callbackUrl: "https://app.test/webhooks/ibex" });
-    ok("IBEX adapter supports USDT", ibexAdapter.supports("USDT"));
-    ok("IBEX USDT currency sent", sentUsdtBody.currency === "USDT");
-    ok("IBEX USDT label == payment ref", sentUsdtBody.label === "MMM-2026-USDT");
-    ok("USDT instruction asset USDT, address returned", ui.asset === "USDT" && ui.code === "TUsdtDeposit9aBc");
-    ok("USDT instruction routed via IBEX", ui.provider === "ibex");
-    // USDT settlement event: micro-USDT (1e6) → USDT
-    const usdtEv = ibexAdapter.parseEvent({ address: "TUsdtDeposit9aBc", status: "CONFIRMED", amount: 84_300_000, currency: "USDT" })!;
-    ok("USDT event parsed as confirmed", usdtEv.kind === "confirmed");
-    ok("USDT event amount converted µUSDT→USDT", Math.abs(usdtEv.amount! - 84.3) < 1e-9);
+    // 1b. On-chain BTC: fresh address from /onchain/address
+    const oi = await ibexAdapter.createInstruction({ method: "ONCHAIN", ref: "MMM-2026-ONCHAIN", amount: BTC_IN, callbackUrl: "https://app.test/webhooks/ibex" });
+    ok("IBEX onchain accountId sent", sentOnchainBody.accountId === "acct_test");
+    ok("onchain instruction is the address", oi.code === "bc1qtestaddr0000" && oi.asset === "BTC");
+    ok("onchain QR is a bitcoin: URI", oi.qr.startsWith("bitcoin:bc1qtestaddr0000"));
+    ok("onchain providerRef is the address", oi.providerRef === "bc1qtestaddr0000");
+    // USDT is NOT an IBEX rail (gated per-org) — the sandbox adapter simulates it
+    ok("IBEX supports LIGHTNING + ONCHAIN", ibexAdapter.supports("LIGHTNING") && ibexAdapter.supports("ONCHAIN"));
+    ok("IBEX does NOT advertise USDT", !ibexAdapter.supports("USDT"));
 
-    // 2. webhook auth
-    const body = JSON.stringify({ hash: "h_live_ln_001", status: "SETTLED", amount: SATS });
-    const sig = createHmac("sha256", "whsec_test").update(body).digest("hex");
-    ok("valid webhook signature accepted", ibexAdapter.verifyWebhook(body, { "x-ibex-signature": sig }));
-    ok("forged webhook signature rejected", !ibexAdapter.verifyWebhook(body, { "x-ibex-signature": "deadbeef" }));
-    ok("unsigned webhook rejected", !ibexAdapter.verifyWebhook(body, {}));
+    // 2. webhook auth — IBEX Hub echoes the per-invoice secret in the body
+    const now0 = new Date().toISOString();
+    const goodBody = JSON.stringify({ transaction: { id: "tx_live_001", status: "SETTLED", settledAt: now0, amount: BTC_IN }, secret: "whsec_test" });
+    ok("valid webhook secret accepted", ibexAdapter.verifyWebhook(goodBody, {}));
+    ok("wrong webhook secret rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ transaction: { id: "tx_live_001" }, secret: "nope" }), {}));
+    ok("missing webhook secret rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ transaction: { id: "tx_live_001" } }), {}));
 
-    // 3. parse settled event (sats → BTC)
-    const ev = ibexAdapter.parseEvent(JSON.parse(body))!;
+    // 3. parse settled event (transaction → confirmed, amount in BTC)
+    const ev = ibexAdapter.parseEvent(JSON.parse(goodBody))!;
     ok("event parsed as confirmed", ev.kind === "confirmed");
-    ok("event amount converted sats→BTC", Math.abs(ev.amount! - BTC_IN) < 1e-9);
+    ok("event providerRef is the transaction id", ev.providerRef === "tx_live_001");
+    ok("event amount is the settled BTC amount", Math.abs(ev.amount! - BTC_IN) < 1e-9);
 
     // helper to seed an AWAITING payment with a locked instruction
     const seedPayment = (id: string, providerRef: string, amount: number) => {
@@ -184,7 +189,7 @@ async function main() {
     };
 
     // 4. happy webhook → match → settle → balanced
-    seedPayment("pay_live_ok", "h_live_ln_001", BTC_IN);
+    seedPayment("pay_live_ok", "tx_live_001", BTC_IN);
     const matched = storeMod.findByProviderRef(ev.providerRef)!;
     ok("webhook matches the payment by providerRef", matched.id === "pay_live_ok");
     await confirmInbound(matched, ev.amount);
@@ -206,7 +211,7 @@ async function main() {
 
     // 6. webhook idempotency
     const evCount = storeMod.getPayment("pay_live_ok")!.events.length;
-    await confirmInbound(storeMod.findByProviderRef("h_live_ln_001")!, ev.amount);
+    await confirmInbound(storeMod.findByProviderRef("tx_live_001")!, ev.amount);
     ok("replayed webhook does not double-settle", storeMod.getPayment("pay_live_ok")!.events.length === evCount);
 
     // 7. confirmed inbound with NO amount is untrusted → MANUAL_REVIEW (not auto-paid)

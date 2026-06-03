@@ -1,14 +1,16 @@
 /* ============================================================
-   IBEX rail adapter — Lightning + on-chain BTC + USDT (stablecoin).
-   IBEX is the single inbound settlement provider: it issues Lightning
-   invoices, on-chain BTC addresses, and USDT deposit addresses, all
-   under one auth + webhook contract.
+   IBEX Hub rail adapter — crypto inbound for Lightning + on-chain BTC.
+   IBEX Hub (poweredbyibex.io) authenticates with OAuth2 client-credentials
+   (M2M): client_id + client_secret + audience → short-lived access token,
+   sent as a RAW `Authorization: <token>` header (no "Bearer" prefix).
 
-   NOTE: IBEX's exact request/response field names live behind an
-   auth wall (docs.ibexmercado.com). The provider-specific shapes are
-   isolated in the small marked sections below — confirm each against
-   your IBEX sandbox before going live. The auth lifecycle, idempotency,
-   sats handling, retry, and webhook verification are production-shaped.
+   USDT/stablecoin receive exists in the API but is gated per-organization
+   (403 until IBEX enables it), so this adapter does NOT advertise USDT —
+   the sandbox adapter handles it as a simulated rail until IBEX turns it on.
+
+   Verified live against sandbox: token, GET /v2/account, POST /invoice/add,
+   POST /onchain/address. The settlement-webhook matching/units are marked
+   CONFIRM — they need a real paid invoice to finalize.
    ============================================================ */
 import crypto from "node:crypto";
 import type { Method, PayInstruction } from "../../../shared/types.js";
@@ -17,31 +19,37 @@ import { formatAmount } from "../core/fx.js";
 import { config } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
-const btcToSats = (btc: number) => Math.round(btc * 1e8);
+const btcToMsat = (btc: number) => Math.round(btc * 1e11); // 1 BTC = 1e8 sat = 1e11 msat
 
-/* ---------- token manager (timeless refresh token → short-lived access token) ---------- */
+/* ---------- OAuth2 client-credentials token manager ---------- */
 let cached: { accessToken: string; expiresAt: number } | null = null;
 
 async function getAccessToken(force = false): Promise<string> {
   if (!force && cached && cached.expiresAt > Date.now() + 30_000) return cached.accessToken;
-  const res = await fetch(`${config.ibex.apiUrl}/auth/refresh-access-token`, {
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: config.ibex.clientId,
+    client_secret: config.ibex.clientSecret,
+    audience: config.ibex.audience,
+  });
+  const res = await fetch(config.ibex.authUrl, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refreshToken: config.ibex.refreshToken }),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
   });
   if (!res.ok) throw new Error(`IBEX auth failed: ${res.status} ${await res.text()}`);
-  // CONFIRM field names against IBEX docs:
-  const data = (await res.json()) as { accessToken: string; expiresAt?: number };
-  cached = { accessToken: data.accessToken, expiresAt: data.expiresAt ?? Date.now() + 10 * 60_000 };
+  const data = (await res.json()) as { access_token: string; expires_in?: number };
+  cached = { accessToken: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 };
   return cached.accessToken;
 }
 
-/** Authenticated fetch with a single transparent re-auth on 401. */
+/** Authenticated fetch with a single transparent re-auth on 401.
+ *  IBEX Hub uses a RAW Authorization header (the token, no "Bearer "). */
 async function ibex(path: string, init: RequestInit): Promise<Response> {
   const call = async (token: string) =>
     fetch(`${config.ibex.apiUrl}${path}`, {
       ...init,
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+      headers: { "content-type": "application/json", authorization: token, ...(init.headers ?? {}) },
     });
   let res = await call(await getAccessToken());
   if (res.status === 401) res = await call(await getAccessToken(true));
@@ -50,61 +58,40 @@ async function ibex(path: string, init: RequestInit): Promise<Response> {
 
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
-  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || m === "USDT",
+  // USDT is intentionally excluded — gated per-org by IBEX; sandbox simulates it.
+  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN",
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
 
     if (req.method === "LIGHTNING") {
-      // ---- CONFIRM shape against IBEX docs (POST /v2/invoice/add) ----
-      const res = await ibex("/v2/invoice/add", {
+      const res = await ibex("/invoice/add", {
         method: "POST",
-        // Idempotency-Key avoids minting two invoices on a retried request.
-        headers: { "Idempotency-Key": req.ref },
         body: JSON.stringify({
           accountId: config.ibex.accountId,
-          amount: btcToSats(req.amount), // IBEX is denominated in sats
-          memo: req.ref,
-          expiration: QUOTE_TTL_SEC.LIGHTNING,
+          amountMsat: btcToMsat(req.amount),
+          memo: req.ref.slice(0, 50), // IBEX caps memo at 50 chars
+          expiration: Math.min(QUOTE_TTL_SEC.LIGHTNING, 900), // IBEX max 15 min
           webhookUrl: req.callbackUrl,
-          webhookSecret: config.ibex.webhookSecret,
+          ...(config.ibex.webhookSecret ? { webhookSecret: config.ibex.webhookSecret } : {}),
         }),
       });
       if (!res.ok) throw new Error(`IBEX add-invoice failed: ${res.status} ${await res.text()}`);
-      const data = (await res.json()) as { bolt11: string; hash: string };
-      const bolt11 = data.bolt11;
+      const data = (await res.json()) as { transactionId: string; bolt11: string; hash: string };
       return {
-        method: "LIGHTNING", code: bolt11, qr: bolt11.toUpperCase(), asset: "BTC",
+        method: "LIGHTNING", code: data.bolt11, qr: data.bolt11.toUpperCase(), asset: "BTC",
         amount: req.amount, amountLabel: formatAmount(req.amount, "BTC"), expiresAt,
-        providerRef: data.hash, provider: "ibex",
+        // The settlement webhook reports the same transaction by id (CONFIRM).
+        providerRef: data.transactionId, provider: "ibex",
       };
     }
 
-    if (req.method === "USDT") {
-      // ---- CONFIRM shape against IBEX docs (USDT/stablecoin deposit address) ----
-      // IBEX also settles USDT under the same account + webhook contract.
-      const res = await ibex(`/v2/account/${config.ibex.accountId}/stablecoin-address`, {
-        method: "POST",
-        headers: { "Idempotency-Key": req.ref },
-        body: JSON.stringify({ currency: "USDT", label: req.ref, webhookUrl: req.callbackUrl, webhookSecret: config.ibex.webhookSecret }),
-      });
-      if (!res.ok) throw new Error(`IBEX usdt-address failed: ${res.status} ${await res.text()}`);
-      const data = (await res.json()) as { address: string };
-      const addr = data.address;
-      return {
-        method: "USDT", code: addr, qr: addr, asset: "USDT",
-        amount: req.amount, amountLabel: formatAmount(req.amount, "USDT"), expiresAt,
-        providerRef: addr, provider: "ibex",
-      };
-    }
-
-    // ONCHAIN ---- CONFIRM shape against IBEX docs (generate account address) ----
-    const res = await ibex(`/v2/account/${config.ibex.accountId}/address`, {
+    // ONCHAIN — generate a fresh on-chain BTC receive address for the account.
+    const res = await ibex("/onchain/address", {
       method: "POST",
-      headers: { "Idempotency-Key": req.ref },
-      body: JSON.stringify({ label: req.ref, webhookUrl: req.callbackUrl, webhookSecret: config.ibex.webhookSecret }),
+      body: JSON.stringify({ accountId: config.ibex.accountId }),
     });
-    if (!res.ok) throw new Error(`IBEX generate-address failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new Error(`IBEX onchain-address failed: ${res.status} ${await res.text()}`);
     const data = (await res.json()) as { address: string };
     const addr = data.address;
     return {
@@ -114,32 +101,33 @@ export const ibexAdapter: RailAdapter = {
     };
   },
 
-  verifyWebhook(rawBody: string, headers): boolean {
-    const sig = headers["x-ibex-signature"];
-    const provided = Array.isArray(sig) ? sig[0] : sig;
-    if (!provided || !config.ibex.webhookSecret) return false;
-    const expected = crypto.createHmac("sha256", config.ibex.webhookSecret).update(rawBody).digest("hex");
-    const a = Buffer.from(expected);
-    const b = Buffer.from(provided);
+  verifyWebhook(rawBody: string): boolean {
+    // IBEX Hub doesn't HMAC-sign webhooks; it echoes the per-invoice secret in
+    // the body. Verify body.secret === our configured secret (+ pair with the
+    // documented sender-IP allowlist at the edge for full security).
+    if (!config.ibex.webhookSecret) return true; // no secret configured (sandbox) → accept
+    let provided = "";
+    try { provided = (JSON.parse(rawBody) as { secret?: string }).secret ?? ""; } catch { return false; }
+    const a = Buffer.from(provided);
+    const b = Buffer.from(config.ibex.webhookSecret);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   },
 
   parseEvent(body: unknown): RailEvent | null {
-    // ---- CONFIRM webhook shape against IBEX docs ----
-    const e = body as { hash?: string; address?: string; status?: string; amount?: number; currency?: string; asset?: string };
-    const providerRef = e.hash ?? e.address;
+    const t = (body as { transaction?: {
+      id?: string; infoId?: string; amount?: number; status?: string; settledAt?: string | null;
+    } }).transaction;
+    if (!t) return null;
+    const providerRef = t.id ?? t.infoId; // CONFIRM the field that links to invoice/address
     if (!providerRef) return null;
-    const status = (e.status ?? "").toUpperCase();
-    const confirmed = ["SETTLED", "COMPLETED", "PAID", "CONFIRMED"].includes(status);
-    const detected = ["PENDING", "DETECTED", "MEMPOOL", "UNCONFIRMED"].includes(status);
+    const status = (t.status ?? "").toUpperCase();
+    const confirmed = !!t.settledAt || ["SETTLED", "COMPLETED", "CONFIRMED", "SUCCEEDED", "PAID"].includes(status);
+    const detected = ["PENDING", "MEMPOOL", "UNCONFIRMED", "PROCESSING", "DETECTED"].includes(status);
     if (!confirmed && !detected) return null;
-    // IBEX reports amounts in the asset's smallest unit: sats (1e8) for BTC,
-    // micro-USDT (1e6) for USDT. The webhook carries the currency/asset.
-    const isUsdt = (e.currency ?? e.asset ?? "").toUpperCase() === "USDT";
     return {
       providerRef,
       kind: confirmed ? "confirmed" : "detected",
-      amount: typeof e.amount === "number" ? e.amount / (isUsdt ? 1e6 : 1e8) : undefined,
+      amount: typeof t.amount === "number" ? t.amount : undefined, // CONFIRM unit (assumed BTC)
     };
   },
 };

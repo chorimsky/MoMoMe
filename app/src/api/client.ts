@@ -10,7 +10,10 @@ import type {
   Merchant, MerchantGraph, ResolveMerchantResult, CountryCode, ProviderId, RoutingSnapshot,
 } from "@shared/types.js";
 
-const BASE = "/api";
+// Same-origin "/api" by default (Vite proxy in dev, Vercel rewrite in prod).
+// Set VITE_API_BASE to point at a separately-hosted backend (e.g. a persistent
+// Node host) without code changes.
+const BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

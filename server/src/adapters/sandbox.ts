@@ -31,7 +31,7 @@ export const sandboxAdapter: RailAdapter = {
 
     if (method === "LIGHTNING") {
       code = `lnbc${Math.round(amount * 1e8)}n1${rand(B32, 90)}`;
-      qr = code.toUpperCase();
+      qr = `lightning:${code}`; // `lightning:` URI scheme so wallets recognise it
       providerRef = rand("0123456789abcdef", 64); // mock payment hash
     } else if (method === "ONCHAIN") {
       const addr = `bc1q${rand(B32, 38)}`;

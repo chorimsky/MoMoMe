@@ -36,7 +36,9 @@ export function QR({ value, size = 188 }: { value: string; size?: number }) {
       width: size,
       margin: 1,
       color: { dark: "#1a1714", light: "#ffffff" },
-      errorCorrectionLevel: "M",
+      // Long payloads (a `lightning:` BOLT11 invoice) make a dense QR — drop to
+      // level L so it stays comfortably scannable on screen; short addresses keep M.
+      errorCorrectionLevel: value.length > 120 ? "L" : "M",
     }).catch(() => {});
   }, [value, size]);
   return <canvas ref={ref} width={size} height={size} style={{ width: size, height: size, borderRadius: 10, display: "block" }} aria-label="Payment QR code" role="img" />;

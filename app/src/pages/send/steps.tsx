@@ -324,7 +324,7 @@ export function PayStep({ payment, method, back, next, refresh, busy }: { paymen
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("total_to_pay")}</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", whiteSpace: "nowrap", marginTop: 2 }}>{fmt(payment.totalXaf)} <span style={{ fontSize: 17, color: "var(--ink-3)" }}>XAF</span></div>
-          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
+          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{method === "LIGHTNING" ? `${fmt(Math.round(inst.amount * 1e8))} sats` : inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
         </div>
       </div>
 

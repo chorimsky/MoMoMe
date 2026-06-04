@@ -15,6 +15,7 @@ import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
+import { ensureIdentity } from "./identity.js";
 import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { transactionStatus } from "../adapters/ibex.js";
@@ -218,6 +219,9 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
       { account: "external_recipient", direction: "credit", amount: p.xaf, currency: "XAF" },
     ]);
     transition(p, "DELIVERED");
+    // First successful delivery → the number becomes an account: provision the
+    // recipient's custodial identity + phone-derived Lightning address. Idempotent.
+    ensureIdentity(p.recipient, p.ref);
     // Learning loop: a successful payout teaches/strengthens the merchant identity.
     recordSuccessfulPayout({
       phone: p.recipient.phone, name: p.recipient.name, provider: p.recipient.provider,
@@ -287,6 +291,7 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   }
   transition(p, "PAYOUT_CONFIRMED", res.providerRef);
   transition(p, "DELIVERED", res.status === "duplicate" ? "delivery reconciled by admin" : "retried by admin");
+  ensureIdentity(p.recipient, p.ref); // delivered → provision the recipient's identity
   return true;
 }
 

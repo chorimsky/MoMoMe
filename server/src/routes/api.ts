@@ -20,7 +20,7 @@ import {
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
-import { ensureIdentity, claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim } from "../core/identity.js";
+import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot } from "../core/routing.js";
 import * as peex from "../integrations/peex/service.js";
@@ -238,9 +238,9 @@ api.post("/payments", async (req, res) => {
   store.putPayment(payment);
   store.consumeQuote(quoteId); // a locked rate can be used once, not replayed
   if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
-  // The quiet part: provision a custodial identity for the recipient number
-  // on first sight (customer + Lightning wallet + ledger). Idempotent.
-  ensureIdentity(payment.recipient, payment.ref);
+  // NOTE: the recipient's custodial identity (the phone → Lightning address) is
+  // provisioned on the first SUCCESSFUL delivery, not here — a number only
+  // becomes an account once it has actually received money (see stateMachine).
   // Optional intelligence layer — fire-and-forget, NEVER blocks the payment.
   void peex.enrich(payment);
   res.json(payment);

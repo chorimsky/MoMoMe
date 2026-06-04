@@ -34,6 +34,10 @@ export const config = {
     // inbound webhooks alongside the shared secret. Override via IBEX_WEBHOOK_IPS.
     webhookIps: env("IBEX_WEBHOOK_IPS", sandbox ? "35.243.242.121,34.74.236.191" : "34.148.92.171,35.196.168.24")
       .split(",").map((s) => s.trim()).filter(Boolean),
+    // IBEX SANDBOX Lightning invoices are payable with real mainnet sats, so a
+    // genuinely-settled sandbox inbound is real money. This explicit opt-in lets
+    // such an inbound authorize a REAL Mobile Money payout (off by default).
+    allowSandboxPayout: env("IBEX_ALLOW_SANDBOX_PAYOUT") === "true",
   }))(env("IBEX_ENV", "sandbox") !== "production"),
 
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
@@ -89,6 +93,11 @@ export function peexitConfigured(): boolean { return !!config.peexit.apiKey; }
    us forbid real payouts driven by test crypto, and disable simulation whenever
    real money can move. */
 export function ibexLive(): boolean { return ibexConfigured() && config.ibex.env === "production"; }
+/** May a SETTLED IBEX inbound authorize a real payout? Production always; sandbox
+ *  only with the explicit IBEX_ALLOW_SANDBOX_PAYOUT opt-in (sandbox LN invoices
+ *  take real mainnet sats → genuinely real money). Scope this per-payment to the
+ *  IBEX rail — a simulated inbound (provider "sandbox") must never qualify. */
+export function ibexInboundTrusted(): boolean { return ibexLive() || (ibexConfigured() && config.ibex.allowSandboxPayout); }
 export function pawapayLive(): boolean { return pawapayConfigured() && config.pawapay.env === "production"; }
 export function peexitLive(): boolean { return peexitConfigured() && config.peexit.env === "production"; }
 export function aggregatorLive(name: string): boolean {

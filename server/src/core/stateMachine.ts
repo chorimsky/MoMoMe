@@ -12,7 +12,7 @@ import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types
 import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, hasDelivered, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
-import { isLive, ibexLive, aggregatorLive } from "../config.js";
+import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
@@ -130,11 +130,14 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
     transition(p, "MANUAL_REVIEW", "no payout aggregator with sufficient balance");
     return;
   }
-  // SAFETY: never move REAL Mobile Money funds for crypto that isn't production.
-  // A live payout requires a live (production) crypto inbound, so a sandbox /
-  // simulated payment can never trigger a real payout.
-  if (aggregatorLive(agg.name) && !ibexLive()) {
-    transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not production");
+  // SAFETY: never move REAL Mobile Money funds unless THIS payment's crypto
+  // inbound is real. Real = a settled IBEX inbound (production, or sandbox when
+  // IBEX_ALLOW_SANDBOX_PAYOUT is set — sandbox LN invoices take real mainnet
+  // sats). A simulated inbound (provider "sandbox", e.g. USDT) never qualifies,
+  // so a fake settlement can't trigger a real payout even with the opt-in on.
+  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+  if (aggregatorLive(agg.name) && !cryptoReal) {
+    transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not real");
     return;
   }
   p.aggregator = agg.name;

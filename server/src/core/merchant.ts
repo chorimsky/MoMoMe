@@ -49,8 +49,12 @@ export function payoutBlocked(phone: string): boolean {
   return !!m && (m.status === "flagged" || m.trustScore < 0.2);
 }
 
-const digits = (s: string) => s.replace(/\D/g, "");
-const nsn = (d: string) => (d.length > 9 ? d.slice(-9) : d); // national significant number
+// Function declarations (hoisted): the persistence restore() runs synchronously
+// at module load — before const initializers — and calls digits() via
+// lightningAddresses(). A const arrow here would be in the temporal dead zone
+// then (ReferenceError → merchants fail to restore). Keep these hoisted.
+function digits(s: string): string { return s.replace(/\D/g, ""); }
+function nsn(d: string): string { return d.length > 9 ? d.slice(-9) : d; } // national significant number
 
 /* ---------- classifier: what kind of input is this? ---------- */
 export function classify(raw: string): { type: MerchantInputType; value: string } {

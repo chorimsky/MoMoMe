@@ -129,19 +129,25 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
     return;
   }
 
-  // Route to a FUNDED aggregator (PawaPay / Peexit) — the API with wallet
-  // balance picks up the payout. Invisible to the user.
-  const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
+  // Is THIS payment's crypto inbound real money? Real = a settled IBEX inbound
+  // (production, or sandbox when IBEX_ALLOW_SANDBOX_PAYOUT is set — sandbox LN
+  // invoices take real mainnet sats). A simulated inbound (provider "sandbox",
+  // e.g. USDT) is not.
+  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+
+  // Route to a FUNDED aggregator (PawaPay / Peexit) — the API with wallet balance
+  // picks up the payout. For real money, require a LIVE rail so a sandbox-configured
+  // aggregator can never simulate a payout and falsely "deliver" a real payment.
+  const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal);
   if (!agg) {
-    transition(p, "MANUAL_REVIEW", "no payout aggregator with sufficient balance");
+    transition(p, "MANUAL_REVIEW", cryptoReal
+      ? "no funded LIVE payout rail — real settlement held for review"
+      : "no payout aggregator with sufficient balance");
     return;
   }
-  // SAFETY: never move REAL Mobile Money funds unless THIS payment's crypto
-  // inbound is real. Real = a settled IBEX inbound (production, or sandbox when
-  // IBEX_ALLOW_SANDBOX_PAYOUT is set — sandbox LN invoices take real mainnet
-  // sats). A simulated inbound (provider "sandbox", e.g. USDT) never qualifies,
-  // so a fake settlement can't trigger a real payout even with the opt-in on.
-  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+  // SAFETY: never move REAL Mobile Money funds for a simulated inbound (a live rail
+  // paired with non-real crypto). The selection above already guarantees the
+  // converse — real crypto only ever routes to a live rail.
   if (aggregatorLive(agg.name) && !cryptoReal) {
     transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not real");
     return;

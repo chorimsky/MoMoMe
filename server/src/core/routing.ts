@@ -6,7 +6,7 @@
    to the user — the state machine just asks for "an aggregator".
    ============================================================ */
 import type { ProviderId, CountryCode, Aggregator, RoutingSnapshot, AggregatorHealth, ExecutionLogEntry } from "../../../shared/types.js";
-import { pawapayConfigured, peexitConfigured } from "../config.js";
+import { pawapayConfigured, peexitConfigured, aggregatorLive } from "../config.js";
 import { register, touch } from "./persist.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
@@ -76,11 +76,17 @@ export function aggregatorByName(name: Aggregator): AggregatorAdapter {
  *  When any aggregator for this corridor is configured (real), require one with
  *  wallet balance ≥ amount (highest balance wins) — never silently fall back to
  *  a simulated rail. With no real rail configured, route by preference/health
- *  (sandbox/demo). Returns null → caller holds the payout for manual review. */
-export async function selectFundedAggregator(provider: ProviderId, country: CountryCode, amountXaf: number): Promise<AggregatorAdapter | null> {
+ *  (sandbox/demo). Returns null → caller holds the payout for manual review.
+ *
+ *  requireLive: when the inbound is REAL money (real crypto), a sandbox-configured
+ *  rail (e.g. Peexit with a sandbox key) must NEVER be chosen — it would simulate
+ *  a payout and falsely mark a real payment "delivered" without moving funds. With
+ *  requireLive, only LIVE (production) rails are eligible, and we never fall back
+ *  to a simulated rail — null instead, so the caller holds it for manual review. */
+export async function selectFundedAggregator(provider: ProviderId, country: CountryCode, amountXaf: number, requireLive = false): Promise<AggregatorAdapter | null> {
   const supporting = (Object.keys(SUPPORTS) as Aggregator[]).filter((a) => SUPPORTS[a].includes(provider) && health[a].up);
   if (!supporting.length) return null;
-  const real = supporting.filter((a) => CONFIGURED[a]());
+  const real = supporting.filter((a) => CONFIGURED[a]() && (!requireLive || aggregatorLive(a)));
   if (real.length) {
     const funded: Array<{ a: Aggregator; bal: number }> = [];
     for (const a of real) {
@@ -91,6 +97,8 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
     funded.sort((x, y) => y.bal - x.bal || successRate(y.a) - successRate(x.a));
     return AGGREGATORS[funded[0].a];
   }
+  // Real settlement with no live funded rail → hold (never simulate real money).
+  if (requireLive) return null;
   // No real rail configured → simulated: preferred while available, else first.
   const pref = PREFERRED[provider];
   return AGGREGATORS[supporting.includes(pref) ? pref : supporting[0]];

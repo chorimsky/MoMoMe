@@ -383,6 +383,10 @@ async function main() {
     const fundedOrange = await routing.selectFundedAggregator("ORANGE", "CM", 100);
     ok("balance-aware select (sandbox) → a usable aggregator", !!fundedMtn && !!fundedOrange);
     ok("balance-aware select falls back to preference when no real rail", fundedMtn!.name === "pawapay" && fundedOrange!.name === "peexit");
+    // requireLive: real-money settlement must NEVER fall back to a simulated rail.
+    const liveMtn = await routing.selectFundedAggregator("MTN", "CM", 100, true);
+    const liveOrange = await routing.selectFundedAggregator("ORANGE", "CM", 100, true);
+    ok("requireLive with no live rail → null (never simulates a real payout)", liveMtn === null && liveOrange === null);
 
     // Operator detection from the number prefix (the routing/identity anchor).
     const { detectProvider } = await import("../../shared/domain.js");

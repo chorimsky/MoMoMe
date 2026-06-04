@@ -55,6 +55,10 @@ export const api = {
   confirmPayment: (id: string) =>
     req<Payment>(`/payments/${id}/confirm`, { method: "POST" }),
 
+  // Demo-only: simulate the inbound (sandbox). 403s in production.
+  simulatePayment: (id: string) =>
+    req<Payment>(`/payments/${id}/simulate`, { method: "POST" }),
+
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
 
   listPayments: () => req<Payment[]>("/payments"),

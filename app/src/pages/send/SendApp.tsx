@@ -95,7 +95,11 @@ export function SendApp() {
     if (!payment) return;
     setBusy(true); setErr(null);
     try {
-      await api.confirmPayment(payment.id);
+      // Demo: simulate the inbound (no real invoice to pay). Production:
+      // confirm checks the REAL crypto payment — it settles only if actually
+      // received (and auto-settles via webhook even without this tap).
+      if (demo?.demoMode) await api.simulatePayment(payment.id);
+      else await api.confirmPayment(payment.id);
       go("processing");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }

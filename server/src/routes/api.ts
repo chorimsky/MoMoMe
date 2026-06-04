@@ -9,7 +9,8 @@ import {
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, providerFor } from "../adapters/index.js";
-import { settle, adminRetry, adminRefund } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMachine.js";
+import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
 import { config, isLive } from "../config.js";
@@ -214,12 +215,36 @@ api.post("/payments", async (req, res) => {
  * Real IBEX (production) settles only via the provider webhook, so there this
  * is a no-op that just returns current state.
  */
-api.post("/payments/:id/confirm", (req, res) => {
+api.post("/payments/:id/confirm", async (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  const simulatable = p.payInstruction.provider === "sandbox"
-    || (p.payInstruction.provider === "ibex" && config.ibex.env === "sandbox");
-  if (simulatable && p.state === "AWAITING_INBOUND") void settle(p);
+  if (p.state === "AWAITING_INBOUND") {
+    const inst = p.payInstruction;
+    if (inst.provider === "ibex" && inst.providerRef) {
+      // REAL rail: settle ONLY if IBEX confirms the crypto actually arrived.
+      // Tapping "I've paid" without paying does nothing; a genuine payment also
+      // auto-settles via the webhook + reconcile without any tap.
+      const s = await transactionStatus(inst.providerRef).catch(() => null);
+      if (s?.settled) await confirmInbound(p, inst.amount);
+    } else if (inst.provider === "sandbox") {
+      // Simulated rail (USDT / no IBEX creds) — no real on-chain payment exists.
+      void settle(p);
+    }
+  }
+  res.json(store.getPayment(p.id) ?? p);
+});
+
+/**
+ * Demo-only: simulate the inbound for testing (sandbox/demo aggregators), since
+ * the demo deliberately doesn't expose a payable invoice. Refuses in production,
+ * so it can never fake a settlement on a real deployment.
+ */
+api.post("/payments/:id/simulate", (req, res) => {
+  const demoMode = config.pawapay.env !== "production" || config.peexit.env !== "production";
+  const p = store.getPayment(req.params.id);
+  if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  if (!demoMode) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled in production." });
+  if (p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
 });
 

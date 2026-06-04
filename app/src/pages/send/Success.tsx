@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo } from "../../components/atoms.js";
@@ -15,37 +15,60 @@ function when(p: Payment): string {
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {
   const { t } = useI18n();
+  // Mobile-Money-only itemisation — never expose USD/crypto to the customer.
   const rows: Array<[string, string]> = [
     [t("recipient"), payment.recipient.name || "—"],
     [t("mobile_number"), fullPhone(payment)],
     [t("amount_delivered"), fmt(payment.xaf) + " XAF"],
     [t("fee"), fmt(payment.feeXaf) + " XAF"],
-    [t("total_paid"), "$" + fmt(payment.usd, 2)],
+    [t("total_paid"), fmt(payment.xaf + payment.feeXaf) + " XAF"],
     [t("reference"), payment.ref],
     [t("date"), when(payment)],
-    [t("status"), t("completed")],
   ];
+  // Notch that punches the "ticket" perforation — coloured to match the scrim.
+  const notch = (side: "left" | "right"): CSSProperties => ({
+    position: "absolute", top: -9, width: 18, height: 18, borderRadius: "50%",
+    background: "oklch(0.2 0.01 64 / 0.45)",
+    ...(side === "left" ? { left: -9 } : { right: -9 }),
+  });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 360, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease" }}>
-        <div style={{ padding: "22px 24px 18px", textAlign: "center", borderBottom: "1px dashed var(--line)" }}>
-          <Logo size={22} />
-          <div style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 7, color: "var(--recv)", fontWeight: 700, fontSize: 14 }}>
-            <span style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontSize: 11 }}>✓</span>
-            {t("receipt_success")}
-          </div>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "grid", placeItems: "center", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease" }}>
+        {/* header — branded band + success badge + the delivered amount */}
+        <div style={{ background: "var(--brand-wash)", padding: "20px 24px 22px", textAlign: "center" }}>
+          <Logo size={21} />
+          <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", margin: "16px auto 0", fontSize: 25, fontWeight: 800, boxShadow: "0 8px 22px oklch(0.6 0.1 158 / 0.35)" }}>✓</div>
+          <div style={{ marginTop: 12, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16.5 }}>{t("receipt_success")}</div>
+          <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>{t("delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></div>
         </div>
-        <div style={{ padding: "8px 24px 4px" }}>
+
+        {/* perforated tear line */}
+        <div style={{ position: "relative", height: 0, borderTop: "2px dashed var(--line)" }}>
+          <span aria-hidden="true" style={notch("left")} />
+          <span aria-hidden="true" style={notch("right")} />
+        </div>
+
+        {/* itemised rows */}
+        <div style={{ padding: "12px 24px 6px", background: "var(--surface)" }}>
           {rows.map(([k, v], i) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "11px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
               <span style={{ fontSize: 12.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{k}</span>
-              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", whiteSpace: "nowrap", color: k === t("status") ? "var(--recv)" : "var(--ink)" }}>{v}</span>
+              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", whiteSpace: "nowrap", color: "var(--ink)" }}>{v}</span>
             </div>
           ))}
+          {/* status as a friendly green pill */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 0 6px" }}>
+            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{t("status")}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "var(--recv)", background: "var(--recv-wash)", padding: "4px 11px", borderRadius: 999 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--recv)" }} />{t("completed")}
+            </span>
+          </div>
         </div>
-        <div style={{ padding: "16px 24px", textAlign: "center", borderTop: "1px dashed var(--line)" }}>
-          <p style={{ fontSize: 12.5, color: "var(--ink-3)", margin: "0 0 14px" }}>{t("receipt_footer")}</p>
-          <button className="btn btn-ghost" onClick={onClose} style={{ width: "100%" }}>{t("close")}</button>
+
+        <div style={{ padding: "8px 24px 18px", textAlign: "center" }}>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 13px", lineHeight: 1.5 }}>{t("receipt_footer")}</p>
+          <button className="btn btn-primary" onClick={onClose} style={{ width: "100%" }}>{t("close")}</button>
         </div>
       </div>
     </div>

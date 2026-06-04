@@ -250,13 +250,13 @@ export type Aggregator = "pawapay" | "peexit";
 
 export interface Merchant {
   internalId: string;
-  merchantCode: string | null;
+  merchantCode: string | null; // lookup label only (POS/MOMO code) — NOT an identity
   phone: string | null;
   country: CountryCode | null;
   displayName: string;
   provider: ProviderId | null;
   aggregatorRef: string | null;
-  lightningAddresses: string[]; // {code}@momomi.io, {phone}@momomi.io
+  lightningAddresses: string[]; // {phone}@momomi.io — the Lightning identity is the phone, never the code
   trustScore: number; // 0–1
   verificationSource: VerificationSource;
   status: MerchantStatus;

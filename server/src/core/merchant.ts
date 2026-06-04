@@ -24,7 +24,11 @@ register(
   "merchants",
   () => ({ list: [...byId.values()], counter, log: resolutionLog.slice(0, 50) }),
   (d: { list: Merchant[]; counter: number; log?: ResolutionLogEntry[] }) => {
-    for (const m of d.list) byId.set(m.internalId, m);
+    for (const m of d.list) {
+      // Migrate any legacy code-based Lightning address to the phone-based identity.
+      m.lightningAddresses = lightningAddresses(m.phone);
+      byId.set(m.internalId, m);
+    }
     counter = d.counter;
     if (d.log) resolutionLog.push(...d.log);
   },
@@ -90,11 +94,11 @@ export function listMerchants(): Merchant[] {
 }
 
 /* ---------- create / upsert ---------- */
-function lightningAddresses(code: string | null, phone: string | null): string[] {
-  const addrs: string[] = [];
-  if (code) addrs.push(`${code.toLowerCase()}@momomi.io`);
-  if (phone) addrs.push(`${digits(phone)}@momomi.io`);
-  return addrs;
+/** A merchant's Lightning identity is its PHONE NUMBER — the routable Mobile Money
+ *  account it settles to — NEVER its merchant code, which is only a lookup label
+ *  (a POS/MOMO code can't receive funds). Empty until a phone is known. */
+function lightningAddresses(phone: string | null): string[] {
+  return phone ? [`${digits(phone)}@momomi.io`] : [];
 }
 
 interface NewMerchant {
@@ -119,7 +123,7 @@ function create(m: NewMerchant): Merchant {
     displayName: m.displayName,
     provider: m.provider ?? null,
     aggregatorRef: m.aggregatorRef ?? null,
-    lightningAddresses: lightningAddresses(m.merchantCode ?? null, m.phone ?? null),
+    lightningAddresses: lightningAddresses(m.phone ?? null),
     trustScore: m.trustScore,
     verificationSource: m.verificationSource,
     status: m.status,
@@ -200,7 +204,7 @@ export function recordSuccessfulPayout(opts: { phone: string; name: string; prov
   if (!merchant.provider) merchant.provider = opts.provider;
   if (!merchant.country) merchant.country = opts.country;
   if (opts.aggregatorRef) merchant.aggregatorRef = opts.aggregatorRef;
-  merchant.lightningAddresses = lightningAddresses(merchant.merchantCode, merchant.phone);
+  merchant.lightningAddresses = lightningAddresses(merchant.phone);
   merchant.txCount += 1;
   merchant.trustScore = Math.min(1, merchant.trustScore + 0.1); // each success raises trust
   merchant.status = "active";
@@ -243,7 +247,7 @@ export function mergeMerchants(keepId: string, dupeId: string): Merchant | null 
   keep.aggregatorRef ??= dupe.aggregatorRef;
   keep.txCount += dupe.txCount;
   keep.trustScore = Math.max(keep.trustScore, dupe.trustScore);
-  keep.lightningAddresses = lightningAddresses(keep.merchantCode, keep.phone);
+  keep.lightningAddresses = lightningAddresses(keep.phone);
   keep.updatedAt = new Date().toISOString();
   byId.delete(dupeId);
   touch("merchants");

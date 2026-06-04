@@ -355,6 +355,8 @@ async function main() {
     // Resolve a brand-new merchant code → PENDING (needs confirmation), then admin-validate.
     const r1 = await mig.resolveMerchant("MOMO-TEST-1");
     ok("unknown code → pending, needs confirmation", r1.merchant!.status === "pending" && r1.needsConfirmation);
+    // A code-only merchant (no phone yet) has NO Lightning identity — never a code-based one.
+    ok("code-only merchant has no lightning identity until a phone is known", r1.merchant!.lightningAddresses.length === 0);
     const validated = mig.validateMerchant(r1.merchant!.internalId, "TEST SHOP")!;
     ok("admin validate → active, trust ≥ 0.9, admin-verified", validated.status === "active" && validated.trustScore >= 0.9 && validated.verificationSource === "admin");
     const r2 = await mig.resolveMerchant("MOMO-TEST-1");
@@ -364,7 +366,11 @@ async function main() {
     const before = mig.resolveMerchant("699000111");
     const learned = mig.recordSuccessfulPayout({ phone: "699000111", name: "BOULANGERIE X", provider: "MTN", country: "CM", merchantCode: "MOMO-BX" });
     ok("learning links code↔phone and raises trust", learned.merchantCode === "MOMO-BX" && learned.phone === "699000111" && learned.txCount === 1);
-    ok("learned merchant has both lightning addresses", learned.lightningAddresses.some((a) => a.startsWith("momo-bx@")) && learned.lightningAddresses.some((a) => /@momomi\.io$/.test(a)));
+    // The Lightning identity is the PHONE, never the merchant code (a lookup label).
+    ok("learned merchant's lightning identity is the phone, not the code",
+      learned.lightningAddresses.length === 1
+      && learned.lightningAddresses[0] === "699000111@momomi.io"
+      && !learned.lightningAddresses.some((a) => a.startsWith("momo-bx@")));
     void before;
 
     // Routing: invisible aggregator selection per provider (health being equal).

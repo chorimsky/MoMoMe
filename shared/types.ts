@@ -341,6 +341,8 @@ export interface PricingInfo {
   eurXafPeg: number;
   spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
+  /** Live FX source feeding the spot rates (IBEX, with freshness). */
+  feed: { source: string; updatedAt: string | null; btcUsd: number; usdtUsd: number; eurUsd: number; usdXaf: number };
 }
 
 /* ---------- delivery ---------- */

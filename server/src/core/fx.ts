@@ -1,22 +1,17 @@
 /* ============================================================
    FX quote engine (BACKEND_DESIGN §3)
    Prices volatility over the confirmation window via a per-rail spread.
-   Spot is simulated here behind a single seam — swap for a live feed.
+   Spot comes from IBEX (the same source that settles the inbound), cached and
+   refreshed in the background (see core/rates.ts) so quoting stays synchronous.
    ============================================================ */
 import type { Method, InboundAsset } from "../../../shared/types.js";
-import { EUR_XAF_PEG, METHOD_ASSET } from "../../../shared/domain.js";
+import { METHOD_ASSET } from "../../../shared/domain.js";
 import { getSettings } from "./settings.js";
+import { btcUsd, usdtUsd, usdXaf } from "./rates.js";
 
-/** USD per EUR — moves the XAF/USD relationship (XAF is EUR-pegged). */
-const EUR_USD = 1.08;
-const USD_XAF = EUR_XAF_PEG / EUR_USD; // ≈ 607
-
-/** Simulated spot, in USD, with a slow deterministic oscillation. */
+/** Live spot in USD from IBEX (BTC/USD, USDT/USD), via the rate cache. */
 function spotUsd(asset: InboundAsset): number {
-  const t = Date.now() / 1000;
-  if (asset === "USDT") return 1; // stable
-  const wobble = 1 + 0.015 * Math.sin(t / 120); // ±1.5% slow drift
-  return 65000 * wobble; // BTC/USD
+  return asset === "USDT" ? usdtUsd() : btcUsd();
 }
 
 export interface RateQuote {
@@ -33,9 +28,10 @@ export function rateFor(method: Method): RateQuote {
   const asset = METHOD_ASSET[method];
   // Spread is admin-tunable at runtime (Pricing & FX engine).
   const spreadBps = getSettings().pricing.spreadBps[method];
-  const midXafPerUnit = spotUsd(asset) * USD_XAF;
+  const usdxaf = usdXaf();
+  const midXafPerUnit = spotUsd(asset) * usdxaf;
   const customerXafPerUnit = midXafPerUnit * (1 - spreadBps / 10_000);
-  return { asset, midXafPerUnit, customerXafPerUnit, spreadBps, usdXaf: USD_XAF };
+  return { asset, midXafPerUnit, customerXafPerUnit, spreadBps, usdXaf: usdxaf };
 }
 
 /** Asset units the sender must pay to deliver `totalXaf`. */

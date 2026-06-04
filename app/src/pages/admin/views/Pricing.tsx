@@ -95,8 +95,14 @@ export function PricingView() {
           </div>
           <div style={{ marginTop: 12 }}>
             <KV k="EUR/XAF peg" v={`${fmt(pricing.eurXafPeg, 3)} (XAF is EUR-pegged)`} />
+            <KV k="Spot source" v={pricing.feed.source === "IBEX" ? "IBEX (live)" : "Fallback (IBEX unreachable)"} />
+            <KV k="BTC/USD" v={`$${fmt(pricing.feed.btcUsd)}`} />
+            <KV k="USDT/USD" v={`$${fmt(pricing.feed.usdtUsd, 4)}`} />
+            <KV k="EUR/USD" v={fmt(pricing.feed.eurUsd, 4)} />
+            <KV k="USD/XAF" v={`${fmt(pricing.feed.usdXaf, 2)} (peg ÷ EUR/USD)`} />
+            <KV k="Updated" v={pricing.feed.updatedAt ? new Date(pricing.feed.updatedAt).toLocaleTimeString() : "—"} />
           </div>
-          <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>Rates shown are mid-market; the per-rail spread is applied on top when quoting customers.</p>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>Spot is pulled from IBEX — the same source that settles the inbound — and refreshed every 30s. The per-rail spread is applied on top when quoting customers; XAF derives from the fixed CFA/EUR peg ÷ live EUR/USD.</p>
         </Card>
 
         <Card title="Spread & fee configuration" sub="These values change live customer quotes.">

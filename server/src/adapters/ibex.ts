@@ -66,6 +66,15 @@ async function ibex(path: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
+/** Current IBEX FX rate: units of `toCurrencyId` per 1 `fromCurrencyId`
+ *  (e.g. rate(2 BTC, 3 USD) → USD per BTC). null on lookup failure. */
+export async function rate(fromCurrencyId: number, toCurrencyId: number): Promise<number | null> {
+  const res = await ibex(`/rates?from=${fromCurrencyId}&to=${toCurrencyId}`, { method: "GET" });
+  if (!res.ok) return null;
+  const d = (await res.json()) as { rate?: number };
+  return typeof d.rate === "number" ? d.rate : null;
+}
+
 /** Register the account-level webhook so on-chain deposits (and all account
  *  transactions) notify us. Idempotent on IBEX's side per account. Called at
  *  boot when IBEX is configured and PUBLIC_URL is publicly reachable. */

@@ -13,7 +13,10 @@ import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMa
 import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
-import { config, isLive, liveMoney } from "../config.js";
+import {
+  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
+} from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
 import { ensureIdentity, claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim } from "../core/identity.js";
@@ -503,6 +506,43 @@ api.get("/admin/health", (_req, res) => {
     server: { cpuPct: load, memoryPct: Math.min(90, 48 + (all.length % 11)), responseMs: 18 + (inFlight % 5) },
   };
   res.json(health);
+});
+
+/** Real rail configuration state (env-derived, masked — never raw secrets). */
+api.get("/admin/rails", (_req, res) => {
+  const mask = (s: string) => (s ? `••••${s.slice(-4)}` : "—");
+  const head = (s: string) => (s ? `${s.slice(0, 8)}…` : "—");
+  res.json({
+    liveMoney: liveMoney(),
+    crypto: {
+      provider: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
+      apiUrl: config.ibex.apiUrl, accountId: head(config.ibex.accountId),
+      clientId: mask(config.ibex.clientId), webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
+      methods: ["LIGHTNING", "ONCHAIN"], // USDT gated per-org by IBEX
+    },
+    payout: [
+      { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(), apiUrl: config.pawapay.apiUrl, apiKey: mask(config.pawapay.apiKey) },
+      { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(), apiUrl: config.peexit.apiUrl, apiKey: mask(config.peexit.apiKey) },
+    ],
+  });
+});
+
+/** Real operational notifications derived from payment activity. */
+api.get("/admin/notifications", (_req, res) => {
+  const rel = (iso: string) => {
+    const m = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
+    return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`;
+  };
+  const out: Array<{ id: string; t: string; s: string; tone: string; time: string }> = [];
+  const recent = [...store.listPayments()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  for (const p of recent) {
+    const note = p.events[p.events.length - 1]?.note;
+    if (p.state === "MANUAL_REVIEW") out.push({ id: `n_${p.id}`, t: "Needs manual review", s: `${p.ref} · ${note ?? "held"}`, tone: "warn", time: rel(p.updatedAt) });
+    else if (p.state === "REFUNDED") out.push({ id: `n_${p.id}`, t: "Payment refunded", s: `${p.ref} · ${p.xaf.toLocaleString()} XAF`, tone: "bad", time: rel(p.updatedAt) });
+    else if (p.xaf >= 500_000 && p.displayStatus !== "Failed") out.push({ id: `n_${p.id}`, t: "Large transaction", s: `${p.xaf.toLocaleString()} XAF · ${p.recipient.phone}`, tone: "warn", time: rel(p.updatedAt) });
+    if (out.length >= 20) break;
+  }
+  res.json(out);
 });
 
 /* ---------- administration: audit log ---------- */

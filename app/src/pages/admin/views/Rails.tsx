@@ -21,11 +21,18 @@ const MONITOR: Array<{ id: string; v: string; l: string; tone: Tone }> = [
   { id: "m4", v: "1", l: "Failed (24h)", tone: "bad" },
 ];
 
+type RailsCfg = Awaited<ReturnType<typeof api.adminRails>>;
+
 export function RailsView() {
   const [defaultRail, setDefaultRail] = useState("Lightning");
   const [autoSwitch, setAutoSwitch] = useState(true);
   const [threshold, setThreshold] = useState(200000);
+  const [cfg, setCfg] = useState<RailsCfg | null>(null);
   const loaded = useRef(false);
+
+  // Real rail configuration (env, configured, masked keys — never raw secrets).
+  useEffect(() => { let alive = true; api.adminRails().then((c) => { if (alive) setCfg(c); }).catch(() => {}); return () => { alive = false; }; }, []);
+  const envPill = (live: boolean, configured: boolean) => (configured ? (live ? "Production" : "Sandbox") : "Not set");
 
   // Load server-side routing config.
   useEffect(() => {
@@ -54,7 +61,7 @@ export function RailsView() {
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{r.name}</div>
                 <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{r.sub}</div>
               </div>
-              <Pill status={r.status} />
+              <Pill status={r.name === "USDT" ? "Gated" : envPill(!!cfg?.crypto.live, !!cfg?.crypto.configured)} />
             </div>
             <KV k={r.a[0]} v={r.a[1]} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0" }}>
@@ -97,25 +104,25 @@ export function RailsView() {
         </Card>
       </Grid>
 
+      <SectionTitle t="Provider configuration" s="Live environment config — secrets are masked, never exposed." />
       <Grid cols={3} gap={16}>
-        <Card title="IBEX · Lightning" action={<Pill status="Connected" />}>
+        <Card title={`${cfg?.crypto.provider ?? "IBEX Hub"} · crypto inbound`} action={<Pill status={envPill(!!cfg?.crypto.live, !!cfg?.crypto.configured)} />}>
           <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
-            <Field label="API key" value="ibex_live_9a31••••7f20" mono />
-            <Field label="Merchant ID" value="mom_ibex_001" mono />
+            <Field label="Environment" value={cfg?.crypto.env ?? "—"} mono />
+            <Field label="Account ID" value={cfg?.crypto.accountId ?? "—"} mono />
+            <Field label="Client ID" value={cfg?.crypto.clientId ?? "—"} mono />
+            <Field label="Webhook secret" value={cfg?.crypto.webhookSecret ?? "—"} mono />
           </Grid>
         </Card>
-        <Card title="Bitcoin node" action={<Pill status="Synced" />}>
-          <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
-            <Field label="Deposit xpub" value="zpub6r••••••k29" mono />
-            <Field label="Confirmations" value="2" mono />
-          </Grid>
-        </Card>
-        <Card title="IBEX · USDT" action={<Pill status="Connected" />}>
-          <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
-            <Field label="Deposit address" value="TKp2v9••••3Hot" mono />
-            <Field label="Confirmations" value="1" mono />
-          </Grid>
-        </Card>
+        {(cfg?.payout ?? []).map((p) => (
+          <Card key={p.name} title={`${p.name} · Mobile Money payout`} action={<Pill status={envPill(p.live, p.configured)} />}>
+            <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
+              <Field label="Environment" value={p.env} mono />
+              <Field label="API key" value={p.apiKey} mono />
+              <Field label="API URL" value={p.apiUrl} mono />
+            </Grid>
+          </Card>
+        ))}
       </Grid>
     </div>
   );

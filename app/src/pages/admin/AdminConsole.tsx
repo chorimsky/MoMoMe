@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Logo } from "../../components/atoms.js";
+import { api } from "../../api/client.js";
 import { AdminContext, DEFAULT_NOTIFS, type AdminKey, type Notif } from "./context.js";
 import { OverviewView } from "./views/Overview.js";
 import { PaymentsView } from "./views/Payments.js";
@@ -119,7 +120,15 @@ export function AdminConsole() {
   const [role, setRole] = useState("Super Admin");
   const [navOpen, setNavOpen] = useState(false);
   const [query, setQueryState] = useState("");
-  const [notifications, setNotifications] = useState<Notif[]>(DEFAULT_NOTIFS);
+  const [notifications, setNotifications] = useState<Notif[]>([]);
+  // Real operational notifications derived from live payment activity.
+  useEffect(() => {
+    let alive = true;
+    api.adminNotifications()
+      .then((n) => { if (alive) setNotifications(n as Notif[]); })
+      .catch(() => { if (alive) setNotifications(DEFAULT_NOTIFS); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     try {

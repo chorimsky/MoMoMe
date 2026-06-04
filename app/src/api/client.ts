@@ -85,6 +85,12 @@ export const api = {
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),
+  adminRails: () => req<{
+    liveMoney: boolean;
+    crypto: { provider: string; env: string; configured: boolean; live: boolean; apiUrl: string; accountId: string; clientId: string; webhookSecret: string; methods: string[] };
+    payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string }>;
+  }>("/admin/rails"),
+  adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
   retryPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),
 

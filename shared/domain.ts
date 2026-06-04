@@ -75,7 +75,11 @@ export const XAF_FLOAT_BASE = 200_000_000;
 
 /** Quote TTL per rail, in seconds. */
 export const QUOTE_TTL_SEC: Record<Method, number> = {
-  LIGHTNING: 90,
+  // 90s was far too short — a person scanning a QR and paying from a mobile
+  // Lightning wallet routinely needs longer, so the invoice expired (CANCEL)
+  // before the payment landed. 10 min (IBEX max is 15) gives ample time; the
+  // per-rail spread covers the slightly longer rate lock.
+  LIGHTNING: 600,
   USDT: 150,
   ONCHAIN: 900,
 };

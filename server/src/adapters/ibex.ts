@@ -89,16 +89,27 @@ export async function registerAccountWebhook(): Promise<void> {
   }
 }
 
-/** Reconciliation backstop: was this Lightning invoice actually PAID? The
- *  /transactions LIST endpoint returns empty in sandbox, so we query the
- *  per-transaction details — a positive `usdAmount` (or a settledAt) means the
- *  inbound was received & FX'd. Returns null on lookup failure (don't act). */
+/** Reconciliation backstop / "I've paid" check: was this Lightning invoice
+ *  actually PAID? Query `GET /v2/transaction/{id}` (NOT /details — that endpoint
+ *  returns no status and `usdAmount:0` for paid AND unpaid invoices, which made
+ *  this silently never settle). The real signal is on the embedded invoice:
+ *  `receiveMsat > 0` / `settleDateUtc` means sats were received; `state.name ===
+ *  CANCEL` (or EXPIRED) means it expired unpaid. Returns null on lookup failure. */
 export async function transactionStatus(transactionId: string): Promise<{ settled: boolean; failed: boolean } | null> {
-  const res = await ibex(`/v2/transaction/${transactionId}/details`, { method: "GET" });
+  const res = await ibex(`/v2/transaction/${transactionId}`, { method: "GET" });
   if (!res.ok) return null;
-  const d = (await res.json()) as { usdAmount?: number; settledAt?: string | null; status?: string };
-  const settled = (typeof d.usdAmount === "number" && d.usdAmount > 0) || !!d.settledAt;
-  return { settled, failed: (d.status ?? "").toLowerCase() === "failed" };
+  const d = (await res.json()) as {
+    settledAt?: string | null; usdAmount?: number;
+    invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
+  };
+  const inv = d.invoice ?? {};
+  const settled =
+    !!d.settledAt || !!inv.settleDateUtc ||
+    (typeof inv.receiveMsat === "number" && inv.receiveMsat > 0) ||
+    (typeof d.usdAmount === "number" && d.usdAmount > 0);
+  const state = (inv.state?.name ?? "").toUpperCase();
+  const failed = !settled && ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"].includes(state);
+  return { settled, failed };
 }
 
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded

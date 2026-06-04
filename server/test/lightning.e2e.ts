@@ -56,7 +56,7 @@ async function main() {
     ok("quote label is BTC", /BTC$/.test(q.body.inboundAmountLabel));
     ok("quote totals", q.body.feeXaf === 1250 && q.body.totalXaf === 51250);
     const ttl = Date.parse(q.body.expiresAt) - Date.parse(q.body.issuedAt);
-    ok("quote TTL ≈ 90s", Math.abs(ttl - 90_000) < 1500, `${ttl}ms`);
+    ok("quote TTL ≈ 600s (10 min — long enough to actually pay)", Math.abs(ttl - 600_000) < 1500, `${ttl}ms`);
 
     // 2. create payment
     const recipient = { phone: "6 70 12 34 56", country: "CM", provider: "MTN", name: "NANA JEAN PAUL", nameSource: "provider" };
@@ -181,9 +181,13 @@ async function main() {
       sentWebhookReg = JSON.parse(init.body);
       return new Response(null, { status: 204 });
     }
-    if (u.includes("/v2/transaction/") && u.endsWith("/details")) {
-      // reconcile backstop: positive usdAmount = the invoice was paid
-      return new Response(JSON.stringify({ usdAmount: 0.05, settledAt: "2026-06-04T00:00:00Z" }), { status: 200 });
+    if (u.includes("/v2/transaction/") && !u.endsWith("/details")) {
+      // GET /v2/transaction/{id} — the real status source. "expired" → CANCEL
+      // (unpaid), anything else → a paid invoice (receiveMsat > 0).
+      if (u.includes("tx_expired")) {
+        return new Response(JSON.stringify({ status: "failed", settledAt: null, invoice: { settleDateUtc: null, receiveMsat: 0, state: { name: "CANCEL" } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ settledAt: "2026-06-04T00:00:00Z", invoice: { settleDateUtc: "2026-06-04T00:00:00Z", receiveMsat: MSAT, state: { name: "SETTLED" } } }), { status: 200 });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -216,7 +220,9 @@ async function main() {
     ok("account webhook registered to /webhooks/ibex", String(sentWebhookReg.url).endsWith("/webhooks/ibex"));
     ok("account webhook carries the secret", sentWebhookReg.secret === "whsec_test");
     const st = await transactionStatus("tx_recon");
-    ok("reconciliation reports a settled tx", st?.settled === true);
+    ok("reconciliation reports a settled tx (receiveMsat>0 via /v2/transaction/{id})", st?.settled === true && st?.failed === false);
+    const stX = await transactionStatus("tx_expired");
+    ok("reconciliation reports an expired/CANCEL tx as failed, not settled", stX?.settled === false && stX?.failed === true);
 
     // 2. webhook auth — IBEX Hub echoes the shared secret in the body (no HMAC)
     const now0 = new Date().toISOString();

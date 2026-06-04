@@ -15,6 +15,7 @@ import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
+import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { transactionStatus } from "../adapters/ibex.js";
 
@@ -115,6 +116,11 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   }
   if (availableFloatXaf() < p.xaf) {
     transition(p, "MANUAL_REVIEW", "insufficient XAF float");
+    return;
+  }
+  // Operator approval threshold: large payouts hold for manual sign-off.
+  if (p.xaf >= getSettings().ops.payoutApprovalXaf) {
+    transition(p, "MANUAL_REVIEW", `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
     return;
   }
   // Trust gate: a flagged / very-low-trust merchant needs manual confirmation.

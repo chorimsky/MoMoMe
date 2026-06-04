@@ -7,6 +7,9 @@ import { setRates, CCY } from "./core/rates.js";
 
 assertLiveConfig();
 assertIbexConfig();
+if (config.admin.passwordIsDefault) {
+  console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
+}
 const app = createApp();
 
 // Backstop: re-query payouts AND inbounds stuck awaiting a (possibly lost) callback.

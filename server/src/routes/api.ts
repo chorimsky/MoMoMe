@@ -24,11 +24,36 @@ import { ensureIdentity, claimIdentity, listIdentities, identityStats, requestCl
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot } from "../core/routing.js";
 import * as peex from "../integrations/peex/service.js";
+import { checkPassword, issueToken, verifyToken, tokenFromHeaders } from "../core/adminAuth.js";
 
 export const api = Router();
 
+/* ---------- admin authentication ----------
+   A shared operator password gates the whole console. /admin/login and
+   /admin/session are public; the guard below protects every other /admin/* route
+   (registered before them, so it runs first). */
+api.post("/admin/login", (req, res) => {
+  const { password } = (req.body ?? {}) as { password?: string };
+  if (!checkPassword(password)) return res.status(401).json({ error: "bad_credentials", message: "Incorrect password." });
+  const { token, expiresAt } = issueToken();
+  res.json({ token, expiresAt });
+});
+
+api.get("/admin/session", (req, res) => {
+  res.json({ authenticated: verifyToken(tokenFromHeaders(req.headers)), passwordIsDefault: config.admin.passwordIsDefault });
+});
+
+api.use("/admin", (req, res, next) => {
+  if (verifyToken(tokenFromHeaders(req.headers))) return next();
+  res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+});
+
 /* ---------- quotes ---------- */
 api.post("/quotes", (req, res) => {
+  // Operator kill-switch — refuse new business when payments are paused.
+  if (!getSettings().ops.acceptingPayments) {
+    return res.status(503).json({ error: "paused", message: "Payments are temporarily paused. Please try again shortly." });
+  }
   const { xaf, method, country } = (req.body ?? {}) as QuoteRequest;
   if (typeof xaf !== "number" || !Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
     return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
@@ -333,6 +358,13 @@ api.put("/admin/settings", (req, res) => {
     }
     for (const v of Object.values(pr.spreadBps ?? {})) {
       if (!inRange(v, 0, 2000)) return res.status(400).json({ error: "bad_pricing", message: "Spread must be 0–2000 bps." });
+    }
+  }
+  const op = patch.ops;
+  if (op?.payoutApprovalXaf !== undefined) {
+    const n = op.payoutApprovalXaf;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < MIN_XAF || n > MAX_XAF) {
+      return res.status(400).json({ error: "bad_ops", message: `Approval threshold must be ${MIN_XAF}–${MAX_XAF} XAF.` });
     }
   }
   res.json(updateSettings(patch));

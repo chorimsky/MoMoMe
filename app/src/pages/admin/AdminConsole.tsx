@@ -161,6 +161,11 @@ export function AdminConsole() {
     [query, active, role, notifications],
   );
 
+  const logout = () => {
+    api.adminLogout();
+    try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
+  };
+
   const View = VIEWS[active] ?? OverviewView;
 
   return (
@@ -201,10 +206,14 @@ export function AdminConsole() {
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderTop: "1px solid var(--line)" }}>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "var(--accent-ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flex: "none" }}>AM</div>
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 650, fontSize: 13, whiteSpace: "nowrap" }}>A. Mbarga</div>
             <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{role}</div>
           </div>
+          <button type="button" onClick={logout} aria-label="Sign out" title="Sign out"
+            style={{ border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", borderRadius: 8, padding: "5px 9px", fontSize: 12, fontWeight: 600, cursor: "pointer", flex: "none" }}>
+            Sign out
+          </button>
         </div>
       </aside>
 

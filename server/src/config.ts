@@ -60,6 +60,15 @@ export const config = {
     webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
   }))(env("PEEXIT_ENV", "sandbox") !== "production"),
 
+  /** Admin console auth. A shared operator password gates every /admin/* API and
+   *  the console UI. ADMIN_SESSION_SECRET signs session tokens; if unset it is
+   *  derived from the password (so rotating the password invalidates sessions). */
+  admin: {
+    password: env("ADMIN_PASSWORD", "momome-admin"), // dev default — SET ADMIN_PASSWORD in production
+    sessionSecret: env("ADMIN_SESSION_SECRET"),
+    passwordIsDefault: !process.env.ADMIN_PASSWORD,
+  },
+
   /** Peex — OPTIONAL intelligence / verification / metadata layer.
    *  "off" disables it entirely (MoMo›Me works identically); "sandbox"
    *  simulates it; "live" calls the real API. NEVER in the payment path. */

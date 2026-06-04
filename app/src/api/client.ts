@@ -15,12 +15,32 @@ import type {
 // Node host) without code changes.
 const BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
 
+/* ---------- admin session token ---------- */
+const TOKEN_KEY = "mm_admin_token";
+let adminToken: string | null = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } })();
+
+export function setAdminToken(token: string | null): void {
+  adminToken = token;
+  try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
+}
+export function getAdminToken(): string | null { return adminToken; }
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!res.ok) {
+    // An expired/invalid session on a protected admin call → drop the token and
+    // signal the console to fall back to the login gate.
+    if (res.status === 401 && path.startsWith("/admin/") && path !== "/admin/login") {
+      setAdminToken(null);
+      try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
+    }
     let message = `Request failed (${res.status})`;
     try {
       const body = await res.json();
@@ -42,6 +62,15 @@ export class ApiError extends Error {
 
 export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string }>("/config"),
+
+  // Admin auth. login stores the session token; session checks the current one.
+  adminLogin: async (password: string) => {
+    const r = await req<{ token: string; expiresAt: string }>("/admin/login", { method: "POST", body: JSON.stringify({ password }) });
+    setAdminToken(r.token);
+    return r;
+  },
+  adminSession: () => req<{ authenticated: boolean; passwordIsDefault: boolean }>("/admin/session"),
+  adminLogout: () => setAdminToken(null),
 
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),

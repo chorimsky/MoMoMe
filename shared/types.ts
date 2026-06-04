@@ -321,6 +321,13 @@ export interface AdminSettings {
   channels: { Email: boolean; SMS: boolean; WhatsApp: boolean };
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: { feePct: number; spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number } };
+  /** Operational controls wired into the live payment path. */
+  ops: {
+    /** Master switch — when false, new quotes/payments are refused. */
+    acceptingPayments: boolean;
+    /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
+    payoutApprovalXaf: number;
+  };
 }
 
 /* ---------- liquidity ---------- */

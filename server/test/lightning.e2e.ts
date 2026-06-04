@@ -106,6 +106,36 @@ async function main() {
     // 6. activity feed includes it
     const list = await J("/api/payments");
     ok("payment appears in activity as Completed", list.body.some((x: any) => x.id === pid && x.displayStatus === "Completed"));
+
+    // 7. admin login guard + operational settings (HTTP, live server)
+    const auth = (tok: string, init?: RequestInit): RequestInit => ({ ...init, headers: { "content-type": "application/json", authorization: `Bearer ${tok}`, ...(init?.headers ?? {}) } });
+    const noTok = await J("/api/admin/overview");
+    ok("admin API without token → 401", noTok.status === 401);
+    const badLogin = await POST("/api/admin/login", { password: "wrong" });
+    ok("login with wrong password → 401", badLogin.status === 401);
+    const goodLogin = await POST("/api/admin/login", { password: "momome-admin" }); // default test password
+    ok("login with correct password → token", goodLogin.status === 200 && typeof goodLogin.body.token === "string");
+    const tok = goodLogin.body.token as string;
+    const withTok = await J("/api/admin/overview", auth(tok));
+    ok("admin API with valid token → 200", withTok.status === 200);
+    const forged = await J("/api/admin/overview", auth(tok.slice(0, -2) + "xx"));
+    ok("tampered token → 401", forged.status === 401);
+    const sess = await J("/api/admin/session", auth(tok));
+    ok("session reports authenticated", sess.body.authenticated === true);
+
+    // Kill-switch: pausing payments refuses new quotes; re-enabling restores them.
+    const pause = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ ops: { acceptingPayments: false } }) }));
+    ok("pause payments persists", pause.status === 200 && pause.body.ops.acceptingPayments === false);
+    const qPaused = await POST("/api/quotes", { xaf: 50000, method: "LIGHTNING", country: "CM" });
+    ok("quotes refused while paused → 503", qPaused.status === 503);
+    const resume = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ ops: { acceptingPayments: true } }) }));
+    ok("resume payments persists", resume.status === 200 && resume.body.ops.acceptingPayments === true);
+    const qResumed = await POST("/api/quotes", { xaf: 50000, method: "LIGHTNING", country: "CM" });
+    ok("quotes accepted after resume → 200", qResumed.status === 200);
+
+    // Approval-threshold validation guards bad input.
+    const badThresh = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ ops: { payoutApprovalXaf: 99_999_999 } }) }));
+    ok("out-of-range approval threshold → 400", badThresh.status === 400);
   } finally {
     server.close();
   }
@@ -367,6 +397,7 @@ async function main() {
     const b = mig.recordSuccessfulPayout({ phone: "655111999", name: "DUP B", provider: "MTN", country: "CM", merchantCode: "MOMO-DUP" });
     const merged = mig.mergeMerchants(a.internalId, b.internalId)!;
     ok("merge combines code + tx counts and removes the duplicate", merged.merchantCode === "MOMO-DUP" && merged.txCount === 2 && !mig.getMerchant(b.internalId));
+
   } finally {
     globalThis.fetch = realFetch;
   }

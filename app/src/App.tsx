@@ -4,6 +4,7 @@ import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
 import { AdminConsole } from "./pages/admin/AdminConsole.js";
+import { AdminGate } from "./pages/admin/AdminGate.js";
 import { OpsDashboard } from "./pages/ops/OpsDashboard.js";
 import { Terms } from "./pages/legal/Terms.js";
 import { Privacy } from "./pages/legal/Privacy.js";
@@ -17,7 +18,7 @@ export function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/send" element={<SendApp />} />
       <Route path="/claim" element={<Claim />} />
-      <Route path="/admin" element={<AdminConsole />} />
+      <Route path="/admin" element={<AdminGate><AdminConsole /></AdminGate>} />
       <Route path="/ops" element={<OpsDashboard />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />

@@ -11,15 +11,17 @@ import { fmt } from "../lib/format.js";
 
 /* ---------- brand mark ---------- */
 export function Logo({ size = 26, withWord = true, mono = false, src = null }: { size?: number; withWord?: boolean; mono?: boolean; src?: string | null }) {
-  const c = mono ? "currentColor" : "var(--accent)";
+  const fill = mono ? "currentColor" : "var(--brand)";
+  const mark = mono ? "var(--surface)" : "var(--brand-ink)";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: size * 0.34 }}>
       {src ? (
-        <img src={src} alt="Logo" width={size} height={size} style={{ flex: "none", objectFit: "contain", borderRadius: size * 0.18 }} />
+        <img src={src} alt="Logo" width={size} height={size} style={{ flex: "none", objectFit: "contain", borderRadius: size * 0.28 }} />
       ) : (
+        // Rounded-square "spark" mark — a yellow lightning bolt on a soft tile.
         <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}>
-          <circle cx="16" cy="16" r="14" fill={c} />
-          <path d="M13 10 L19.5 16 L13 22" fill="none" stroke="var(--accent-ink)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+          <rect x="2" y="2" width="28" height="28" rx="9" fill={fill} />
+          <path d="M18 6 L10 18 H15 L13.5 26 L22 13 H17 Z" fill={mark} stroke={mark} strokeWidth="1.1" strokeLinejoin="round" />
         </svg>
       )}
       {withWord && (
@@ -28,6 +30,36 @@ export function Logo({ size = 26, withWord = true, mono = false, src = null }: {
         </span>
       )}
     </span>
+  );
+}
+
+/* ---------- Momo — the mascot ----------
+   A friendly lightning character: speed, trust, Mobile Money. Used sparingly
+   (welcome, success, empty, loading), never inside transactional flows. */
+export function Momo({ size = 96, mood = "happy", className }: { size?: number; mood?: "happy" | "wink" | "wow"; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 96 96" className={className} role="img" aria-label="Momo the lightning mascot" style={{ flex: "none" }}>
+      {/* feet */}
+      <ellipse cx="39" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
+      <ellipse cx="59" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
+      {/* body */}
+      <circle cx="48" cy="46" r="34" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="4" />
+      {/* cheeks */}
+      <circle cx="29" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
+      <circle cx="67" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
+      {/* eyes */}
+      {mood === "wink"
+        ? <path d="M34 44 q4 3 8 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />
+        : <><circle cx="38" cy="44" r="5" fill="var(--brand-ink)" /><circle cx="39.6" cy="42.3" r="1.6" fill="#fff" /></>}
+      <circle cx="58" cy="44" r="5" fill="var(--brand-ink)" />
+      <circle cx="59.6" cy="42.3" r="1.6" fill="#fff" />
+      {/* mouth */}
+      {mood === "wow"
+        ? <ellipse cx="48" cy="58" rx="5" ry="6" fill="var(--brand-ink)" />
+        : <path d="M38 56 q10 9 20 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />}
+      {/* lightning spark */}
+      <path d="M79 16 l-10 13 h5.5 l-4.5 11 13 -15 h-5.5 z" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 

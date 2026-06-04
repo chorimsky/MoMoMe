@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Logo } from "../components/atoms.js";
+import { Logo, Momo } from "../components/atoms.js";
 import "./Landing.css";
 
 export function Landing() {
@@ -16,12 +16,12 @@ export function Landing() {
 
         <section className="hero">
           <div className="hero-text">
-            <div className="eyebrow">Mobile Money, from anywhere</div>
-            <h1>Pay Mobile Money instantly</h1>
-            <p className="lede">Pay MTN Mobile Money and Orange Money accounts directly — from anywhere, in seconds.</p>
+            <div className="eyebrow">⚡ Bitcoin → Mobile Money</div>
+            <h1>Spend Bitcoin. Receive Mobile Money.</h1>
+            <p className="lede">Convert Bitcoin, Lightning and USDT into MTN &amp; Orange Money — instantly, in seconds.</p>
             <div className="cta-row">
-              <Link className="btn btn-primary btn-lg" to="/send">Pay Mobile Money</Link>
-              <a className="text-link" href="#how">See how it works →</a>
+              <Link className="btn btn-primary btn-lg" to="/send">Send Money</Link>
+              <a className="btn btn-ghost btn-lg" href="#how">How it works</a>
             </div>
             <div className="trust">
               <span><span className="tdot" /> Delivered in seconds</span>
@@ -30,15 +30,18 @@ export function Landing() {
             </div>
           </div>
 
-          <div className="hero-card" aria-hidden="true">
-            <div className="pc-check">✓</div>
-            <div className="pc-title">Payment delivered</div>
-            <div className="pc-amt">50,000 <span>XAF</span></div>
-            <div className="pc-sub">delivered to MTN Mobile Money</div>
-            <div className="pc-rows">
-              <div className="r"><span>Recipient</span><span>NANA JEAN PAUL</span></div>
-              <div className="r"><span>Reference</span><span>MMM-2026-000123</span></div>
-              <div className="r"><span>Arrival</span><span style={{ color: "var(--recv)" }}>Instant</span></div>
+          <div className="hero-visual">
+            <Momo size={132} className="hero-momo" />
+            <div className="hero-card" aria-hidden="true">
+              <div className="pc-check">✓</div>
+              <div className="pc-title">Payment delivered</div>
+              <div className="pc-amt">50,000 <span>XAF</span></div>
+              <div className="pc-sub">delivered to MTN Mobile Money</div>
+              <div className="pc-rows">
+                <div className="r"><span>Recipient</span><span>NANA JEAN PAUL</span></div>
+                <div className="r"><span>Reference</span><span>MMM-2026-000123</span></div>
+                <div className="r"><span>Arrival</span><span style={{ color: "var(--recv)" }}>Instant</span></div>
+              </div>
             </div>
           </div>
         </section>

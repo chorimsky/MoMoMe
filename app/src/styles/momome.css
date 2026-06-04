@@ -7,57 +7,63 @@
 /* ---- Fonts (loaded per-page via <link>) ---- */
 
 :root {
-  /* type */
-  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
-  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  /* type — rounded, friendly fintech */
+  --font-display: "Fredoka", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* warm paper light theme */
-  --paper:     oklch(0.985 0.006 79);
-  --paper-2:   oklch(0.965 0.008 78);
+  /* clean light theme — white & soft gray, deep-black ink */
+  --paper:     oklch(0.99 0.004 95);
+  --paper-2:   oklch(0.972 0.006 95);
   --surface:   oklch(1 0 0);
-  --surface-2: oklch(0.978 0.006 79);
-  --ink:       oklch(0.22 0.012 64);
-  --ink-2:     oklch(0.46 0.012 64);
-  --ink-3:     oklch(0.63 0.010 64);
-  --line:      oklch(0.90 0.008 75);
-  --line-2:    oklch(0.94 0.006 75);
+  --surface-2: oklch(0.974 0.005 95);
+  --ink:       oklch(0.19 0.013 75);    /* deep black */
+  --ink-2:     oklch(0.42 0.013 75);
+  --ink-3:     oklch(0.60 0.011 75);
+  --line:      oklch(0.915 0.006 90);
+  --line-2:    oklch(0.95 0.004 90);
 
-  /* brand: send (crypto/warm) -> receive (local/green) */
-  --accent:     oklch(0.66 0.155 48);   /* clay / terracotta */
-  --accent-2:   oklch(0.60 0.150 44);
-  --accent-ink: oklch(0.99 0.01 80);
-  --accent-wash: oklch(0.95 0.035 55);
+  /* brand: electric YELLOW (primary) + ORANGE (accent) — on deep black & white */
+  --brand:      oklch(0.87 0.175 97);   /* electric yellow — primary fill */
+  --brand-2:    oklch(0.83 0.185 93);   /* yellow pressed/hover */
+  --brand-ink:  oklch(0.21 0.015 80);   /* near-black text on yellow */
+  --brand-wash: oklch(0.975 0.065 100); /* faint yellow surface */
 
-  --send:      oklch(0.70 0.155 62);    /* crypto amber */
-  --send-wash: oklch(0.955 0.035 70);
-  --recv:      oklch(0.58 0.105 158);   /* mobile-money green */
-  --recv-wash: oklch(0.95 0.04 158);
+  --accent:     oklch(0.69 0.19 47);    /* orange — readable emphasis/accent */
+  --accent-2:   oklch(0.63 0.185 44);
+  --accent-ink: oklch(0.99 0.012 90);   /* white text on orange */
+  --accent-wash: oklch(0.955 0.05 60);
 
-  --warn:      oklch(0.70 0.14 70);
-  --bad:       oklch(0.58 0.16 25);
-  --bad-wash:  oklch(0.95 0.03 25);
+  --send:      oklch(0.87 0.175 97);    /* yellow — lightning / crypto */
+  --send-wash: oklch(0.975 0.065 100);
+  --recv:      oklch(0.60 0.13 158);    /* mobile-money green */
+  --recv-wash: oklch(0.95 0.05 158);
+
+  --warn:      oklch(0.75 0.15 70);     /* orange-amber */
+  --bad:       oklch(0.60 0.19 25);     /* red */
+  --bad-wash:  oklch(0.95 0.04 25);
   --info:      oklch(0.58 0.12 250);
 
   /* rails */
   --lightning: oklch(0.72 0.16 70);
   --tron:      oklch(0.58 0.16 18);
 
-  /* geometry */
-  --r-sm: 8px;
-  --r:    14px;
-  --r-lg: 20px;
-  --r-xl: 28px;
+  /* geometry — soft, rounded, approachable */
+  --r-sm: 10px;
+  --r:    16px;
+  --r-lg: 24px;
+  --r-xl: 34px;
 
   /* density (overridden by [data-density]) */
   --pad: 22px;
   --gap: 14px;
   --row: 14px;
 
-  --shadow-sm: 0 1px 2px oklch(0.4 0.02 64 / 0.06), 0 1px 1px oklch(0.4 0.02 64 / 0.04);
-  --shadow:    0 4px 16px oklch(0.4 0.03 64 / 0.08), 0 1px 3px oklch(0.4 0.03 64 / 0.06);
-  --shadow-lg: 0 18px 48px oklch(0.35 0.04 64 / 0.14), 0 4px 14px oklch(0.35 0.04 64 / 0.08);
-  --shadow-pop: 0 24px 70px oklch(0.30 0.05 64 / 0.22);
+  /* subtle elevation — soft, never heavy */
+  --shadow-sm: 0 1px 2px oklch(0.4 0.02 64 / 0.05);
+  --shadow:    0 6px 18px oklch(0.45 0.03 70 / 0.07), 0 1px 2px oklch(0.45 0.03 70 / 0.04);
+  --shadow-lg: 0 16px 40px oklch(0.4 0.04 70 / 0.10), 0 3px 10px oklch(0.4 0.04 70 / 0.05);
+  --shadow-pop: 0 24px 64px oklch(0.35 0.05 70 / 0.16);
 }
 
 [data-theme="dark"] {
@@ -71,13 +77,18 @@
   --line:      oklch(0.36 0.014 68);
   --line-2:    oklch(0.32 0.014 68);
 
-  --accent:     oklch(0.72 0.155 52);
-  --accent-2:   oklch(0.66 0.150 48);
-  --accent-ink: oklch(0.18 0.02 64);
-  --accent-wash: oklch(0.33 0.05 52);
+  --brand:      oklch(0.86 0.175 97);
+  --brand-2:    oklch(0.82 0.185 93);
+  --brand-ink:  oklch(0.20 0.015 80);
+  --brand-wash: oklch(0.34 0.06 100);
 
-  --send:      oklch(0.76 0.15 66);
-  --send-wash: oklch(0.32 0.05 66);
+  --accent:     oklch(0.74 0.17 50);
+  --accent-2:   oklch(0.68 0.165 47);
+  --accent-ink: oklch(0.18 0.02 64);
+  --accent-wash: oklch(0.34 0.06 50);
+
+  --send:      oklch(0.86 0.175 97);
+  --send-wash: oklch(0.34 0.06 100);
   --recv:      oklch(0.70 0.12 158);
   --recv-wash: oklch(0.30 0.05 158);
 
@@ -91,8 +102,8 @@
   --shadow-pop: 0 24px 70px oklch(0 0 0 / 0.6);
 }
 
-/* accent presets (set on :root via data-accent) */
-[data-accent="clay"]   { --accent: oklch(0.66 0.155 48);  --accent-2: oklch(0.60 0.15 44);  --accent-wash: oklch(0.95 0.035 55); }
+/* accent presets (set on :root via data-accent) — "clay" is the default = orange */
+[data-accent="clay"]   { --accent: oklch(0.69 0.19 47);   --accent-2: oklch(0.63 0.185 44); --accent-wash: oklch(0.955 0.05 60); }
 [data-accent="green"]  { --accent: oklch(0.58 0.115 158); --accent-2: oklch(0.52 0.11 158); --accent-wash: oklch(0.95 0.04 158); }
 [data-accent="violet"] { --accent: oklch(0.56 0.155 290); --accent-2: oklch(0.50 0.15 290); --accent-wash: oklch(0.95 0.035 290); }
 [data-accent="ink"]    { --accent: oklch(0.30 0.02 250);  --accent-2: oklch(0.24 0.02 250); --accent-wash: oklch(0.93 0.01 250); }
@@ -144,24 +155,30 @@ a { color: inherit; }
 
 /* buttons */
 .btn {
-  font-family: var(--font-body);
-  font-size: 15px; font-weight: 650;
-  border-radius: var(--r);
-  padding: 14px 18px;
-  border: 1px solid transparent;
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  border-radius: 999px;            /* friendly, pill-rounded */
+  padding: 13px 22px;
+  border: 1.5px solid transparent;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
-  transition: transform .12s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, opacity .18s;
+  transition: transform .14s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, opacity .18s;
   user-select: none;
 }
-.btn:active { transform: translateY(1px) scale(0.995); }
-.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-sm); }
-.btn-primary:hover { box-shadow: var(--shadow); }
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
-.btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
-.btn-ghost:hover { background: var(--surface-2); }
-.btn-quiet { background: transparent; color: var(--ink-2); }
+.btn:active { transform: translateY(1px) scale(0.99); }
+/* Primary — electric yellow with deep-black text */
+.btn-primary { background: var(--brand); color: var(--brand-ink); box-shadow: var(--shadow-sm); }
+.btn-primary:hover { background: var(--brand-2); box-shadow: var(--shadow); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+/* Secondary — white with a deep-black border */
+.btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--ink); }
+.btn-ghost:hover { background: var(--paper-2); }
+.btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Danger — red */
+.btn-danger { background: var(--bad); color: #fff; box-shadow: var(--shadow-sm); }
+.btn-danger:hover { box-shadow: var(--shadow); }
+.btn-quiet { background: transparent; color: var(--ink-2); border-color: transparent; }
 .btn-quiet:hover { color: var(--ink); background: var(--surface-2); }
 
 /* focus */

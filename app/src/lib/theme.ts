@@ -24,9 +24,10 @@ export const DEFAULT_THEME: ThemeSettings = {
 };
 
 const FONT_PAIRS: Record<FontPair, { display: string; body: string }> = {
-  warm: { display: '"Bricolage Grotesque", sans-serif', body: '"Hanken Grotesk", sans-serif' },
-  geometric: { display: '"Space Grotesk", sans-serif', body: '"Public Sans", sans-serif' },
-  editorial: { display: '"Instrument Serif", serif', body: '"Hanken Grotesk", sans-serif' },
+  // Rounded, friendly fintech type — Fredoka headings + Nunito body.
+  warm: { display: '"Fredoka", sans-serif', body: '"Nunito", sans-serif' },
+  geometric: { display: '"Poppins", sans-serif', body: '"Nunito", sans-serif' },
+  editorial: { display: '"Baloo 2", sans-serif', body: '"Nunito", sans-serif' },
 };
 
 export function useApplyTheme(t: ThemeSettings) {

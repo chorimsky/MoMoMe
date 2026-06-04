@@ -17,8 +17,7 @@ body { background: var(--paper); -webkit-font-smoothing: antialiased; }
 .cta-sm { font-size: 14px; padding: 11px 18px; text-decoration: none; box-shadow: none; }
 
 /* ---- document header ---- */
-.eyebrow { display: inline-flex; align-items: center; gap: 9px; font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
-.eyebrow::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.eyebrow { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-body); font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: 0; text-transform: none; }
 .doc-head { padding-bottom: 26px; border-bottom: 1px solid var(--line); }
 .doc-head h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 5.2vw, 46px); line-height: 1.03; letter-spacing: -0.032em; margin: 16px 0 0; text-wrap: balance; }
 .doc-meta { font-size: 13px; color: var(--ink-3); margin-top: 14px; }

@@ -188,6 +188,7 @@ export const ibexAdapter: RailAdapter = {
     const t = (body as { transaction?: {
       id?: string; infoId?: string; amount?: number; status?: string; settledAt?: string | null;
       transactionTypeId?: number; address?: string; metadata?: { address?: string };
+      invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
     } }).transaction;
     if (!t) return null;
     // Lightning (typeId 1) is matched by the transaction id (= the invoice's
@@ -198,15 +199,24 @@ export const ibexAdapter: RailAdapter = {
     const providerRef = t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
     if (!providerRef) return null;
     const status = (t.status ?? "").toLowerCase();
-    if (status === "failed") return null; // expired/failed invoice — ignore
-    const confirmed = !!t.settledAt || ["settled", "completed", "confirmed", "succeeded", "paid"].includes(status);
+    const inv = t.invoice ?? {};
+    const invState = (inv.state?.name ?? "").toUpperCase();
+    // Authoritative "paid" signal lives on the embedded invoice (receiveMsat /
+    // settleDateUtc) — check it alongside the top-level status so the webhook
+    // path agrees with transactionStatus(). The received msat is the real amount.
+    const receivedMsat = typeof inv.receiveMsat === "number" && inv.receiveMsat > 0 ? inv.receiveMsat : undefined;
+    if (status === "failed" || ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED"].includes(invState)) return null; // expired/failed — ignore
+    const confirmed = !!t.settledAt || !!inv.settleDateUtc || receivedMsat !== undefined
+      || ["settled", "completed", "confirmed", "succeeded", "paid"].includes(status)
+      || ["SETTLE", "SETTLED", "PAID", "ACCEPTED"].includes(invState);
     const detected = ["pending", "mempool", "unconfirmed", "processing", "detected"].includes(status);
     if (!confirmed && !detected) return null;
     return {
       providerRef,
       kind: confirmed ? "confirmed" : "detected",
       // IBEX reports msat on a BTC account → BTC for the underpayment guard.
-      amount: typeof t.amount === "number" ? msatToBtc(t.amount) : undefined,
+      // Prefer the invoice's actually-received msat; fall back to the tx amount.
+      amount: receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined,
     };
   },
 };

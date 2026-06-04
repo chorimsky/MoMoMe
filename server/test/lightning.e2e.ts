@@ -241,6 +241,11 @@ async function main() {
     ok("event providerRef is the transaction id", ev.providerRef === "tx_live_001");
     ok("event amount converted msat→BTC", Math.abs(ev.amount! - BTC_IN) < 1e-9);
     ok("a failed/expired tx is ignored", ibexAdapter.parseEvent({ transaction: { id: "x", status: "failed" } }) === null);
+    // webhook path agrees with transactionStatus: paid signal carried ONLY on the
+    // embedded invoice (receiveMsat) — no top-level settledAt/status — still confirms.
+    const evInv = ibexAdapter.parseEvent({ transaction: { id: "tx_inv", invoice: { receiveMsat: MSAT, settleDateUtc: now0, state: { name: "SETTLED" } } } })!;
+    ok("invoice-only paid webhook confirms (receiveMsat)", evInv?.kind === "confirmed" && Math.abs(evInv.amount! - BTC_IN) < 1e-9);
+    ok("invoice CANCEL webhook is ignored", ibexAdapter.parseEvent({ transaction: { id: "x", invoice: { receiveMsat: 0, state: { name: "CANCEL" } } } }) === null);
 
     // helper to seed an AWAITING payment with a locked instruction
     const seedPayment = (id: string, providerRef: string, amount: number, method: any = "LIGHTNING") => {

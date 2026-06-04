@@ -521,6 +521,9 @@ api.get("/admin/rails", (_req, res) => {
       apiUrl: config.ibex.apiUrl, accountId: head(config.ibex.accountId),
       clientId: mask(config.ibex.clientId), webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
       methods: ["LIGHTNING", "ONCHAIN"], // USDT gated per-org by IBEX
+      // Sandbox LN takes real sats → a settled sandbox inbound can authorize a
+      // real payout when this opt-in is on (off by default).
+      sandboxPayout: config.ibex.allowSandboxPayout,
     },
     payout: [
       { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(), apiUrl: config.pawapay.apiUrl, apiKey: mask(config.pawapay.apiKey) },

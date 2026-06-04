@@ -112,6 +112,7 @@ export function RailsView() {
             <Field label="Account ID" value={cfg?.crypto.accountId ?? "—"} mono />
             <Field label="Client ID" value={cfg?.crypto.clientId ?? "—"} mono />
             <Field label="Webhook secret" value={cfg?.crypto.webhookSecret ?? "—"} mono />
+            {cfg?.crypto.sandboxPayout && <Field label="Sandbox → real payout" value="ENABLED (real sats)" mono />}
           </Grid>
         </Card>
         {(cfg?.payout ?? []).map((p) => (

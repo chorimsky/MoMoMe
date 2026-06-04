@@ -84,6 +84,19 @@ export function ibexConfigured(): boolean {
 export function pawapayConfigured(): boolean { return !!config.pawapay.apiKey; }
 export function peexitConfigured(): boolean { return !!config.peexit.apiKey; }
 
+/* ---- "live money" gates — REAL value moves only when a rail is production ----
+   Sandbox rails simulate; only production envs move real funds. These gates let
+   us forbid real payouts driven by test crypto, and disable simulation whenever
+   real money can move. */
+export function ibexLive(): boolean { return ibexConfigured() && config.ibex.env === "production"; }
+export function pawapayLive(): boolean { return pawapayConfigured() && config.pawapay.env === "production"; }
+export function peexitLive(): boolean { return peexitConfigured() && config.peexit.env === "production"; }
+export function aggregatorLive(name: string): boolean {
+  return name === "pawapay" ? pawapayLive() : name === "peexit" ? peexitLive() : false;
+}
+/** Any rail that moves REAL funds is active → simulation must be off. */
+export function liveMoney(): boolean { return ibexLive() || pawapayLive() || peexitLive(); }
+
 /** IBEX is all-or-nothing: reject a partial credential set at boot. In
  *  production, also require a webhook secret and a reachable https PUBLIC_URL,
  *  otherwise settlements can't be verified or delivered. */

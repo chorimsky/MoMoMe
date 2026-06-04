@@ -13,7 +13,7 @@ import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMa
 import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
-import { config, isLive } from "../config.js";
+import { config, isLive, liveMoney } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
 import { ensureIdentity, claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim } from "../core/identity.js";
@@ -60,7 +60,7 @@ api.post("/quotes", (req, res) => {
 
 /* ---------- public app config (demo hints, never crypto) ---------- */
 api.get("/config", (_req, res) => {
-  const demoMode = config.pawapay.env !== "production" || config.peexit.env !== "production";
+  const demoMode = !liveMoney(); // no real-money rail active → safe to simulate
   res.json({
     demoMode,
     // Sandbox payout outcomes are driven by the recipient number. Surfaced only
@@ -240,10 +240,9 @@ api.post("/payments/:id/confirm", async (req, res) => {
  * so it can never fake a settlement on a real deployment.
  */
 api.post("/payments/:id/simulate", (req, res) => {
-  const demoMode = config.pawapay.env !== "production" || config.peexit.env !== "production";
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  if (!demoMode) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled in production." });
+  if (liveMoney()) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled when a real-money rail is live." });
   if (p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
 });

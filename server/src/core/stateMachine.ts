@@ -12,7 +12,7 @@ import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types
 import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, hasDelivered, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
-import { isLive } from "../config.js";
+import { isLive, ibexLive, aggregatorLive } from "../config.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
@@ -128,6 +128,13 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
   if (!agg) {
     transition(p, "MANUAL_REVIEW", "no payout aggregator with sufficient balance");
+    return;
+  }
+  // SAFETY: never move REAL Mobile Money funds for crypto that isn't production.
+  // A live payout requires a live (production) crypto inbound, so a sandbox /
+  // simulated payment can never trigger a real payout.
+  if (aggregatorLive(agg.name) && !ibexLive()) {
+    transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not production");
     return;
   }
   p.aggregator = agg.name;

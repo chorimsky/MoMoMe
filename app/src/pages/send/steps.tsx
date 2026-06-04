@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META } from "@shared/domain.js";
-import { ProviderChip, Flag, QR, CopyField, Spinner } from "../../components/atoms.js";
+import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { api } from "../../api/client.js";
@@ -453,8 +453,11 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
 
   return (
     <FlowCard>
-      <h2 style={{ fontSize: 23, marginTop: 4 }}>{slow ? t("proc_slow_title") : t("proc_title")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 24px", lineHeight: 1.5 }}>{slow ? t("proc_slow_sub") : t("proc_sub")}</p>
+      <div style={{ display: "flex", alignItems: "center", gap: 13, marginTop: 4 }}>
+        <Momo size={52} mood="happy" className="momo-bob" />
+        <h2 style={{ fontSize: 22, margin: 0 }}>{slow ? t("proc_slow_title") : t("proc_title")}</h2>
+      </div>
+      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "12px 0 24px", lineHeight: 1.5 }}>{slow ? t("proc_slow_sub") : t("proc_sub")}</p>
       {slow && (
         <button className="btn btn-ghost" onClick={onViewActivity} style={{ width: "100%", marginBottom: 16 }}>{t("view_activity")}</button>
       )}

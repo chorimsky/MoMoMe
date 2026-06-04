@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
-import { Logo } from "../../components/atoms.js";
+import { Logo, Momo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { FlowCard, Row } from "./ui.js";
@@ -58,8 +58,17 @@ export function SuccessStep({ payment, reset }: { payment: Payment; reset: () =>
   return (
     <FlowCard>
       <div style={{ textAlign: "center", padding: "10px 0 4px" }}>
-        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "var(--recv)", display: "grid", placeItems: "center", margin: "0 auto 18px", animation: "popIn .4s ease", boxShadow: "0 8px 26px var(--recv-wash)" }}>
-          <span style={{ color: "#fff", fontSize: 34, fontWeight: 800 }}>✓</span>
+        {/* Momo celebrates the delivery — the payoff moment. */}
+        <div style={{ position: "relative", width: 132, height: 116, margin: "0 auto 6px" }}>
+          {[
+            { left: 6, top: 14, c: "var(--brand)", s: 11, d: ".15s" },
+            { left: 108, top: 8, c: "var(--accent)", s: 9, d: ".3s" },
+            { left: 118, top: 64, c: "var(--brand)", s: 8, d: ".45s" },
+            { left: 0, top: 70, c: "var(--accent)", s: 10, d: ".6s" },
+          ].map((sp, i) => (
+            <span key={i} aria-hidden="true" style={{ position: "absolute", left: sp.left, top: sp.top, width: sp.s, height: sp.s, borderRadius: "50%", background: sp.c, animation: `sparkle 1.4s ease ${sp.d} infinite` }} />
+          ))}
+          <Momo size={108} mood="wow" className="momo-celebrate" />
         </div>
         <h2 style={{ fontSize: 25 }}>{t("success_title")}</h2>
         <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>

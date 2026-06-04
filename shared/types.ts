@@ -317,7 +317,8 @@ export interface RoutingSnapshot {
 }
 
 export interface AdminSettings {
-  company: { brand: string; email: string; phone: string };
+  /** logo is a data URL (data:image/…;base64,…) or null when unset. */
+  company: { brand: string; email: string; phone: string; logo: string | null };
   channels: { Email: boolean; SMS: boolean; WhatsApp: boolean };
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: { feePct: number; spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number } };

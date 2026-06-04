@@ -136,6 +136,17 @@ async function main() {
     // Approval-threshold validation guards bad input.
     const badThresh = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ ops: { payoutApprovalXaf: 99_999_999 } }) }));
     ok("out-of-range approval threshold → 400", badThresh.status === 400);
+
+    // Brand logo: a valid data URL persists + surfaces on public /config; junk is rejected.
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const setLogo = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ company: { logo: PNG } }) }));
+    ok("valid logo data URL persists", setLogo.status === 200 && setLogo.body.company.logo === PNG);
+    const cfg = await J("/api/config");
+    ok("logo surfaces on public /config", cfg.body.brandLogo === PNG);
+    const badLogo = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ company: { logo: "not-a-data-url" } }) }));
+    ok("invalid logo → 400", badLogo.status === 400);
+    const clearLogo = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ company: { logo: null } }) }));
+    ok("logo can be removed (null)", clearLogo.status === 200 && clearLogo.body.company.logo === null);
   } finally {
     server.close();
   }

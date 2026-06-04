@@ -14,7 +14,7 @@ export function createApp() {
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().
   app.use("/webhooks", webhooks);
 
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" })); // headroom for a base64 logo data URL in settings
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
   app.use("/api", api);
 

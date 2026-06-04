@@ -10,14 +10,18 @@ import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
 
 /* ---------- brand mark ---------- */
-export function Logo({ size = 26, withWord = true, mono = false }: { size?: number; withWord?: boolean; mono?: boolean }) {
+export function Logo({ size = 26, withWord = true, mono = false, src = null }: { size?: number; withWord?: boolean; mono?: boolean; src?: string | null }) {
   const c = mono ? "currentColor" : "var(--accent)";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: size * 0.34 }}>
-      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}>
-        <circle cx="16" cy="16" r="14" fill={c} />
-        <path d="M13 10 L19.5 16 L13 22" fill="none" stroke="var(--accent-ink)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      {src ? (
+        <img src={src} alt="Logo" width={size} height={size} style={{ flex: "none", objectFit: "contain", borderRadius: size * 0.18 }} />
+      ) : (
+        <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}>
+          <circle cx="16" cy="16" r="14" fill={c} />
+          <path d="M13 10 L19.5 16 L13 22" fill="none" stroke="var(--accent-ink)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
       {withWord && (
         <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: size * 0.74, letterSpacing: "-0.02em", color: "var(--ink)" }}>
           MoMo<span style={{ color: "var(--accent)", fontWeight: 600, margin: "0 0.02em" }}>›</span>Me

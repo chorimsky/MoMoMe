@@ -121,13 +121,17 @@ export function AdminConsole() {
   const [navOpen, setNavOpen] = useState(false);
   const [query, setQueryState] = useState("");
   const [notifications, setNotifications] = useState<Notif[]>([]);
+  const [brandLogo, setBrandLogo] = useState<string | null>(null);
   // Real operational notifications derived from live payment activity.
   useEffect(() => {
     let alive = true;
     api.adminNotifications()
       .then((n) => { if (alive) setNotifications(n as Notif[]); })
       .catch(() => { if (alive) setNotifications(DEFAULT_NOTIFS); });
-    return () => { alive = false; };
+    api.getConfig().then((c) => { if (alive) setBrandLogo(c.brandLogo); }).catch(() => {});
+    const onLogo = (e: Event) => setBrandLogo((e as CustomEvent).detail ?? null);
+    window.addEventListener("mm-brand-logo", onLogo);
+    return () => { alive = false; window.removeEventListener("mm-brand-logo", onLogo); };
   }, []);
 
   useEffect(() => {
@@ -177,7 +181,7 @@ export function AdminConsole() {
         display: "flex", flexDirection: "column", background: "var(--surface)", borderRight: "1px solid var(--line)",
         transform: navOpen ? "none" : undefined, transition: "transform .25s ease",
       }} className="mm-admin-side" data-open={navOpen}>
-        <div style={{ padding: "18px 18px 12px" }}><Logo size={24} /></div>
+        <div style={{ padding: "18px 18px 12px" }}><Logo size={24} src={brandLogo} /></div>
         <nav style={{ flex: 1, overflowY: "auto", padding: "4px 12px 12px" }}>
           {NAV.map((grp) => (
             <div key={grp.group ?? "root"} style={{ marginBottom: 6 }}>

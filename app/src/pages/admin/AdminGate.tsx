@@ -17,6 +17,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [defaultPw, setDefaultPw] = useState(false);
+  const [brandLogo, setBrandLogo] = useState<string | null>(null);
 
   // Validate any stored token on mount, and react to mid-session expiry.
   useEffect(() => {
@@ -27,6 +28,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
         .catch(() => { if (alive) setPhase("out"); });
     };
     check();
+    api.getConfig().then((c) => { if (alive) setBrandLogo(c.brandLogo); }).catch(() => {});
     const onUnauth = () => { if (alive) { setPhase("out"); setErr("Your session expired. Please sign in again."); } };
     window.addEventListener("mm-admin-unauthorized", onUnauth);
     return () => { alive = false; window.removeEventListener("mm-admin-unauthorized", onUnauth); };
@@ -51,7 +53,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--paper)", color: "var(--ink)", padding: 20 }}>
       <div className="card" style={{ width: "100%", maxWidth: 380, padding: 28 }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}><Logo size={28} /></div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}><Logo size={28} src={brandLogo} /></div>
         <h1 style={{ fontSize: 19, fontWeight: 750, textAlign: "center", margin: "0 0 4px" }}>Admin console</h1>
         <p style={{ fontSize: 13, color: "var(--ink-3)", textAlign: "center", margin: "0 0 22px" }}>
           {phase === "checking" ? "Checking session…" : "Sign in to continue."}

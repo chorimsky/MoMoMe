@@ -87,11 +87,21 @@ api.post("/quotes", (req, res) => {
   res.json(quote);
 });
 
-/* ---------- public app config (demo hints, never crypto) ---------- */
+/** A logo is a base64 image data URL within a sane size budget (~256 KB image →
+ *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
+function isValidLogo(v: unknown): v is string {
+  return typeof v === "string"
+    && /^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(v)
+    && v.length <= 360_000;
+}
+
+/* ---------- public app config (demo hints + branding, never crypto) ---------- */
 api.get("/config", (_req, res) => {
   const demoMode = !liveMoney(); // no real-money rail active → safe to simulate
   res.json({
     demoMode,
+    // Brand logo (data URL) so any surface — admin or customer — can show it.
+    brandLogo: getSettings().company.logo ?? null,
     // Sandbox payout outcomes are driven by the recipient number. Surfaced only
     // in demo mode so testers' payments complete cleanly.
     demoHint: demoMode
@@ -359,6 +369,10 @@ api.put("/admin/settings", (req, res) => {
     for (const v of Object.values(pr.spreadBps ?? {})) {
       if (!inRange(v, 0, 2000)) return res.status(400).json({ error: "bad_pricing", message: "Spread must be 0–2000 bps." });
     }
+  }
+  const logo = patch.company?.logo;
+  if (logo !== undefined && logo !== null && !isValidLogo(logo)) {
+    return res.status(400).json({ error: "bad_logo", message: "Logo must be a PNG, JPEG, WebP, GIF or SVG image under 256 KB." });
   }
   const op = patch.ops;
   if (op?.payoutApprovalXaf !== undefined) {

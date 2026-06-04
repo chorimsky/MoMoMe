@@ -9,8 +9,12 @@ import type { AdminSettings } from "@shared/types.js";
 import { MIN_XAF, MAX_XAF } from "@shared/domain.js";
 import { api } from "../../../api/client.js";
 import { Card, Grid, SectionTitle, Toggle } from "../AdminUI.js";
+import { Logo } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
 import { Loading } from "./Overview.js";
+
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"];
+const LOGO_MAX = 256 * 1024;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+\d][\d\s-]{6,}$/;
@@ -37,6 +41,7 @@ export function SettingsView() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [logoErr, setLogoErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -55,6 +60,17 @@ export function SettingsView() {
   if (!company || !channels || !ops) return <Loading t="Settings" s="General configuration and operational controls." />;
 
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
+
+  const onLogoFile = (file?: File) => {
+    setLogoErr(null);
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) { setLogoErr("Use a PNG, JPEG, WebP, GIF or SVG."); return; }
+    if (file.size > LOGO_MAX) { setLogoErr("Image must be under 256 KB."); return; }
+    const reader = new FileReader();
+    reader.onload = () => edit({ logo: String(reader.result) });
+    reader.onerror = () => setLogoErr("Couldn't read that file.");
+    reader.readAsDataURL(file);
+  };
   const toggle = (k: keyof AdminSettings["channels"], v: boolean) => { setChannels((c) => ({ ...c!, [k]: v })); setDirty(true); };
   const editOps = (patch: Partial<AdminSettings["ops"]>) => { setOps((o) => ({ ...o!, ...patch })); setDirty(true); };
 
@@ -73,6 +89,8 @@ export function SettingsView() {
       const next = await api.saveSettings({ company, channels, ops });
       setCompany(next.company); setChannels(next.channels); setOps(next.ops);
       setDirty(false); setSaved(true);
+      // Let the console shell refresh its brand logo without a reload.
+      try { window.dispatchEvent(new CustomEvent("mm-brand-logo", { detail: next.company.logo })); } catch { /* noop */ }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't save. Please try again.");
     } finally {
@@ -87,6 +105,25 @@ export function SettingsView() {
       <SectionTitle t="Settings" s="General configuration, operational controls and session security." />
       <Grid cols={2} gap={16}>
         <Card title="Company information">
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 4, marginBottom: 16 }}>
+            <div style={{ width: 56, height: 56, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-2)", display: "grid", placeItems: "center", overflow: "hidden", flex: "none" }}>
+              {company.logo ? <img src={company.logo} alt="Logo preview" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <Logo size={30} withWord={false} />}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 7 }}>Brand logo</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <label className="btn btn-ghost" style={{ fontSize: 12.5, cursor: "pointer", padding: "6px 12px" }}>
+                  {company.logo ? "Replace" : "Upload"}
+                  <input type="file" accept={LOGO_TYPES.join(",")} aria-label="Upload brand logo"
+                    onChange={(e) => { onLogoFile(e.target.files?.[0]); e.target.value = ""; }} style={{ display: "none" }} />
+                </label>
+                {company.logo && <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 12px" }} onClick={() => { edit({ logo: null }); setLogoErr(null); }}>Remove</button>}
+              </div>
+              {logoErr
+                ? <div style={{ fontSize: 11.5, color: "var(--bad)", fontWeight: 600, marginTop: 7 }}>{logoErr}</div>
+                : <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 7 }}>PNG, JPEG, WebP, GIF or SVG · under 256 KB · applied on Save.</div>}
+            </div>
+          </div>
           <Grid cols={1} gap={14} style={{ marginTop: 4 }}>
             <LabeledInput label="Brand name" value={company.brand} onChange={(v) => edit({ brand: v })} error={brandErr} />
             <LabeledInput label="Support email" value={company.email} onChange={(v) => edit({ email: v })} type="email" error={emailErr} />

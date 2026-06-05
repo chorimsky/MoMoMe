@@ -4,6 +4,7 @@ import { COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
+import { downloadReceipt, shareReceipt, type ReceiptStrings } from "../../lib/receipt.js";
 import { FlowCard, Row } from "./ui.js";
 
 function fullPhone(p: Payment): string {
@@ -15,6 +16,17 @@ function when(p: Payment): string {
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {
   const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2200); };
+  const strings: ReceiptStrings = {
+    title: t("receipt_success"), deliveredTo: t("delivered_to"),
+    recipient: t("recipient"), mobileNumber: t("mobile_number"), amountDelivered: t("amount_delivered"),
+    fee: t("fee"), totalPaid: t("total_paid"), reference: t("reference"), date: t("date"),
+    status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
+  };
+  const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
+  const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
   // Mobile-Money-only itemisation — never expose USD/crypto to the customer.
   const rows: Array<[string, string]> = [
     [t("recipient"), payment.recipient.name || "—"],
@@ -67,7 +79,18 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
         </div>
 
         <div style={{ padding: "8px 24px 18px", textAlign: "center" }}>
-          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 13px", lineHeight: 1.5 }}>{t("receipt_footer")}</p>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 12px", lineHeight: 1.5 }}>{t("receipt_footer")}</p>
+          {msg && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--recv)", marginBottom: 10 }}>{msg}</div>}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button className="btn btn-ghost" disabled={busy} onClick={onDownload} style={{ flex: 1, gap: 7, fontSize: 14 }} aria-label={t("download")}>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 1.5v9M4.5 7L8 10.5 11.5 7M2.5 13.5h11" /></svg>
+              {t("download")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={onShare} style={{ flex: 1, gap: 7, fontSize: 14 }} aria-label={t("share")}>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="3.5" r="2" /><circle cx="4" cy="8" r="2" /><circle cx="12" cy="12.5" r="2" /><path d="M5.7 7l4.6-2.7M5.7 9l4.6 2.7" /></svg>
+              {t("share")}
+            </button>
+          </div>
           <button className="btn btn-primary" onClick={onClose} style={{ width: "100%" }}>{t("close")}</button>
         </div>
       </div>

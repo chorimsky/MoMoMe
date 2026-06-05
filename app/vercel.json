@@ -6,6 +6,8 @@
     }
   },
   "rewrites": [
+    { "source": "/.well-known/lnurlp/:user", "destination": "https://momome-api-production.up.railway.app/.well-known/lnurlp/:user" },
+    { "source": "/lnurl/pay/:user", "destination": "https://momome-api-production.up.railway.app/lnurl/pay/:user" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

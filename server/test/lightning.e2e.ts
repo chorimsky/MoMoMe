@@ -155,6 +155,22 @@ async function main() {
     const agentUsers = await J("/api/admin/users", auth(agentTok));
     ok("support agent blocked from user admin → 403", agentUsers.status === 403);
 
+    // Money-movement RBAC: a Support Agent can VIEW payments but must never
+    // retry a payout or issue a refund (those move funds).
+    const somePid = Array.isArray(agentPayments.body) && agentPayments.body[0]?.id;
+    if (somePid) {
+      const agentRetry = await J(`/api/admin/payments/${somePid}/retry`, auth(agentTok, { method: "POST" }));
+      ok("support agent blocked from retry → 403", agentRetry.status === 403);
+      const agentRefund = await J(`/api/admin/payments/${somePid}/refund`, auth(agentTok, { method: "POST" }));
+      ok("support agent blocked from refund → 403", agentRefund.status === 403);
+      // An Operations Manager may move funds — authorized (not 403, even if the
+      // action itself no-ops on an already-delivered payment).
+      await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "ops1", password: "ops-pass-123", role: "Operations Manager" }) }));
+      const opsLogin = await POST("/api/admin/login", { username: "ops1", password: "ops-pass-123" });
+      const opsRetry = await J(`/api/admin/payments/${somePid}/retry`, auth(opsLogin.body.token as string, { method: "POST" }));
+      ok("operations manager allowed to move funds (not 403)", opsRetry.status !== 403);
+    }
+
     // change-own-password: wrong current rejected, correct accepted, old password then fails.
     const badChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "nope", newPassword: "newsupportpass" }) }));
     ok("change password with wrong current → 401", badChange.status === 401);

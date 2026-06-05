@@ -29,7 +29,7 @@ import {
   verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
-import { canAccess, isReadOnly, isSuperAdmin, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 
 export const api = Router();
 
@@ -114,6 +114,11 @@ api.use("/admin", (req, res, next) => {
     if (section && !canAccess(role, section)) {
       return res.status(403).json({ error: "forbidden", message: "Your role can't access this section." });
     }
+  }
+  // Money-movement on a payment (retry a payout / issue a refund) is stricter
+  // than "payments" section access — a Support Agent can view but not move funds.
+  if (/^\/payments\/[^/]+\/(retry|refund)$/.test(sub) && !canMovePaymentFunds(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Your role can't retry or refund payments." });
   }
   next();
 });

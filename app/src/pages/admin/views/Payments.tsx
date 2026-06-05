@@ -5,11 +5,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LedgerEntry, Method, Payment } from "@shared/types.js";
 import { METHOD_META } from "@shared/domain.js";
+import { canMovePaymentFunds } from "@shared/roles.js";
 import { api } from "../../../api/client.js";
 import { Flag, RailBadge } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
 import { Card, KV, Pill, SectionTitle, SegToggle } from "../AdminUI.js";
 import { useAdmin } from "../context.js";
+import { useAdminUser } from "../AdminGate.js";
 import { Failed, Loading } from "./Overview.js";
 
 function exportCsv(rows: Payment[]) {
@@ -115,6 +117,8 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
   const [ledgerErr, setLedgerErr] = useState(false);
   const [busy, setBusy] = useState<"" | "retry" | "refund">("");
   const [actErr, setActErr] = useState<string | null>(null);
+  const { role } = useAdminUser();
+  const canMoveFunds = canMovePaymentFunds(role);
   const method = METHOD_META[p.method as Method];
 
   const act = async (kind: "retry" | "refund") => {
@@ -182,12 +186,18 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
 
           {p.displayStatus !== "Completed" && (
             <Block title="Actions">
-              <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, lineHeight: 1.45 }}>This payment hasn't been delivered. Retry the Mobile Money payout, or refund the sender.</p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => act("retry")} style={{ flex: 1 }}>{busy === "retry" ? "Retrying…" : "Retry payout"}</button>
-                <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => act("refund")} style={{ flex: 1 }}>{busy === "refund" ? "Refunding…" : "Refund"}</button>
-              </div>
-              {actErr && <div role="alert" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--bad)", marginTop: 10, lineHeight: 1.45 }}>{actErr}</div>}
+              {canMoveFunds ? (
+                <>
+                  <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, lineHeight: 1.45 }}>This payment hasn't been delivered. Retry the Mobile Money payout, or refund the sender.</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => act("retry")} style={{ flex: 1 }}>{busy === "retry" ? "Retrying…" : "Retry payout"}</button>
+                    <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => act("refund")} style={{ flex: 1 }}>{busy === "refund" ? "Refunding…" : "Refund"}</button>
+                  </div>
+                  {actErr && <div role="alert" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--bad)", marginTop: 10, lineHeight: 1.45 }}>{actErr}</div>}
+                </>
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.45 }}>This payment hasn't been delivered. Retrying the payout or refunding the sender requires an Operations Manager or Super Admin.</p>
+              )}
             </Block>
           )}
         </div>

@@ -7,7 +7,7 @@ import type {
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
   Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
-  Merchant, MerchantGraph, ResolveMerchantResult, CountryCode, ProviderId, RoutingSnapshot,
+  Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 
@@ -171,8 +171,6 @@ export const api = {
   adminPeex: () => req<PeexPanel>("/admin/peex"),
   peexTest: () => req<{ ok: boolean; detail: string }>("/admin/peex/test", { method: "POST" }),
 
-  resolveMerchant: (input: string, country?: CountryCode, provider?: ProviderId) =>
-    req<ResolveMerchantResult>("/merchants/resolve", { method: "POST", body: JSON.stringify({ input, country, provider }) }),
   adminMerchants: () => req<MerchantGraph>("/admin/merchants"),
   adminRouting: () => req<RoutingSnapshot>("/admin/routing"),
   validateMerchant: (id: string, displayName?: string) =>

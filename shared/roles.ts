@@ -48,6 +48,16 @@ export function canAccess(role: AdminRole, section: Section): boolean {
 export const isReadOnly = (role: AdminRole): boolean => role === "Read Only";
 export const isSuperAdmin = (role: AdminRole): boolean => role === "Super Admin";
 
+/** Roles allowed to MOVE MONEY on an existing payment — retry a Mobile Money
+ *  payout or issue a refund. Stricter than plain "payments" section access:
+ *  a Support Agent can view and triage payments but must never trigger funds
+ *  movement. Enforced on the server (api.ts admin guard) and used to hide the
+ *  buttons in the console so UI and enforcement never disagree. */
+export const PAYMENT_FUNDS_ROLES: AdminRole[] = ["Super Admin", "Operations Manager"];
+export function canMovePaymentFunds(role: AdminRole): boolean {
+  return PAYMENT_FUNDS_ROLES.includes(role);
+}
+
 /** Public view of an admin user (never includes the password hash). */
 export interface AdminUserView {
   id: string;

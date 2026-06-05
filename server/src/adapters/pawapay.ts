@@ -1,14 +1,15 @@
 /* ============================================================
-   PawaPay payout adapter — real Mobile Money disbursement (v1 API).
-   Activates the REAL payout rail when PAWAPAY_API_KEY is set (independent
-   of RAILS_MODE), otherwise simulates. The idempotency contract is REAL:
-   the same payment ref maps to one deterministic UUID payoutId, so a retry
-   never produces a second payout (PawaPay also dedupes on payoutId).
+   PawaPay payout adapter — real Mobile Money disbursement (v2 API).
+   POST /v2/payouts with a {recipient:{type:"MMO",accountDetails:{phoneNumber,
+   provider}}} body (the deprecated v1 /payouts used a different "payout flow
+   configuration" model that rejected v2-onboarded accounts). Activates the REAL
+   payout rail when PAWAPAY_API_KEY is set (independent of RAILS_MODE), otherwise
+   simulates. The idempotency contract is REAL: the same payment ref maps to one
+   deterministic UUID payoutId, so a retry never produces a second payout.
 
-   Settlement is async: PawaPay accepts the payout, then the final status
-   arrives via the /webhooks/pawapay callback — which we treat only as a
-   trigger and confirm by re-querying GET /payouts/{payoutId} (authoritative,
-   so we don't need to verify their RFC-9421 callback signature).
+   Settlement is async: PawaPay accepts the payout, then the final status arrives
+   via the /webhooks/pawapay callback — which we treat only as a trigger and
+   confirm by re-querying GET /v2/payouts/{payoutId} (authoritative).
    ============================================================ */
 import crypto from "node:crypto";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
@@ -88,26 +89,26 @@ export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
 }
 
 async function liveSubmit(req: DisburseRequest, payoutId: string): Promise<void> {
-  const res = await fetch(`${config.pawapay.apiUrl}/payouts`, {
+  // v2 API: POST /v2/payouts. The recipient carries the provider (MTN_MOMO_CMR /
+  // ORANGE_CMR …) directly — no separate correspondent/country/customerTimestamp.
+  const res = await fetch(`${config.pawapay.apiUrl}/v2/payouts`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${config.pawapay.apiKey}` },
     body: JSON.stringify({
       payoutId,
+      recipient: { type: "MMO", accountDetails: { phoneNumber: msisdn(req.phone, req.country), provider: correspondent(req.provider, req.country) } },
       amount: String(req.xaf), // XAF is a zero-decimal currency
       currency: "XAF",
-      country: ISO3[req.country] ?? "CMR",
-      correspondent: correspondent(req.provider, req.country),
-      recipient: { type: "MSISDN", address: { value: msisdn(req.phone, req.country) } },
-      customerTimestamp: new Date().toISOString(),
-      statementDescription: "MoMoMe payout", // 4–22 chars
+      customerMessage: "MoMoMe payout", // ≤ 22 chars
     }),
   });
-  if (!res.ok) throw new Error(`PawaPay payout submit failed: ${res.status} ${await res.text()}`);
-  const data = (await res.json()) as { status?: string; rejectionReason?: unknown };
+  // A REJECTED payout returns 200 OR 4xx, both with a {status, failureReason} body.
+  const data = (await res.json().catch(() => ({}))) as { status?: string; failureReason?: { failureCode?: string; failureMessage?: string } };
   const s = (data.status ?? "").toUpperCase();
   // ACCEPTED = queued for processing; DUPLICATE_IGNORED = idempotent retry.
-  if (s && !["ACCEPTED", "DUPLICATE_IGNORED", "ENQUEUED"].includes(s)) {
-    throw new Error(`PawaPay payout not accepted: ${JSON.stringify(data)}`);
+  if (!["ACCEPTED", "DUPLICATE_IGNORED"].includes(s)) {
+    const why = data.failureReason ? `${data.failureReason.failureCode}: ${data.failureReason.failureMessage}` : `HTTP ${res.status} ${JSON.stringify(data)}`;
+    throw new Error(`PawaPay payout not accepted: ${why}`);
   }
 }
 
@@ -118,16 +119,17 @@ function mapStatus(raw: string | undefined): PayoutStatus {
   return "PENDING";
 }
 
-/** Authoritative status from PawaPay (used by the callback and reconciliation). */
+/** Authoritative status from PawaPay (used by the callback and reconciliation).
+ *  v2: GET /v2/payouts/{id} → { status: "FOUND"|"NOT_FOUND", data: { status } }. */
 export async function queryStatusByPayoutId(payoutId: string): Promise<PayoutStatus> {
   try {
-    const res = await fetch(`${config.pawapay.apiUrl}/payouts/${payoutId}`, {
+    const res = await fetch(`${config.pawapay.apiUrl}/v2/payouts/${payoutId}`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
     if (!res.ok) return "PENDING";
-    const data = (await res.json()) as unknown;
-    const rec = Array.isArray(data) ? (data[0] as { status?: string }) : (data as { status?: string });
-    return mapStatus(rec?.status);
+    const d = (await res.json()) as { status?: string; data?: { status?: string } };
+    if ((d.status ?? "").toUpperCase() === "NOT_FOUND") return "PENDING";
+    return mapStatus(d.data?.status); // inner payout status: COMPLETED / FAILED / …
   } catch { return "PENDING"; }
 }
 
@@ -152,7 +154,7 @@ export async function availableBalanceXaf(country: CountryCode, _provider?: Prov
   const iso = ISO3[country] ?? "CMR";
   if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;
   try {
-    const res = await fetch(`${config.pawapay.apiUrl}/v1/wallet-balances`, {
+    const res = await fetch(`${config.pawapay.apiUrl}/v2/wallet-balances`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
     if (!res.ok) return null;

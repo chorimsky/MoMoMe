@@ -21,7 +21,7 @@ export function PageTop() {
       <div className="pg-actions">
         <Link className="pg-link" to="/contact">Help</Link>
         <ThemeToggle size={38} />
-        <Link className="btn btn-primary cta-sm" to="/send">Pay Mobile Money</Link>
+        <Link className="btn btn-primary cta-sm" to="/send">Pay<span className="cta-rest"> Mobile Money</span></Link>
       </div>
     </header>
   );

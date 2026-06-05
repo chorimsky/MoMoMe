@@ -49,7 +49,7 @@ export function Landing() {
           <div className="lp-actions">
             <a className="lp-link" href="#how">How it works</a>
             <ThemeToggle size={38} />
-            <Link className="btn btn-primary cta-sm" to="/send">Pay Mobile Money</Link>
+            <Link className="btn btn-primary cta-sm" to="/send">Pay<span className="cta-rest"> Mobile Money</span></Link>
           </div>
         </header>
 

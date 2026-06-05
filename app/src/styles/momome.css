@@ -213,3 +213,7 @@ button, input, select, textarea { color: inherit; }
 .momo-bob { animation: momoBob 2.8s ease-in-out infinite; transform-origin: center bottom; }
 .momo-celebrate { animation: momoPop .5s cubic-bezier(.34,1.56,.64,1) both, momoBob 2.8s ease-in-out .5s infinite; transform-origin: center bottom; }
 @media (prefers-reduced-motion: reduce) { .momo-bob, .momo-celebrate { animation: none; } }
+
+/* Header CTA shortens "Pay Mobile Money" → "Pay" on small screens so the
+   compact header (logo · theme toggle · CTA) always fits a phone. */
+@media (max-width: 600px) { .cta-rest { display: none; } }

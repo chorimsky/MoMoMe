@@ -10,25 +10,42 @@ import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
 
 /* ---------- brand mark ---------- */
-export function Logo({ size = 26, withWord = true, mono = false, src = null }: { size?: number; withWord?: boolean; mono?: boolean; src?: string | null }) {
-  const fill = mono ? "currentColor" : "var(--brand)";
-  const mark = mono ? "var(--surface)" : "var(--brand-ink)";
+/** The MoMoMe lightning bolt — green, sits between "MoMo" and "Me". */
+function Bolt({ h, color }: { h: number; color: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: size * 0.34 }}>
-      {src ? (
-        <img src={src} alt="Logo" width={size} height={size} style={{ flex: "none", objectFit: "contain", borderRadius: size * 0.28 }} />
-      ) : (
-        // Rounded-square "spark" mark — a yellow lightning bolt on a soft tile.
-        <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}>
-          <rect x="2" y="2" width="28" height="28" rx="9" fill={fill} />
-          <path d="M18 6 L10 18 H15 L13.5 26 L22 13 H17 Z" fill={mark} stroke={mark} strokeWidth="1.1" strokeLinejoin="round" />
-        </svg>
-      )}
-      {withWord && (
-        <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: size * 0.74, letterSpacing: "-0.02em", color: "var(--ink)" }}>
-          MoMo<span style={{ color: "var(--accent)", fontWeight: 600, margin: "0 0.02em" }}>›</span>Me
-        </span>
-      )}
+    <svg height={h} width={h * 0.46} viewBox="0 0 23 50" aria-hidden="true" style={{ flex: "none", margin: `0 ${h * -0.04}px` }}>
+      <path d="M15.5 1 L2 27 Q1 29 3.5 29 H9.5 L7 47 Q6.8 49.5 9 47.5 L21 22 Q22 20 19.5 20 H13.5 L17.8 3 Q18.4 0.5 15.5 1 Z"
+        fill={color} stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Brand logo — the bubbly "MoMoMe" wordmark (yellow/orange letters + a green
+ *  lightning bolt). `src` overrides with an uploaded logo; `withWord={false}`
+ *  renders the compact square app-icon; `size` is the wordmark/icon height. */
+export function Logo({ size = 26, withWord = true, mono = false, src = null }: { size?: number; withWord?: boolean; mono?: boolean; src?: string | null }) {
+  if (src) return <img src={src} alt="MoMoMe" height={size} style={{ height: size, width: "auto", flex: "none", objectFit: "contain", borderRadius: size * 0.22, verticalAlign: "middle" }} />;
+
+  const yellow = mono ? "currentColor" : "var(--brand)";
+  const orange = mono ? "currentColor" : "var(--accent)";
+  const green = mono ? "currentColor" : "var(--recv)";
+
+  // Compact square app-icon (favicons / tight tiles): bolt on a rounded tile.
+  if (!withWord) {
+    return (
+      <span style={{ display: "inline-grid", placeItems: "center", width: size, height: size, borderRadius: size * 0.28, background: mono ? "transparent" : yellow, flex: "none" }}>
+        <Bolt h={size * 0.74} color={mono ? "currentColor" : "var(--brand-ink)"} />
+      </span>
+    );
+  }
+
+  const f = size * 1.42; // Bagel Fat One cap-height ≈ 0.7em → wordmark height ≈ size
+  const letter = (text: string, color: string) => <span style={{ color }}>{text}</span>;
+  return (
+    <span aria-label="MoMoMe" style={{ display: "inline-flex", alignItems: "center", fontFamily: '"Bagel Fat One", system-ui, sans-serif', fontWeight: 400, fontSize: f, lineHeight: 1, letterSpacing: "-0.04em", whiteSpace: "nowrap", userSelect: "none" }}>
+      {letter("Mo", yellow)}{letter("Mo", orange)}
+      <Bolt h={f * 0.92} color={green} />
+      {letter("M", yellow)}{letter("e", orange)}
     </span>
   );
 }

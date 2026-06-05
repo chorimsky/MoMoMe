@@ -19,15 +19,10 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
   const { t } = useI18n();
   const c = COUNTRIES[s.country];
   const fee = Math.round(s.xaf * FEE_PCT);
-  const [mode, setMode] = useState<"number" | "merchant">("number");
   const [resolving, setResolving] = useState(false);
-  const [mInput, setMInput] = useState("");
-  const [mResolving, setMResolving] = useState(false);
-  const [mMiss, setMMiss] = useState(false);
 
-  // Number mode: resolve the recipient name (read-only, gated to this mode).
+  // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
-    if (mode !== "number") return;
     const d = s.phone.replace(/\D/g, "");
     if (d.length < 8) { set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
@@ -48,50 +43,10 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
     }, 500);
     return () => { active = false; clearTimeout(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.phone, mode]);
-
-  // Merchant mode: classify + resolve a code/QR via the MIG (lookup-only as you type).
-  useEffect(() => {
-    if (mode !== "merchant") return;
-    const code = mInput.trim();
-    setMMiss(false);
-    if (code.length < 4) { set({ recipientName: "", nameSource: "idle", phone: "" }); return; }
-    setMResolving(true);
-    let active = true;
-    const id = setTimeout(async () => {
-      try {
-        const r = await api.resolveMerchant(code);
-        if (!active) return;
-        if (r.resolved && r.merchant?.phone && r.merchant.provider) {
-          const m = r.merchant;
-          set({ country: m.country ?? s.country, provider: m.provider!, phone: m.phone!, recipientName: m.displayName, nameSource: "provider" });
-        } else {
-          setMMiss(true);
-          set({ recipientName: "", nameSource: "unknown", phone: "" });
-        }
-      } catch {
-        if (active) setMMiss(true);
-      } finally {
-        if (active) setMResolving(false);
-      }
-    }, 500);
-    return () => { active = false; clearTimeout(id); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mInput, mode]);
-
-  function switchMode(m: "number" | "merchant") {
-    setMode(m);
-    setMInput(""); setMMiss(false);
-    set({ recipientName: "", nameSource: "idle", phone: "" });
-  }
+  }, [s.phone]);
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
-  const valid = s.xaf >= MIN_XAF && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving && !mResolving;
-
-  const tabBtn = (m: "number" | "merchant", label: string) => (
-    <button key={m} type="button" onClick={() => switchMode(m)} aria-pressed={mode === m}
-      style={{ flex: 1, cursor: "pointer", border: "none", padding: "9px 0", borderRadius: 8, fontSize: 13, fontWeight: 650, fontFamily: "inherit", background: mode === m ? "var(--surface)" : "transparent", color: mode === m ? "var(--ink)" : "var(--ink-3)", boxShadow: mode === m ? "var(--shadow-sm)" : "none" }}>{label}</button>
-  );
+  const valid = s.xaf >= MIN_XAF && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
 
   return (
     <FlowCard>
@@ -99,14 +54,7 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
       <h2 style={{ fontSize: 25, marginTop: 16 }}>{t("pay_title")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 20px", lineHeight: 1.5 }}>{t("details_sub")}</p>
 
-      <div style={{ display: "flex", gap: 3, background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: 3, marginBottom: 16 }}>
-        {tabBtn("number", t("pay_by_number"))}
-        {tabBtn("merchant", t("pay_by_merchant"))}
-      </div>
-
-      {mode === "number" ? (
-        <>
-          <Label>{t("mm_number")}</Label>
+      <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: "none" }}>
               <select value={s.country} aria-label={t("mm_number")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
@@ -148,34 +96,6 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
               </div>
             ) : null}
           </div>
-        </>
-      ) : (
-        <>
-          <Label>{t("pay_by_merchant")}</Label>
-          <input value={mInput} onChange={(e) => setMInput(e.target.value)} placeholder={t("merchant_ph")} aria-label={t("merchant_ph")}
-            style={{ width: "100%", padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 15, color: "var(--ink)", outline: "none" }} />
-          <div style={{ marginTop: 14 }} aria-live="polite">
-            {mResolving ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
-                <Spinner size={15} /> <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{t("finding_merchant")}</span>
-              </div>
-            ) : verified && s.recipientName ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", border: "1px solid var(--recv)", borderRadius: "var(--r)", background: "var(--recv-wash)" }}>
-                <span style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>✓</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{s.recipientName}</div>
-                  <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("verified_merchant")}</div>
-                </div>
-              </div>
-            ) : mMiss ? (
-              <div style={{ padding: "13px 14px", border: "1px solid var(--warn)", borderRadius: "var(--r)", background: "var(--send-wash)", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "var(--warn)", fontWeight: 800, fontSize: 15 }}>⚠</span>
-                <span style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.4 }}>{t("merchant_unknown")}</span>
-              </div>
-            ) : null}
-          </div>
-        </>
-      )}
 
       <div style={{ marginTop: 24 }}>
         <Label>{t("amount_q")}</Label>

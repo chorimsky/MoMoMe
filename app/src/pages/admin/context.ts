@@ -18,15 +18,6 @@ export interface Notif {
   time: string;
 }
 
-export const DEFAULT_NOTIFS: Notif[] = [
-  { id: "n1", t: "Payment failed", s: "MMM284067 · USDT timeout", tone: "bad", time: "2m ago" },
-  { id: "n2", t: "Large transaction alert", s: "1.2M XAF · +237 678…", tone: "warn", time: "11m ago" },
-  { id: "n3", t: "Liquidity low", s: "XAF pool below 200M floor", tone: "warn", time: "26m ago" },
-  { id: "n4", t: "Provider offline", s: "Airtel · maintenance window", tone: "warn", time: "1h ago" },
-  { id: "n5", t: "Compliance alert", s: "1 transaction under review", tone: "bad", time: "2h ago" },
-  { id: "n6", t: "API error", s: "FX feed reconnected", tone: "recv", time: "3h ago" },
-];
-
 export interface AdminCtx {
   query: string;
   setQuery: (q: string) => void;

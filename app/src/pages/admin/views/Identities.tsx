@@ -137,10 +137,8 @@ function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () 
             <KV k="Ledger ID" v={id.ledgerId} />
           </Section>
 
-          <Section title="Ledger balances">
-            <KV k="XAF" v={`${fmt(id.balances.XAF)} XAF`} />
-            <KV k="BTC" v={`${id.balances.BTC} BTC`} />
-            <KV k="USDT" v={`${id.balances.USDT} USDT`} />
+          <Section title="Received">
+            <KV k="Total received" v={`${fmt(id.balances.XAF)} XAF`} />
           </Section>
 
           <div style={{ marginTop: 22 }}>
@@ -148,8 +146,8 @@ function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () 
               <div style={{ fontSize: 13, color: "var(--recv)", fontWeight: 650, display: "flex", alignItems: "center", gap: 8 }}>✓ Account claimed — full features unlocked.</div>
             ) : (
               <>
-                <button type="button" className="btn btn-primary" disabled={claiming} onClick={claim} style={{ width: "100%" }}>{claiming ? "Sending OTP…" : "Simulate claim (OTP)"}</button>
-                <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.45 }}>Phase 2 — the recipient verifies ownership of {id.e164} via OTP to claim this wallet and unlock history, payment requests and profile.</p>
+                <button type="button" className="btn btn-primary" disabled={claiming} onClick={claim} style={{ width: "100%" }}>{claiming ? "Claiming…" : "Mark as claimed (admin)"}</button>
+                <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.45 }}>Admin override — marks {id.e164} as claimed without OTP. The recipient's own OTP claim runs through the customer app (Claim your account).</p>
               </>
             )}
           </div>

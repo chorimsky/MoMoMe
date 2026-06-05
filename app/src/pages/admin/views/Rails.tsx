@@ -10,15 +10,8 @@ import { api } from "../../../api/client.js";
 
 const RAILS: Array<{ name: string; sub: string; status: string; a: [string, string]; b: [string, string] }> = [
   { name: "Lightning", sub: "IBEX", status: "Connected", a: ["Settlement", "~1s"], b: ["Network fee", "0.1%"] },
-  { name: "Bitcoin On-chain", sub: "BTC node · block 842,019", status: "Synced", a: ["Confirmations", "2 required"], b: ["Settlement", "10–60m"] },
+  { name: "Bitcoin On-chain", sub: "IBEX · on-chain BTC", status: "Synced", a: ["Confirmations", "2 required"], b: ["Settlement", "10–60m"] },
   { name: "USDT", sub: "IBEX · stablecoin", status: "Connected", a: ["Confirmations", "1 required"], b: ["Settlement", "~1m"] },
-];
-
-const MONITOR: Array<{ id: string; v: string; l: string; tone: Tone }> = [
-  { id: "m1", v: "14", l: "Pending transactions", tone: "warn" },
-  { id: "m2", v: "1.4", l: "Avg confirmations", tone: "ink" },
-  { id: "m3", v: "18 sat/vB", l: "Mempool fee", tone: "ink" },
-  { id: "m4", v: "1", l: "Failed (24h)", tone: "bad" },
 ];
 
 type RailsCfg = Awaited<ReturnType<typeof api.adminRails>>;
@@ -73,10 +66,14 @@ export function RailsView() {
       </Grid>
 
       <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
-        <Card title="Bitcoin on-chain monitoring">
-          <Grid cols={2} gap={16} style={{ marginTop: 4 }}>
-            {MONITOR.map((m) => (
-              <div key={m.id}>
+        <Card title="Bitcoin rail monitoring" sub="Lightning + on-chain · live">
+          <Grid cols={3} gap={16} style={{ marginTop: 4 }}>
+            {[
+              { v: cfg?.monitor.pending ?? "—", l: "In-flight", tone: "warn" as Tone },
+              { v: cfg?.monitor.delivered24h ?? "—", l: "Delivered (24h)", tone: "recv" as Tone },
+              { v: cfg?.monitor.failed24h ?? "—", l: "Failed (24h)", tone: "bad" as Tone },
+            ].map((m, i) => (
+              <div key={i}>
                 <div className="num" style={{ fontSize: 23, fontWeight: 750, color: toneColor(m.tone) }}>{m.v}</div>
                 <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{m.l}</div>
               </div>

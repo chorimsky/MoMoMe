@@ -32,15 +32,15 @@ export function OverviewView() {
   if (!data) return <Loading t="Overview" s="Health of the entire platform, at a glance." />;
 
   const volumeM = (data.volumeXaf / 1_000_000).toFixed(1);
-  const pending = feed.filter((p) => p.displayStatus === "Pending").length;
+  const pending = data.pending; // real count from the backend (not capped to the feed)
   const rangedSpark = range === "14d" ? data.spark.slice(-7) : range === "30d" ? data.spark.slice(-10) : data.spark;
 
   return (
     <div>
       <SectionTitle t="Overview" s="Health of the entire platform, at a glance." />
       <Grid cols={5} style={{ marginBottom: 14 }}>
-        <AKpi label="Today's payments" value={fmt(data.payments)} spark={data.spark.slice(-7)} />
-        <AKpi label="Today's volume" value={volumeM} unit="M XAF" spark={data.spark.slice(-7)} />
+        <AKpi label="Total payments" value={fmt(data.payments)} spark={data.spark.slice(-7)} />
+        <AKpi label="Total volume" value={volumeM} unit="M XAF" spark={data.spark.slice(-7)} />
         <AKpi label="Successful" value={fmt(data.successRatePct, 1)} unit="%" tone="recv" />
         <AKpi label="Pending" value={pending} tone="warn" />
         <AKpi label="Failed" value={data.failed} tone="bad" />
@@ -50,7 +50,7 @@ export function OverviewView() {
           <Card title="Volume" sub={`Last ${range}`} action={<SegToggle options={["14d", "30d", "90d"]} value={range} onChange={setRange} />}>
             <Spark data={rangedSpark} h={120} />
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
-              <span>earliest</span><span>{volumeM}M XAF today</span><span>now</span>
+              <span>earliest</span><span>{volumeM}M XAF total</span><span>now</span>
             </div>
           </Card>
           <Card title="Provider performance" sub="Mobile Money payout success">

@@ -154,6 +154,7 @@ export interface AdminCustomer {
   txns: number;
   volumeXaf: number;
   risk: number; // 0–100
+  lightningAddress?: string; // the recipient's real identity address, when provisioned
 }
 
 export interface AdminOverview {
@@ -161,6 +162,7 @@ export interface AdminOverview {
   payments: number;
   successRatePct: number;
   failed: number;
+  pending: number;
   providers: Array<{ id: ProviderId; ratePct: number; volumeXaf: number }>;
   spark: number[];
 }

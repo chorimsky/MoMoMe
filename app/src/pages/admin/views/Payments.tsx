@@ -114,15 +114,22 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
   const [ledger, setLedger] = useState<LedgerEntry[] | null>(null);
   const [ledgerErr, setLedgerErr] = useState(false);
   const [busy, setBusy] = useState<"" | "retry" | "refund">("");
+  const [actErr, setActErr] = useState<string | null>(null);
   const method = METHOD_META[p.method as Method];
 
   const act = async (kind: "retry" | "refund") => {
-    setBusy(kind);
+    setBusy(kind); setActErr(null);
     try {
-      if (kind === "retry") await api.retryPayment(p.id);
-      else await api.refundPayment(p.id);
+      const r = kind === "retry" ? await api.retryPayment(p.id) : await api.refundPayment(p.id);
+      if (!r.ok) {
+        setActErr(kind === "retry" ? "Retry didn't go through — no funded rail, or it's already completed." : "Refund couldn't be applied to this payment.");
+        setBusy(""); return;
+      }
       await onChanged();
-    } catch { setBusy(""); }
+    } catch (e) {
+      setActErr(e instanceof Error ? e.message : "Action failed. Please try again.");
+      setBusy("");
+    }
   };
 
   useEffect(() => {
@@ -180,6 +187,7 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
                 <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => act("retry")} style={{ flex: 1 }}>{busy === "retry" ? "Retrying…" : "Retry payout"}</button>
                 <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => act("refund")} style={{ flex: 1 }}>{busy === "refund" ? "Refunding…" : "Refund"}</button>
               </div>
+              {actErr && <div role="alert" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--bad)", marginTop: 10, lineHeight: 1.45 }}>{actErr}</div>}
             </Block>
           )}
         </div>

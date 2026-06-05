@@ -89,7 +89,9 @@ export function CustomersView() {
 /* ---------- identity / customer drawer ---------- */
 function CustomerDrawer({ c, onClose }: { c: AdminCustomer; onClose: () => void }) {
   const { goTo } = useAdmin();
-  const addr = c.phone.replace(/[^0-9]/g, "").slice(-9) + "@momome.africa";
+  // The recipient's real identity address (provisioned on first delivery); only
+  // present once the number has actually received money.
+  const addr = c.lightningAddress ?? "— not provisioned yet";
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60 }}>
       <button type="button" aria-label="Close" onClick={onClose} style={{ position: "absolute", inset: 0, background: "oklch(0.2 0.01 64 / 0.42)", border: "none", cursor: "pointer" }} />

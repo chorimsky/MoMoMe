@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from
 import { Link } from "react-router-dom";
 import { Logo } from "../../components/atoms.js";
 import { api } from "../../api/client.js";
-import { AdminContext, DEFAULT_NOTIFS, type AdminKey, type Notif } from "./context.js";
+import { AdminContext, type AdminKey, type Notif } from "./context.js";
 import { OverviewView } from "./views/Overview.js";
 import { PaymentsView } from "./views/Payments.js";
 import { IdentitiesView } from "./views/Identities.js";
@@ -125,9 +125,10 @@ export function AdminConsole() {
   // Real operational notifications derived from live payment activity.
   useEffect(() => {
     let alive = true;
+    // Real notifications only — on error fall back to empty (never fabricate).
     api.adminNotifications()
       .then((n) => { if (alive) setNotifications(n as Notif[]); })
-      .catch(() => { if (alive) setNotifications(DEFAULT_NOTIFS); });
+      .catch(() => { if (alive) setNotifications([]); });
     api.getConfig().then((c) => { if (alive) setBrandLogo(c.brandLogo); }).catch(() => {});
     const onLogo = (e: Event) => setBrandLogo((e as CustomEvent).detail ?? null);
     window.addEventListener("mm-brand-logo", onLogo);

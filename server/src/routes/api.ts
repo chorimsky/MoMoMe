@@ -20,7 +20,7 @@ import {
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
-import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities } from "../core/identity.js";
+import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot } from "../core/routing.js";
 import * as peex from "../integrations/peex/service.js";
@@ -308,21 +308,30 @@ api.get("/admin/overview", (_req, res) => {
   const volumeXaf = completed.reduce((s, p) => s + p.xaf, 0);
   const successRatePct = all.length ? Math.round((completed.length / all.length) * 100) : 0;
   const provIds = ["MTN", "ORANGE", "AIRTEL"] as const;
+  // Real 12-day daily-volume series (completed payments bucketed by day).
+  const DAY = 86_400_000;
+  const todayIdx = Math.floor(Date.now() / DAY);
+  const spark = Array.from({ length: 12 }, (_, i) => {
+    const day = todayIdx - 11 + i;
+    return completed.filter((p) => Math.floor(Date.parse(p.createdAt) / DAY) === day).reduce((s, p) => s + p.xaf, 0);
+  });
   const overview: AdminOverview = {
     volumeXaf,
     payments: all.length,
     successRatePct,
     failed: failed.length,
+    pending: all.filter((p) => p.displayStatus === "Pending").length,
     providers: provIds.map((pid) => {
-      const ps = completed.filter((p) => p.recipient.provider === pid);
-      return { id: pid, ratePct: 96 + (pid === "MTN" ? 3 : pid === "ORANGE" ? 1 : 0), volumeXaf: ps.reduce((s, p) => s + p.xaf, 0) };
+      // Real success rate from this provider's settled (non-pending) payments.
+      const settled = all.filter((p) => p.recipient.provider === pid && p.displayStatus !== "Pending");
+      const done = settled.filter((p) => p.displayStatus === "Completed");
+      return { id: pid, ratePct: settled.length ? Math.round((done.length / settled.length) * 100) : 100, volumeXaf: done.reduce((s, p) => s + p.xaf, 0) };
     }),
-    spark: [12, 18, 14, 22, 28, 24, 31, 27, 35, 33, 40, 38].map((n) => n * 1000),
+    spark,
   };
   res.json(overview);
 });
 
-const VERIFICATIONS: AdminCustomer["verification"][] = ["Verified", "Verified", "Pending", "Verified", "Rejected"];
 api.get("/admin/customers", (_req, res) => {
   // Derive the customer book from real payments so a customer's phone links
   // to their actual payment history (one customer per unique recipient).
@@ -335,16 +344,20 @@ api.get("/admin/customers", (_req, res) => {
     byPhone.set(key, e);
   }
   const rows: AdminCustomer[] = [...byPhone.values()].map((e) => {
-    let h = 0;
-    for (let i = 0; i < e.phone.length; i++) h = (h * 31 + e.phone.charCodeAt(i)) >>> 0;
+    // Reconcile with the real identity layer + merchant trust — no fabrication.
+    const id = getIdentityByDigits(e.phone.replace(/\D/g, ""));
+    const flagged = merchant.payoutBlocked(e.phone);
     return {
-      id: `cust_${(h % 1_000_000).toString(36)}`,
+      id: id?.customerId ?? `cust_${e.phone.replace(/\D/g, "").slice(-6)}`,
       phone: e.phone,
       country: e.country,
-      verification: VERIFICATIONS[h % VERIFICATIONS.length],
+      // Verified = the recipient claimed their account (OTP); otherwise Pending.
+      verification: id?.claimed ? "Verified" : "Pending",
       txns: e.txns,
       volumeXaf: e.vol,
-      risk: 8 + (h % 62),
+      // Risk from real signals: flagged/low-trust merchant → high; claimed → low.
+      risk: flagged ? 82 : id?.claimed ? 6 : 24,
+      lightningAddress: id?.lightningAddress,
     };
   });
   res.json(rows);
@@ -389,7 +402,16 @@ api.get("/admin/identities/stats", (_req, res) => {
   res.json(identityStats());
 });
 api.get("/admin/identities", (_req, res) => {
-  res.json(listIdentities());
+  // Populate the XAF balance with money the number actually received (delivered
+  // payouts) so the ledger view shows real value instead of perpetual zeros.
+  const nsn = (p: string) => p.replace(/\D/g, "").slice(-9);
+  const receivedXaf = new Map<string, number>();
+  for (const p of store.listPayments()) {
+    if (p.state !== "DELIVERED") continue;
+    const k = nsn(p.recipient.phone);
+    receivedXaf.set(k, (receivedXaf.get(k) ?? 0) + p.xaf);
+  }
+  res.json(listIdentities().map((i) => ({ ...i, balances: { ...i.balances, XAF: receivedXaf.get(nsn(i.phone)) ?? 0 } })));
 });
 /** Maintenance: drop phantom identities (unclaimed + never received money) left
  *  by the old at-creation provisioning. Self-healing — re-provisioned on delivery. */
@@ -407,16 +429,24 @@ api.post("/admin/identities/:id/claim", (req, res) => {
 });
 
 /* ---------- liquidity ---------- */
+const XAF_FLOAT_CAPACITY = 50_000_000; // configured payout-float treasury size
 api.get("/admin/liquidity", (_req, res) => {
-  const xafFloat = 48_500_000 + Math.max(0, balance("payout_float_XAF", "XAF"));
-  const btc = 0.85 + Math.max(0, balance("fx_position", "BTC"));
-  const usdt = 12_400 + Math.max(0, balance("fx_position", "USDT"));
+  // XAF float DEPLETES as money is paid out and is restored by refunds — a real,
+  // moving number (was a constant seed). Floor at 20% of capacity so "below floor"
+  // is a meaningful low-liquidity signal (it used to equal capacity → always on).
+  const pays = store.listPayments();
+  const deliveredXaf = pays.filter((p) => p.state === "DELIVERED").reduce((s, p) => s + p.xaf, 0);
+  const xafFloat = Math.max(0, XAF_FLOAT_CAPACITY - deliveredXaf);
+  // Crypto inventory held = net FX position from the ledger (≥0; the engine
+  // converts inbound to XAF, so at rest it holds little — shown honestly).
+  const btc = Math.max(0, balance("fx_position", "BTC"));
+  const usdt = Math.max(0, balance("fx_position", "USDT"));
   res.json({
-    floorXaf: 200_000_000,
+    floorXaf: Math.round(XAF_FLOAT_CAPACITY * 0.2),
     pools: [
-      { asset: "BTC", label: "Bitcoin pool", balance: btc, capacity: 2 },
-      { asset: "USDT", label: "USDT pool", balance: usdt, capacity: 50_000 },
-      { asset: "XAF", label: "XAF payout float", balance: xafFloat, capacity: 200_000_000 },
+      { asset: "BTC", label: "Bitcoin inventory", balance: btc, capacity: 2 },
+      { asset: "USDT", label: "USDT inventory", balance: usdt, capacity: 50_000 },
+      { asset: "XAF", label: "XAF payout float", balance: xafFloat, capacity: XAF_FLOAT_CAPACITY },
     ],
   });
 });
@@ -469,6 +499,15 @@ api.get("/admin/compliance", (_req, res) => {
 /* ---------- delivery management ---------- */
 const PROVIDER_IDS = ["MTN", "ORANGE", "AIRTEL"] as const;
 const IN_FLIGHT: PaymentState[] = ["AWAITING_INBOUND", "INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED"];
+/** Seconds from payment creation to its DELIVERED event (null if not delivered). */
+function deliverySec(p: Payment): number | null {
+  const d = p.events.find((e) => e.state === "DELIVERED");
+  if (!d) return null;
+  const ms = Date.parse(d.at) - Date.parse(p.createdAt);
+  return ms > 0 ? Math.round(ms / 1000) : null;
+}
+/** Mean of an array, rounded; 0 when empty. */
+const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
 api.get("/admin/delivery", (_req, res) => {
   const all = store.listPayments();
   const isProcessing = (p: Payment) => IN_FLIGHT.includes(p.state);
@@ -486,7 +525,7 @@ api.get("/admin/delivery", (_req, res) => {
       return {
         id,
         successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : 100,
-        avgDeliverySec: id === "MTN" ? 4 : id === "ORANGE" ? 6 : 9,
+        avgDeliverySec: avg(done.map(deliverySec).filter((n): n is number => n != null)),
         failures,
         pending: ps.filter(isProcessing).length,
         volumeXaf: done.reduce((s, p) => s + p.xaf, 0),
@@ -504,11 +543,20 @@ api.get("/admin/mobile-money", (_req, res) => {
     webhookUrl: `${config.publicUrl}/webhooks/pawapay`,
     apiKeyMasked: config.pawapay.apiKey ? `pawapay_••••${config.pawapay.apiKey.slice(-4)}` : "pawapay_sandbox_••••",
     payoutConfirmation: "Async callback + reconciliation",
-    providers: PROVIDER_IDS.map((id) => {
-      const ps = all.filter((p) => p.recipient.provider === id && p.displayStatus !== "Pending");
-      const done = ps.filter((p) => p.displayStatus === "Completed").length;
-      return { id, status: "Online" as const, successRatePct: ps.length ? Math.round((done / ps.length) * 100) : 100, maxPayoutXaf: PROVIDER_PAYOUT_MAX[id] };
-    }),
+    providers: (() => {
+      // Status from real aggregator health: a provider is Online when an
+      // aggregator that serves it is up, else Offline; Degraded if recent failures.
+      const aggs = routingSnapshot().aggregators;
+      return PROVIDER_IDS.map((id) => {
+        const ps = all.filter((p) => p.recipient.provider === id && p.displayStatus !== "Pending");
+        const done = ps.filter((p) => p.displayStatus === "Completed").length;
+        const serving = aggs.filter((a) => a.supports.includes(id));
+        const anyUp = serving.some((a) => a.up);
+        const rate = ps.length ? Math.round((done / ps.length) * 100) : 100;
+        const status: "Online" | "Offline" | "Maintenance" = !anyUp && serving.length ? "Offline" : ps.length && rate < 60 ? "Maintenance" : "Online";
+        return { id, status, successRatePct: rate, maxPayoutXaf: PROVIDER_PAYOUT_MAX[id] };
+      });
+    })(),
     routing: (Object.keys(COUNTRIES) as Array<keyof typeof COUNTRIES>).map((cc) => ({ country: cc, providers: COUNTRIES[cc].providers })),
   };
   res.json(info);
@@ -535,7 +583,8 @@ api.get("/admin/reports", (req, res) => {
     revenueXaf: completed.reduce((s, p) => s + p.feeXaf, 0),
     volumeXaf: completed.reduce((s, p) => s + p.xaf, 0),
     payments: completed.length,
-    customers: listIdentities().length,
+    // Distinct recipients active in the window (responds to the period filter).
+    customers: new Set(all.map((p) => p.recipient.phone.replace(/\D/g, ""))).size,
     daily,
     byProvider: PROVIDER_IDS.map((id) => {
       const ps = all.filter((p) => p.recipient.provider === id);
@@ -568,8 +617,17 @@ api.get("/admin/health", (_req, res) => {
 api.get("/admin/rails", (_req, res) => {
   const mask = (s: string) => (s ? `••••${s.slice(-4)}` : "—");
   const head = (s: string) => (s ? `${s.slice(0, 8)}…` : "—");
+  // Real BTC-rail monitoring (Lightning + on-chain), replacing fabricated metrics.
+  const btcPays = store.listPayments().filter((p) => p.payInstruction.method === "LIGHTNING" || p.payInstruction.method === "ONCHAIN");
+  const dayAgo = Date.now() - 86_400_000;
+  const monitor = {
+    pending: btcPays.filter((p) => IN_FLIGHT.includes(p.state)).length,
+    delivered24h: btcPays.filter((p) => p.state === "DELIVERED" && Date.parse(p.updatedAt) >= dayAgo).length,
+    failed24h: btcPays.filter((p) => p.displayStatus === "Failed" && Date.parse(p.updatedAt) >= dayAgo).length,
+  };
   res.json({
     liveMoney: liveMoney(),
+    monitor,
     crypto: {
       provider: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
       apiUrl: config.ibex.apiUrl, accountId: head(config.ibex.accountId),

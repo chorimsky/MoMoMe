@@ -117,6 +117,7 @@ export const api = {
   adminPruneIdentities: () => req<{ removed: number; kept: number; customerIds: string[] }>("/admin/identities/prune", { method: "POST" }),
   adminRails: () => req<{
     liveMoney: boolean;
+    monitor: { pending: number; delivered24h: number; failed24h: number };
     crypto: { provider: string; env: string; configured: boolean; live: boolean; apiUrl: string; accountId: string; clientId: string; webhookSecret: string; methods: string[]; sandboxPayout: boolean };
     payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string }>;
   }>("/admin/rails"),

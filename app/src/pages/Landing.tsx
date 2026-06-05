@@ -135,6 +135,7 @@ export function Landing() {
           <a href="/crypto-to-mobile-money/">Crypto to Mobile Money</a>
           <a href="/learn/">Learn</a>
           <a href="/countries/">Coverage</a>
+          <a href="/fr/" lang="fr">Français</a>
         </nav>
         <footer className="lp-foot">
           <span className="c">© 2026 MoMo›Me · Secure Mobile Money payments</span>

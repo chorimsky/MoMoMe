@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { id } from "../core/ids.js";
-import { config, pawapayConfigured, isLive } from "../config.js";
+import { config, pawapayLive, isLive } from "../config.js";
 import { register, touch } from "../core/persist.js";
 
 export interface DisburseRequest {
@@ -72,13 +72,14 @@ register("pawapay", () => [...byKey], (d: [string, DisburseResult][]) => { for (
 
 /**
  * SUBMIT a payout. Idempotent on the ref (same ref → "duplicate", never a
- * second payout). Real when configured; otherwise simulated (caller fakes the
- * callback). The final status is confirmed asynchronously.
+ * second payout). Real only on a LIVE (production) rail; a sandbox rail
+ * simulates locally (caller fakes the callback) so the demo completes end-to-end
+ * without depending on the sandbox payout API. Status confirmed asynchronously.
  */
 export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
   const existing = byKey.get(req.idempotencyKey);
   if (existing) return { ...existing, status: "duplicate" };
-  const real = pawapayConfigured();
+  const real = pawapayLive();
   const providerRef = real ? payoutIdFor(req.idempotencyKey) : id("pp");
   if (real) await liveSubmit(req, providerRef);
   const result: DisburseResult = { status: "accepted", providerRef, simulated: !real };
@@ -147,10 +148,11 @@ export function refForPayoutId(payoutId: string): string | undefined {
 }
 
 /** Available wallet balance (XAF) for a country — drives balance-aware routing.
- *  null when PawaPay isn't configured (can't settle). Cached briefly. */
+ *  null unless PawaPay is LIVE (a sandbox rail has no real balance and simulates
+ *  its payouts, so it routes via the simulated fallback). Cached briefly. */
 let balCache: { at: number; map: Record<string, number> } | null = null;
 export async function availableBalanceXaf(country: CountryCode, _provider?: ProviderId): Promise<number | null> {
-  if (!pawapayConfigured()) return null;
+  if (!pawapayLive()) return null;
   const iso = ISO3[country] ?? "CMR";
   if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;
   try {

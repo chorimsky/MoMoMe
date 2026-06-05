@@ -93,9 +93,15 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
       const bal = await AGGREGATORS[a].balance(country, provider);
       if (bal != null && bal >= amountXaf) funded.push({ a, bal });
     }
-    if (!funded.length) return null; // real rail(s) exist but none funded → manual review
-    funded.sort((x, y) => y.bal - x.bal || successRate(y.a) - successRate(x.a));
-    return AGGREGATORS[funded[0].a];
+    if (funded.length) {
+      funded.sort((x, y) => y.bal - x.bal || successRate(y.a) - successRate(x.a));
+      return AGGREGATORS[funded[0].a];
+    }
+    // No funded rail. Hold for manual review when REAL money is involved OR a LIVE
+    // rail is configured (never silently simulate a real/live payout). Otherwise
+    // (only sandbox rails configured + non-real inbound) fall through to a
+    // simulated payout so the sandbox demo completes end-to-end.
+    if (requireLive || real.some((a) => aggregatorLive(a))) return null;
   }
   // Real settlement with no live funded rail → hold (never simulate real money).
   if (requireLive) return null;

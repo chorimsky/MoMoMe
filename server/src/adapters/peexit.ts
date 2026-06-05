@@ -10,7 +10,7 @@
    ============================================================ */
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
-import { config, peexitConfigured } from "../config.js";
+import { config, peexitLive } from "../config.js";
 import { register, touch } from "../core/persist.js";
 import type { DisburseRequest, DisburseResult, PayoutStatus } from "./pawapay.js";
 
@@ -47,7 +47,7 @@ async function peex(path: string, init: RequestInit): Promise<Response> {
 export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
   const existing = byKey.get(req.idempotencyKey);
   if (existing) return { ...existing, status: "duplicate" };
-  const real = peexitConfigured();
+  const real = peexitLive();
   let providerRef: string;
   if (real) {
     providerRef = await liveSubmit(req);
@@ -100,7 +100,7 @@ export function statusByKey(idempotencyKey: string): DisburseResult | null {
  *  GET /operators `solde`. null when not configured. */
 let balCache: { at: number; ops: Array<{ name?: string; solde?: number }> } | null = null;
 export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
-  if (!peexitConfigured()) return null;
+  if (!peexitLive()) return null;
   try {
     if (!balCache || Date.now() - balCache.at > 15_000) {
       const res = await peex("/operators", { method: "GET" });

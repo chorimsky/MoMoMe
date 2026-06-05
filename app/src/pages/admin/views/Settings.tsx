@@ -11,6 +11,7 @@ import { api } from "../../../api/client.js";
 import { Card, Grid, SectionTitle, Toggle } from "../AdminUI.js";
 import { Logo } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
+import { processLogo, detectSolidBackground } from "../../../lib/logo.js";
 import { Loading } from "./Overview.js";
 
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"];
@@ -42,6 +43,12 @@ export function SettingsView() {
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [logoErr, setLogoErr] = useState<string | null>(null);
+  // Logo background handling — knock out a solid background so the logo blends
+  // with both the light and dark theme. `logoRaw` keeps the last untouched
+  // upload so the toggle can round-trip within a session.
+  const [bgTransparent, setBgTransparent] = useState(true);
+  const [logoRaw, setLogoRaw] = useState<string | null>(null);
+  const [logoNote, setLogoNote] = useState<string | null>(null);
 
   // Change-your-own-password form (per-user account).
   const [pwCur, setPwCur] = useState("");
@@ -53,7 +60,24 @@ export function SettingsView() {
   useEffect(() => {
     let alive = true;
     api.adminSettings()
-      .then((s) => { if (alive) { setCompany(s.company); setChannels(s.channels); setOps(s.ops); } })
+      .then(async (s) => {
+        if (!alive) return;
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops);
+        setLogoRaw(s.company.logo ?? null);
+        // If the saved logo sits on a solid background, it shows as a box in dark
+        // mode. Offer a transparent version so it blends — applied on Save.
+        if (s.company.logo) {
+          const bg = await detectSolidBackground(s.company.logo);
+          if (alive && bg) {
+            const fixed = await processLogo(s.company.logo, { transparent: true });
+            if (alive && fixed !== s.company.logo) {
+              setCompany((c) => (c ? { ...c, logo: fixed } : c));
+              setDirty(true);
+              setLogoNote("We made your logo's background transparent so it blends in light and dark — press Save changes to keep it.");
+            }
+          }
+        }
+      })
       .catch(() => { if (alive) setErr("Couldn't load settings."); });
     return () => { alive = false; };
   }, []);
@@ -69,14 +93,30 @@ export function SettingsView() {
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
 
   const onLogoFile = (file?: File) => {
-    setLogoErr(null);
+    setLogoErr(null); setLogoNote(null);
     if (!file) return;
     if (!LOGO_TYPES.includes(file.type)) { setLogoErr("Use a PNG, JPEG, WebP, GIF or SVG."); return; }
     if (file.size > LOGO_MAX) { setLogoErr("Image must be under 256 KB."); return; }
     const reader = new FileReader();
-    reader.onload = () => edit({ logo: String(reader.result) });
+    reader.onload = async () => {
+      const raw = String(reader.result);
+      setLogoRaw(raw);
+      // SVG is vector + already theme-friendly; never rasterise it.
+      const processed = file.type === "image/svg+xml" ? raw : await processLogo(raw, { transparent: bgTransparent });
+      edit({ logo: processed });
+    };
     reader.onerror = () => setLogoErr("Couldn't read that file.");
     reader.readAsDataURL(file);
+  };
+
+  // Toggle the transparent-background treatment, re-deriving from the last raw
+  // upload (or the current logo if this session has no fresh upload).
+  const onBgTransparent = async (v: boolean) => {
+    setBgTransparent(v); setLogoNote(null);
+    const source = logoRaw ?? company?.logo;
+    if (!source) return;
+    const processed = await processLogo(source, { transparent: v });
+    edit({ logo: processed });
   };
   const toggle = (k: keyof AdminSettings["channels"], v: boolean) => { setChannels((c) => ({ ...c!, [k]: v })); setDirty(true); };
   const editOps = (patch: Partial<AdminSettings["ops"]>) => { setOps((o) => ({ ...o!, ...patch })); setDirty(true); };
@@ -127,25 +167,46 @@ export function SettingsView() {
       <SectionTitle t="Settings" s="General configuration, operational controls and session security." />
       <Grid cols={2} gap={16}>
         <Card title="Company information">
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 4, marginBottom: 16 }}>
-            {/* Preview sized like the real header — wide wordmark logos show fully. */}
-            <div style={{ minWidth: 56, height: 56, padding: company.logo ? "0 12px" : 0, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-2)", display: "grid", placeItems: "center", overflow: "hidden", flex: "none" }}>
-              {company.logo ? <img src={company.logo} alt="Logo preview" style={{ height: 40, width: "auto", maxWidth: 220, objectFit: "contain" }} /> : <Logo size={30} withWord={false} />}
+          <div style={{ marginTop: 4, marginBottom: 16 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 8 }}>Brand logo</div>
+            {/* Preview on both themes so a transparent logo is verified seamless. */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              {([{ bg: "#ffffff", label: "Light" }, { bg: "oklch(0.22 0.012 68)", label: "Dark" }] as const).map((sw) => (
+                <div key={sw.label} style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ height: 58, borderRadius: 12, border: "1px solid var(--line)", background: sw.bg, display: "grid", placeItems: "center", overflow: "hidden", padding: "0 12px" }}>
+                    {company.logo
+                      ? <img src={company.logo} alt={`Logo on ${sw.label.toLowerCase()} background`} style={{ height: 38, width: "auto", maxWidth: 200, objectFit: "contain" }} />
+                      : <Logo size={28} />}
+                  </div>
+                  <div style={{ textAlign: "center", fontSize: 10.5, color: "var(--ink-3)", marginTop: 4, fontWeight: 600 }}>{sw.label}</div>
+                </div>
+              ))}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 7 }}>Brand logo</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <label className="btn btn-ghost" style={{ fontSize: 12.5, cursor: "pointer", padding: "6px 12px" }}>
-                  {company.logo ? "Replace" : "Upload"}
-                  <input type="file" accept={LOGO_TYPES.join(",")} aria-label="Upload brand logo"
-                    onChange={(e) => { onLogoFile(e.target.files?.[0]); e.target.value = ""; }} style={{ display: "none" }} />
-                </label>
-                {company.logo && <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 12px" }} onClick={() => { edit({ logo: null }); setLogoErr(null); }}>Remove</button>}
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <label className="btn btn-ghost" style={{ fontSize: 12.5, cursor: "pointer", padding: "6px 12px" }}>
+                {company.logo ? "Replace" : "Upload"}
+                <input type="file" accept={LOGO_TYPES.join(",")} aria-label="Upload brand logo"
+                  onChange={(e) => { onLogoFile(e.target.files?.[0]); e.target.value = ""; }} style={{ display: "none" }} />
+              </label>
+              {company.logo && <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 12px" }} onClick={() => { edit({ logo: null }); setLogoErr(null); setLogoNote(null); setLogoRaw(null); }}>Remove</button>}
+            </div>
+
+            {company.logo && !company.logo.startsWith("data:image/svg") && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 12, padding: "11px 12px", borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 650 }}>Transparent background</div>
+                  <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>Knocks out a solid background so the logo blends with light & dark.</div>
+                </div>
+                <Toggle on={bgTransparent} onChange={onBgTransparent} />
               </div>
-              {logoErr
-                ? <div style={{ fontSize: 11.5, color: "var(--bad)", fontWeight: 600, marginTop: 7 }}>{logoErr}</div>
-                : <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 7 }}>PNG, JPEG, WebP, GIF or SVG · under 256 KB · applied on Save.</div>}
-            </div>
+            )}
+
+            {logoNote
+              ? <div style={{ fontSize: 11.5, color: "var(--recv)", fontWeight: 600, marginTop: 8, lineHeight: 1.5 }}>{logoNote}</div>
+              : logoErr
+                ? <div style={{ fontSize: 11.5, color: "var(--bad)", fontWeight: 600, marginTop: 8 }}>{logoErr}</div>
+                : <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8 }}>PNG, JPEG, WebP, GIF or SVG · under 256 KB · applied on Save.</div>}
           </div>
           <Grid cols={1} gap={14} style={{ marginTop: 4 }}>
             <LabeledInput label="Brand name" value={company.brand} onChange={(v) => edit({ brand: v })} error={brandErr} />

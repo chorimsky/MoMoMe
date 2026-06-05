@@ -39,7 +39,8 @@ async function main() {
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
   const base = `http://localhost:${(server.address() as AddressInfo).port}`;
-  const J = (p: string, init?: RequestInit) => fetch(base + p, init).then(async (r) => ({ status: r.status, body: await r.json() }));
+  // Every call carries an anonymous sender id so sender-scoped reads (GET /payments) work.
+  const J = (p: string, init?: RequestInit) => fetch(base + p, { ...init, headers: { "x-mm-sender": "e2e-sender", ...(init?.headers ?? {}) } }).then(async (r) => ({ status: r.status, body: await r.json() }));
   const POST = (p: string, body?: unknown) => J(p, { method: "POST", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
 
   try {
@@ -103,9 +104,13 @@ async function main() {
     const after = await J(`/api/payments/${pid}`);
     ok("re-confirm does not re-settle", after.body.events.length === before && after.body.state === "DELIVERED");
 
-    // 6. activity feed includes it
+    // 6. activity feed includes it — and is SENDER-SCOPED (another device sees nothing)
     const list = await J("/api/payments");
     ok("payment appears in activity as Completed", list.body.some((x: any) => x.id === pid && x.displayStatus === "Completed"));
+    const otherSender = await J("/api/payments", { headers: { "x-mm-sender": "someone-else" } });
+    ok("activity is sender-scoped (another device sees none of it)", Array.isArray(otherSender.body) && !otherSender.body.some((x: any) => x.id === pid));
+    const recents = await J("/api/me/recipients");
+    ok("recent recipients lists the sender's recipient(s)", Array.isArray(recents.body) && recents.body.length >= 1 && !!recents.body[0].phone);
 
     // 7. admin login guard + operational settings (HTTP, live server)
     const auth = (tok: string, init?: RequestInit): RequestInit => ({ ...init, headers: { "content-type": "application/json", authorization: `Bearer ${tok}`, ...(init?.headers ?? {}) } });

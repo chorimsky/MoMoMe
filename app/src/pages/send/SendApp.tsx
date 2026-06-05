@@ -31,7 +31,7 @@ export function SendApp() {
   const [err, setErr] = useState<string | null>(null);
 
   const [s, setS] = useState<Draft>({
-    country: "CM", phone: "6 70 12 34 56", provider: "MTN", xaf: 50000, method: "LIGHTNING", recipientName: "", nameSource: "idle",
+    country: "CM", phone: "", provider: "MTN", xaf: 50000, method: "LIGHTNING", recipientName: "", nameSource: "idle",
   });
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 

@@ -107,6 +107,8 @@ export interface Payment {
   displayStatus: DisplayStatus;
   method: Method;
   recipient: Recipient;
+  /** Anonymous device id of the sender who created this payment (no login). */
+  senderId?: string;
   xaf: number;
   feeXaf: number;
   totalXaf: number;

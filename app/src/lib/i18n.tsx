@@ -15,6 +15,7 @@ export const STRINGS: Dict = {
   pay_title: ["Pay Mobile Money", "Payer Mobile Money"],
   details_sub: ["Delivered straight to a Mobile Money number in seconds.", "Envoyé directement vers un numéro Mobile Money en quelques secondes."],
   mm_number: ["Mobile Money number", "Numéro Mobile Money"], mm_number_ph: ["Enter Mobile Money number", "Entrez le numéro Mobile Money"],
+  send_again: ["Send again", "Renvoyer"],
   pay_by_number: ["Mobile number", "Numéro mobile"], pay_by_merchant: ["Merchant code", "Code marchand"],
   merchant_ph: ["Enter merchant code or scan QR", "Entrez le code marchand ou scannez le QR"],
   finding_merchant: ["Finding merchant…", "Recherche du marchand…"],

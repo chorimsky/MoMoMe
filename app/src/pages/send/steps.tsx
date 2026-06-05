@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
-import { fmt } from "../../lib/format.js";
+import { fmt, initials } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { api } from "../../api/client.js";
 import { FlowCard, Label, Stepper, Row, useExpiry } from "./ui.js";
@@ -20,6 +20,9 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
   const c = COUNTRIES[s.country];
   const fee = Math.round(s.xaf * FEE_PCT);
   const [resolving, setResolving] = useState(false);
+  // The returning sender's recent recipients (anonymous identity, no login).
+  const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
+  useEffect(() => { api.recentRecipients().then((r) => setRecents(r)).catch(() => {}); }, []);
 
   // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
@@ -53,6 +56,25 @@ export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft
       <Stepper i={0} />
       <h2 style={{ fontSize: 25, marginTop: 16 }}>{t("pay_title")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 20px", lineHeight: 1.5 }}>{t("details_sub")}</p>
+
+      {recents.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <Label>{t("send_again")}</Label>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, margin: "0 -2px" }}>
+            {recents.map((r) => (
+              <button key={r.phone} type="button"
+                onClick={() => set({ country: r.country, provider: r.provider, phone: r.phone, recipientName: r.name, nameSource: "internal" })}
+                style={{ flex: "none", display: "flex", alignItems: "center", gap: 9, padding: "8px 13px 8px 8px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", cursor: "pointer", font: "inherit" }}>
+                <span style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 11, flex: "none" }}>{initials(r.name)}</span>
+                <span style={{ minWidth: 0, textAlign: "left" }}>
+                  <span style={{ display: "block", fontSize: 12.5, fontWeight: 650, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{r.name}</span>
+                  <span className="num" style={{ display: "block", fontSize: 10.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{COUNTRIES[r.country]?.dial} {r.phone}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>

@@ -48,6 +48,14 @@ api.use("/admin", (req, res, next) => {
   res.status(401).json({ error: "unauthorized", message: "Admin login required." });
 });
 
+/** The anonymous sender id (per-device, no login) carried on each request. Lets
+ *  the system recognise the returning user and scope their data without sign-in. */
+function senderOf(req: { headers: Record<string, string | string[] | undefined> }): string | undefined {
+  const v = req.headers["x-mm-sender"];
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === "string" && s ? s : undefined;
+}
+
 /* ---------- quotes ---------- */
 api.post("/quotes", (req, res) => {
   // Operator kill-switch — refuse new business when payments are paused.
@@ -223,6 +231,7 @@ api.post("/payments", async (req, res) => {
     displayStatus: "Pending",
     method: quote.method,
     recipient,
+    senderId: senderOf(req), // anonymous device id — attributes the payment to its sender
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
@@ -292,8 +301,26 @@ api.get("/payments/:id", (req, res) => {
   res.json(p);
 });
 
-api.get("/payments", (_req, res) => {
-  res.json(store.listPayments());
+// Sender-scoped: a customer sees only their OWN payments (by anonymous device id).
+api.get("/payments", (req, res) => {
+  const sid = senderOf(req);
+  res.json(sid ? store.listPayments().filter((p) => p.senderId === sid) : []);
+});
+
+/** The sender's distinct recent recipients — powers "send again" quick-pick. */
+api.get("/me/recipients", (req, res) => {
+  const sid = senderOf(req);
+  if (!sid) return res.json([]);
+  const seen = new Set<string>();
+  const out: Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }> = [];
+  for (const p of store.listPayments().filter((p) => p.senderId === sid).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+    const k = p.recipient.phone.replace(/\D/g, "");
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push({ phone: p.recipient.phone, country: p.recipient.country, provider: p.recipient.provider as ProviderId, name: p.recipient.name || p.recipient.phone });
+    if (out.length >= 5) break;
+  }
+  res.json(out);
 });
 
 api.get("/ledger/:paymentId", (req, res) => {

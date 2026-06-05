@@ -25,11 +25,30 @@ export function setAdminToken(token: string | null): void {
 }
 export function getAdminToken(): string | null { return adminToken; }
 
+/* ---------- anonymous sender identity (no login) ----------
+   A persistent per-device id the system uses to recognise the returning user and
+   scope their history — without any sign-in. Generated once, kept in localStorage,
+   and sent on every request so the backend can attribute and filter the sender's
+   payments. */
+const SENDER_KEY = "mm_sender_id";
+function ensureSenderId(): string {
+  try {
+    let v = localStorage.getItem(SENDER_KEY);
+    if (!v) { v = (crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`); localStorage.setItem(SENDER_KEY, v); }
+    return v;
+  } catch {
+    return "anon"; // storage blocked (private mode) — degrade to a single anon bucket
+  }
+}
+const senderId = ensureSenderId();
+export function getSenderId(): string { return senderId; }
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-MM-Sender": senderId,
       ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -91,6 +110,9 @@ export const api = {
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
 
   listPayments: () => req<Payment[]>("/payments"),
+
+  // The sender's distinct recent recipients (anonymous, no login) — "send again".
+  recentRecipients: () => req<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>("/me/recipients"),
 
   ledger: (paymentId: string) => req<LedgerEntry[]>(`/ledger/${paymentId}`),
 

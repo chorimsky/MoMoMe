@@ -36,7 +36,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
       <div onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease" }}>
         {/* header — branded band + success badge + the delivered amount */}
         <div style={{ background: "var(--brand-wash)", padding: "20px 24px 22px", textAlign: "center" }}>
-          <Logo size={21} />
+          <Logo size={28} />
           <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", margin: "16px auto 0", fontSize: 25, fontWeight: 800, boxShadow: "0 8px 22px oklch(0.6 0.1 158 / 0.35)" }}>✓</div>
           <div style={{ marginTop: 12, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16.5 }}>{t("receipt_success")}</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>

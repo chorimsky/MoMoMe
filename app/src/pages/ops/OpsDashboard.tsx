@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { OpsSnapshot, OpsTx, PaymentState } from "@shared/types.js";
-import { Logo, Flag, ProviderChip, RailBadge, Spinner } from "../../components/atoms.js";
+import { Logo, Flag, ProviderChip, RailBadge, Spinner, ThemeToggle } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { api } from "../../api/client.js";
 
@@ -173,13 +173,14 @@ export function OpsDashboard() {
         {/* top bar */}
         <div className="mm-ops-top">
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Logo size={24} />
+            <Logo size={30} />
             <span style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600, color: "var(--ink-2)", borderLeft: "1px solid var(--line)", paddingLeft: 16 }}>Operations</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span className="pill" style={{ fontSize: 10.5 }}>
               <span className="dot" style={{ background: "var(--recv)", animation: "pulse 1.4s infinite" }} />live · 2s
             </span>
+            <ThemeToggle size={36} />
             <Link to="/" className="btn btn-ghost" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>← Home</Link>
           </div>
         </div>

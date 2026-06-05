@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Logo } from "../../components/atoms.js";
+import { Logo, ThemeToggle } from "../../components/atoms.js";
 
 type Current = "terms" | "privacy" | "contact" | null;
 
@@ -16,10 +16,11 @@ export function PageTop() {
   return (
     <header className="pg-top">
       <Link className="pg-brand" to="/" aria-label="MoMo›Me — home">
-        <Logo size={26} />
+        <Logo size={34} />
       </Link>
       <div className="pg-actions">
         <Link className="pg-link" to="/contact">Help</Link>
+        <ThemeToggle size={38} />
         <Link className="btn btn-primary cta-sm" to="/send">Pay Mobile Money</Link>
       </div>
     </header>

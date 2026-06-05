@@ -24,28 +24,154 @@ import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot } from "../core/routing.js";
 import * as peex from "../integrations/peex/service.js";
-import { checkPassword, issueToken, verifyToken, tokenFromHeaders } from "../core/adminAuth.js";
+import { issueToken, verifyToken, tokenFromHeaders, type Session } from "../core/adminAuth.js";
+import {
+  verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
+  changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
+} from "../core/adminUsers.js";
+import { canAccess, isReadOnly, isSuperAdmin, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 
 export const api = Router();
 
+/* Requests reaching a guarded /admin route carry the verified session. */
+interface AdminReq { session?: Session; }
+const sessionOf = (req: unknown): Session | undefined => (req as AdminReq).session;
+
 /* ---------- admin authentication ----------
-   A shared operator password gates the whole console. /admin/login and
-   /admin/session are public; the guard below protects every other /admin/* route
-   (registered before them, so it runs first). */
+   Per-user accounts (unique username + password, roles). /admin/login,
+   /admin/session and /admin/forgot are public; the guard below protects every
+   other /admin/* route (registered before them, so it runs first). */
 api.post("/admin/login", (req, res) => {
-  const { password } = (req.body ?? {}) as { password?: string };
-  if (!checkPassword(password)) return res.status(401).json({ error: "bad_credentials", message: "Incorrect password." });
-  const { token, expiresAt } = issueToken();
-  res.json({ token, expiresAt });
+  const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
+  const user = typeof username === "string" && typeof password === "string" ? verifyCredentials(username, password) : null;
+  if (!user) return res.status(401).json({ error: "bad_credentials", message: "Incorrect username or password." });
+  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role });
+  res.json({ token, expiresAt, user: { id: user.id, username: user.username, role: user.role } });
 });
 
 api.get("/admin/session", (req, res) => {
-  res.json({ authenticated: verifyToken(tokenFromHeaders(req.headers)), passwordIsDefault: config.admin.passwordIsDefault });
+  const session = verifyToken(tokenFromHeaders(req.headers));
+  const user = session ? getUser(session.uid) : undefined;
+  if (!session || !user) return res.json({ authenticated: false, passwordIsDefault: config.admin.passwordIsDefault });
+  res.json({ authenticated: true, passwordIsDefault: config.admin.passwordIsDefault, user: { id: user.id, username: user.username, role: user.role } });
 });
 
+/* Forgot password — no email/SMS infra, so recovery is the server-controlled
+   master key (ADMIN_PASSWORD). Whoever controls the deployment can reset any
+   account by username. */
+api.post("/admin/forgot", (req, res) => {
+  const { username, recoveryKey, newPassword } = (req.body ?? {}) as { username?: string; recoveryKey?: string; newPassword?: string };
+  if (!masterRecoveryMatches(recoveryKey)) return res.status(401).json({ error: "bad_recovery", message: "Recovery key is incorrect." });
+  const pwIssue = passwordIssue(newPassword);
+  if (pwIssue) return res.status(400).json({ error: "weak_password", message: pwIssue });
+  const u = typeof username === "string" ? findByUsername(username) : undefined;
+  if (!u) return res.status(404).json({ error: "no_such_user", message: "No account with that username." });
+  setPassword(u.id, newPassword as string);
+  res.json({ ok: true });
+});
+
+/* Map a request sub-path (mount-relative, e.g. "/liquidity") to its console
+   section, for the role gate. */
+function sectionForPath(sub: string): Section | null {
+  const p = sub.replace(/^\//, "").split("/")[0] ?? "";
+  const map: Record<string, Section> = {
+    overview: "overview", payments: "payments", quotes: "payments", delivery: "delivery",
+    liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
+    "mobile-money": "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
+    identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
+    notifications: "notifications", health: "health", settings: "settings",
+    users: "administration", audit: "administration",
+  };
+  return map[p] ?? null;
+}
+
 api.use("/admin", (req, res, next) => {
-  if (verifyToken(tokenFromHeaders(req.headers))) return next();
-  res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+  const session = verifyToken(tokenFromHeaders(req.headers));
+  const user = session ? getUser(session.uid) : undefined;
+  if (!session || !user) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+  // Use the live role from the store (a role change takes effect immediately).
+  const role = user.role;
+  (req as unknown as AdminReq).session = { uid: user.id, role };
+
+  // Inside this mounted middleware Express strips the "/admin" prefix, so
+  // req.path is the sub-path (e.g. "/liquidity", "/users", "/password").
+  const sub = req.path.startsWith("/admin/") ? req.path.slice("/admin".length) : req.path;
+
+  // User administration is Super-Admin only.
+  if (sub === "/users" || sub.startsWith("/users/")) {
+    if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+    return next();
+  }
+  // Read Only can never mutate.
+  if (isReadOnly(role) && req.method !== "GET") {
+    return res.status(403).json({ error: "forbidden", message: "Read-only access." });
+  }
+  // Section gate — block routes outside the role's remit. Always-allowed:
+  // self password change.
+  if (sub !== "/password") {
+    const section = sectionForPath(sub);
+    if (section && !canAccess(role, section)) {
+      return res.status(403).json({ error: "forbidden", message: "Your role can't access this section." });
+    }
+  }
+  next();
+});
+
+/* ---------- change own password ---------- */
+api.post("/admin/password", (req, res) => {
+  const session = sessionOf(req)!;
+  const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
+  const pwIssue = passwordIssue(newPassword);
+  if (pwIssue) return res.status(400).json({ error: "weak_password", message: pwIssue });
+  const r = changeOwnPassword(session.uid, String(currentPassword ?? ""), newPassword as string);
+  if (!r.ok) {
+    if (r.reason === "bad_current") return res.status(401).json({ error: "bad_current", message: "Current password is incorrect." });
+    return res.status(404).json({ error: "not_found", message: "Account not found." });
+  }
+  res.json({ ok: true });
+});
+
+/* ---------- user administration (Super Admin) ---------- */
+api.get("/admin/users", (_req, res) => {
+  res.json({ users: listUsers(), roles: ADMIN_ROLES });
+});
+
+api.post("/admin/users", (req, res) => {
+  const { username, password, role } = (req.body ?? {}) as { username?: string; password?: string; role?: AdminRole };
+  if (typeof username !== "string" || !USERNAME_RE.test(username.trim().toLowerCase())) {
+    return res.status(400).json({ error: "bad_username", message: "Username must be 3–32 chars: letters, numbers, . _ -" });
+  }
+  if (!role || !ADMIN_ROLES.includes(role)) return res.status(400).json({ error: "bad_role", message: "Choose a valid role." });
+  const pwIssue = passwordIssue(password);
+  if (pwIssue) return res.status(400).json({ error: "weak_password", message: pwIssue });
+  if (findByUsername(username)) return res.status(409).json({ error: "exists", message: "That username is taken." });
+  const u = createUser(username, password as string, role);
+  res.status(201).json({ user: u });
+});
+
+api.put("/admin/users/:id", (req, res) => {
+  const { id: uid } = req.params;
+  const { role, password } = (req.body ?? {}) as { role?: AdminRole; password?: string };
+  if (!getUser(uid)) return res.status(404).json({ error: "not_found", message: "Account not found." });
+  if (role !== undefined) {
+    if (!ADMIN_ROLES.includes(role)) return res.status(400).json({ error: "bad_role", message: "Choose a valid role." });
+    if (!setRole(uid, role)) return res.status(409).json({ error: "last_super_admin", message: "Can't change the last Super Admin's role." });
+  }
+  if (password !== undefined) {
+    const pwIssue = passwordIssue(password);
+    if (pwIssue) return res.status(400).json({ error: "weak_password", message: pwIssue });
+    setPassword(uid, password);
+  }
+  res.json({ user: listUsers().find((u) => u.id === uid) });
+});
+
+api.delete("/admin/users/:id", (req, res) => {
+  const { id: uid } = req.params;
+  const session = sessionOf(req)!;
+  if (uid === session.uid) return res.status(400).json({ error: "self", message: "You can't delete your own account." });
+  if (!getUser(uid)) return res.status(404).json({ error: "not_found", message: "Account not found." });
+  if (!deleteUser(uid)) return res.status(409).json({ error: "last_super_admin", message: "Can't delete the last Super Admin." });
+  res.json({ ok: true });
 });
 
 /** The anonymous sender id (per-device, no login) carried on each request. Lets

@@ -9,6 +9,7 @@ import type { CountryCode, ProviderId, Method } from "@shared/types.js";
 import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
 import { api } from "../api/client.js";
+import { useTheme } from "../lib/theme.js";
 
 /* ---------- brand logo (uploaded via admin → shown app-wide) ----------
    One shared source of truth: fetched once from /config, kept live via the
@@ -70,6 +71,42 @@ export function Logo({ size = 26, withWord = true, mono = false, src = null }: {
       <Bolt h={f * 0.92} color={green} />
       {letter("M", yellow)}{letter("e", orange)}
     </span>
+  );
+}
+
+/* ---------- theme switch (light ⇄ dark) ----------
+   A small round button that flips the persisted theme. Reads/writes the
+   ThemeProvider, so the whole app re-themes instantly. */
+export function ThemeToggle({ size = 36 }: { size?: number }) {
+  const { theme, toggleDark } = useTheme();
+  const dark = theme.dark;
+  const s = Math.round(size * 0.52);
+  return (
+    <button
+      type="button"
+      onClick={toggleDark}
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      aria-pressed={dark}
+      title={dark ? "Light mode" : "Dark mode"}
+      style={{
+        width: size, height: size, flex: "none", display: "inline-grid", placeItems: "center",
+        borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)",
+        color: "var(--ink-2)", cursor: "pointer", transition: "background .18s, color .18s, border-color .18s",
+      }}
+    >
+      {dark ? (
+        // Sun
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" />
+          <path d="M12 2.5v2.2M12 19.3v2.2M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.4 19.6l1.6-1.6M18 6l1.6-1.6" />
+        </svg>
+      ) : (
+        // Moon
+        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M20 14.2A8 8 0 1 1 9.8 4 6.4 6.4 0 0 0 20 14.2z" />
+        </svg>
+      )}
+    </button>
   );
 }
 

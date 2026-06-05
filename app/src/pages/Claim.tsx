@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Identity } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
-import { Logo, Spinner } from "../components/atoms.js";
+import { Logo, Spinner, ThemeToggle } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
 import { api, ApiError } from "../api/client.js";
 import { FlowCard, Label } from "./send/ui.js";
@@ -52,8 +52,9 @@ export function Claim() {
     <div className="app-bg" style={{ minHeight: "100vh", background: "var(--paper)" }}>
       <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "18px clamp(16px,4vw,24px) 56px" }}>
         <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 22px" }}>
-          <Link to="/" style={{ textDecoration: "none" }}><Logo size={26} /></Link>
-          <nav style={{ display: "flex", gap: 2, alignItems: "center" }}>
+          <Link to="/" style={{ textDecoration: "none" }}><Logo size={34} /></Link>
+          <nav style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <ThemeToggle size={34} />
             <button onClick={() => setLang(lang === "en" ? "fr" : "en")} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
               {lang === "en" ? "FR" : "EN"}
             </button>

@@ -1,56 +1,51 @@
 /* ============================================================
-   Admin authentication — a shared operator password gates the admin console
-   and every /admin/* API. Login exchanges the password for a stateless,
-   HMAC-signed session token (no DB / session store needed): the signature is
-   derived from a server secret, so a forged or tampered token is rejected.
-   Tokens carry an expiry and survive restarts (secret is stable per password).
+   Admin authentication — per-user login (see adminUsers) exchanged for a
+   stateless, HMAC-signed session token carrying the user id + role. The
+   signature is derived from a server secret, so a forged/tampered token is
+   rejected. Tokens carry an expiry and survive restarts.
    ============================================================ */
 import crypto from "node:crypto";
+import type { AdminRole } from "../../../shared/roles.js";
 import { config } from "../config.js";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
-/** Signing secret: explicit ADMIN_SESSION_SECRET, else derived from the
- *  password — stable across restarts, and rotating the password ends sessions. */
+/** A verified session: which user and what role. */
+export interface Session { uid: string; role: AdminRole; }
+
+/** Signing secret: explicit ADMIN_SESSION_SECRET, else derived from
+ *  ADMIN_PASSWORD — stable across restarts; rotating it ends all sessions. */
 function secret(): string {
   return config.admin.sessionSecret || crypto.createHash("sha256").update(`mm-admin:${config.admin.password}`).digest("hex");
 }
-
 function sign(payload: string): string {
   return crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
-/** Constant-time password check against the configured operator password. */
-export function checkPassword(pw: unknown): boolean {
-  if (typeof pw !== "string" || !config.admin.password) return false;
-  const a = Buffer.from(pw);
-  const b = Buffer.from(config.admin.password);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-/** Issue a signed session token valid for SESSION_TTL_MS. */
-export function issueToken(): { token: string; expiresAt: string } {
+/** Issue a signed session token for a user, valid for SESSION_TTL_MS. */
+export function issueToken(session: Session): { token: string; expiresAt: string } {
   const exp = Date.now() + SESSION_TTL_MS;
-  const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ uid: session.uid, role: session.role, exp })).toString("base64url");
   return { token: `${payload}.${sign(payload)}`, expiresAt: new Date(exp).toISOString() };
 }
 
-/** Verify a token's signature and expiry (constant-time on the signature). */
-export function verifyToken(token: unknown): boolean {
-  if (typeof token !== "string") return false;
+/** Verify a token's signature + expiry; returns the session or null. */
+export function verifyToken(token: unknown): Session | null {
+  if (typeof token !== "string") return null;
   const dot = token.indexOf(".");
-  if (dot < 1) return false;
+  if (dot < 1) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   const expect = sign(payload);
   const a = Buffer.from(sig);
   const b = Buffer.from(expect);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const { exp } = JSON.parse(Buffer.from(payload, "base64url").toString()) as { exp?: number };
-    return typeof exp === "number" && exp > Date.now();
+    const d = JSON.parse(Buffer.from(payload, "base64url").toString()) as { uid?: string; role?: AdminRole; exp?: number };
+    if (typeof d.exp !== "number" || d.exp <= Date.now() || !d.uid || !d.role) return null;
+    return { uid: d.uid, role: d.role };
   } catch {
-    return false;
+    return null;
   }
 }
 

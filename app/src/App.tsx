@@ -1,5 +1,4 @@
 import { Routes, Route } from "react-router-dom";
-import { useApplyTheme, DEFAULT_THEME } from "./lib/theme.js";
 import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
@@ -12,7 +11,6 @@ import { Contact } from "./pages/legal/Contact.js";
 import { NotFound } from "./pages/legal/NotFound.js";
 
 export function App() {
-  useApplyTheme(DEFAULT_THEME);
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

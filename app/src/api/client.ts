@@ -9,6 +9,9 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, ResolveMerchantResult, CountryCode, ProviderId, RoutingSnapshot,
 } from "@shared/types.js";
+import type { AdminRole, AdminUserView } from "@shared/roles.js";
+
+export interface AdminSessionUser { id: string; username: string; role: AdminRole; }
 
 // Same-origin "/api" by default (Vite proxy in dev, Vercel rewrite in prod).
 // Set VITE_API_BASE to point at a separately-hosted backend (e.g. a persistent
@@ -83,13 +86,30 @@ export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string; brandLogo: string | null }>("/config"),
 
   // Admin auth. login stores the session token; session checks the current one.
-  adminLogin: async (password: string) => {
-    const r = await req<{ token: string; expiresAt: string }>("/admin/login", { method: "POST", body: JSON.stringify({ password }) });
+  adminLogin: async (username: string, password: string) => {
+    const r = await req<{ token: string; expiresAt: string; user: AdminSessionUser }>("/admin/login", { method: "POST", body: JSON.stringify({ username, password }) });
     setAdminToken(r.token);
     return r;
   },
-  adminSession: () => req<{ authenticated: boolean; passwordIsDefault: boolean }>("/admin/session"),
+  adminSession: () => req<{ authenticated: boolean; passwordIsDefault: boolean; user?: AdminSessionUser }>("/admin/session"),
   adminLogout: () => setAdminToken(null),
+
+  // Forgot password — reset via the server master recovery key (no token needed).
+  adminForgotPassword: (username: string, recoveryKey: string, newPassword: string) =>
+    req<{ ok: boolean }>("/admin/forgot", { method: "POST", body: JSON.stringify({ username, recoveryKey, newPassword }) }),
+
+  // Change the signed-in user's own password.
+  adminChangePassword: (currentPassword: string, newPassword: string) =>
+    req<{ ok: boolean }>("/admin/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
+
+  // User administration (Super Admin only).
+  adminUsers: () => req<{ users: AdminUserView[]; roles: AdminRole[] }>("/admin/users"),
+  adminCreateUser: (username: string, password: string, role: AdminRole) =>
+    req<{ user: AdminUserView }>("/admin/users", { method: "POST", body: JSON.stringify({ username, password, role }) }),
+  adminUpdateUser: (id: string, patch: { role?: AdminRole; password?: string }) =>
+    req<{ user?: AdminUserView }>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  adminDeleteUser: (id: string) =>
+    req<{ ok: boolean }>(`/admin/users/${id}`, { method: "DELETE" }),
 
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),

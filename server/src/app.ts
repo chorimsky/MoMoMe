@@ -5,6 +5,7 @@ import { webhooks } from "./routes/webhooks.js";
 import { seed } from "./seed.js";
 import { config } from "./config.js";
 import { listPayments } from "./core/store.js";
+import { seedAdminUsers } from "./core/adminUsers.js";
 
 /** Build the Express app (no listen). Used by the server bootstrap and tests. */
 export function createApp() {
@@ -20,5 +21,7 @@ export function createApp() {
 
   // Seed only a fresh database — on restart, state is restored from SQLite.
   if (listPayments().length === 0) seed();
+  // Ensure at least the initial Super Admin account exists (idempotent).
+  seedAdminUsers();
   return app;
 }

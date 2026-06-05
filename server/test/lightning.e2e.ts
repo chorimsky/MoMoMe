@@ -116,17 +116,63 @@ async function main() {
     const auth = (tok: string, init?: RequestInit): RequestInit => ({ ...init, headers: { "content-type": "application/json", authorization: `Bearer ${tok}`, ...(init?.headers ?? {}) } });
     const noTok = await J("/api/admin/overview");
     ok("admin API without token → 401", noTok.status === 401);
-    const badLogin = await POST("/api/admin/login", { password: "wrong" });
+    const badLogin = await POST("/api/admin/login", { username: "admin", password: "wrong" });
     ok("login with wrong password → 401", badLogin.status === 401);
-    const goodLogin = await POST("/api/admin/login", { password: "momome-admin" }); // default test password
-    ok("login with correct password → token", goodLogin.status === 200 && typeof goodLogin.body.token === "string");
+    const goodLogin = await POST("/api/admin/login", { username: "admin", password: "momome-admin" }); // seeded Super Admin
+    ok("login with correct credentials → token", goodLogin.status === 200 && typeof goodLogin.body.token === "string");
+    ok("login returns the user with role", goodLogin.body.user?.username === "admin" && goodLogin.body.user?.role === "Super Admin");
     const tok = goodLogin.body.token as string;
     const withTok = await J("/api/admin/overview", auth(tok));
     ok("admin API with valid token → 200", withTok.status === 200);
     const forged = await J("/api/admin/overview", auth(tok.slice(0, -2) + "xx"));
     ok("tampered token → 401", forged.status === 401);
     const sess = await J("/api/admin/session", auth(tok));
-    ok("session reports authenticated", sess.body.authenticated === true);
+    ok("session reports authenticated + user", sess.body.authenticated === true && sess.body.user?.role === "Super Admin");
+
+    // 7b. Per-user accounts + RBAC enforcement
+    const mkSupport = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "support-pass", role: "Support Agent" }) }));
+    ok("super admin creates a user → 201", mkSupport.status === 201 && mkSupport.body.user?.username === "agent1");
+    const dupe = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "support-pass", role: "Support Agent" }) }));
+    ok("duplicate username → 409", dupe.status === 409);
+    const weak = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent2", password: "short", role: "Support Agent" }) }));
+    ok("weak password rejected → 400", weak.status === 400);
+
+    const agentLogin = await POST("/api/admin/login", { username: "agent1", password: "support-pass" });
+    ok("new user can sign in", agentLogin.status === 200);
+    const agentTok = agentLogin.body.token as string;
+    // Support Agent can read payments (in remit) but not liquidity (out of remit).
+    const agentPayments = await J("/api/admin/payments", auth(agentTok));
+    ok("support agent reads payments (in remit) → 200", agentPayments.status === 200);
+    const agentLiquidity = await J("/api/admin/liquidity", auth(agentTok));
+    ok("support agent blocked from liquidity → 403", agentLiquidity.status === 403);
+    // Support Agent cannot manage users.
+    const agentUsers = await J("/api/admin/users", auth(agentTok));
+    ok("support agent blocked from user admin → 403", agentUsers.status === 403);
+
+    // change-own-password: wrong current rejected, correct accepted, old password then fails.
+    const badChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "nope", newPassword: "newsupportpass" }) }));
+    ok("change password with wrong current → 401", badChange.status === 401);
+    const goodChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "support-pass", newPassword: "newsupportpass" }) }));
+    ok("change own password → 200", goodChange.status === 200);
+    const oldFails = await POST("/api/admin/login", { username: "agent1", password: "support-pass" });
+    ok("old password no longer works → 401", oldFails.status === 401);
+    const newWorks = await POST("/api/admin/login", { username: "agent1", password: "newsupportpass" });
+    ok("new password works", newWorks.status === 200);
+
+    // forgot-password: master recovery key (ADMIN_PASSWORD) resets any account.
+    const badRecover = await POST("/api/admin/forgot", { username: "agent1", recoveryKey: "wrong", newPassword: "recovered-pass" });
+    ok("forgot with bad recovery key → 401", badRecover.status === 401);
+    const recover = await POST("/api/admin/forgot", { username: "agent1", recoveryKey: "momome-admin", newPassword: "recovered-pass" });
+    ok("forgot with master key resets password → 200", recover.status === 200);
+    const recoveredLogin = await POST("/api/admin/login", { username: "agent1", password: "recovered-pass" });
+    ok("login with recovered password works", recoveredLogin.status === 200);
+
+    // delete the agent (super admin); last-super-admin protection.
+    const agentId = mkSupport.body.user.id as string;
+    const del = await J(`/api/admin/users/${agentId}`, auth(tok, { method: "DELETE" }));
+    ok("super admin deletes a user → 200", del.status === 200);
+    const selfDemote = await J(`/api/admin/users/${goodLogin.body.user.id}`, auth(tok, { method: "PUT", body: JSON.stringify({ role: "Read Only" }) }));
+    ok("last super admin can't be demoted → 409", selfDemote.status === 409);
 
     // Kill-switch: pausing payments refuses new quotes; re-enabling restores them.
     const pause = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ ops: { acceptingPayments: false } }) }));

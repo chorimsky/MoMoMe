@@ -43,6 +43,13 @@ export function SettingsView() {
   const [err, setErr] = useState<string | null>(null);
   const [logoErr, setLogoErr] = useState<string | null>(null);
 
+  // Change-your-own-password form (per-user account).
+  const [pwCur, setPwCur] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     let alive = true;
     api.adminSettings()
@@ -99,6 +106,21 @@ export function SettingsView() {
   };
 
   const signOut = () => { api.adminLogout(); try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* noop */ } };
+
+  const pwInvalid = !pwCur || pwNew.length < 8 || pwNew !== pwConfirm;
+  const changePassword = async () => {
+    if (pwInvalid) return;
+    setPwBusy(true); setPwMsg(null);
+    try {
+      await api.adminChangePassword(pwCur, pwNew);
+      setPwCur(""); setPwNew(""); setPwConfirm("");
+      setPwMsg({ ok: true, text: "✓ Password changed." });
+    } catch (e) {
+      setPwMsg({ ok: false, text: e instanceof Error ? e.message : "Couldn't change password." });
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -169,9 +191,25 @@ export function SettingsView() {
             <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Token-based · 12h expiry</span>
           </div>
           <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "12px 0 14px" }}>
-            The console password is set with the <code style={{ fontFamily: "var(--font-mono)" }}>ADMIN_PASSWORD</code> server environment variable. Rotating it signs out all sessions.
+            Each operator signs in with their own username and password. Manage accounts and roles under <strong>Administration</strong> (Super Admin). The <code style={{ fontFamily: "var(--font-mono)" }}>ADMIN_PASSWORD</code> env is the master recovery key for forgotten passwords.
           </p>
           <button type="button" className="btn btn-ghost" onClick={signOut} style={{ fontSize: 13 }}>Sign out</button>
+        </Card>
+
+        <Card title="Change your password" sub="Update the password for your account.">
+          <Grid cols={1} gap={14} style={{ marginTop: 4 }}>
+            <LabeledInput label="Current password" type="password" value={pwCur} onChange={setPwCur} />
+            <LabeledInput label="New password" type="password" value={pwNew} onChange={setPwNew}
+              error={pwNew && pwNew.length < 8 ? "At least 8 characters." : undefined} />
+            <LabeledInput label="Confirm new password" type="password" value={pwConfirm} onChange={setPwConfirm}
+              error={pwConfirm && pwConfirm !== pwNew ? "Passwords don't match." : undefined} />
+          </Grid>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
+            <button type="button" className="btn btn-primary" disabled={pwInvalid || pwBusy} onClick={changePassword} style={{ fontSize: 13 }}>
+              {pwBusy ? "Updating…" : "Update password"}
+            </button>
+            {pwMsg && <span style={{ fontSize: 13, fontWeight: 650, color: pwMsg.ok ? "var(--recv)" : "var(--bad)" }}>{pwMsg.text}</span>}
+          </div>
         </Card>
       </Grid>
 

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
-import { Logo, Momo } from "../components/atoms.js";
+import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import "./Landing.css";
 
 /* Simple line glyphs (rounded, friendly) for benefit + step tiles. */
@@ -45,9 +45,10 @@ export function Landing() {
     <div style={{ background: "var(--paper)", minHeight: "100vh" }}>
       <div className="lp">
         <header className="lp-top">
-          <Logo size={26} />
+          <Logo size={36} />
           <div className="lp-actions">
             <a className="lp-link" href="#how">How it works</a>
+            <ThemeToggle size={38} />
             <Link className="btn btn-primary cta-sm" to="/send">Pay Mobile Money</Link>
           </div>
         </header>

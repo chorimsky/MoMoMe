@@ -5,8 +5,10 @@
    ============================================================ */
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Logo } from "../../components/atoms.js";
+import { Logo, ThemeToggle } from "../../components/atoms.js";
 import { api } from "../../api/client.js";
+import { canAccess as roleCanAccess, isSuperAdmin, type AdminRole, type Section } from "@shared/roles.js";
+import { useAdminUser } from "./AdminGate.js";
 import { AdminContext, type AdminKey, type Notif } from "./context.js";
 import { OverviewView } from "./views/Overview.js";
 import { PaymentsView } from "./views/Payments.js";
@@ -89,19 +91,12 @@ const VIEWS: Record<Key, ComponentType> = {
   administration: AdministrationView,
 };
 
-const ROLES = ["Super Admin", "Operations Manager", "Finance Manager", "Compliance Officer", "Support Agent", "Read Only"];
-const ROLE_ACCESS: Record<string, Key[] | "all"> = {
-  "Super Admin": "all",
-  "Read Only": "all",
-  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "merchants", "health", "peex", "notifications"],
-  "Finance Manager": ["overview", "pricing", "liquidity", "reports", "settings"],
-  "Compliance Officer": ["overview", "compliance", "merchants", "customers", "identities", "health", "peex", "notifications"],
-  "Support Agent": ["overview", "merchants", "customers", "payments", "delivery"],
-};
-const canAccess = (role: string, key: Key) => {
-  const a = ROLE_ACCESS[role];
-  return a === "all" || a.includes(key);
-};
+// The console nav keys are exactly the shared role Sections — the same module
+// the server enforces with, so UI nav and API access never disagree.
+// Administration (user management) is Super-Admin only, even for Read Only's
+// "view everything" — it mirrors the server's Super-Admin gate on /admin/users.
+const canAccess = (role: AdminRole, key: Key) =>
+  roleCanAccess(role, key as Section) && (key !== "administration" || isSuperAdmin(role));
 
 function loadSection(): Key {
   try {
@@ -116,8 +111,8 @@ function loadSection(): Key {
 const SEARCHABLE: Key[] = ["payments", "customers"];
 
 export function AdminConsole() {
+  const { username, role } = useAdminUser();
   const [active, setActive] = useState<Key>(loadSection);
-  const [role, setRole] = useState("Super Admin");
   const [navOpen, setNavOpen] = useState(false);
   const [query, setQueryState] = useState("");
   const [notifications, setNotifications] = useState<Notif[]>([]);
@@ -182,37 +177,41 @@ export function AdminConsole() {
         display: "flex", flexDirection: "column", background: "var(--surface)", borderRight: "1px solid var(--line)",
         transform: navOpen ? "none" : undefined, transition: "transform .25s ease",
       }} className="mm-admin-side" data-open={navOpen}>
-        <div style={{ padding: "18px 18px 12px" }}><Logo size={24} src={brandLogo} /></div>
+        <div style={{ padding: "18px 18px 12px" }}><Logo size={30} src={brandLogo} /></div>
         <nav style={{ flex: 1, overflowY: "auto", padding: "4px 12px 12px" }}>
-          {NAV.map((grp) => (
-            <div key={grp.group ?? "root"} style={{ marginBottom: 6 }}>
-              {grp.group && <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700, color: "var(--ink-3)", padding: "10px 10px 4px" }}>{grp.group}</div>}
-              {grp.items.map(([key, label]) => {
-                const ok = canAccess(role, key);
-                const on = active === key;
-                return (
-                  <button key={key} type="button" disabled={!ok} onClick={() => { setActive(key); setNavOpen(false); }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 10px", marginBottom: 1,
-                      borderRadius: 9, border: "none", font: "inherit", textAlign: "left",
-                      background: on ? "var(--accent-wash)" : "transparent", color: on ? "var(--accent)" : "var(--ink-2)",
-                      fontWeight: on ? 700 : 600, fontSize: 13.5, opacity: ok ? 1 : 0.32, cursor: ok ? "pointer" : "not-allowed",
-                    }}>
-                    <Icon name={key} />
-                    <span style={{ flex: 1 }}>{label}</span>
-                    {key === "notifications" && ok && notifications.length > 0 && (
-                      <span style={{ fontSize: 10.5, fontWeight: 700, background: "var(--bad)", color: "#fff", borderRadius: 999, padding: "1px 6px" }}>{notifications.length}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          {NAV.map((grp) => {
+            // Real RBAC: only show sections this role can access; hide empty groups.
+            const items = grp.items.filter(([key]) => canAccess(role, key));
+            if (items.length === 0) return null;
+            return (
+              <div key={grp.group ?? "root"} style={{ marginBottom: 6 }}>
+                {grp.group && <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700, color: "var(--ink-3)", padding: "10px 10px 4px" }}>{grp.group}</div>}
+                {items.map(([key, label]) => {
+                  const on = active === key;
+                  return (
+                    <button key={key} type="button" onClick={() => { setActive(key); setNavOpen(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 10px", marginBottom: 1,
+                        borderRadius: 9, border: "none", font: "inherit", textAlign: "left",
+                        background: on ? "var(--accent-wash)" : "transparent", color: on ? "var(--accent)" : "var(--ink-2)",
+                        fontWeight: on ? 700 : 600, fontSize: 13.5, cursor: "pointer",
+                      }}>
+                      <Icon name={key} />
+                      <span style={{ flex: 1 }}>{label}</span>
+                      {key === "notifications" && notifications.length > 0 && (
+                        <span style={{ fontSize: 10.5, fontWeight: 700, background: "var(--bad)", color: "#fff", borderRadius: 999, padding: "1px 6px" }}>{notifications.length}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderTop: "1px solid var(--line)" }}>
-          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "var(--accent-ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flex: "none" }}>AM</div>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "var(--accent-ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flex: "none", textTransform: "uppercase" }}>{username.slice(0, 2)}</div>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontWeight: 650, fontSize: 13, whiteSpace: "nowrap" }}>A. Mbarga</div>
+            <div style={{ fontWeight: 650, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{username}</div>
             <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{role}</div>
           </div>
           <button type="button" onClick={logout} aria-label="Sign out" title="Sign out"
@@ -243,10 +242,11 @@ export function AdminConsole() {
               style={{ border: "none", background: "transparent", font: "inherit", fontSize: 13, color: "var(--ink)", outline: "none", width: 200 }} />
             {query && <button type="button" aria-label="Clear search" onClick={() => admin.setQuery("")} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-3)", fontSize: 14, lineHeight: 1 }}>✕</button>}
           </div>
-          <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Switch role"
-            style={{ height: 36, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, fontWeight: 600, color: "var(--ink)", padding: "0 10px", cursor: "pointer" }}>
-            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <div title={`Signed in as ${username}`} style={{ height: 36, display: "flex", alignItems: "center", gap: 8, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", fontSize: 12.5, fontWeight: 650, color: "var(--ink-2)", padding: "0 12px" }} className="mm-admin-role">
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} aria-hidden="true" />
+            {role}
+          </div>
+          <ThemeToggle size={36} />
           <Link to="/send" className="btn btn-ghost" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Customer app ↗</Link>
         </header>
         <main style={{ flex: 1, padding: "22px", maxWidth: 1320, width: "100%", margin: "0 auto" }}>

@@ -18,13 +18,14 @@ export function OverviewView() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.adminOverview(), api.adminPayments()])
-      .then(([ov, pays]) => {
-        if (!alive) return;
-        setData(ov);
-        setFeed(pays.slice(0, 6));
-      })
+    // Overview is in every role's remit; the recent-payments feed is supplementary
+    // and may be out of a role's reach (e.g. Finance Manager) — tolerate its absence.
+    api.adminOverview()
+      .then((ov) => { if (alive) setData(ov); })
       .catch(() => { if (alive) setErr("Couldn't load overview data."); });
+    api.adminPayments()
+      .then((pays) => { if (alive) setFeed(pays.slice(0, 6)); })
+      .catch(() => { /* role can't read payments — show overview without the live feed */ });
     return () => { alive = false; };
   }, []);
 

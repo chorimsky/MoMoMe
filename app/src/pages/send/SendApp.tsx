@@ -37,7 +37,7 @@ export function SendApp() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
-  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string } | null>(null);
+  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number } | null>(null);
   useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
   const go = (to: Step) => { window.scrollTo({ top: 0 }); setStep(to); };
@@ -153,7 +153,7 @@ export function SendApp() {
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Help /></div>
         ) : (
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} />}
+            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} />}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
             {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}

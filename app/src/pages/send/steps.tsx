@@ -15,10 +15,13 @@ const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿",
 const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)" };
 
 /* ============================================================ 1 — DETAILS */
-export function DetailsStep({ s, set, next }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void }) {
+export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number }) {
   const { t } = useI18n();
   const c = COUNTRIES[s.country];
-  const fee = Math.round(s.xaf * FEE_PCT);
+  // Live admin fee (from /config) so the preview tracks Rates & Pricing; fall
+  // back to the shared default until config loads. The authoritative fee still
+  // comes from the server quote on the next step.
+  const fee = Math.round(s.xaf * (feePct ?? FEE_PCT));
   const [resolving, setResolving] = useState(false);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);

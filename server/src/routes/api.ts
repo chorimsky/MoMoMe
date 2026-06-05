@@ -235,6 +235,9 @@ api.get("/config", (_req, res) => {
   const demoMode = !liveMoney(); // no real-money rail active → safe to simulate
   res.json({
     demoMode,
+    // Live platform fee (fraction) so the customer's pre-quote fee preview tracks
+    // the admin's Rates & Pricing setting instead of a hardcoded constant.
+    feePct: getSettings().pricing.feePct,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
     // Sandbox payout outcomes are driven by the recipient number. Surfaced only

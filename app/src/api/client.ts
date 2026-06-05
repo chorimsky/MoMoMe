@@ -83,7 +83,7 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null }>("/config"),
+  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string } }>("/config"),
 
   // Admin auth. login stores the session token; session checks the current one.
   adminLogin: async (username: string, password: string) => {

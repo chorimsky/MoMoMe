@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useI18n } from "../../lib/i18n.js";
+import { DEFAULT_SUPPORT, waLink, telLink } from "../../lib/support.js";
 import { FlowCard } from "./ui.js";
 
 const FAQS = [
@@ -9,9 +10,10 @@ const FAQS = [
   { q: "faq4_q", a: "faq4_a" },
 ];
 
-export function Help() {
+export function Help({ support }: { support?: { email: string; phone: string } }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(0);
+  const phone = support?.phone || DEFAULT_SUPPORT.phone;
   return (
     <FlowCard>
       <h2 style={{ fontSize: 24 }}>{t("help_title")}</h2>
@@ -35,8 +37,8 @@ export function Help() {
         <div style={{ fontWeight: 650, fontSize: 14.5 }}>{t("still_help")}</div>
         <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "5px 0 14px" }}>{t("team_replies")}</p>
         <div style={{ display: "flex", gap: 8 }}>
-          <a className="btn btn-primary" href="https://wa.me/237600000000" target="_blank" rel="noopener noreferrer" style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("chat_wa")}</a>
-          <a className="btn btn-ghost" href="tel:+237600000000" style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("call_support")}</a>
+          <a className="btn btn-primary" href={waLink(phone)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("chat_wa")}</a>
+          <a className="btn btn-ghost" href={telLink(phone)} style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("call_support")}</a>
         </div>
       </div>
     </FlowCard>

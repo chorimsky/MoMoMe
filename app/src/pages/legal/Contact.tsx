@@ -1,70 +1,86 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useI18n } from "../../lib/i18n.js";
+import { api } from "../../api/client.js";
+import { DEFAULT_SUPPORT, waLink, telLink, type SupportContact } from "../../lib/support.js";
 import { DocShell } from "./LegalLayout.js";
 
 export function Contact() {
+  const { t, lang } = useI18n();
+  const [c, setC] = useState<SupportContact>(DEFAULT_SUPPORT);
+
   useEffect(() => {
-    document.title = "Contact & support · MoMo›Me";
+    document.title = lang === "fr" ? "Contact & assistance · MoMo›Me" : "Contact & support · MoMo›Me";
+  }, [lang]);
+
+  // Pull the live, admin-managed support email/phone (Settings → Company).
+  useEffect(() => {
+    let alive = true;
+    api.getConfig()
+      .then((cfg) => { if (alive && cfg.support) setC(cfg.support); })
+      .catch(() => { /* keep defaults */ });
+    return () => { alive = false; };
   }, []);
 
   return (
-    <DocShell kicker="Support" title="We’re here to help" updated={null} current="contact">
+    <DocShell kicker={t("c_kicker")} title={t("c_title")} updated={null} current="contact" langToggle>
       <p className="lead" style={{ fontSize: 17, color: "var(--ink-2)", marginTop: 18 }}>
-        Have a question about a payment, or something not working? Reach us the way that suits you — keep your
-        reference (e.g. <span className="mono">MMM-2026-000123</span>) handy and we’ll find it fast.
+        {t("c_lead_a")}
+        <span className="mono">MMM-2026-000123</span>
+        {t("c_lead_b")}
       </p>
 
       <div className="contact-grid">
         <a
           className="contact-card"
-          href="https://wa.me/237600000000"
+          href={waLink(c.phone)}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Chat with MoMo›Me support on WhatsApp"
+          aria-label="WhatsApp"
         >
           <div className="ic" aria-hidden="true">💬</div>
           <h3>WhatsApp</h3>
-          <p>Fastest for payment questions. Send us your reference and we’ll trace it.</p>
-          <span className="val">Chat on WhatsApp <span aria-hidden="true">→</span></span>
+          <p>{t("c_wa_desc")}</p>
+          <span className="val">{t("c_wa_cta")} <span aria-hidden="true">→</span></span>
         </a>
         <a
           className="contact-card"
-          href="mailto:support@momome.app"
-          aria-label="Email MoMo›Me support at support@momome.app"
+          href={`mailto:${c.email}`}
+          aria-label={`${t("c_email")}: ${c.email}`}
         >
           <div className="ic" aria-hidden="true">✉️</div>
-          <h3>Email</h3>
-          <p>Best for documents or anything detailed. We reply within one business day.</p>
-          <span className="val">support@momome.app <span aria-hidden="true">→</span></span>
+          <h3>{t("c_email")}</h3>
+          <p>{t("c_email_desc")}</p>
+          <span className="val">{c.email} <span aria-hidden="true">→</span></span>
         </a>
         <a
           className="contact-card"
-          href="tel:+237600000000"
-          aria-label="Call MoMo›Me support on +237 6 00 00 00 00"
+          href={telLink(c.phone)}
+          aria-label={`${t("c_call")}: ${c.phone}`}
         >
           <div className="ic" aria-hidden="true">📞</div>
-          <h3>Call us</h3>
-          <p>Talk to a person during support hours, listed below.</p>
-          <span className="val">+237 6 00 00 00 00 <span aria-hidden="true">→</span></span>
+          <h3>{t("c_call")}</h3>
+          <p>{t("c_call_desc")}</p>
+          <span className="val">{c.phone} <span aria-hidden="true">→</span></span>
         </a>
-        <Link className="contact-card" to="/send" aria-label="Open Help and FAQ in the pay flow">
+        <Link className="contact-card" to="/send?tab=help" aria-label={t("c_help_faq")}>
           <div className="ic" aria-hidden="true">❓</div>
-          <h3>Help &amp; FAQ</h3>
-          <p>Quick answers to the most common questions, right inside the pay flow.</p>
-          <span className="val">Open Help <span aria-hidden="true">→</span></span>
+          <h3>{t("c_help_faq")}</h3>
+          <p>{t("c_help_desc")}</p>
+          <span className="val">{t("c_open_help")} <span aria-hidden="true">→</span></span>
         </Link>
       </div>
 
       <div className="hours">
-        <h3>Support hours (WAT)</h3>
-        <div className="row"><span>Monday – Friday</span><span>07:00 – 22:00</span></div>
-        <div className="row"><span>Saturday</span><span>09:00 – 18:00</span></div>
-        <div className="row"><span>Sunday &amp; public holidays</span><span>10:00 – 16:00</span></div>
+        <h3>{t("c_hours_title")}</h3>
+        <div className="row"><span>{t("c_days_week")}</span><span>07:00 – 22:00</span></div>
+        <div className="row"><span>{t("c_days_sat")}</span><span>09:00 – 18:00</span></div>
+        <div className="row"><span>{t("c_days_sun")}</span><span>10:00 – 16:00</span></div>
       </div>
 
       <p style={{ marginTop: 24, fontSize: 13.5, color: "var(--ink-3)" }}>
-        For partner, compliance, or press enquiries, see the <Link to="/admin">partner portal</Link>.
-        Read our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
+        {t("c_foot_a")}<Link to="/admin">{t("c_foot_portal")}</Link>{t("c_foot_b")}
+        <Link to="/terms">{t("c_terms")}</Link>{t("c_and")}<Link to="/privacy">{t("c_privacy")}</Link>.
       </p>
     </DocShell>
   );

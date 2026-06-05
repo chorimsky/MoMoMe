@@ -216,6 +216,9 @@ export function SettingsView() {
             <LabeledInput label="Brand name" value={company.brand} onChange={(v) => edit({ brand: v })} error={brandErr} />
             <LabeledInput label="Support email" value={company.email} onChange={(v) => edit({ email: v })} type="email" error={emailErr} />
             <LabeledInput label="Support phone" value={company.phone} onChange={(v) => edit({ phone: v })} mono error={phoneErr} />
+            <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              Shown on the public <strong>Help</strong> &amp; <strong>Contact</strong> pages. The phone also powers the WhatsApp (wa.me) and call links.
+            </div>
           </Grid>
         </Card>
 

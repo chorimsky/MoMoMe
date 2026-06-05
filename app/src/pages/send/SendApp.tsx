@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
@@ -25,7 +25,11 @@ type Tab = "pay" | "history" | "help";
 
 export function SendApp() {
   const { t, lang, setLang } = useI18n();
-  const [tab, setTab] = useState<Tab>("pay");
+  // Deep-link support: /send?tab=help (from the Contact page) or ?tab=activity
+  // opens directly on that tab instead of the pay flow.
+  const [params] = useSearchParams();
+  const initialTab: Tab = ((p) => (p === "help" || p === "history" || p === "activity" ? (p === "activity" ? "history" : p) : "pay"))(params.get("tab"));
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [step, setStep] = useState<Step>("details");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -37,7 +41,7 @@ export function SendApp() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
-  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number } | null>(null);
+  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; support: { email: string; phone: string } } | null>(null);
   useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
   const go = (to: Step) => { window.scrollTo({ top: 0 }); setStep(to); };
@@ -150,7 +154,7 @@ export function SendApp() {
         {tab === "history" ? (
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Activity /></div>
         ) : tab === "help" ? (
-          <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Help /></div>
+          <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Help support={demo?.support} /></div>
         ) : (
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} />}

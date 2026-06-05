@@ -240,6 +240,10 @@ api.get("/config", (_req, res) => {
     feePct: getSettings().pricing.feePct,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
+    // Public support contact (admin-managed in Settings → Company) so the Help
+    // and Contact surfaces always show the live email/phone, never a hardcoded
+    // placeholder. Phone is also used to derive the WhatsApp (wa.me) and tel link.
+    support: { email: getSettings().company.email, phone: getSettings().company.phone },
     // Sandbox payout outcomes are driven by the recipient number. Surfaced only
     // in demo mode so testers' payments complete cleanly.
     demoHint: demoMode

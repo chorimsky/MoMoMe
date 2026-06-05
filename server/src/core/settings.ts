@@ -8,7 +8,7 @@ import { FEE_PCT, RAIL_SPREAD_BPS, MAX_XAF } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
 
 const DEFAULTS: AdminSettings = {
-  company: { brand: "MoMo›Me", email: "help@momome.app", phone: "+237 233 00 00 00", logo: null },
+  company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
   channels: { Email: true, SMS: true, WhatsApp: false },
   rails: { defaultRail: "Lightning", autoSwitch: true, threshold: 200000 },
   // Cost assumptions for net-margin intelligence (override with real rail rates):

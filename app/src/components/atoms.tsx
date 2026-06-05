@@ -8,6 +8,26 @@ import QRCode from "qrcode";
 import type { CountryCode, ProviderId, Method } from "@shared/types.js";
 import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
+import { api } from "../api/client.js";
+
+/* ---------- brand logo (uploaded via admin → shown app-wide) ----------
+   One shared source of truth: fetched once from /config, kept live via the
+   `mm-brand-logo` event the admin Settings save dispatches. Any <Logo> uses it
+   automatically, so an uploaded logo replaces the wordmark everywhere. */
+let _brandLogo: string | null = null;
+let _brandLoaded = false;
+const _brandSubs = new Set<(v: string | null) => void>();
+function setBrandLogo(v: string | null) { if (v === _brandLogo) return; _brandLogo = v; _brandSubs.forEach((f) => f(v)); }
+if (typeof window !== "undefined") window.addEventListener("mm-brand-logo", (e) => setBrandLogo((e as CustomEvent).detail ?? null));
+export function useBrandLogo(): string | null {
+  const [v, setV] = useState<string | null>(_brandLogo);
+  useEffect(() => {
+    _brandSubs.add(setV);
+    if (!_brandLoaded) { _brandLoaded = true; api.getConfig().then((c) => setBrandLogo(c.brandLogo)).catch(() => {}); }
+    return () => { _brandSubs.delete(setV); };
+  }, []);
+  return v;
+}
 
 /* ---------- brand mark ---------- */
 /** The MoMoMe lightning bolt — green, sits between "MoMo" and "Me". */
@@ -24,7 +44,10 @@ function Bolt({ h, color }: { h: number; color: string }) {
  *  lightning bolt). `src` overrides with an uploaded logo; `withWord={false}`
  *  renders the compact square app-icon; `size` is the wordmark/icon height. */
 export function Logo({ size = 26, withWord = true, mono = false, src = null }: { size?: number; withWord?: boolean; mono?: boolean; src?: string | null }) {
-  if (src) return <img src={src} alt="MoMoMe" height={size} style={{ height: size, width: "auto", flex: "none", objectFit: "contain", borderRadius: size * 0.22, verticalAlign: "middle" }} />;
+  // An uploaded brand logo (explicit src, or the app-wide one) wins everywhere.
+  const auto = useBrandLogo();
+  const logo = src ?? auto;
+  if (logo) return <img src={logo} alt="MoMoMe" height={size} style={{ height: size, width: "auto", maxWidth: size * 6, flex: "none", objectFit: "contain", verticalAlign: "middle" }} />;
 
   const yellow = mono ? "currentColor" : "var(--brand)";
   const orange = mono ? "currentColor" : "var(--accent)";

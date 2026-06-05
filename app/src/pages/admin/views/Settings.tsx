@@ -106,8 +106,9 @@ export function SettingsView() {
       <Grid cols={2} gap={16}>
         <Card title="Company information">
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 4, marginBottom: 16 }}>
-            <div style={{ width: 56, height: 56, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-2)", display: "grid", placeItems: "center", overflow: "hidden", flex: "none" }}>
-              {company.logo ? <img src={company.logo} alt="Logo preview" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <Logo size={30} withWord={false} />}
+            {/* Preview sized like the real header — wide wordmark logos show fully. */}
+            <div style={{ minWidth: 56, height: 56, padding: company.logo ? "0 12px" : 0, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-2)", display: "grid", placeItems: "center", overflow: "hidden", flex: "none" }}>
+              {company.logo ? <img src={company.logo} alt="Logo preview" style={{ height: 40, width: "auto", maxWidth: 220, objectFit: "contain" }} /> : <Logo size={30} withWord={false} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 7 }}>Brand logo</div>

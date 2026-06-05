@@ -16,7 +16,7 @@ export function toneColor(t: Tone | undefined): string {
   return { recv: "var(--recv)", info: "var(--info)", warn: "var(--warn)", bad: "var(--bad)", accent: "var(--accent)", lightning: "var(--lightning)", ink: "var(--ink-2)" }[t ?? "ink"] ?? "var(--ink-2)";
 }
 export function toneWash(t: Tone): string {
-  return { recv: "var(--recv-wash)", info: "oklch(0.95 0.03 250)", warn: "var(--send-wash)", bad: "var(--bad-wash)", accent: "var(--accent-wash)", lightning: "var(--accent-wash)", ink: "var(--surface-2)" }[t] ?? "var(--surface-2)";
+  return { recv: "var(--recv-wash)", info: "var(--info-wash)", warn: "var(--send-wash)", bad: "var(--bad-wash)", accent: "var(--accent-wash)", lightning: "var(--accent-wash)", ink: "var(--surface-2)" }[t] ?? "var(--surface-2)";
 }
 
 export function Pill({ status, tone }: { status: string; tone?: Tone }) {
@@ -88,7 +88,7 @@ export function Bar({ pct, tone = "accent" }: { pct: number; tone?: Tone }) {
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button type="button" onClick={() => onChange(!on)} role="switch" aria-checked={on}
-      style={{ width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", padding: 3, background: on ? "var(--recv)" : "var(--line)", transition: "background .2s", display: "flex" }}>
+      style={{ width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", padding: 3, background: on ? "var(--recv)" : "var(--ink-3)", transition: "background .2s", display: "flex" }}>
       <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#fff", boxShadow: "var(--shadow-sm)", transform: on ? "translateX(18px)" : "none", transition: "transform .2s" }} />
     </button>
   );

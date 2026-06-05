@@ -31,7 +31,7 @@ const NETS = [
   { sym: <G n="bolt" />, t: "Lightning", c: "var(--brand)", ink: "var(--brand-ink)" },
   { sym: "₿", t: "Bitcoin", c: "var(--accent)", ink: "#fff" },
   { sym: "₮", t: "USDT", c: "var(--recv)", ink: "#fff" },
-  { sym: <G n="phone" />, t: "MTN & Orange Money", c: "var(--ink)", ink: "#fff" },
+  { sym: <G n="phone" />, t: "MTN & Orange Money", c: "var(--ink)", ink: "var(--paper)" },
 ];
 
 const STEPS = [

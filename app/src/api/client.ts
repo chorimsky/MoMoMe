@@ -114,6 +114,7 @@ export const api = {
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),
+  adminPruneIdentities: () => req<{ removed: number; kept: number; customerIds: string[] }>("/admin/identities/prune", { method: "POST" }),
   adminRails: () => req<{
     liveMoney: boolean;
     crypto: { provider: string; env: string; configured: boolean; live: boolean; apiUrl: string; accountId: string; clientId: string; webhookSecret: string; methods: string[]; sandboxPayout: boolean };

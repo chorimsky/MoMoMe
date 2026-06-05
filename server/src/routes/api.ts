@@ -611,13 +611,9 @@ api.get("/admin/audit", (_req, res) => {
     .listPayments()
     .flatMap((p) => p.events
       .filter((e) => NOTABLE.includes(e.state) || e.note)
-      .map((e) => ({ at: e.at, actor: e.note?.includes("admin") ? "A. Mbarga" : "system", action: `${p.ref} → ${e.state}${e.note ? ` (${e.note})` : ""}`, ref: p.ref })));
-  // A couple of operator config events (your audit example).
-  const config: import("../../../shared/types.js").AuditEntry[] = [
-    { at: new Date(Date.now() - 3_600_000).toISOString(), actor: "A. Mbarga", action: "Updated BTC spread to 2.8%" },
-    { at: new Date(Date.now() - 7_200_000).toISOString(), actor: "Finance", action: "Adjusted XAF payout float threshold" },
-  ];
-  const entries = [...fromPayments, ...config].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+      .map((e) => ({ at: e.at, actor: e.note?.includes("admin") ? "operator" : "system", action: `${p.ref} → ${e.state}${e.note ? ` (${e.note})` : ""}`, ref: p.ref })));
+  // Real events only — sorted newest-first. (No fabricated config entries.)
+  const entries = [...fromPayments].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
   res.json(entries);
 });
 

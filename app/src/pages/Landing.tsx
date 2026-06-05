@@ -127,6 +127,15 @@ export function Landing() {
           </div>
         </section>
 
+        <nav className="lp-foot-links" aria-label="Convert to Mobile Money" style={{ marginBottom: 14, flexWrap: "wrap", justifyContent: "center" }}>
+          <a href="/bitcoin-to-mobile-money/">Bitcoin to Mobile Money</a>
+          <a href="/lightning-to-mobile-money/">Lightning to Mobile Money</a>
+          <a href="/usdt-to-mobile-money/">USDT to Mobile Money</a>
+          <a href="/stablecoin-to-mobile-money/">Stablecoin to Mobile Money</a>
+          <a href="/crypto-to-mobile-money/">Crypto to Mobile Money</a>
+          <a href="/learn/">Learn</a>
+          <a href="/countries/">Coverage</a>
+        </nav>
         <footer className="lp-foot">
           <span className="c">© 2026 MoMo›Me · Secure Mobile Money payments</span>
           <nav className="lp-foot-links" aria-label="Footer">

@@ -11,7 +11,7 @@ import { api } from "../../../api/client.js";
 import { Card, Grid, SectionTitle, Toggle } from "../AdminUI.js";
 import { Logo } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
-import { processLogo, detectSolidBackground } from "../../../lib/logo.js";
+import { processLogo, analyzeLogo } from "../../../lib/logo.js";
 import { Loading } from "./Overview.js";
 
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"];
@@ -64,16 +64,20 @@ export function SettingsView() {
         if (!alive) return;
         setCompany(s.company); setChannels(s.channels); setOps(s.ops);
         setLogoRaw(s.company.logo ?? null);
-        // If the saved logo sits on a solid background, it shows as a box in dark
-        // mode. Offer a transparent version so it blends — applied on Save.
-        if (s.company.logo) {
-          const bg = await detectSolidBackground(s.company.logo);
-          if (alive && bg) {
-            const fixed = await processLogo(s.company.logo, { transparent: true });
+        // A logo on a solid background shows as a box in dark mode; a logo with
+        // lots of empty padding renders too small. Offer a cleaned-up version
+        // (transparent + trimmed) so it blends and displays at full size.
+        if (s.company.logo && !s.company.logo.startsWith("data:image/svg")) {
+          const { solidBg, padded } = await analyzeLogo(s.company.logo);
+          if (alive && (solidBg || padded)) {
+            const fixed = await processLogo(s.company.logo, { transparent: true, trim: true });
             if (alive && fixed !== s.company.logo) {
               setCompany((c) => (c ? { ...c, logo: fixed } : c));
               setDirty(true);
-              setLogoNote("We made your logo's background transparent so it blends in light and dark — press Save changes to keep it.");
+              const what = solidBg && padded ? "made your logo's background transparent and trimmed its padding"
+                : solidBg ? "made your logo's background transparent"
+                : "trimmed your logo's padding";
+              setLogoNote(`We ${what} so it displays crisp and full-size in light and dark — press Save changes to keep it.`);
             }
           }
         }
@@ -102,7 +106,7 @@ export function SettingsView() {
       const raw = String(reader.result);
       setLogoRaw(raw);
       // SVG is vector + already theme-friendly; never rasterise it.
-      const processed = file.type === "image/svg+xml" ? raw : await processLogo(raw, { transparent: bgTransparent });
+      const processed = file.type === "image/svg+xml" ? raw : await processLogo(raw, { transparent: bgTransparent, trim: true });
       edit({ logo: processed });
     };
     reader.onerror = () => setLogoErr("Couldn't read that file.");
@@ -115,7 +119,7 @@ export function SettingsView() {
     setBgTransparent(v); setLogoNote(null);
     const source = logoRaw ?? company?.logo;
     if (!source) return;
-    const processed = await processLogo(source, { transparent: v });
+    const processed = await processLogo(source, { transparent: v, trim: true });
     edit({ logo: processed });
   };
   const toggle = (k: keyof AdminSettings["channels"], v: boolean) => { setChannels((c) => ({ ...c!, [k]: v })); setDirty(true); };

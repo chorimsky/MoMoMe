@@ -384,9 +384,8 @@ export interface ReportsSnapshot {
 
 /* ---------- system health ---------- */
 export interface HealthSnapshot {
-  apis: Array<{ name: string; status: "Online" | "Degraded" | "Offline"; latencyMs: number }>;
+  apis: Array<{ name: string; status: "Online" | "Degraded" | "Offline"; detail?: string }>;
   queue: { pending: number; processing: number; failed: number };
-  server: { cpuPct: number; memoryPct: number; responseMs: number };
 }
 
 /* ---------- administration ---------- */

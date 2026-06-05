@@ -599,16 +599,17 @@ api.get("/admin/reports", (req, res) => {
 api.get("/admin/health", (_req, res) => {
   const all = store.listPayments();
   const inFlight = all.filter((p) => IN_FLIGHT.includes(p.state)).length;
-  // Deterministic synthetic load (no random-in-render); scales gently with activity.
-  const load = Math.min(95, 30 + inFlight * 6 + (all.length % 7));
+  // Real integration status, derived from configuration (no fabricated latency).
+  const envLabel = (configured: boolean, env: string) => (configured ? env : "not configured");
+  const fxLive = ratesMeta().source === "IBEX";
   const health: import("../../../shared/types.js").HealthSnapshot = {
     apis: [
-      { name: "IBEX (Lightning + BTC + USDT)", status: "Online", latencyMs: 90 },
-      { name: "PawaPay (Mobile Money)", status: "Online", latencyMs: 220 },
-      { name: "FX feed", status: "Online", latencyMs: 60 },
+      { name: "IBEX · Crypto inbound", status: ibexConfigured() ? "Online" : "Offline", detail: envLabel(ibexConfigured(), config.ibex.env) },
+      { name: "PawaPay · Mobile Money", status: pawapayConfigured() ? "Online" : "Offline", detail: envLabel(pawapayConfigured(), config.pawapay.env) },
+      { name: "Peexit · Mobile Money", status: peexitConfigured() ? "Online" : "Offline", detail: envLabel(peexitConfigured(), config.peexit.env) },
+      { name: "FX feed (IBEX rates)", status: fxLive ? "Online" : "Degraded", detail: fxLive ? "live" : "fallback rates" },
     ],
     queue: { pending: inFlight, processing: all.filter((p) => p.state === "PAYOUT_REQUESTED").length, failed: all.filter((p) => p.displayStatus === "Failed").length },
-    server: { cpuPct: load, memoryPct: Math.min(90, 48 + (all.length % 11)), responseMs: 18 + (inFlight % 5) },
   };
   res.json(health);
 });

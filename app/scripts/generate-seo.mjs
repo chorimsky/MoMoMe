@@ -15,6 +15,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { renderOgImages } from "./og.mjs";
 
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 const SITE = (process.env.SITE_URL || "https://mo-mo-me-app.vercel.app").replace(/\/$/, "");
@@ -473,8 +474,9 @@ function footer(lc) {
 <p class="narr">${narr}</p><p class="disc">${disc}</p></div></footer>`;
 }
 
-function shell({ lc, url, altUrl, title, description, keywords, jsonld, body }) {
+function shell({ lc, url, altUrl, title, description, keywords, jsonld, body, ogImg }) {
   const canonical = SITE + url;
+  const img = SITE + (ogImg || `/og/default-${lc}.png`);
   const en = lc === "en" ? url : altUrl;
   const fr = lc === "fr" ? url : altUrl;
   return `<!DOCTYPE html><html lang="${LOCALES[lc].lang}"><head>
@@ -489,9 +491,9 @@ ${keywords ? `<meta name="keywords" content="${esc(keywords)}">` : ""}
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:type" content="website"><meta property="og:site_name" content="${esc(BRAND)}"><meta property="og:locale" content="${lc === "fr" ? "fr_FR" : "en_US"}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
-<meta property="og:url" content="${canonical}"><meta property="og:image" content="${SITE}/og.svg">
+<meta property="og:url" content="${canonical}"><meta property="og:image" content="${img}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}">
-<meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${SITE}/og.svg">
+<meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${img}">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>${CSS}</style>
@@ -553,7 +555,7 @@ ${langSwitch(url, altUrl, lc)}
 ${ctaHtml(t, t.ctaLine(asset.label, inPlace))}
 <h2>${esc(t.otherWays(inPlace))}</h2><div class="grid">${related}</div>
 <h2>${esc(t.elsewhere(asset.name))}</h2><div class="grid">${nearby}</div>`;
-  write(url, shell({ lc, url, altUrl, title, description, keywords, jsonld, body }));
+  write(url, shell({ lc, url, altUrl, title, description, keywords, jsonld, body, ogImg: `/og/${asset.slug}-${lc}.png` }));
 }
 
 function assetHub(asset, lc) {
@@ -591,7 +593,7 @@ ${langSwitch(url, altUrl, lc)}
 <h2>${esc(t.byCountry(asset.label))}</h2><div class="grid">${countryLinks}</div>
 <h2>${esc(t.faqHeading)}</h2>${faqHtml(faqs)}
 ${ctaHtml(t, lc === "fr" ? `Transformez du ${asset.label} en Mobile Money en quelques secondes.` : `Turn ${asset.label} into Mobile Money in seconds.`)}`;
-  write(url, shell({ lc, url, altUrl, title, description, keywords: at.kw.join(", "), jsonld, body }));
+  write(url, shell({ lc, url, altUrl, title, description, keywords: at.kw.join(", "), jsonld, body, ogImg: `/og/${asset.slug}-${lc}.png` }));
 }
 
 function guidePage(g, lc) {
@@ -749,9 +751,10 @@ for (const lc of ["en", "fr"]) {
   countriesIndex(lc);
 }
 frHome();
-ogImage();
+ogImage(); // keep og.svg as a secondary asset
 const total = sitemap();
 robots();
 aiTxt();
 llmsTxt();
-console.log(`✓ SEO: generated ${total} pages (EN+FR) + sitemap/robots/llms.txt/ai.txt/og.svg → ${DIST}`);
+const ogCount = await renderOgImages(DIST, ASSETS);
+console.log(`✓ SEO: generated ${total} pages (EN+FR) + ${ogCount} OG PNG cards + sitemap/robots/llms.txt/ai.txt → ${DIST}`);

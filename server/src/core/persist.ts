@@ -21,18 +21,32 @@ const DB_PATH = process.env.DB_PATH ?? "data/momome.db";
 interface Stmt { get(key: string): unknown; run(key: string, json: string): void; }
 interface Db { exec(sql: string): void; prepare(sql: string): Stmt; }
 
+/** Run `fn` with node:sqlite's "experimental feature" ExperimentalWarning
+ *  suppressed (it prints on every start) — all other warnings pass through. */
+function withoutSqliteWarning<T>(fn: () => T): T {
+  const orig = process.emitWarning.bind(process);
+  process.emitWarning = ((w: unknown, ...rest: unknown[]) => {
+    const msg = typeof w === "string" ? w : (w as { message?: string } | undefined)?.message;
+    if (typeof msg === "string" && msg.includes("SQLite is an experimental feature")) return;
+    return (orig as (...a: unknown[]) => void)(w as never, ...rest);
+  }) as typeof process.emitWarning;
+  try { return fn(); } finally { process.emitWarning = orig; }
+}
+
 /** Open SQLite if possible; otherwise return null and run in-memory. */
 function openDb(): Db | null {
   try {
     // require() (not static import) so a missing/flag-gated node:sqlite is catchable.
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (p: string) => Db };
     if (DB_PATH !== ":memory:") {
       try { mkdirSync(dirname(DB_PATH), { recursive: true }); } catch { /* exists / read-only */ }
     }
-    const db = new DatabaseSync(DB_PATH);
-    db.exec("CREATE TABLE IF NOT EXISTS snapshot (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
-    return db;
+    return withoutSqliteWarning(() => {
+      const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (p: string) => Db };
+      const db = new DatabaseSync(DB_PATH);
+      db.exec("CREATE TABLE IF NOT EXISTS snapshot (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
+      return db;
+    });
   } catch (e) {
     console.warn(`persist: SQLite unavailable, running in-memory (${e instanceof Error ? e.message : e})`);
     return null;

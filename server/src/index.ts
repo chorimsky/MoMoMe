@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { config, assertLiveConfig, assertIbexConfig, ibexConfigured } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, ibexConfigured, liveMoney } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds } from "./core/stateMachine.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
@@ -7,7 +7,10 @@ import { setRates, CCY } from "./core/rates.js";
 
 assertLiveConfig();
 assertIbexConfig();
-if (config.admin.passwordIsDefault) {
+// Warn about the default admin password only on a real/reachable deployment
+// (https public URL or a live-money rail) — it's a production reminder, not
+// noise for local dev where the default password is fine.
+if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
   console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
 }
 const app = createApp();

@@ -113,6 +113,8 @@ export interface Payment {
   feeXaf: number;
   totalXaf: number;
   usd: number;
+  /** FX spread (bps) locked at quote time — carried for revenue attribution. */
+  spreadBps?: number;
   /** The real inbound payment instruction (address / invoice) for this payment. */
   payInstruction: PayInstruction;
   /** PawaPay payout id (set once the payout is submitted). */
@@ -325,7 +327,15 @@ export interface AdminSettings {
   company: { brand: string; email: string; phone: string; logo: string | null };
   channels: { Email: boolean; SMS: boolean; WhatsApp: boolean };
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
-  pricing: { feePct: number; spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number } };
+  pricing: {
+    feePct: number;
+    spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+    /** Cost assumptions for net-margin intelligence (set from your real rail
+     *  contracts): payout = Mobile Money disbursement cost as a fraction of the
+     *  delivered XAF; rail = crypto-in cost as a fraction of the total billed;
+     *  fixed = flat per-transaction cost (KYC/ops) in XAF. */
+    costs: { payoutPct: number; railPct: number; fixedXaf: number };
+  };
   /** Operational controls wired into the live payment path. */
   ops: {
     /** Master switch — when false, new quotes/payments are refused. */
@@ -352,9 +362,43 @@ export interface PricingInfo {
   feePct: number;
   eurXafPeg: number;
   spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+  costs: { payoutPct: number; railPct: number; fixedXaf: number };
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */
   feed: { source: string; updatedAt: string | null; btcUsd: number; usdtUsd: number; eurUsd: number; usdXaf: number };
+}
+
+/* ---------- revenue intelligence ---------- */
+export interface RevenueRail {
+  method: Method;
+  payments: number;
+  volumeXaf: number;
+  feeXaf: number;
+  spreadXaf: number;
+  grossXaf: number;
+  costsXaf: number;
+  netXaf: number;
+  takePct: number;       // gross / volume
+  netMarginPct: number;  // net / volume
+}
+export interface RevenueReport {
+  period: string;
+  volumeXaf: number;
+  payments: number;
+  feeRevenueXaf: number;
+  spreadRevenueXaf: number;
+  grossRevenueXaf: number;
+  costsXaf: number;
+  netRevenueXaf: number;
+  effectiveTakePct: number;  // gross / volume
+  netMarginPct: number;      // net / volume
+  avgRevenuePerTxXaf: number;
+  byRail: RevenueRail[];
+  daily: Array<{ date: string; grossXaf: number; netXaf: number }>;
+  /** Market benchmarks for the customer take rate (%), from research. */
+  benchmarks: { corridorPct: number; cryptoCompPct: number; ssaAvgPct: number };
+  insights: Array<{ tone: "good" | "warn" | "bad" | "info"; text: string }>;
+  costs: { payoutPct: number; railPct: number; fixedXaf: number };
 }
 
 /* ---------- delivery ---------- */

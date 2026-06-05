@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
-  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId,
+  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
@@ -363,6 +363,7 @@ api.post("/payments", async (req, res) => {
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
     usd: quote.usd,
+    spreadBps: quote.spreadBps, // locked spread → exact revenue attribution
     payInstruction: instruction,
     events: [
       { at: now, state: "QUOTED" },
@@ -536,6 +537,12 @@ api.put("/admin/settings", (req, res) => {
     for (const v of Object.values(pr.spreadBps ?? {})) {
       if (!inRange(v, 0, 2000)) return res.status(400).json({ error: "bad_pricing", message: "Spread must be 0–2000 bps." });
     }
+    const c = pr.costs;
+    if (c) {
+      if (c.payoutPct !== undefined && !inRange(c.payoutPct, 0, 0.2)) return res.status(400).json({ error: "bad_pricing", message: "Payout cost must be 0%–20%." });
+      if (c.railPct !== undefined && !inRange(c.railPct, 0, 0.2)) return res.status(400).json({ error: "bad_pricing", message: "Rail cost must be 0%–20%." });
+      if (c.fixedXaf !== undefined && !inRange(c.fixedXaf, 0, MAX_XAF)) return res.status(400).json({ error: "bad_pricing", message: `Fixed cost must be 0–${MAX_XAF} XAF.` });
+    }
   }
   const logo = patch.company?.logo;
   if (logo !== undefined && logo !== null && !isValidLogo(logo)) {
@@ -612,12 +619,92 @@ api.get("/admin/pricing", (_req, res) => {
     feePct: s.feePct,
     eurXafPeg: EUR_XAF_PEG,
     spreadBps: s.spreadBps,
+    costs: s.costs,
     rates: [
       { pair: "BTC/XAF", rate: Math.round(rateFor("LIGHTNING").midXafPerUnit), spreadBps: s.spreadBps.LIGHTNING },
       { pair: "USDT/XAF", rate: Math.round(rateFor("USDT").midXafPerUnit), spreadBps: s.spreadBps.USDT },
     ],
     feed: ratesMeta(),
   });
+});
+
+/* ---------- revenue intelligence ----------
+   Auto-computes true earnings: explicit fee + the FX spread (which otherwise
+   sits unbooked in the fx_position), nets out rail/payout/fixed costs, and
+   surfaces per-rail profitability, market benchmarks and live insights. */
+api.get("/admin/revenue", (req, res) => {
+  const period = ["7d", "30d", "90d", "all"].includes(String(req.query.period)) ? String(req.query.period) : "30d";
+  const days = period === "7d" ? 7 : period === "90d" ? 90 : period === "all" ? 36500 : 30;
+  const cutoff = Date.now() - days * 86_400_000;
+  const pr = getSettings().pricing;
+  const costs = pr.costs;
+  const completed = store.listPayments().filter((p) => p.displayStatus === "Completed" && Date.parse(p.createdAt) >= cutoff);
+
+  const spreadBpsOf = (p: Payment) => (typeof p.spreadBps === "number" ? p.spreadBps : pr.spreadBps[p.method]);
+  const spreadOf = (p: Payment) => { const b = spreadBpsOf(p); return b > 0 && b < 10000 ? Math.round((p.totalXaf * b) / (10000 - b)) : 0; };
+  const costOf = (p: Payment) => Math.round(p.xaf * costs.payoutPct + p.totalXaf * costs.railPct + costs.fixedXaf);
+  const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
+
+  const methods: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
+  const byRail = methods.map((m) => {
+    const ps = completed.filter((p) => p.method === m);
+    const volumeXaf = ps.reduce((s, p) => s + p.xaf, 0);
+    const feeXaf = ps.reduce((s, p) => s + p.feeXaf, 0);
+    const spreadXaf = ps.reduce((s, p) => s + spreadOf(p), 0);
+    const cXaf = ps.reduce((s, p) => s + costOf(p), 0);
+    const grossXaf = feeXaf + spreadXaf;
+    const netXaf = grossXaf - cXaf;
+    return { method: m, payments: ps.length, volumeXaf, feeXaf, spreadXaf, grossXaf, costsXaf: cXaf, netXaf, takePct: pct(grossXaf, volumeXaf), netMarginPct: pct(netXaf, volumeXaf) };
+  }).filter((r) => r.payments > 0);
+
+  const volumeXaf = completed.reduce((s, p) => s + p.xaf, 0);
+  const feeRevenueXaf = completed.reduce((s, p) => s + p.feeXaf, 0);
+  const spreadRevenueXaf = completed.reduce((s, p) => s + spreadOf(p), 0);
+  const grossRevenueXaf = feeRevenueXaf + spreadRevenueXaf;
+  const costsXaf = completed.reduce((s, p) => s + costOf(p), 0);
+  const netRevenueXaf = grossRevenueXaf - costsXaf;
+
+  const byDay = new Map<string, { grossXaf: number; netXaf: number }>();
+  for (const p of completed) {
+    const k = p.createdAt.slice(0, 10);
+    const e = byDay.get(k) ?? { grossXaf: 0, netXaf: 0 };
+    const g = p.feeXaf + spreadOf(p);
+    e.grossXaf += g; e.netXaf += g - costOf(p);
+    byDay.set(k, e);
+  }
+  const daily = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
+
+  const effectiveTakePct = pct(grossRevenueXaf, volumeXaf);
+  const netMarginPct = pct(netRevenueXaf, volumeXaf);
+  const benchmarks = { corridorPct: 3.5, cryptoCompPct: 2.0, ssaAvgPct: 8.8 };
+
+  // ----- automatic insights -----
+  const insights: RevenueReport["insights"] = [];
+  if (completed.length === 0) {
+    insights.push({ tone: "info", text: "No completed payments in this period yet — revenue intelligence populates as payments settle." });
+  } else {
+    const spreadShare = grossRevenueXaf ? Math.round((spreadRevenueXaf / grossRevenueXaf) * 100) : 0;
+    insights.push({ tone: "info", text: `FX spread contributes ${spreadShare}% of gross revenue (${spreadRevenueXaf.toLocaleString()} XAF). It is earned in the rate, separately from the ${(pr.feePct * 100).toFixed(1)}% platform fee.` });
+    if (effectiveTakePct > benchmarks.corridorPct) {
+      insights.push({ tone: "warn", text: `Your blended take is ${effectiveTakePct}% — above the France→Cameroon corridor (~${benchmarks.corridorPct}%) and crypto off-ramps (~${benchmarks.cryptoCompPct}%). Competitive headroom is limited as rivals enter; defend margin via B2B/float rather than raising the consumer take.` });
+    } else {
+      insights.push({ tone: "good", text: `Your blended take is ${effectiveTakePct}% — below the corridor benchmark (~${benchmarks.corridorPct}%) and far below the Sub-Saharan Africa average (~${benchmarks.ssaAvgPct}%). Competitive for the corridor.` });
+    }
+    if (netMarginPct <= 0) insights.push({ tone: "bad", text: `Net margin is ${netMarginPct}% — your cost assumptions exceed revenue. Lower payout/rail costs or raise the take.` });
+    else if (netMarginPct < 1.5) insights.push({ tone: "warn", text: `Net margin is thin at ${netMarginPct}% of volume. The payout-cost assumption (${(costs.payoutPct * 100).toFixed(2)}%) is the biggest lever — negotiate your aggregator rate.` });
+    else insights.push({ tone: "good", text: `Net margin is healthy at ${netMarginPct}% of volume (${netRevenueXaf.toLocaleString()} XAF net this period).` });
+    for (const r of byRail) {
+      if (r.netMarginPct <= 0) insights.push({ tone: "bad", text: `${r.method} loses money at ${r.netMarginPct}% net — costs exceed its take. Widen its spread or de-prioritise it.` });
+    }
+    insights.push({ tone: "info", text: `Net margin uses an estimated ${(costs.payoutPct * 100).toFixed(2)}% payout cost — set your real PawaPay/Peexit/MTN/Orange rate below for an exact figure.` });
+  }
+
+  res.json({
+    period, volumeXaf, payments: completed.length,
+    feeRevenueXaf, spreadRevenueXaf, grossRevenueXaf, costsXaf, netRevenueXaf,
+    effectiveTakePct, netMarginPct, avgRevenuePerTxXaf: completed.length ? Math.round(grossRevenueXaf / completed.length) : 0,
+    byRail, daily, benchmarks, insights, costs,
+  } satisfies RevenueReport);
 });
 
 /* ---------- compliance ---------- */

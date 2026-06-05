@@ -129,6 +129,12 @@ async function main() {
     const sess = await J("/api/admin/session", auth(tok));
     ok("session reports authenticated + user", sess.body.authenticated === true && sess.body.user?.role === "Super Admin");
 
+    // Revenue intelligence: gross = fee + spread; the delivered Lightning payment is counted, with non-zero spread.
+    const rev = await J("/api/admin/revenue?period=all", auth(tok));
+    ok("revenue gross = fee + spread", rev.status === 200 && rev.body.grossRevenueXaf === rev.body.feeRevenueXaf + rev.body.spreadRevenueXaf);
+    ok("revenue books the FX spread (was invisible)", rev.body.payments >= 1 && rev.body.spreadRevenueXaf > 0);
+    ok("revenue nets out costs", rev.body.netRevenueXaf === rev.body.grossRevenueXaf - rev.body.costsXaf && Array.isArray(rev.body.insights));
+
     // 7b. Per-user accounts + RBAC enforcement
     const mkSupport = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "support-pass", role: "Support Agent" }) }));
     ok("super admin creates a user → 201", mkSupport.status === 201 && mkSupport.body.user?.username === "agent1");

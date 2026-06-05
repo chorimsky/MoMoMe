@@ -11,7 +11,10 @@ const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "help@momome.app", phone: "+237 233 00 00 00", logo: null },
   channels: { Email: true, SMS: true, WhatsApp: false },
   rails: { defaultRail: "Lightning", autoSwitch: true, threshold: 200000 },
-  pricing: { feePct: FEE_PCT, spreadBps: { ...RAIL_SPREAD_BPS } },
+  // Cost assumptions for net-margin intelligence (override with real rail rates):
+  // payout ≈ Mobile Money disbursement cost (PawaPay/Peexit/MTN/Orange) as a
+  // fraction of delivered XAF; rail ≈ crypto-in cost; fixed = per-tx flat cost.
+  pricing: { feePct: FEE_PCT, spreadBps: { ...RAIL_SPREAD_BPS }, costs: { payoutPct: 0.015, railPct: 0.001, fixedXaf: 0 } },
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
@@ -26,7 +29,11 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     company: { ...DEFAULTS.company, ...(d.company ?? {}) },
     channels: { ...DEFAULTS.channels, ...(d.channels ?? {}) },
     rails: { ...DEFAULTS.rails, ...(d.rails ?? {}) },
-    pricing: { feePct: d.pricing?.feePct ?? DEFAULTS.pricing.feePct, spreadBps: { ...DEFAULTS.pricing.spreadBps, ...(d.pricing?.spreadBps ?? {}) } },
+    pricing: {
+      feePct: d.pricing?.feePct ?? DEFAULTS.pricing.feePct,
+      spreadBps: { ...DEFAULTS.pricing.spreadBps, ...(d.pricing?.spreadBps ?? {}) },
+      costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
+    },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
   };
 });
@@ -44,6 +51,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     pricing: {
       feePct: patch.pricing?.feePct ?? settings.pricing.feePct,
       spreadBps: { ...settings.pricing.spreadBps, ...(patch.pricing?.spreadBps ?? {}) },
+      costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
   };

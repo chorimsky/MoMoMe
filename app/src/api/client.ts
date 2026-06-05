@@ -5,7 +5,7 @@
 import type {
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
-  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, ComplianceSnapshot, PeexPanel,
+  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, ResolveMerchantResult, CountryCode, ProviderId, RoutingSnapshot,
 } from "@shared/types.js";
@@ -150,6 +150,7 @@ export const api = {
 
   adminLiquidity: () => req<LiquiditySnapshot>("/admin/liquidity"),
   adminPricing: () => req<PricingInfo>("/admin/pricing"),
+  adminRevenue: (period = "30d") => req<RevenueReport>(`/admin/revenue?period=${period}`),
   adminCompliance: () => req<ComplianceSnapshot>("/admin/compliance"),
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),

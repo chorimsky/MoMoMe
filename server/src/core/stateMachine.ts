@@ -10,7 +10,7 @@
    ============================================================ */
 import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types.js";
 import { putPayment, listPayments, findPaymentByRef } from "./store.js";
-import { recordTxn, reversePayment, hasDelivered, balance } from "./ledger.js";
+import { recordTxn, reversePayment, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
@@ -273,25 +273,42 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   }
 }
 
-/** Admin: re-attempt delivery of a stuck/failed payment. Exactly-once: reuses the
- *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay)
- *  and posts the delivery ledger legs once. */
+/** Admin: re-attempt delivery of a stuck payment. Exactly-once: reuses the
+ *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay).
+ *  Honours the same real-money safety as the settle path and only marks DELIVERED
+ *  on an authoritative payout confirmation (never eagerly on "accepted"). */
 export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
-  // Retry reuses the original aggregator (idempotent on the ref); if none was
-  // chosen yet, pick a funded one now.
-  const agg = p.aggregator ? aggregatorByName(p.aggregator) : await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf);
+  if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
+
+  // Is THIS payment's crypto inbound real money? (Same test as confirmInbound.)
+  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+  // Reuse the original aggregator (idempotent on the ref); else pick a funded one,
+  // requiring a LIVE rail when real money is involved.
+  const agg = p.aggregator
+    ? aggregatorByName(p.aggregator)
+    : await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal);
   if (!agg) return false;
-  const res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
-  if (!hasDelivered(p.id)) {
-    recordTxn(p.id, [
-      { account: "payout_float_XAF", direction: "debit", amount: p.xaf, currency: "XAF" },
-      { account: "external_recipient", direction: "credit", amount: p.xaf, currency: "XAF" },
-    ]);
+  // SAFETY: never move REAL Mobile Money for a non-real (simulated) crypto inbound.
+  if (aggregatorLive(agg.name) && !cryptoReal) return false;
+  p.aggregator = agg.name;
+
+  let res;
+  try {
+    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
+  } catch {
+    return false;
   }
-  transition(p, "PAYOUT_CONFIRMED", res.providerRef);
-  transition(p, "DELIVERED", res.status === "duplicate" ? "delivery reconciled by admin" : "retried by admin");
-  ensureIdentity(p.recipient, p.ref); // delivered → provision the recipient's identity
+  p.payoutRef = res.providerRef;
+  // Hand off to the confirmation path: onPayoutResult posts the delivery legs and
+  // transitions to DELIVERED — only once the payout actually COMPLETED.
+  transition(p, "PAYOUT_REQUESTED", "retried by admin");
+  if (res.simulated) { await onPayoutResult(p.ref, "COMPLETED", res.providerRef); return true; }
+  // Real rail: confirm via status query; settle on COMPLETED/FAILED, else keep polling.
+  let status: PayoutStatus = "PENDING";
+  try { status = (await agg.queryStatus(p.ref)) ?? "PENDING"; } catch { /* keep PENDING */ }
+  if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status, res.providerRef);
+  else void pollPayout(p.ref);
   return true;
 }
 

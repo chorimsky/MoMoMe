@@ -921,15 +921,6 @@ ${guideLines}
 - Contact: help@momome.app
 `);
 }
-function ogImage() {
-  write("/og.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-<rect width="1200" height="630" fill="#1b1916"/><rect width="1200" height="630" fill="url(#g)" opacity="0.18"/>
-<defs><radialGradient id="g" cx="30%" cy="25%" r="80%"><stop offset="0%" stop-color="#FFC92E"/><stop offset="100%" stop-color="#1b1916"/></radialGradient></defs>
-<text x="80" y="250" font-family="Bagel Fat One, Fredoka, sans-serif" font-size="120" font-weight="700"><tspan fill="#FFC92E">MoMo</tspan><tspan fill="#1F9E5A">›</tspan><tspan fill="#F2660D">Me</tspan></text>
-<text x="84" y="340" font-family="Fredoka, sans-serif" font-size="46" fill="#f5f1e8" font-weight="600">Pay Mobile Money instantly</text>
-<text x="84" y="408" font-family="Nunito, sans-serif" font-size="30" fill="#c3bcb0">Bitcoin · Lightning · Stablecoins → MTN &amp; Orange Money</text>
-<text x="84" y="556" font-family="Nunito, sans-serif" font-size="26" fill="#8f897e">Crypto-to-Mobile-Money settlement infrastructure for Africa</text></svg>`);
-}
 
 /* ---------- run ---------- */
 for (const lc of ["en", "fr"]) {
@@ -944,7 +935,6 @@ for (const lc of ["en", "fr"]) {
   useCaseIndex(lc);
 }
 frHome();
-ogImage(); // keep og.svg as a secondary asset
 const total = sitemap();
 robots();
 aiTxt();

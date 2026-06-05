@@ -93,9 +93,10 @@ api.use("/admin", (req, res, next) => {
   const role = user.role;
   (req as unknown as AdminReq).session = { uid: user.id, role };
 
-  // Inside this mounted middleware Express strips the "/admin" prefix, so
-  // req.path is the sub-path (e.g. "/liquidity", "/users", "/password").
-  const sub = req.path.startsWith("/admin/") ? req.path.slice("/admin".length) : req.path;
+  // Inside this mounted middleware Express has already stripped the "/admin"
+  // mount prefix, so req.path is the sub-path itself (e.g. "/liquidity",
+  // "/users", "/users/:id", "/password"). Do NOT strip again.
+  const sub = req.path;
 
   // User administration is Super-Admin only.
   if (sub === "/users" || sub.startsWith("/users/")) {

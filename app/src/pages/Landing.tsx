@@ -55,11 +55,11 @@ export function Landing() {
 
         <section className="hero">
           <div className="hero-text">
-            <div className="eyebrow">⚡ Bitcoin → Mobile Money</div>
-            <h1>Spend Bitcoin. Receive Mobile Money.</h1>
-            <p className="lede">Convert Bitcoin, Lightning and USDT into MTN &amp; Orange Money — instantly, in seconds.</p>
+            <div className="eyebrow">⚡ Instant Mobile Money</div>
+            <h1>Send money to any Mobile Money number.</h1>
+            <p className="lede">Pay MTN &amp; Orange Money accounts directly — delivered in seconds, from anywhere in the world.</p>
             <div className="cta-row">
-              <Link className="btn btn-primary btn-lg" to="/send">Send Money</Link>
+              <Link className="btn btn-primary btn-lg" to="/send">Send Mobile Money</Link>
               <a className="btn btn-ghost btn-lg" href="#how">How it works</a>
             </div>
             <div className="trust">
@@ -115,8 +115,8 @@ export function Landing() {
         </section>
 
         <section className="nets">
-          <h2>Spend any of these</h2>
-          <p className="how-sub">Pay from Bitcoin, Lightning or USDT — your recipient just sees Mobile Money.</p>
+          <h2>Pay however suits you</h2>
+          <p className="how-sub">Fund your payment with Bitcoin, Lightning or USDT — your recipient only ever receives Mobile Money.</p>
           <div className="nets-row">
             {NETS.map((n) => (
               <div className="net-chip" key={n.t}>

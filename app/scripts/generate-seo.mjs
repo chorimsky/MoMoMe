@@ -385,6 +385,87 @@ const GUIDES = [
   },
 ];
 
+/* ---------- corridors (remittance source → African destination) ---------- */
+const ORIGINS = [
+  { name: "France", fr: "France", cur: "EUR", prepEn: "from France", prepFr: "depuis la France" },
+  { name: "United States", fr: "États-Unis", cur: "USD", prepEn: "from the United States", prepFr: "depuis les États-Unis" },
+  { name: "United Kingdom", fr: "Royaume-Uni", cur: "GBP", prepEn: "from the United Kingdom", prepFr: "depuis le Royaume-Uni" },
+  { name: "Canada", fr: "Canada", cur: "CAD", prepEn: "from Canada", prepFr: "depuis le Canada" },
+  { name: "Germany", fr: "Allemagne", cur: "EUR", prepEn: "from Germany", prepFr: "depuis l'Allemagne" },
+  { name: "Belgium", fr: "Belgique", cur: "EUR", prepEn: "from Belgium", prepFr: "depuis la Belgique" },
+  { name: "Italy", fr: "Italie", cur: "EUR", prepEn: "from Italy", prepFr: "depuis l'Italie" },
+  { name: "Switzerland", fr: "Suisse", cur: "CHF", prepEn: "from Switzerland", prepFr: "depuis la Suisse" },
+  { name: "United Arab Emirates", fr: "Émirats arabes unis", cur: "AED", prepEn: "from the UAE", prepFr: "depuis les Émirats arabes unis" },
+  { name: "South Africa", fr: "Afrique du Sud", cur: "ZAR", prepEn: "from South Africa", prepFr: "depuis l'Afrique du Sud" },
+];
+const CORRIDOR_DEST_NAMES = ["Cameroon", "Nigeria", "Kenya", "Ghana", "Senegal", "Ivory Coast"];
+const CORRIDOR_DESTS = COUNTRIES.filter((c) => CORRIDOR_DEST_NAMES.includes(c.name));
+const fromOrigin = (o, lc) => (lc === "fr" ? o.prepFr : o.prepEn);
+const toDest = (d, lc) => (lc === "fr" ? `${d.prepFr} ${d.fr}` : `to ${d.name}`);
+const corridorUrl = (o, d, lc) => (lc === "fr" ? `/fr/envoyer-argent-${slug(d.name)}-depuis-${slug(o.name)}/` : `/send-money-to-${slug(d.name)}-from-${slug(o.name)}/`);
+const corridorHubUrl = (lc) => (lc === "fr" ? "/fr/envoyer-de-l-argent-en-afrique/" : "/send-money-to-africa/");
+
+/* ---------- use cases ---------- */
+const USE_CASES = [
+  {
+    slug: "remittances-to-africa",
+    en: { title: "Crypto Remittances to Africa", h1: "Crypto remittances to Africa", desc: "Send remittances to Africa with Bitcoin, Lightning or USDT — delivered as Mobile Money. Faster and cheaper than traditional money-transfer corridors.",
+      answer: "A crypto remittance to Africa lets the diaspora send money home using Bitcoin, Lightning or stablecoins, with the recipient receiving local Mobile Money in seconds. MoMo›Me handles the conversion and pays out to MTN or Orange Money — no bank account, no agent queue, lower fees.",
+      sections: [["The remittance problem", "Traditional remittance corridors to Africa are slow and expensive, often charging 7–10% and taking days. The diaspora wants to send value home instantly and cheaply, and recipients want it on the wallet they already use — Mobile Money."], ["How crypto fixes it", "Bitcoin and the Lightning Network settle globally in seconds at near-zero cost; stablecoins move dollars without banks. MoMo›Me converts the inbound crypto and delivers a Mobile Money payout, so a transfer that took days now lands in seconds."], ["No crypto knowledge required", "The sender pays with crypto; the recipient simply receives Mobile Money in their local currency on MTN or Orange Money. No app, no account, no seed phrases."]],
+      faqs: [["What is a crypto remittance?", "Sending money across borders using cryptocurrency — here, the recipient receives local Mobile Money instead of crypto."], ["Is it cheaper than a money-transfer operator?", "Usually, yes. Bitcoin and Lightning avoid correspondent banks and card networks, cutting fees and settlement time."], ["Which countries can receive?", "MoMo›Me is live in Cameroon (MTN & Orange Money) and expanding across Africa."]] },
+    fr: { title: "Transferts d'argent en crypto vers l'Afrique", h1: "Transferts d'argent en crypto vers l'Afrique", desc: "Envoyez des transferts vers l'Afrique avec Bitcoin, Lightning ou USDT — livrés en Mobile Money. Plus rapide et moins cher que les corridors de transfert traditionnels.",
+      answer: "Un transfert en crypto vers l'Afrique permet à la diaspora d'envoyer de l'argent au pays avec du Bitcoin, du Lightning ou des stablecoins, le destinataire recevant du Mobile Money local en quelques secondes. MoMo›Me gère la conversion et paie sur MTN ou Orange Money — sans compte bancaire, sans file d'attente, avec des frais réduits.",
+      sections: [["Le problème des transferts", "Les corridors de transfert traditionnels vers l'Afrique sont lents et coûteux, facturant souvent 7 à 10 % et prenant plusieurs jours. La diaspora veut envoyer de la valeur au pays instantanément et à moindre coût, et les destinataires la veulent sur le portefeuille qu'ils utilisent déjà — le Mobile Money."], ["Comment la crypto règle le problème", "Bitcoin et le réseau Lightning se règlent dans le monde entier en quelques secondes à un coût quasi nul ; les stablecoins déplacent des dollars sans banques. MoMo›Me convertit la crypto entrante et livre un paiement Mobile Money — un transfert qui prenait des jours arrive désormais en quelques secondes."], ["Aucune connaissance de la crypto requise", "L'expéditeur paie en crypto ; le destinataire reçoit simplement du Mobile Money dans sa monnaie locale sur MTN ou Orange Money. Sans application, sans compte, sans phrase de récupération."]],
+      faqs: [["Qu'est-ce qu'un transfert en crypto ?", "Envoyer de l'argent à l'international en utilisant une cryptomonnaie — ici, le destinataire reçoit du Mobile Money local au lieu de crypto."], ["Est-ce moins cher qu'un opérateur de transfert ?", "Généralement oui. Bitcoin et Lightning évitent les banques correspondantes et les réseaux de cartes, réduisant les frais et les délais."], ["Quels pays peuvent recevoir ?", "MoMo›Me est disponible au Cameroun (MTN et Orange Money) et s'étend à travers l'Afrique."]] },
+  },
+  {
+    slug: "pay-freelancers-in-africa",
+    en: { title: "Pay Freelancers & Remote Workers in Africa", h1: "Pay freelancers and remote workers in Africa", desc: "Pay freelancers, contractors and remote workers in Africa with Bitcoin, Lightning or USDT — settled instantly to their Mobile Money wallet.",
+      answer: "Pay African freelancers by sending Bitcoin, Lightning or USDT through MoMo›Me; they receive local Mobile Money on MTN or Orange Money in seconds. No international bank transfer, no PayPal restrictions, no multi-day waits.",
+      sections: [["Paying talent across borders", "African freelancers and remote workers are often locked out of PayPal, Stripe and international banking. Getting paid means slow wires, high fees and currency hassle."], ["A faster way to pay", "With MoMo›Me, a client anywhere can pay with stablecoins or Bitcoin and the freelancer receives Mobile Money instantly in local currency — predictable, fast and low-fee."], ["Built for recurring payouts", "Pay once or on a schedule. Each payout shows the exact amount the worker receives, with a reference for their records."]],
+      faqs: [["How do I pay an African freelancer?", "Send Bitcoin, Lightning or USDT via MoMo›Me to their Mobile Money number; they receive local currency on MTN or Orange Money."], ["Does the freelancer need crypto?", "No. They receive ordinary Mobile Money. Only the payer uses crypto."], ["Which countries are supported?", "Live in Cameroon, expanding across Africa."]] },
+    fr: { title: "Payer des freelances et travailleurs à distance en Afrique", h1: "Payer des freelances et travailleurs à distance en Afrique", desc: "Payez des freelances, prestataires et travailleurs à distance en Afrique avec Bitcoin, Lightning ou USDT — réglés instantanément sur leur portefeuille Mobile Money.",
+      answer: "Payez des freelances africains en envoyant du Bitcoin, du Lightning ou de l'USDT via MoMo›Me ; ils reçoivent du Mobile Money local sur MTN ou Orange Money en quelques secondes. Sans virement bancaire international, sans restrictions PayPal, sans attente de plusieurs jours.",
+      sections: [["Payer les talents au-delà des frontières", "Les freelances et travailleurs à distance africains sont souvent exclus de PayPal, Stripe et de la banque internationale. Être payé implique des virements lents, des frais élevés et des soucis de change."], ["Une façon plus rapide de payer", "Avec MoMo›Me, un client n'importe où peut payer en stablecoins ou en Bitcoin et le freelance reçoit du Mobile Money instantanément en monnaie locale — prévisible, rapide et peu coûteux."], ["Conçu pour les paiements récurrents", "Payez une fois ou de façon planifiée. Chaque paiement affiche le montant exact reçu par le travailleur, avec une référence pour ses archives."]],
+      faqs: [["Comment payer un freelance africain ?", "Envoyez du Bitcoin, du Lightning ou de l'USDT via MoMo›Me sur son numéro Mobile Money ; il reçoit la monnaie locale sur MTN ou Orange Money."], ["Le freelance a-t-il besoin de crypto ?", "Non. Il reçoit du Mobile Money ordinaire. Seul le payeur utilise la crypto."], ["Quels pays sont pris en charge ?", "Disponible au Cameroun, en expansion à travers l'Afrique."]] },
+  },
+  {
+    slug: "crypto-payroll-africa",
+    en: { title: "Crypto Payroll for African Teams", h1: "Crypto payroll for African teams", desc: "Run payroll for African teams with Bitcoin, Lightning or USDT — each employee paid instantly to Mobile Money in local currency.",
+      answer: "Crypto payroll for Africa means funding salaries with stablecoins or Bitcoin and paying each team member as Mobile Money. MoMo›Me converts and delivers to MTN or Orange Money, so distributed and remote-first companies can pay African staff without local bank rails.",
+      sections: [["Payroll without local banks", "Companies hiring across Africa struggle with local payroll rails and slow international transfers. Stablecoins give a single funding source; Mobile Money is the universal local payout."], ["How it works", "Fund with USDT or Bitcoin, enter each employee's Mobile Money number and net amount, and MoMo›Me delivers their pay in local currency — instantly, with a receipt."], ["Predictable and transparent", "Each payout is exact and logged. Stablecoins keep amounts stable in dollar terms while staff receive spendable local money."]],
+      faqs: [["Can I pay a whole team?", "Yes — pay each member's Mobile Money number; stablecoins make a clean single funding source."], ["Do employees receive crypto?", "No. Employees receive Mobile Money in local currency on MTN or Orange Money."], ["Where is this available?", "Cameroon today, expanding across Africa."]] },
+    fr: { title: "Paie en crypto pour les équipes africaines", h1: "Paie en crypto pour les équipes africaines", desc: "Gérez la paie des équipes africaines avec Bitcoin, Lightning ou USDT — chaque employé payé instantanément en Mobile Money dans sa monnaie locale.",
+      answer: "La paie en crypto pour l'Afrique consiste à financer les salaires avec des stablecoins ou du Bitcoin et à payer chaque membre de l'équipe en Mobile Money. MoMo›Me convertit et livre sur MTN ou Orange Money, permettant aux entreprises distribuées de payer le personnel africain sans rails bancaires locaux.",
+      sections: [["La paie sans banques locales", "Les entreprises qui recrutent en Afrique peinent avec les rails de paie locaux et les virements internationaux lents. Les stablecoins offrent une source de financement unique ; le Mobile Money est le paiement local universel."], ["Comment ça marche", "Financez avec de l'USDT ou du Bitcoin, saisissez le numéro Mobile Money et le montant net de chaque employé, et MoMo›Me livre la paie en monnaie locale — instantanément, avec un reçu."], ["Prévisible et transparent", "Chaque paiement est exact et journalisé. Les stablecoins maintiennent les montants stables en dollars pendant que le personnel reçoit de la monnaie locale dépensable."]],
+      faqs: [["Puis-je payer toute une équipe ?", "Oui — payez le numéro Mobile Money de chaque membre ; les stablecoins offrent une source de financement unique et propre."], ["Les employés reçoivent-ils de la crypto ?", "Non. Les employés reçoivent du Mobile Money en monnaie locale sur MTN ou Orange Money."], ["Où est-ce disponible ?", "Au Cameroun aujourd'hui, en expansion à travers l'Afrique."]] },
+  },
+  {
+    slug: "accept-crypto-settle-mobile-money",
+    en: { title: "Accept Bitcoin & USDT, Settle to Mobile Money", h1: "Accept Bitcoin & USDT, settle to Mobile Money", desc: "Let merchants and businesses accept Bitcoin, Lightning or USDT and settle directly to Mobile Money — no crypto on the balance sheet.",
+      answer: "Merchant settlement with MoMo›Me lets a business accept Bitcoin, Lightning or USDT from customers and receive the value as Mobile Money on MTN or Orange Money. The business never holds crypto or manages a wallet — it just gets paid in local currency.",
+      sections: [["Accept global payment, settle local", "Businesses want to accept crypto-paying customers worldwide without taking on crypto volatility or custody. MoMo›Me bridges that: customers pay in crypto, the merchant settles in Mobile Money."], ["How it works", "The customer pays Bitcoin, Lightning or USDT; MoMo›Me converts and delivers a Mobile Money payout to the merchant's number in local currency, with a reference for reconciliation."], ["No custody, no volatility", "The merchant never holds crypto. Settlement is in local Mobile Money, so the books stay simple."]],
+      faqs: [["Does my business hold crypto?", "No. You receive Mobile Money in local currency; MoMo›Me handles the crypto side."], ["What can customers pay with?", "Bitcoin (on-chain), the Lightning Network, or stablecoins such as USDT."], ["Where can I settle?", "To MTN Mobile Money and Orange Money in Cameroon, with more of Africa coming."]] },
+    fr: { title: "Acceptez Bitcoin et USDT, réglez en Mobile Money", h1: "Acceptez Bitcoin et USDT, réglez en Mobile Money", desc: "Permettez aux commerçants et entreprises d'accepter Bitcoin, Lightning ou USDT et de régler directement en Mobile Money — sans crypto au bilan.",
+      answer: "Le règlement marchand avec MoMo›Me permet à une entreprise d'accepter du Bitcoin, du Lightning ou de l'USDT de ses clients et de recevoir la valeur en Mobile Money sur MTN ou Orange Money. L'entreprise ne détient jamais de crypto ni ne gère de portefeuille — elle est simplement payée en monnaie locale.",
+      sections: [["Accepter le paiement mondial, régler en local", "Les entreprises veulent accepter des clients payant en crypto dans le monde entier sans subir la volatilité ni la conservation. MoMo›Me fait le pont : les clients paient en crypto, le commerçant règle en Mobile Money."], ["Comment ça marche", "Le client paie en Bitcoin, Lightning ou USDT ; MoMo›Me convertit et livre un paiement Mobile Money sur le numéro du commerçant en monnaie locale, avec une référence pour la réconciliation."], ["Sans conservation, sans volatilité", "Le commerçant ne détient jamais de crypto. Le règlement se fait en Mobile Money local, pour une comptabilité simple."]],
+      faqs: [["Mon entreprise détient-elle de la crypto ?", "Non. Vous recevez du Mobile Money en monnaie locale ; MoMo›Me gère le côté crypto."], ["Avec quoi les clients peuvent-ils payer ?", "Bitcoin (on-chain), le réseau Lightning, ou des stablecoins comme l'USDT."], ["Où puis-je régler ?", "Sur MTN Mobile Money et Orange Money au Cameroun, avec le reste de l'Afrique à venir."]] },
+  },
+  {
+    slug: "cross-border-business-payments-to-africa",
+    en: { title: "Cross-Border Business Payments to Africa", h1: "Cross-border business payments to Africa", desc: "Pay suppliers, partners and staff in Africa from anywhere using Bitcoin, Lightning or USDT — settled as Mobile Money in local currency.",
+      answer: "Cross-border B2B payments to Africa with MoMo›Me let a company pay suppliers, agents or staff by sending crypto, with the recipient receiving Mobile Money. It replaces slow, costly correspondent-bank wires with instant settlement.",
+      sections: [["The B2B payments gap", "Paying suppliers and partners in Africa via banks means correspondent fees, FX spreads and multi-day delays. Many recipients don't have business bank accounts but do have Mobile Money."], ["Instant settlement over crypto rails", "Fund with USDT or Bitcoin and MoMo›Me delivers Mobile Money to the recipient in local currency in seconds — with a reference for every payment."], ["Simple reconciliation", "Each payout is exact and logged, making cross-border payables predictable."]],
+      faqs: [["Can I pay suppliers in Africa?", "Yes. Send crypto and the supplier receives Mobile Money in local currency."], ["Is it faster than a bank wire?", "Yes — crypto rails settle in seconds instead of days, without correspondent banks."], ["Which destinations?", "Cameroon today; expanding across Africa."]] },
+    fr: { title: "Paiements interentreprises transfrontaliers vers l'Afrique", h1: "Paiements interentreprises transfrontaliers vers l'Afrique", desc: "Payez fournisseurs, partenaires et personnel en Afrique depuis n'importe où avec Bitcoin, Lightning ou USDT — réglés en Mobile Money dans la monnaie locale.",
+      answer: "Les paiements B2B transfrontaliers vers l'Afrique avec MoMo›Me permettent à une entreprise de payer fournisseurs, agents ou personnel en envoyant de la crypto, le destinataire recevant du Mobile Money. Cela remplace les virements bancaires lents et coûteux par un règlement instantané.",
+      sections: [["Le déficit des paiements B2B", "Payer fournisseurs et partenaires en Afrique via les banques implique des frais de correspondance, des marges de change et des délais de plusieurs jours. Beaucoup de destinataires n'ont pas de compte bancaire professionnel mais ont du Mobile Money."], ["Règlement instantané sur les rails crypto", "Financez avec de l'USDT ou du Bitcoin et MoMo›Me livre du Mobile Money au destinataire en monnaie locale en quelques secondes — avec une référence pour chaque paiement."], ["Réconciliation simple", "Chaque paiement est exact et journalisé, rendant les dettes transfrontalières prévisibles."]],
+      faqs: [["Puis-je payer des fournisseurs en Afrique ?", "Oui. Envoyez de la crypto et le fournisseur reçoit du Mobile Money en monnaie locale."], ["Est-ce plus rapide qu'un virement bancaire ?", "Oui — les rails crypto se règlent en quelques secondes au lieu de plusieurs jours, sans banques correspondantes."], ["Quelles destinations ?", "Le Cameroun aujourd'hui ; en expansion à travers l'Afrique."]] },
+  },
+];
+const useCaseUrl = (uc, lc) => (lc === "fr" ? `/fr/cas-usage/${uc.slug}/` : `/use-cases/${uc.slug}/`);
+const useCaseHubUrl = (lc) => (lc === "fr" ? "/fr/cas-usage/" : "/use-cases/");
+
 /* ---------- JSON-LD ---------- */
 const orgNode = {
   "@type": "Organization", "@id": `${SITE}/#org`, name: "MoMo›Me", alternateName: "MoMoMe",
@@ -468,7 +549,7 @@ function footer(lc) {
 <div class="cols">
 <div><h4>${heads[0]}</h4>${al}</div>
 <div><h4>${heads[1]}</h4>${gl}</div>
-<div><h4>${heads[2]}</h4><a href="${covUrl(lc)}">${lc === "fr" ? "Tous les pays" : "All countries"}</a><a href="${pageUrl(ASSETS[0], COUNTRIES[0], lc)}">Cameroun</a><a href="${pageUrl(ASSETS[4], REGIONS[2], lc)}">${lc === "fr" ? "Afrique" : "Africa"}</a></div>
+<div><h4>${heads[2]}</h4><a href="${covUrl(lc)}">${lc === "fr" ? "Tous les pays" : "All countries"}</a><a href="${corridorHubUrl(lc)}">${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</a><a href="${useCaseHubUrl(lc)}">${lc === "fr" ? "Cas d'usage" : "Use cases"}</a><a href="${pageUrl(ASSETS[4], REGIONS[2], lc)}">${lc === "fr" ? "Afrique" : "Africa"}</a></div>
 <div><h4>${heads[3]}</h4><a href="${APP}">${T[lc].payCta}</a><a href="/contact">Contact</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div>
 </div>
 <p class="narr">${narr}</p><p class="disc">${disc}</p></div></footer>`;
@@ -672,6 +753,114 @@ ${ctaHtml(t, "Disponible au Cameroun (MTN Mobile Money et Orange Money, XAF) et 
   write(url, shell({ lc, url, altUrl, title: t.homeTitle, description: "Payez n'importe quel numéro MTN ou Orange Money instantanément. MoMo›Me transforme Bitcoin, Lightning et stablecoins (USDT) en Mobile Money à travers l'Afrique — sans compte, sans carte, livré en quelques secondes.", keywords: "bitcoin vers mobile money, usdt vers mobile money, lightning vers mobile money, crypto vers mobile money, encaisser crypto afrique, retirer bitcoin cameroun, infrastructure de paiement afrique", jsonld, body }));
 }
 
+/* ---------- corridor + use-case builders ---------- */
+function corridorPage(o, d, lc) {
+  const t = T[lc];
+  const url = corridorUrl(o, d, lc), altUrl = corridorUrl(o, d, lc === "en" ? "fr" : "en");
+  if (lc === "en") sitemapEntries.push({ paths: { en: url, fr: altUrl }, priority: 0.65, changefreq: "weekly" });
+  const dn = locName(d, lc), on = lc === "fr" ? o.fr : o.name, to = toDest(d, lc), from = fromOrigin(o, lc);
+  const prov = d.providers.join(lc === "fr" ? " et " : " and ");
+  const title = lc === "fr" ? `Envoyer de l'argent ${to} ${from} | ${BRAND}` : `Send Money ${to} ${from} | ${BRAND}`;
+  const description = lc === "fr"
+    ? `Envoyez de l'argent ${to} ${from} avec Bitcoin, Lightning ou USDT — livré en Mobile Money (${d.cur}) sur ${prov}. Plus rapide et moins cher qu'un transfert classique.`
+    : `Send money ${to} ${from} with Bitcoin, Lightning or USDT — delivered as Mobile Money (${d.cur}) on ${prov}. Faster and cheaper than a traditional transfer.`;
+  const keywords = lc === "fr"
+    ? `envoyer de l'argent ${dn.toLowerCase()}, transfert ${dn.toLowerCase()} ${on.toLowerCase()}, envoyer argent ${on.toLowerCase()} ${dn.toLowerCase()}, mobile money ${dn.toLowerCase()}`
+    : `send money to ${dn.toLowerCase()}, ${dn.toLowerCase()} remittance, send money ${on.toLowerCase()} to ${dn.toLowerCase()}, mobile money ${dn.toLowerCase()}`;
+  const steps = lc === "fr"
+    ? [`Saisissez le numéro Mobile Money du destinataire ${to} et le montant à recevoir en ${d.cur}.`, `Payez avec du Bitcoin, du Lightning ou de l'USDT ${from} — selon ce que vous détenez.`, `MoMo›Me convertit et livre automatiquement le paiement Mobile Money sur son portefeuille ${d.providers[0]}.`]
+    : [`Enter the recipient's Mobile Money number ${to.replace(/^to /, "in ")} and the amount they should receive in ${d.cur}.`, `Pay with Bitcoin, Lightning or USDT ${from} — whatever you hold.`, `MoMo›Me converts it and delivers the Mobile Money payout to their ${d.providers[0]} wallet automatically.`];
+  const faqs = lc === "fr" ? [
+    [`Comment envoyer de l'argent ${to} ${from} ?`, `Ouvrez MoMo›Me, saisissez le numéro Mobile Money du destinataire et le montant en ${d.cur}, puis payez avec du Bitcoin, du Lightning ou de l'USDT. Le paiement Mobile Money est livré automatiquement — sans compte bancaire.`],
+    [`Combien de temps cela prend-il ?`, `Lightning est instantané ; le Bitcoin on-chain prend 10 à 60 minutes ; les stablecoins quelques minutes. Le paiement Mobile Money arrive ensuite en quelques secondes.`],
+    [`Combien ça coûte ?`, `De petits frais initiaux, affichés avant le paiement. Les rails crypto évitent les banques correspondantes, donc c'est souvent moins cher qu'un opérateur de transfert classique.`],
+    [`Le destinataire a-t-il besoin d'un compte bancaire ou de crypto ?`, `Non. Le destinataire reçoit du Mobile Money ordinaire sur son numéro ${prov} existant.`],
+    [`Quels fournisseurs Mobile Money ${to} ?`, `${prov}${d.live ? "" : " (au fur et à mesure du déploiement)"}.`],
+  ] : [
+    [`How do I send money ${to} ${from}?`, `Open MoMo›Me, enter the recipient's Mobile Money number and amount in ${d.cur}, then pay with Bitcoin, Lightning or USDT. The Mobile Money payout is delivered automatically — no bank account needed.`],
+    [`How long does it take?`, `Lightning is instant; on-chain Bitcoin takes 10–60 minutes; stablecoins a few minutes. The Mobile Money payout then lands in seconds.`],
+    [`How much does it cost?`, `One small upfront fee shown before you pay. Crypto rails skip correspondent banks, so it's often cheaper than a traditional money-transfer operator.`],
+    [`Does the recipient need a bank account or crypto?`, `No. The recipient receives ordinary Mobile Money on their existing ${prov} number.`],
+    [`Which Mobile Money providers ${to.replace(/^to /, "in ")}?`, `${prov}${d.live ? "" : " (as coverage rolls out)"}.`],
+  ];
+  const otherOrigins = ORIGINS.filter((x) => x.name !== o.name).slice(0, 6).map((x) => `<a class="chip" href="${corridorUrl(x, d, lc)}">${lc === "fr" ? `${dn} ${x.prepFr}` : `${dn} ${x.prepEn}`}</a>`).join("");
+  const otherDests = CORRIDOR_DESTS.filter((x) => x.name !== d.name).map((x) => `<a class="chip" href="${corridorUrl(o, x, lc)}">${lc === "fr" ? `${x.fr} ${from}` : `${x.name} ${from}`}</a>`).join("");
+  const jsonld = graph(orgNode, siteNode, serviceNode(`Send money ${to} ${from}`, description, d.country), faqNode(faqs),
+    crumbNode([{ name: t.home, url: homeUrl(lc) }, { name: lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa", url: corridorHubUrl(lc) }, { name: `${dn} · ${on}`, url }]));
+  const live = d.live ? `<span class="pill">${esc(lc === "fr" ? "Disponible" : "Live")}</span>` : `<span class="pill soon">${esc(lc === "fr" ? "Bientôt" : "Soon")}</span>`;
+  const body = `
+<div class="crumb"><a href="${homeUrl(lc)}">${esc(t.home)}</a> › <a href="${corridorHubUrl(lc)}">${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</a> › ${esc(dn)}</div>
+${langSwitch(url, altUrl, lc)}
+<h1>${lc === "fr" ? "Envoyer de l'argent" : "Send money"} ${esc(to)} ${esc(from)} ${live}</h1>
+<p class="lede">${lc === "fr" ? `Envoyez de l'argent ${to} ${from} avec du Bitcoin, du Lightning ou de l'USDT. Le destinataire reçoit des ${d.cur} sur ${prov} en quelques secondes — sans banque.` : `Send money ${to} ${from} with Bitcoin, Lightning or USDT. The recipient receives ${d.cur} on ${prov} in seconds — no bank involved.`}</p>
+<div class="answer"><div class="q">${lc === "fr" ? "Réponse rapide" : "Quick answer"}: ${lc === "fr" ? `comment envoyer de l'argent ${to} ${from} ?` : `how do I send money ${to} ${from}?`}</div><p>${faqs[0][1]}</p></div>
+<h2>${lc === "fr" ? "Comment ça marche" : "How it works"}</h2>
+<div class="steps">${steps.map((s, i) => `<div class="step"><div class="n">${i + 1}</div><div>${esc(s)}</div></div>`).join("")}</div>
+<h2>${lc === "fr" ? "Devises et Mobile Money" : "Currencies & Mobile Money"}</h2>
+<div class="tags"><span class="tag">${lc === "fr" ? "Depuis" : "From"}: ${esc(o.cur)}</span><span class="tag">${lc === "fr" ? "Vers" : "To"}: ${esc(d.cur)}</span>${d.providers.map((p) => `<span class="tag">${esc(p)}</span>`).join("")}</div>
+<h2>${t.faqHeading}</h2>${faqHtml(faqs)}
+${ctaHtml(t, lc === "fr" ? `Envoyez de l'argent ${to} ${from} en quelques secondes.` : `Send money ${to} ${from} in seconds.`)}
+<h2>${lc === "fr" ? `Envoyer ${to} depuis d'autres pays` : `Send ${to} from other countries`}</h2><div class="grid">${otherOrigins}</div>
+<h2>${lc === "fr" ? `Envoyer ${from} vers d'autres pays` : `Send ${from} to other countries`}</h2><div class="grid">${otherDests}</div>`;
+  write(url, shell({ lc, url, altUrl, title, description, keywords, jsonld, body }));
+}
+
+function corridorHub(lc) {
+  const t = T[lc];
+  const url = corridorHubUrl(lc), altUrl = corridorHubUrl(lc === "en" ? "fr" : "en");
+  if (lc === "en") sitemapEntries.push({ paths: { en: url, fr: altUrl }, priority: 0.8, changefreq: "weekly" });
+  const title = lc === "fr" ? `Envoyer de l'argent en Afrique avec la crypto | ${BRAND}` : `Send Money to Africa with Crypto | ${BRAND}`;
+  const description = lc === "fr"
+    ? "Envoyez de l'argent en Afrique avec Bitcoin, Lightning ou USDT — livré en Mobile Money. Corridors depuis la France, les États-Unis, le Royaume-Uni, le Canada et plus."
+    : "Send money to Africa with Bitcoin, Lightning or USDT — delivered as Mobile Money. Corridors from France, the US, the UK, Canada and more.";
+  const groups = CORRIDOR_DESTS.map((d) => `<h3>${esc(locName(d, lc))}</h3><div class="grid">${ORIGINS.map((o) => `<a class="chip" href="${corridorUrl(o, d, lc)}">${lc === "fr" ? `${o.prepFr}` : `${o.prepEn}`}</a>`).join("")}</div>`).join("");
+  const jsonld = graph(orgNode, siteNode, serviceNode("Send money to Africa", description, "Africa"), crumbNode([{ name: t.home, url: homeUrl(lc) }, { name: lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa", url }]));
+  const body = `
+<div class="crumb"><a href="${homeUrl(lc)}">${esc(t.home)}</a> › ${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</div>
+${langSwitch(url, altUrl, lc)}
+<h1>${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</h1>
+<p class="lede">${lc === "fr" ? "Envoyez de l'argent en Afrique avec du Bitcoin, du Lightning ou de l'USDT — le destinataire reçoit du Mobile Money sur MTN ou Orange Money. Choisissez votre corridor." : "Send money to Africa with Bitcoin, Lightning or USDT — the recipient receives Mobile Money on MTN or Orange Money. Pick your corridor."}</p>
+${groups}
+${ctaHtml(t, lc === "fr" ? "Payez un numéro Mobile Money en Afrique maintenant." : "Pay a Mobile Money number in Africa now.")}`;
+  write(url, shell({ lc, url, altUrl, title, description, keywords: "", jsonld, body }));
+}
+
+function useCasePage(uc, lc) {
+  const t = T[lc], c = uc[lc];
+  const url = useCaseUrl(uc, lc), altUrl = useCaseUrl(uc, lc === "en" ? "fr" : "en");
+  if (lc === "en") sitemapEntries.push({ paths: { en: url, fr: altUrl }, priority: 0.7, changefreq: "monthly" });
+  const jsonld = graph(orgNode, siteNode,
+    { "@type": "Article", inLanguage: LOCALES[lc].lang, headline: c.title, description: c.desc, author: { "@id": `${SITE}/#org` }, publisher: { "@id": `${SITE}/#org` }, datePublished: BUILD_DATE, dateModified: BUILD_DATE, mainEntityOfPage: SITE + url },
+    faqNode(c.faqs), crumbNode([{ name: t.home, url: homeUrl(lc) }, { name: lc === "fr" ? "Cas d'usage" : "Use cases", url: useCaseHubUrl(lc) }, { name: c.title, url }]));
+  const body = `
+<div class="crumb"><a href="${homeUrl(lc)}">${esc(t.home)}</a> › <a href="${useCaseHubUrl(lc)}">${lc === "fr" ? "Cas d'usage" : "Use cases"}</a> › ${esc(c.title)}</div>
+${langSwitch(url, altUrl, lc)}
+<h1>${esc(c.h1)}</h1>
+<div class="answer"><div class="q">${esc(t.inShort)}</div><p>${esc(c.answer)}</p></div>
+${c.sections.map(([h, p]) => `<h2>${esc(h)}</h2><p>${esc(p)}</p>`).join("")}
+<h2>${t.faqHeading}</h2>${faqHtml(c.faqs)}
+${ctaHtml(t, lc === "fr" ? "Payez n'importe quel numéro Mobile Money avec Bitcoin, Lightning ou USDT." : "Pay any Mobile Money number with Bitcoin, Lightning or USDT.")}
+<h2>${esc(t.keepExploring)}</h2><div class="grid">${ASSETS.map((a) => `<a class="chip" href="${hubUrl(a, lc)}">${esc(a.label)} ${lc === "fr" ? "vers" : "to"} Mobile Money</a>`).join("")}<a class="chip" href="${corridorHubUrl(lc)}">${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</a></div>`;
+  write(url, shell({ lc, url, altUrl, title: `${c.title} | ${BRAND}`, description: c.desc, keywords: "", jsonld, body }));
+}
+
+function useCaseIndex(lc) {
+  const t = T[lc];
+  const url = useCaseHubUrl(lc), altUrl = useCaseHubUrl(lc === "en" ? "fr" : "en");
+  if (lc === "en") sitemapEntries.push({ paths: { en: url, fr: altUrl }, priority: 0.75, changefreq: "weekly" });
+  const title = lc === "fr" ? `Cas d'usage : remittances, paie, marchands | ${BRAND}` : `Use Cases: Remittances, Payroll, Merchants | ${BRAND}`;
+  const description = lc === "fr" ? "Comment utiliser MoMo›Me : transferts vers l'Afrique, paiement de freelances, paie, règlement marchand et paiements interentreprises." : "Ways to use MoMo›Me: remittances to Africa, paying freelancers, payroll, merchant settlement and cross-border business payments.";
+  const jsonld = graph(orgNode, siteNode, crumbNode([{ name: t.home, url: homeUrl(lc) }, { name: lc === "fr" ? "Cas d'usage" : "Use cases", url }]));
+  const body = `
+<div class="crumb"><a href="${homeUrl(lc)}">${esc(t.home)}</a> › ${lc === "fr" ? "Cas d'usage" : "Use cases"}</div>
+${langSwitch(url, altUrl, lc)}
+<h1>${lc === "fr" ? "Cas d'usage" : "Use cases"}</h1>
+<p class="lede">${lc === "fr" ? "De la diaspora aux entreprises : comment MoMo›Me transforme la crypto mondiale en Mobile Money africain." : "From the diaspora to businesses: how MoMo›Me turns global crypto into African Mobile Money."}</p>
+<div class="grid">${USE_CASES.map((u) => `<a class="chip" href="${useCaseUrl(u, lc)}">${esc(u[lc].title)}</a>`).join("")}<a class="chip" href="${corridorHubUrl(lc)}">${lc === "fr" ? "Envoyer de l'argent en Afrique" : "Send money to Africa"}</a></div>
+${ctaHtml(t, lc === "fr" ? "Commencez un paiement maintenant." : "Start a payment now.")}`;
+  write(url, shell({ lc, url, altUrl, title, description, keywords: "", jsonld, body }));
+}
+
 /* ---------- technical files ---------- */
 function sitemap() {
   const X = (u) => `${SITE}${u}`;
@@ -749,6 +938,10 @@ for (const lc of ["en", "fr"]) {
   GUIDES.forEach((g) => guidePage(g, lc));
   learnIndex(lc);
   countriesIndex(lc);
+  CORRIDOR_DESTS.forEach((d) => ORIGINS.forEach((o) => corridorPage(o, d, lc)));
+  corridorHub(lc);
+  USE_CASES.forEach((u) => useCasePage(u, lc));
+  useCaseIndex(lc);
 }
 frHome();
 ogImage(); // keep og.svg as a secondary asset

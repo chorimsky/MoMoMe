@@ -133,6 +133,8 @@ export function Landing() {
           <a href="/usdt-to-mobile-money/">USDT to Mobile Money</a>
           <a href="/stablecoin-to-mobile-money/">Stablecoin to Mobile Money</a>
           <a href="/crypto-to-mobile-money/">Crypto to Mobile Money</a>
+          <a href="/send-money-to-africa/">Send money to Africa</a>
+          <a href="/use-cases/">Use cases</a>
           <a href="/learn/">Learn</a>
           <a href="/countries/">Coverage</a>
           <a href="/fr/" lang="fr">Français</a>

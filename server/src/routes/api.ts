@@ -20,7 +20,7 @@ import {
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
-import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim } from "../core/identity.js";
+import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot } from "../core/routing.js";
 import * as peex from "../integrations/peex/service.js";
@@ -390,6 +390,14 @@ api.get("/admin/identities/stats", (_req, res) => {
 });
 api.get("/admin/identities", (_req, res) => {
   res.json(listIdentities());
+});
+/** Maintenance: drop phantom identities (unclaimed + never received money) left
+ *  by the old at-creation provisioning. Self-healing — re-provisioned on delivery. */
+api.post("/admin/identities/prune", (_req, res) => {
+  const norm = (p: string) => { const d = p.replace(/\D/g, ""); return d.length > 9 ? d.slice(-9) : d; };
+  const delivered = new Set(store.listPayments().filter((p) => p.state === "DELIVERED").map((p) => norm(p.recipient.phone)));
+  const removed = pruneOrphanIdentities(delivered);
+  res.json({ removed: removed.length, kept: listIdentities().length, customerIds: removed });
 });
 /** Phase 2: claim an identity (OTP verification simulated in sandbox). */
 api.post("/admin/identities/:id/claim", (req, res) => {

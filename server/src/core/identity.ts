@@ -106,6 +106,23 @@ export function getIdentityByPhone(phone: string): Identity | undefined {
   return byPhone.get(phone);
 }
 
+/** Maintenance: remove "phantom" identities provisioned under the old
+ *  at-creation rule — those that are NOT claimed and whose number never
+ *  received money (no national-significant-number in `deliveredNsn`). Safe and
+ *  self-healing: a pruned number is re-provisioned on its next delivery.
+ *  Returns the customerIds removed. */
+export function pruneOrphanIdentities(deliveredNsn: Set<string>): string[] {
+  const removed: string[] = [];
+  for (const [key, id] of [...byPhone]) {
+    if (id.claimed) continue; // never drop a claimed account
+    if (deliveredNsn.has(nsn(id.phone.replace(/\D/g, "")))) continue; // received money → keep
+    byPhone.delete(key);
+    removed.push(id.customerId);
+  }
+  if (removed.length) touch("identity");
+  return removed;
+}
+
 export function listIdentities(): Identity[] {
   return [...byPhone.values()].sort((a, b) => a.customerId.localeCompare(b.customerId));
 }

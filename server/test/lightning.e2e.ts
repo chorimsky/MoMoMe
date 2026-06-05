@@ -430,6 +430,16 @@ async function main() {
     const merged = mig.mergeMerchants(a.internalId, b.internalId)!;
     ok("merge combines code + tx counts and removes the duplicate", merged.merchantCode === "MOMO-DUP" && merged.txCount === 2 && !mig.getMerchant(b.internalId));
 
+    // Identity prune: phantom (unclaimed, never-delivered) identities are removed;
+    // a claimed identity is always kept. (Runs last — it mutates the identity graph.)
+    const idMod = await import("../src/core/identity.js");
+    const orphan = idMod.ensureIdentity({ phone: "699888777", country: "CM", provider: "ORANGE", name: "ORPHAN", nameSource: "manual" });
+    const keeper = idMod.ensureIdentity({ phone: "699888666", country: "CM", provider: "ORANGE", name: "KEEPER", nameSource: "manual" });
+    idMod.claimIdentity(keeper.customerId); // claimed → must survive the prune
+    const removedIds = idMod.pruneOrphanIdentities(new Set()); // no delivered numbers → all UNCLAIMED pruned
+    ok("prune removes an unclaimed never-delivered identity", removedIds.includes(orphan.customerId) && idMod.getIdentityByPhone("699888777") === undefined);
+    ok("prune keeps a claimed identity", idMod.getIdentityByPhone("699888666") !== undefined);
+
   } finally {
     globalThis.fetch = realFetch;
   }

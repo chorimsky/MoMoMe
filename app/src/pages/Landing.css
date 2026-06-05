@@ -43,7 +43,7 @@
 .how-sub { color: var(--ink-3); font-size: 15px; margin-top: 8px; }
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 4vw, 48px); margin-top: clamp(32px, 5vw, 52px); }
 @media (max-width: 720px) { .steps { grid-template-columns: 1fr; gap: 32px; } }
-.step-ic { width: 46px; height: 46px; border-radius: 15px; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; margin-bottom: 16px; box-shadow: var(--shadow-sm); }
+.step-ic { width: 56px; height: 56px; border-radius: 18px; margin-bottom: 16px; }
 .step .n { display: inline-block; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: .06em; }
 .step h3 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin-top: 8px; letter-spacing: -0.01em; }
 .step p { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
@@ -56,7 +56,35 @@
 @media (max-width: 460px) { .why-grid { grid-template-columns: 1fr; } }
 .why-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 18px; box-shadow: var(--shadow-sm); transition: transform .16s ease, box-shadow .16s ease; }
 .why-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
-.why-ic { width: 40px; height: 40px; border-radius: 12px; background: var(--brand-wash); color: var(--brand-ink); display: grid; place-items: center; margin-bottom: 14px; border: 1.5px solid var(--brand); }
+.why-ic { width: 50px; height: 50px; border-radius: 16px; margin-bottom: 14px; }
+/* Shared tile for the Momo-style duotone icons — soft surface so the warm
+   icon colours pop; lifts on hover. */
+.step-ic, .why-ic { display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); transition: transform .3s cubic-bezier(.34,1.5,.5,1), box-shadow .3s, border-color .3s; }
+.step:hover .step-ic, .why-card:hover .why-ic { transform: translateY(-3px); box-shadow: var(--shadow); border-color: color-mix(in oklab, var(--brand) 55%, var(--line)); }
+
+/* Icon micro-interactions — each icon animates with its own personality. */
+.ico { transform-box: fill-box; transform-origin: center; }
+.ico .merid, .ico .key { transform-box: fill-box; transform-origin: center; }
+.ico-shield .check { stroke-dasharray: 14; }
+.why-card:hover .ico-bolt, .step:hover .ico-bolt { animation: ico-zap .55s ease; }
+.why-card:hover .ico-smile { animation: ico-bob .6s ease; }
+.why-card:hover .ico-tag { animation: ico-swing .65s ease; }
+.why-card:hover .ico-globe, .step:hover .ico-globe { animation: ico-pop .5s ease; }
+.why-card:hover .ico-globe .merid { animation: ico-spin 1.4s ease; }
+.why-card:hover .ico-shield, .step:hover .ico-shield { animation: ico-pop .5s ease; }
+.why-card:hover .ico-shield .check, .step:hover .ico-shield .check { animation: ico-draw .55s ease .06s both; }
+.step:hover .ico-number { animation: ico-pop .5s ease; }
+.step:hover .ico-number .key { animation: ico-tap .5s ease .05s; }
+.step:hover .ico-send { animation: ico-fly .6s ease; }
+@keyframes ico-pop { 0%{transform:scale(1)} 35%{transform:scale(1.15)} 70%{transform:scale(.97)} 100%{transform:scale(1)} }
+@keyframes ico-zap { 0%{transform:scale(1) rotate(0)} 28%{transform:scale(1.2) rotate(-9deg)} 55%{transform:scale(.95) rotate(4deg)} 100%{transform:scale(1) rotate(0)} }
+@keyframes ico-bob { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-2.5px)} }
+@keyframes ico-swing { 0%,100%{transform:rotate(0)} 28%{transform:rotate(-10deg)} 62%{transform:rotate(6deg)} }
+@keyframes ico-spin { to { transform: rotate(360deg); } }
+@keyframes ico-draw { from { stroke-dashoffset: 14; } to { stroke-dashoffset: 0; } }
+@keyframes ico-tap { 0%,100%{transform:scale(1)} 50%{transform:scale(1.7)} }
+@keyframes ico-fly { 0%{transform:translate(0,0) rotate(0)} 45%{transform:translate(3px,-3px) rotate(-5deg)} 100%{transform:translate(0,0) rotate(0)} }
+@media (prefers-reduced-motion: reduce) { .ico, .ico * { animation: none !important; } .step:hover .step-ic, .why-card:hover .why-ic { transform: none; } }
 .why-card h3 { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
 .why-card p { font-size: 13px; color: var(--ink-2); line-height: 1.55; margin-top: 6px; }
 

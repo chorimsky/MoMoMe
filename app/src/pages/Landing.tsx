@@ -19,6 +19,64 @@ function G({ n }: { n: string }) {
   return <svg {...p}>{I[n] ?? I.bolt}</svg>;
 }
 
+/* Momo-style duotone icons — bold rounded ink outline + warm brand fills, like
+   the mascot. Each part is classed so CSS can animate it on hover. Colours are
+   theme variables, so they adapt to light/dark. */
+function Icon({ n, size = 28 }: { n: string; size?: number }) {
+  const ink = "var(--ink)";
+  const I: Record<string, ReactNode> = {
+    bolt: (
+      <path d="M13 2 4.5 13H10l-1 9 10.5-12H13.5z" fill="var(--brand)" stroke={ink} strokeWidth="2" strokeLinejoin="round" />
+    ),
+    smile: (
+      <g>
+        <circle cx="12" cy="12" r="9.2" fill="var(--brand)" stroke={ink} strokeWidth="2" />
+        <circle cx="6.7" cy="13.4" r="1.5" fill="var(--accent)" opacity="0.5" />
+        <circle cx="17.3" cy="13.4" r="1.5" fill="var(--accent)" opacity="0.5" />
+        <circle className="eye" cx="9.2" cy="10.6" r="1.15" fill={ink} />
+        <circle className="eye" cx="14.8" cy="10.6" r="1.15" fill={ink} />
+        <path d="M8.6 14.6Q12 17.7 15.4 14.6" fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round" />
+      </g>
+    ),
+    shield: (
+      <g>
+        <path d="M12 2.5 20 5.5V11c0 5-3.4 8.3-8 9.9C7.4 19.3 4 16 4 11V5.5z" fill="var(--recv)" fillOpacity="0.16" stroke={ink} strokeWidth="2" strokeLinejoin="round" />
+        <path className="check" d="M8.2 11.6 11 14.4 16 8.9" fill="none" stroke="var(--recv)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    ),
+    globe: (
+      <g>
+        <circle cx="12" cy="12" r="9.2" fill="var(--brand)" fillOpacity="0.16" stroke={ink} strokeWidth="2" />
+        <g className="merid" fill="none" stroke={ink} strokeWidth="1.7">
+          <path d="M2.9 12H21.1" />
+          <path d="M12 2.8C15 6 15 18 12 21.2 9 18 9 6 12 2.8z" />
+        </g>
+      </g>
+    ),
+    tag: (
+      <g>
+        <path d="M11.4 3H19a2 2 0 0 1 2 2v7.6L12.5 21a2 2 0 0 1-2.8 0L3 14.3a2 2 0 0 1 0-2.8z" fill="var(--accent)" fillOpacity="0.18" stroke={ink} strokeWidth="2" strokeLinejoin="round" />
+        <circle cx="16" cy="8" r="1.7" fill="var(--accent)" stroke={ink} strokeWidth="1.4" />
+      </g>
+    ),
+    number: (
+      <g>
+        <rect x="5" y="2.5" width="14" height="19" rx="3.2" fill="var(--brand)" fillOpacity="0.16" stroke={ink} strokeWidth="2" />
+        <rect x="8" y="5.4" width="8" height="4.8" rx="1.3" fill="var(--brand)" stroke={ink} strokeWidth="1.5" />
+        <circle cx="9" cy="14.4" r="1" fill={ink} /><circle cx="12" cy="14.4" r="1" fill={ink} /><circle cx="15" cy="14.4" r="1" fill={ink} />
+        <circle className="key" cx="12" cy="18" r="1.3" fill="var(--accent)" />
+      </g>
+    ),
+    send: (
+      <g>
+        <path d="M21 3 3 10.5 9.6 13 12 19.5z" fill="var(--accent)" stroke={ink} strokeWidth="2" strokeLinejoin="round" />
+        <path d="M21 3 9.6 13" fill="none" stroke={ink} strokeWidth="1.5" strokeLinecap="round" />
+      </g>
+    ),
+  };
+  return <svg className={`ico ico-${n}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{I[n] ?? I.bolt}</svg>;
+}
+
 const WHY = [
   { icon: "bolt", t: "Fast", d: "Delivered in seconds, not days." },
   { icon: "smile", t: "Simple", d: "Just a number and an amount." },
@@ -91,7 +149,7 @@ export function Landing() {
           <div className="steps">
             {STEPS.map((s) => (
               <div className="step" key={s.n}>
-                <div className="step-ic"><G n={s.ic} /></div>
+                <div className="step-ic"><Icon n={s.ic} /></div>
                 <div className="n">{s.n}</div>
                 <h3>{s.t}</h3>
                 <p>{s.d}</p>
@@ -106,7 +164,7 @@ export function Landing() {
           <div className="why-grid">
             {WHY.map((b) => (
               <div className="why-card" key={b.t}>
-                <div className="why-ic"><G n={b.icon} /></div>
+                <div className="why-ic"><Icon n={b.icon} /></div>
                 <h3>{b.t}</h3>
                 <p>{b.d}</p>
               </div>

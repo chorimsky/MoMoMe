@@ -330,16 +330,26 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
 const ORDER: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED"];
 
 const SLOW_AFTER_MS = 30_000;
+// Hard cap: stop polling after a few minutes rather than hammering the backend
+// forever. The payment keeps settling server-side and appears in Activity.
+const MAX_POLL_MS = 4 * 60_000;
 
 export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivity }: { paymentId: string; method: Method; onDone: () => void; reset: () => void; onViewActivity: () => void }) {
   const { t } = useI18n();
   const [state, setState] = useState<PaymentState>("AWAITING_INBOUND");
   const [outcome, setOutcome] = useState<"pending" | "review" | "failed">("pending");
   const [slow, setSlow] = useState(false);
-  const doneRef = useRef(false);
+
+  // onDone is recreated on every parent (SendApp) render. Keep the latest in a
+  // ref so the poll effect can depend on `paymentId` alone — depending on onDone
+  // would tear down and restart the poll on every parent render, leaking the
+  // pending timer and firing duplicate getPayment requests.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
     const poll = async () => {
       try {
@@ -347,26 +357,30 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
         if (!active) return;
         setState(p.state);
         if (p.state === "DELIVERED") {
-          doneRef.current = true;
-          setTimeout(() => { if (active) onDone(); }, 700);
+          timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
           return;
         }
         if (FAIL_STATES.includes(p.state)) {
           // Terminal non-delivery — stop polling and show an honest outcome
           // instead of spinning forever (the prototype/earlier build would hang).
-          doneRef.current = true;
           setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
           return;
         }
-        if (Date.now() - started > SLOW_AFTER_MS) setSlow(true);
       } catch {
         /* transient; keep polling */
       }
-      if (active && !doneRef.current) setTimeout(poll, 700);
+      if (!active) return;
+      const elapsed = Date.now() - started;
+      if (elapsed > SLOW_AFTER_MS) setSlow(true);
+      // Stop polling at the cap; the slow screen already offers "View activity".
+      if (elapsed > MAX_POLL_MS) return;
+      // Ease off once we've crossed into "slow" so a stuck payment doesn't keep
+      // polling at full rate.
+      timer = setTimeout(poll, elapsed > SLOW_AFTER_MS ? 2500 : 800);
     };
     poll();
-    return () => { active = false; };
-  }, [paymentId, onDone]);
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [paymentId]);
 
   if (outcome !== "pending") {
     const failed = outcome === "failed";

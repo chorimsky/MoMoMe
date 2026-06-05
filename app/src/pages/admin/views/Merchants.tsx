@@ -140,13 +140,14 @@ export function MerchantsView() {
 function MerchantDrawer({ m, all, onClose, onChanged }: { m: Merchant; all: Merchant[]; onClose: () => void; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState<null | "validate" | "flag" | "merge">(null);
   const [mergeId, setMergeId] = useState<string>("");
+  const [actErr, setActErr] = useState<string | null>(null);
 
   const run = async (kind: "validate" | "flag" | "merge", fn: () => Promise<unknown>) => {
-    setBusy(kind);
+    setBusy(kind); setActErr(null);
     try {
       await fn();
       await onChanged();
-    } catch { /* surfaced by the list */ } finally {
+    } catch (e) { setActErr(e instanceof Error ? e.message : "Action failed. Try again."); } finally {
       setBusy(null);
     }
   };
@@ -218,6 +219,7 @@ function MerchantDrawer({ m, all, onClose, onChanged }: { m: Merchant; all: Merc
             <button type="button" className="btn btn-quiet" disabled={busy !== null} onClick={() => run("flag", () => api.flagMerchant(m.internalId))} style={{ width: "100%" }}>
               {busy === "flag" ? "Flagging…" : "Flag"}
             </button>
+            {actErr && <p role="alert" style={{ fontSize: 12.5, color: "var(--bad)", fontWeight: 600, marginTop: 10 }}>{actErr}</p>}
 
             {mergeable.length > 0 && (
               <div style={{ marginTop: 12 }}>

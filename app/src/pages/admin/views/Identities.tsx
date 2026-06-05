@@ -87,14 +87,15 @@ export function IdentitiesView() {
 function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () => void; onChanged: () => Promise<void> }) {
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(id.claimed);
+  const [actErr, setActErr] = useState<string | null>(null);
 
   const claim = async () => {
-    setClaiming(true);
+    setClaiming(true); setActErr(null);
     try {
       await api.claimIdentity(id.customerId);
       setClaimed(true);
       await onChanged();
-    } catch { /* surfaced by list */ } finally {
+    } catch (e) { setActErr(e instanceof Error ? e.message : "Couldn't mark as claimed. Try again."); } finally {
       setClaiming(false);
     }
   };
@@ -147,6 +148,7 @@ function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () 
             ) : (
               <>
                 <button type="button" className="btn btn-primary" disabled={claiming} onClick={claim} style={{ width: "100%" }}>{claiming ? "Claiming…" : "Mark as claimed (admin)"}</button>
+                {actErr && <p role="alert" style={{ fontSize: 12.5, color: "var(--bad)", fontWeight: 600, marginTop: 8 }}>{actErr}</p>}
                 <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.45 }}>Admin override — marks {id.e164} as claimed without OTP. The recipient's own OTP claim runs through the customer app (Claim your account).</p>
               </>
             )}

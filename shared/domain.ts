@@ -44,6 +44,12 @@ export function detectProvider(phone: string, country: CountryCode): ProviderId 
 /** XAF is pegged to EUR at this fixed rate (BACKEND_DESIGN §3). */
 export const EUR_XAF_PEG = 655.957;
 
+/** The domain for Lightning Addresses. Every Mobile Money number is reachable
+ *  as <number>@<domain> (LNURL-pay): an external Lightning wallet paying that
+ *  address sends Sats that settle to the Mobile Money account. Single source of
+ *  truth for merchant/customer identities and the LNURL-pay server. */
+export const LN_ADDRESS_DOMAIN = "momome.xyz";
+
 /** Per-rail spread in basis points — wider where confirmation exposure is longer. */
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure

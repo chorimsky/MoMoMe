@@ -109,6 +109,9 @@ export interface Payment {
   recipient: Recipient;
   /** Anonymous device id of the sender who created this payment (no login). */
   senderId?: string;
+  /** How the payment was initiated: the in-app send flow ("app", default) or an
+   *  external Lightning wallet paying the recipient's Lightning Address ("lnurl"). */
+  source?: "app" | "lnurl";
   xaf: number;
   feeXaf: number;
   totalXaf: number;

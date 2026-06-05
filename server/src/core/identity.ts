@@ -9,7 +9,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
-import { COUNTRIES } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
 
 interface Otp { hash: string; expiresAt: number; attempts: number }
@@ -60,7 +60,7 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
     walletId: `LNW${pad(seq)}`,
     lnWalletRef: createCustodialWallet(),
     ledgerId: `LED${pad(seq)}`,
-    lightningAddress: `${cc}${phoneDigits}@momome.africa`,
+    lightningAddress: `${cc}${phoneDigits}@${LN_ADDRESS_DOMAIN}`,
     status: "Active",
     claimed: false,
     balances: { XAF: 0, BTC: 0, USDT: 0 },

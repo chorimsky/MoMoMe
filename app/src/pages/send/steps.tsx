@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
@@ -23,9 +23,32 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
   // comes from the server quote on the next step.
   const fee = Math.round(s.xaf * (feePct ?? FEE_PCT));
   const [resolving, setResolving] = useState(false);
+  const [contactNote, setContactNote] = useState<string | null>(null);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
   useEffect(() => { api.recentRecipients().then((r) => setRecents(r)).catch(() => {}); }, []);
+
+  // Pick a recipient's Mobile Money number straight from the device's contact
+  // book (Web Contact Picker API — Chrome/Android over HTTPS). Always offered;
+  // on devices without it, tapping explains it isn't available here.
+  const pickContact = async () => {
+    setContactNote(null);
+    const nav = navigator as Navigator & {
+      contacts?: { select: (props: string[], opts?: { multiple?: boolean }) => Promise<Array<{ name?: string[]; tel?: string[] }>> };
+    };
+    if (!nav.contacts?.select) { setContactNote(t("contacts_unsupported")); return; }
+    try {
+      const picked = await nav.contacts.select(["name", "tel"], { multiple: false });
+      const tel = picked?.[0]?.tel?.[0];
+      if (!tel) return;
+      let d = tel.replace(/\D/g, "");
+      // Strip a leading CM country code so the field holds the national number.
+      if (d.startsWith("00237")) d = d.slice(5);
+      else if (d.startsWith("237") && d.length > 9) d = d.slice(3);
+      const name = picked?.[0]?.name?.[0]?.trim();
+      set({ phone: d, ...(name ? { recipientName: name } : {}) });
+    } catch { /* user cancelled or denied permission — no-op */ }
+  };
 
   // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
@@ -90,7 +113,13 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
             </div>
             <input value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")} inputMode="tel"
               style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 15, color: "var(--ink)", outline: "none", minWidth: 0 }} />
+            <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
+              style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", cursor: "pointer", font: "inherit", fontWeight: 650, fontSize: 13, color: "var(--ink-2)" }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.8" /><path d="M5.5 19.5c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              <span className="cta-rest">{t("from_contacts")}</span>
+            </button>
           </div>
+          {contactNote && <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{contactNote}</div>}
 
           <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
             {c.providers.map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={s.provider === pid} onClick={() => set({ provider: pid })} />)}
@@ -281,7 +310,19 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
     <FlowCard>
       <Stepper i={3} />
       <h2 style={{ fontSize: 22, marginTop: 16 }}>{ml(method, "payTitle")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 18px", lineHeight: 1.5 }}>{ml(method, "payDesc")}</p>
+      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 14px", lineHeight: 1.5 }}>{ml(method, "payDesc")}</p>
+
+      {/* The linked Mobile Money recipient — so the payer always sees exactly
+          which number the Sats settle to (and its Lightning address). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 13px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--line)", marginBottom: 18 }}>
+        <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>{initials(payment.recipient.name)}</span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{payment.recipient.name}</div>
+          <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
+          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {payment.recipient.phone.replace(/\D/g, "")}@{LN_ADDRESS_DOMAIN}</div>
+        </div>
+      </div>
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "6px 0 16px" }}>
         {demoMode ? (

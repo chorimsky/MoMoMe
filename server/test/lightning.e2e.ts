@@ -220,6 +220,24 @@ async function main() {
     ok("invalid logo → 400", badLogo.status === 400);
     const clearLogo = await J("/api/admin/settings", auth(tok, { method: "PUT", body: JSON.stringify({ company: { logo: null } }) }));
     ok("logo can be removed (null)", clearLogo.status === 200 && clearLogo.body.company.logo === null);
+
+    /* ---- Lightning Address (LNURL-pay): pay a Mobile Money number in Sats ---- */
+    const lnp = await J("/.well-known/lnurlp/677000789");
+    ok("lnurlp resolves a valid MTN number → payRequest", lnp.status === 200 && lnp.body.tag === "payRequest");
+    ok("lnurlp callback + sendable range present", typeof lnp.body.callback === "string" && lnp.body.maxSendable >= lnp.body.minSendable && lnp.body.minSendable > 0);
+    ok("lnurlp metadata names the Mobile Money number", typeof lnp.body.metadata === "string" && lnp.body.metadata.includes("677000789"));
+    const lnBad = await J("/.well-known/lnurlp/666000111"); // Nexttel 66x — unsupported
+    ok("lnurlp rejects an unsupported number → ERROR", lnBad.body.status === "ERROR");
+    const amt = Math.round((lnp.body.minSendable + lnp.body.maxSendable) / 2) > 0 ? Math.max(lnp.body.minSendable, 5_000_000) : lnp.body.minSendable;
+    const lnPay = await J(`/lnurl/pay/677000789?amount=${amt}`);
+    ok("lnurl pay returns a bolt11 invoice (pr)", typeof lnPay.body.pr === "string" && lnPay.body.pr.startsWith("lnbc"));
+    const lnLow = await J("/lnurl/pay/677000789?amount=1");
+    ok("lnurl pay rejects out-of-range amount → ERROR", lnLow.body.status === "ERROR");
+    const lnNoAmt = await J("/lnurl/pay/677000789");
+    ok("lnurl pay requires an amount → ERROR", lnNoAmt.body.status === "ERROR");
+    // The LNURL invoice creates a real AWAITING_INBOUND payment tagged source=lnurl.
+    const lnPays = await J("/api/payments", { headers: { "x-mm-sender": `lnurl:677000789@momome.xyz` } });
+    ok("lnurl payment is created + tagged source=lnurl", Array.isArray(lnPays.body) && lnPays.body.some((p: { source?: string; recipient: { phone: string } }) => p.source === "lnurl" && p.recipient.phone === "677000789"));
   } finally {
     server.close();
   }
@@ -453,7 +471,7 @@ async function main() {
     // The Lightning identity is the PHONE, never the merchant code (a lookup label).
     ok("learned merchant's lightning identity is the phone, not the code",
       learned.lightningAddresses.length === 1
-      && learned.lightningAddresses[0] === "699000111@momomi.io"
+      && learned.lightningAddresses[0] === "699000111@momome.xyz"
       && !learned.lightningAddresses.some((a) => a.startsWith("momo-bx@")));
     void before;
 

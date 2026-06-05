@@ -11,7 +11,7 @@ import type {
   Merchant, MerchantInputType, MerchantStatus, ResolveMerchantResult, ResolutionLogEntry,
   CountryCode, ProviderId, VerificationSource,
 } from "../../../shared/types.js";
-import { COUNTRIES } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN } from "../../../shared/domain.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 import * as pawapay from "../adapters/pawapay.js";
@@ -102,7 +102,7 @@ export function listMerchants(): Merchant[] {
  *  account it settles to — NEVER its merchant code, which is only a lookup label
  *  (a POS/MOMO code can't receive funds). Empty until a phone is known. */
 function lightningAddresses(phone: string | null): string[] {
-  return phone ? [`${digits(phone)}@momomi.io`] : [];
+  return phone ? [`${digits(phone)}@${LN_ADDRESS_DOMAIN}`] : [];
 }
 
 interface NewMerchant {

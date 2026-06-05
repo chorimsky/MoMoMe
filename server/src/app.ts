@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
 import { webhooks } from "./routes/webhooks.js";
+import { lnurl } from "./routes/lnurl.js";
 import { seed } from "./seed.js";
 import { config } from "./config.js";
 import { listPayments } from "./core/store.js";
@@ -17,6 +18,9 @@ export function createApp() {
 
   app.use(express.json({ limit: "1mb" })); // headroom for a base64 logo data URL in settings
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
+  // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
+  // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).
+  app.use("/", lnurl);
   app.use("/api", api);
 
   // Seed only a fresh database — on restart, state is restored from SQLite.

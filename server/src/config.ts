@@ -60,12 +60,15 @@ export const config = {
     webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
   }))(env("PEEXIT_ENV", "sandbox") !== "production"),
 
-  /** Admin console auth. A shared operator password gates every /admin/* API and
-   *  the console UI. ADMIN_SESSION_SECRET signs session tokens; if unset it is
-   *  derived from the password (so rotating the password invalidates sessions). */
+  /** Admin console auth. Per-user accounts gate every /admin/* API and the
+   *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted
+   *  random secret is used — never the password). */
   admin: {
     password: env("ADMIN_PASSWORD", "momome-admin"), // dev default — SET ADMIN_PASSWORD in production
     sessionSecret: env("ADMIN_SESSION_SECRET"),
+    // Master password-reset key (/admin/forgot). Defaults to ADMIN_PASSWORD for
+    // back-compat; set a distinct long ADMIN_RECOVERY_KEY in production.
+    recoveryKey: env("ADMIN_RECOVERY_KEY") || env("ADMIN_PASSWORD", "momome-admin"),
     passwordIsDefault: !process.env.ADMIN_PASSWORD,
   },
 
@@ -128,6 +131,23 @@ export function assertIbexConfig(): void {
     if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
     if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
     if (missing.length) throw new Error(`IBEX production requires: ${missing.join(", ")}.`);
+  }
+}
+
+/** Fail closed in production: never run with the default admin password (it is
+ *  also the master recovery key and would be publicly known). Warn — but don't
+ *  block — when the session secret isn't pinned (a persisted random one is used).
+ *  "Production" = NODE_ENV=production or any real-money rail live. */
+export function assertAdminSecurity(): void {
+  const inProd = process.env.NODE_ENV === "production" || liveMoney();
+  if (inProd && config.admin.passwordIsDefault) {
+    throw new Error("Refusing to start in production with the default ADMIN_PASSWORD. Set a strong ADMIN_PASSWORD (and ideally ADMIN_RECOVERY_KEY + ADMIN_SESSION_SECRET).");
+  }
+  if (inProd && !config.admin.sessionSecret) {
+    console.warn("⚠️  ADMIN_SESSION_SECRET is not set — using a persisted random signing secret. Set ADMIN_SESSION_SECRET to pin it across deploys.");
+  }
+  if (inProd && !process.env.ADMIN_RECOVERY_KEY) {
+    console.warn("⚠️  ADMIN_RECOVERY_KEY is not set — /admin/forgot falls back to ADMIN_PASSWORD. Set a distinct ADMIN_RECOVERY_KEY.");
   }
 }
 

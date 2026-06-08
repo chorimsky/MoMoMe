@@ -7,16 +7,23 @@
 import crypto from "node:crypto";
 import type { AdminRole } from "../../../shared/roles.js";
 import { config } from "../config.js";
+import { register, touch } from "./persist.js";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
 /** A verified session: which user and what role. */
 export interface Session { uid: string; role: AdminRole; }
 
-/** Signing secret: explicit ADMIN_SESSION_SECRET, else derived from
- *  ADMIN_PASSWORD — stable across restarts; rotating it ends all sessions. */
+/** Token-signing secret. Prefer an explicit ADMIN_SESSION_SECRET; otherwise a
+ *  random secret generated once and persisted — so token forgery is NOT coupled
+ *  to the admin password (which doubles as the recovery key). Stable across
+ *  restarts via the store; rotating it ends all sessions. */
+let persistedSecret: string | null = null;
+register("admin_secret", () => persistedSecret, (d: unknown) => { if (typeof d === "string" && d) persistedSecret = d; });
 function secret(): string {
-  return config.admin.sessionSecret || crypto.createHash("sha256").update(`mm-admin:${config.admin.password}`).digest("hex");
+  if (config.admin.sessionSecret) return config.admin.sessionSecret;
+  if (!persistedSecret) { persistedSecret = crypto.randomBytes(32).toString("hex"); touch("admin_secret"); }
+  return persistedSecret;
 }
 function sign(payload: string): string {
   return crypto.createHmac("sha256", secret()).update(payload).digest("base64url");

@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
 import { webhooks } from "./routes/webhooks.js";
@@ -8,10 +8,39 @@ import { config } from "./config.js";
 import { listPayments } from "./core/store.js";
 import { seedAdminUsers } from "./core/adminUsers.js";
 
+/** Browser origins allowed to call the API cross-origin: our own app domains.
+ *  Non-browser callers (Lightning wallets hitting LNURL, provider webhooks,
+ *  curl) send no Origin header and are allowed through. */
+const ALLOWED_ORIGIN: RegExp[] = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/,
+  /^https:\/\/([a-z0-9-]+\.)*momome\.xyz$/,
+];
+function corsOrigin(origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void): void {
+  if (!origin) return cb(null, true);
+  cb(null, ALLOWED_ORIGIN.some((re) => re.test(origin)));
+}
+
+/** Baseline security headers. The API serves only JSON, so a deny-all CSP is
+ *  safe and adds clickjacking/sniffing/referrer-leak protection. */
+function securityHeaders(_req: Request, res: Response, next: NextFunction): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  next();
+}
+
 /** Build the Express app (no listen). Used by the server bootstrap and tests. */
 export function createApp() {
   const app = express();
-  app.use(cors());
+  // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
+  // client IP (rate limiting, webhook IP allowlist), not a spoofable XFF.
+  app.set("trust proxy", 1);
+  app.use(cors({ origin: corsOrigin }));
+  app.use(securityHeaders);
 
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().
   app.use("/webhooks", webhooks);

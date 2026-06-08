@@ -117,8 +117,9 @@ function superAdminCount(): number { return [...byId.values()].filter((u) => u.r
  *  account's password. This is the "forgot password" backstop when there's no
  *  email/SMS — whoever controls the deployment can recover access. */
 export function masterRecoveryMatches(key: unknown): boolean {
-  if (typeof key !== "string" || !config.admin.password) return false;
+  const expected = config.admin.recoveryKey;
+  if (typeof key !== "string" || !expected) return false;
   const a = Buffer.from(key);
-  const b = Buffer.from(config.admin.password);
+  const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

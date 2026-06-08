@@ -238,6 +238,22 @@ async function main() {
     // The LNURL invoice creates a real AWAITING_INBOUND payment tagged source=lnurl.
     const lnPays = await J("/api/payments", { headers: { "x-mm-sender": `lnurl:677000789@momome.xyz` } });
     ok("lnurl payment is created + tagged source=lnurl", Array.isArray(lnPays.body) && lnPays.body.some((p: { source?: string; recipient: { phone: string } }) => p.source === "lnurl" && p.recipient.phone === "677000789"));
+
+    // --- Security: admin auth brute-force throttling (real HTTP, end of phase 1
+    // so the shared-IP buckets don't affect earlier auth tests). Per-username
+    // lockout on login; per-IP lockout on the recovery-key forgot endpoint. ---
+    let loginSaw429 = false;
+    for (let i = 0; i < 9; i++) {
+      const r = await POST("/api/admin/login", { username: "ratelimit-probe", password: `nope${i}` });
+      if (r.status === 429) loginSaw429 = true;
+    }
+    ok("admin login is rate-limited after repeated failures (429)", loginSaw429);
+    let forgotSaw429 = false;
+    for (let i = 0; i < 7; i++) {
+      const r = await POST("/api/admin/forgot", { username: "admin", recoveryKey: "definitely-wrong", newPassword: "irrelevant" });
+      if (r.status === 429) forgotSaw429 = true;
+    }
+    ok("admin forgot (recovery-key) is rate-limited (429)", forgotSaw429);
   } finally {
     server.close();
   }

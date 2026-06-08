@@ -30,6 +30,7 @@ import {
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import { rateLimit, rateLimitReset, clientIp } from "../core/ratelimit.js";
 
 export const api = Router();
 
@@ -42,9 +43,20 @@ const sessionOf = (req: unknown): Session | undefined => (req as AdminReq).sessi
    /admin/session and /admin/forgot are public; the guard below protects every
    other /admin/* route (registered before them, so it runs first). */
 api.post("/admin/login", (req, res) => {
+  // Brute-force throttle: per-IP (broad) + per-username (targeted) windows.
+  const ip = clientIp(req);
   const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
+  const uname = (typeof username === "string" ? username : "").toLowerCase().slice(0, 64);
+  const ipRl = rateLimit(`login:ip:${ip}`, 20, 15 * 60_000);
+  const userRl = rateLimit(`login:user:${uname}`, 8, 15 * 60_000);
+  if (!ipRl.ok || !userRl.ok) {
+    res.setHeader("Retry-After", String(Math.max(ipRl.retryAfterSec, userRl.retryAfterSec)));
+    return res.status(429).json({ error: "rate_limited", message: "Too many sign-in attempts. Please wait a few minutes and try again." });
+  }
   const user = typeof username === "string" && typeof password === "string" ? verifyCredentials(username, password) : null;
   if (!user) return res.status(401).json({ error: "bad_credentials", message: "Incorrect username or password." });
+  // Successful auth — clear this user's counter so a legit operator isn't locked.
+  rateLimitReset(`login:user:${uname}`);
   const { token, expiresAt } = issueToken({ uid: user.id, role: user.role });
   res.json({ token, expiresAt, user: { id: user.id, username: user.username, role: user.role } });
 });
@@ -60,6 +72,13 @@ api.get("/admin/session", (req, res) => {
    master key (ADMIN_PASSWORD). Whoever controls the deployment can reset any
    account by username. */
 api.post("/admin/forgot", (req, res) => {
+  // The recovery key gates resetting ANY account — throttle hard against
+  // online brute force of the master key.
+  const rl = rateLimit(`forgot:${clientIp(req)}`, 5, 15 * 60_000);
+  if (!rl.ok) {
+    res.setHeader("Retry-After", String(rl.retryAfterSec));
+    return res.status(429).json({ error: "rate_limited", message: "Too many attempts. Please wait and try again." });
+  }
   const { username, recoveryKey, newPassword } = (req.body ?? {}) as { username?: string; recoveryKey?: string; newPassword?: string };
   if (!masterRecoveryMatches(recoveryKey)) return res.status(401).json({ error: "bad_recovery", message: "Recovery key is incorrect." });
   const pwIssue = passwordIssue(newPassword);

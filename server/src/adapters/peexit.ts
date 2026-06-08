@@ -8,6 +8,7 @@
    the routing engine can pick either invisibly. Idempotent on the payment ref
    (track_id). Activates when PEEXIT_API_KEY is set; otherwise simulated.
    ============================================================ */
+import crypto from "node:crypto";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
 import { config, peexitLive } from "../config.js";
@@ -119,10 +120,17 @@ export async function availableBalanceXaf(_country: CountryCode, provider?: Prov
 }
 
 /* ---------- notification webhook (async final status) ---------- */
-export function verifyWebhook(_rawBody: string, _signature: string | undefined): boolean {
-  // Peexit notifications aren't HMAC-signed in a documented way; we confirm by
-  // mapping the body's status. (Pair with a sender-IP allowlist in production.)
-  return true;
+export function verifyWebhook(rawBody: string, signature: string | undefined): boolean {
+  const secret = config.peexit.webhookSecret;
+  // No secret configured → accept only OUTSIDE production (sandbox testing). In
+  // production a missing secret means the callback can't be authenticated, so
+  // fail closed (reject) rather than trust an unauthenticated body.
+  if (!secret) return !peexitLive();
+  if (typeof signature !== "string" || !signature) return false;
+  const expect = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expect);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export function parsePayoutEvent(body: unknown): { ref: string; status: PayoutStatus } | null {

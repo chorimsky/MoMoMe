@@ -30,7 +30,7 @@ import {
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
-import { rateLimit, rateLimitReset, clientIp } from "../core/ratelimit.js";
+import { rateLimit, rateLimitReset, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
 
@@ -207,8 +207,22 @@ function senderOf(req: { headers: Record<string, string | string[] | undefined> 
   return typeof s === "string" && s ? s : undefined;
 }
 
+/** True when the request carries a valid admin session token (any role). */
+function isAdminRequest(req: { headers: Record<string, string | string[] | undefined> }): boolean {
+  return !!verifyToken(tokenFromHeaders(req.headers));
+}
+
+/** May this requester view this payment? Admins always; otherwise the request's
+ *  anonymous sender id must match the payment's. Prevents enumerating other
+ *  people's payments/ledgers by id (the id is the only thing the caller needs). */
+function mayViewPayment(req: { headers: Record<string, string | string[] | undefined> }, senderId: string | undefined): boolean {
+  if (!senderId) return true;          // legacy/seed payments with no owner
+  if (isAdminRequest(req)) return true; // admin console (e.g. ledger drawer)
+  return senderOf(req) === senderId;
+}
+
 /* ---------- quotes ---------- */
-api.post("/quotes", (req, res) => {
+api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   // Operator kill-switch — refuse new business when payments are paused.
   if (!getSettings().ops.acceptingPayments) {
     return res.status(503).json({ error: "paused", message: "Payments are temporarily paused. Please try again shortly." });
@@ -277,20 +291,23 @@ api.get("/config", (_req, res) => {
 });
 
 /* ---------- recipient name resolution ---------- */
-api.get("/recipients/resolve", async (req, res) => {
-  const phone = String(req.query.phone ?? "");
+api.get("/recipients/resolve", rateLimitMiddleware("resolve", 120, 60_000), async (req, res) => {
+  const phone = String(req.query.phone ?? "").slice(0, 24); // bound input → bounded cache key / work
   const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
   res.json(await resolveRecipient(phone, country));
 });
 
 /* ---------- merchant identity resolution (MIG) ---------- */
-api.post("/merchants/resolve", async (req, res) => {
+api.post("/merchants/resolve", rateLimitMiddleware("merchants", 30, 60_000), async (req, res) => {
   const { input, country, provider, commit } = (req.body ?? {}) as { input?: string; country?: CountryCode; provider?: ProviderId; commit?: boolean };
-  if (typeof input !== "string" || !input.trim()) {
+  if (typeof input !== "string" || !input.trim() || input.length > 64) {
     return res.status(400).json({ error: "bad_input", message: "Enter a merchant code, number or QR." });
   }
-  // Lookup-only by default (as-you-type); commit=true allows creating a pending identity.
-  res.json(await merchant.resolveMerchant(input, { country, provider }, commit === true));
+  // Lookup-only by default (as-you-type). Creating a PENDING graph identity
+  // (commit=true) is a mutation — only honour it for an authenticated admin, so
+  // anonymous callers can't pollute the merchant graph.
+  const allowCommit = commit === true && isAdminRequest(req);
+  res.json(await merchant.resolveMerchant(input, { country, provider }, allowCommit));
 });
 
 /* ---------- admin: merchant graph ---------- */
@@ -318,7 +335,7 @@ api.post("/admin/merchants/merge", (req, res) => {
 });
 
 /* ---------- consumer account claim (Phase 2) ---------- */
-api.post("/identities/claim/request", (req, res) => {
+api.post("/identities/claim/request", rateLimitMiddleware("claim_req", 6, 60_000), (req, res) => {
   const r = requestClaim(String((req.body ?? {}).phone ?? ""));
   if (!r.found) {
     return res.status(404).json({ error: "no_account", message: "No account for this number yet. You'll have one the moment you receive a Mobile Money payment." });
@@ -330,7 +347,7 @@ api.post("/identities/claim/request", (req, res) => {
   res.json({ sent: true, devCode: isLive() ? undefined : r.code });
 });
 
-api.post("/identities/claim/verify", (req, res) => {
+api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_000), (req, res) => {
   const { phone, code } = (req.body ?? {}) as { phone?: string; code?: string };
   const r = verifyClaim(String(phone ?? ""), String(code ?? ""));
   if (!r.ok) {
@@ -343,7 +360,7 @@ api.post("/identities/claim/verify", (req, res) => {
 });
 
 /* ---------- payments ---------- */
-api.post("/payments", async (req, res) => {
+api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, res) => {
   const { quoteId, recipient } = (req.body ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes
   // and arbitrary payout targets).
@@ -363,8 +380,11 @@ api.post("/payments", async (req, res) => {
   // Never store a null/blank name — fall back to the number so downstream UI
   // (activity, receipts) and the identity layer always have a string.
   if (typeof recipient.name !== "string" || !recipient.name.trim()) recipient.name = recipient.phone;
-  const quote = store.getQuote(quoteId);
-  if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or expired." });
+  // Atomically claim the quote BEFORE any async work — a locked rate becomes
+  // exactly one payment even if two requests race on the same quoteId (the
+  // loser gets 404). A claimed quote is gone, so the rate can't be replayed.
+  const quote = store.claimQuote(quoteId);
+  if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or already used — please re-quote." });
   if (Date.now() > Date.parse(quote.expiresAt)) {
     return res.status(409).json({ error: "quote_expired", message: "This quote has expired — please re-quote." });
   }
@@ -404,7 +424,7 @@ api.post("/payments", async (req, res) => {
     updatedAt: now,
   };
   store.putPayment(payment);
-  store.consumeQuote(quoteId); // a locked rate can be used once, not replayed
+  // (the quote was already atomically claimed above — a locked rate is used once)
   if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
   // NOTE: the recipient's custodial identity (the phone → Lightning address) is
   // provisioned on the first SUCCESSFUL delivery, not here — a number only
@@ -456,7 +476,8 @@ api.post("/payments/:id/simulate", (req, res) => {
 
 api.get("/payments/:id", (req, res) => {
   const p = store.getPayment(req.params.id);
-  if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // 404 (not 403) on a non-owned payment too, so the id space can't be probed.
+  if (!p || !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   res.json(p);
 });
 
@@ -483,6 +504,8 @@ api.get("/me/recipients", (req, res) => {
 });
 
 api.get("/ledger/:paymentId", (req, res) => {
+  const p = store.getPayment(req.params.paymentId);
+  if (p && !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "not_found", message: "Not found." });
   res.json(entriesFor(req.params.paymentId));
 });
 

@@ -42,6 +42,16 @@ export function consumeQuote(qid: string) {
   quotes.delete(qid);
   touch("store");
 }
+/** Atomically claim a quote (get-and-delete in one synchronous step) so a locked
+ *  rate becomes EXACTLY one payment, even under concurrent /payments requests.
+ *  Returns undefined if it was already claimed. */
+export function claimQuote(qid: string): Quote | undefined {
+  const q = quotes.get(qid);
+  if (!q) return undefined;
+  quotes.delete(qid);
+  touch("store");
+  return q;
+}
 
 export function putPayment(p: Payment) {
   payments.set(p.id, p);

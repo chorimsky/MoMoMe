@@ -20,6 +20,7 @@ import * as peex from "../integrations/peex/service.js";
 import {
   parseLnUser, quoteFromMsat, sendableRangeMsat, lnurlMetadata, lnAddress,
 } from "../core/lnurl.js";
+import { rateLimitMiddleware } from "../core/ratelimit.js";
 
 export const lnurl = Router();
 
@@ -33,7 +34,7 @@ function baseUrl(req: { protocol: string; get(h: string): string | undefined }):
 }
 
 /* ---- LUD-16: GET /.well-known/lnurlp/:user → payRequest ---- */
-lnurl.get("/.well-known/lnurlp/:user", async (req, res) => {
+lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000), async (req, res) => {
   const r = parseLnUser(req.params.user);
   if (!r) return res.status(200).json(lnErr("Not a valid Mobile Money number."));
 
@@ -52,7 +53,7 @@ lnurl.get("/.well-known/lnurlp/:user", async (req, res) => {
 });
 
 /* ---- LUD-06: GET /lnurl/pay/:user?amount=<msat> → { pr } ---- */
-lnurl.get("/lnurl/pay/:user", async (req, res) => {
+lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), async (req, res) => {
   // Operator kill-switch — refuse new inbound when payments are paused.
   if (!getSettings().ops.acceptingPayments) return res.json(lnErr("Payments are temporarily paused. Please try again shortly."));
 

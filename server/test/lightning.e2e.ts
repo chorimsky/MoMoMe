@@ -98,6 +98,21 @@ async function main() {
     const accounts = new Set(led.body.map((e: any) => e.account));
     ok("ledger touched all expected accounts", ["inbound_clearing", "customer_wallet", "fx_position", "payout_float_XAF", "fee_revenue", "external_recipient"].every((a) => accounts.has(a)));
 
+    // Security: IDOR — another sender (or anonymous) can't read someone's payment
+    // or ledger by id; the owner can. 404 (not 403) so the id space can't be probed.
+    const idorPay = await J(`/api/payments/${pid}`, { headers: { "x-mm-sender": "not-the-owner" } });
+    ok("IDOR: foreign sender can't read a payment → 404", idorPay.status === 404);
+    const idorLed = await J(`/api/ledger/${pid}`, { headers: { "x-mm-sender": "not-the-owner" } });
+    ok("IDOR: foreign sender can't read a ledger → 404", idorLed.status === 404);
+    const ownerPay = await J(`/api/payments/${pid}`);
+    ok("owner can still read their own payment → 200", ownerPay.status === 200);
+
+    // Security: a locked quote is single-use — replaying it into a second payment fails.
+    const sq = await POST("/api/quotes", { xaf: 10000, method: "LIGHTNING", country: "CM" });
+    const sp1 = await POST("/api/payments", { quoteId: sq.body.id, recipient });
+    const sp2 = await POST("/api/payments", { quoteId: sq.body.id, recipient });
+    ok("quote is single-use (replay → 404)", sp1.status === 200 && sp2.status === 404);
+
     // 5. idempotent confirm
     const before = final.events.length;
     await POST(`/api/payments/${pid}/confirm`);
@@ -421,6 +436,10 @@ async function main() {
     const rn = nets("pay_refund");
     ok("refund reverses ledger to zero (no float overstatement)", Math.abs(rn.BTC ?? 0) < 1e-9 && Math.abs(rn.XAF ?? 0) < 1e-9);
     ok("refunded payment is REFUNDED", storeMod.getPayment("pay_refund")!.state === "REFUNDED");
+    // Idempotent: a second refund must be a no-op (never double-reverse the ledger).
+    const secondRefund = adminRefund(storeMod.getPayment("pay_refund")!);
+    const rn2 = nets("pay_refund");
+    ok("second refund is a no-op (idempotent, ledger stays balanced)", secondRefund === false && Math.abs(rn2.BTC ?? 0) < 1e-9 && Math.abs(rn2.XAF ?? 0) < 1e-9);
 
     // Retry a MANUAL_REVIEW payment → delivered, ledger balanced, NO double-pay.
     seedPayment("pay_retry", "h_retry", BTC_IN);

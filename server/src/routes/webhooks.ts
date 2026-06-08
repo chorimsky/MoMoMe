@@ -10,6 +10,7 @@ import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
+import { transactionStatus } from "../adapters/ibex.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 
 export const webhooks = Router();
@@ -79,8 +80,20 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
   // Ack now; settle asynchronously.
   if (event.kind === "detected") {
     markDetected(payment);
-  } else {
-    void confirmInbound(payment, event.amount).catch((e) => console.error("settle error", payment.id, e));
+    return res.json({ ok: true });
   }
   res.json({ ok: true });
+  // Authoritative re-confirm for IBEX: never settle on the webhook body alone.
+  // Re-query IBEX so a forged "settled" webhook — even one with a leaked secret —
+  // can't trigger a real payout for an unpaid invoice. transactionStatus returns
+  // null when it can't determine (e.g. an on-chain address), in which case we
+  // fall back to the verified webhook (still secret-gated, amount re-checked in
+  // confirmInbound); only an EXPLICIT not-settled result is rejected.
+  void (async () => {
+    if (adapter.name === "ibex") {
+      const s = await transactionStatus(event.providerRef).catch(() => null);
+      if (s && !s.settled) return; // IBEX says this invoice is not paid — ignore
+    }
+    await confirmInbound(payment, event.amount);
+  })().catch((e) => console.error("settle error", payment.id, e));
 });

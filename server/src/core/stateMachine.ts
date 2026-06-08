@@ -316,6 +316,10 @@ export async function adminRetry(p: Payment): Promise<boolean> {
  *  the books stay balanced and the customer's inbound is returned. */
 export function adminRefund(p: Payment): boolean {
   if (p.displayStatus === "Completed") return false;
+  // Idempotent: never reverse an already-refunded payment again — reversePayment
+  // posts the inverse of EVERY existing entry, so a second refund would double-
+  // reverse and unbalance the ledger.
+  if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false;
   reversePayment(p.id);
   transition(p, "REFUND_PENDING", "refund initiated by admin");
   transition(p, "REFUNDED", "refunded by admin");

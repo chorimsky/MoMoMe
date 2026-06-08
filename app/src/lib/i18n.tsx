@@ -36,6 +36,7 @@ export const STRINGS: Dict = {
   confirm_payment: ["Confirm payment", "Confirmer le paiement"], ive_paid: ["I've sent the payment", "J'ai effectué le paiement"],
   demo_note: ["Sandbox · tapping simulates your payment arriving", "Démo · appuyer simule la réception du paiement"],
   pay_to: ["Paying to", "Paiement à"],
+  mm_recipient: ["Mobile Money recipient", "Bénéficiaire Mobile Money"],
   from_contacts: ["Contacts", "Contacts"],
   contacts_unsupported: ["Picking from Contacts isn't available on this device — type the number instead.", "La sélection depuis les contacts n'est pas disponible sur cet appareil — saisissez le numéro."],
   waiting_pay: ["Waiting for your payment…", "En attente de votre paiement…"], waiting_conf: ["Confirming your payment…", "Confirmation de votre paiement…"],

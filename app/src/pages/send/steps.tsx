@@ -287,6 +287,13 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
   const { label, expired } = useExpiry(inst.expiresAt);
+  // The name attached to the number. When no real name is on file the backend
+  // stores the number itself as the name — show a neutral label instead of
+  // repeating the digits, so "Paying to" always reads as a recipient.
+  const recDigits = payment.recipient.phone.replace(/\D/g, "");
+  const recName = payment.recipient.name && payment.recipient.name.replace(/\D/g, "") !== recDigits && payment.recipient.name.trim().length >= 2
+    ? payment.recipient.name.trim()
+    : t("mm_recipient");
 
   // Auto-advance: the inbound settles via the rail's webhook (real Lightning/
   // on-chain). Poll for it and move to processing the moment it's detected, so
@@ -315,12 +322,13 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       {/* The linked Mobile Money recipient — so the payer always sees exactly
           which number the Sats settle to (and its Lightning address). */}
       <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 13px", borderRadius: 14, background: "var(--surface-2)", border: "1px solid var(--line)", marginBottom: 18 }}>
-        <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>{initials(payment.recipient.name)}</span>
+        <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>{initials(recName)}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
-          <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{payment.recipient.name}</div>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{recName}</div>
           <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
-          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {payment.recipient.phone.replace(/\D/g, "")}@{LN_ADDRESS_DOMAIN}</div>
+          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>
+          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("reference")} · {payment.ref}</div>
         </div>
       </div>
 

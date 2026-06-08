@@ -166,6 +166,9 @@ async function main() {
     ok("support agent reads payments (in remit) → 200", agentPayments.status === 200);
     const agentLiquidity = await J("/api/admin/liquidity", auth(agentTok));
     ok("support agent blocked from liquidity → 403", agentLiquidity.status === 403);
+    // Fail-closed section gate: revenue (finance data) is denied to Support Agents.
+    const agentRevenue = await J("/api/admin/revenue", auth(agentTok));
+    ok("support agent blocked from revenue (fail-closed) → 403", agentRevenue.status === 403);
     // Support Agent cannot manage users.
     const agentUsers = await J("/api/admin/users", auth(agentTok));
     ok("support agent blocked from user admin → 403", agentUsers.status === 403);

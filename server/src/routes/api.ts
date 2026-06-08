@@ -98,6 +98,7 @@ function sectionForPath(sub: string): Section | null {
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
     "mobile-money": "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
+    revenue: "reports", // revenue intelligence = finance/reporting data
     notifications: "notifications", health: "health", settings: "settings",
     users: "administration", audit: "administration",
   };
@@ -126,11 +127,13 @@ api.use("/admin", (req, res, next) => {
   if (isReadOnly(role) && req.method !== "GET") {
     return res.status(403).json({ error: "forbidden", message: "Read-only access." });
   }
-  // Section gate — block routes outside the role's remit. Always-allowed:
-  // self password change.
+  // Section gate — fail CLOSED: every admin route must map to a section the role
+  // can access. An unmapped route (section === null) is denied, so a new endpoint
+  // can never be accidentally world-readable to every role. Always-allowed: self
+  // password change (handled above as a public-ish self-service route).
   if (sub !== "/password") {
     const section = sectionForPath(sub);
-    if (section && !canAccess(role, section)) {
+    if (!section || !canAccess(role, section)) {
       return res.status(403).json({ error: "forbidden", message: "Your role can't access this section." });
     }
   }
@@ -294,7 +297,11 @@ api.get("/config", (_req, res) => {
 api.get("/recipients/resolve", rateLimitMiddleware("resolve", 120, 60_000), async (req, res) => {
   const phone = String(req.query.phone ?? "").slice(0, 24); // bound input → bounded cache key / work
   const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
-  res.json(await resolveRecipient(phone, country));
+  try {
+    res.json(await resolveRecipient(phone, country));
+  } catch {
+    res.json({ status: "idle", verified: false }); // resolution is best-effort — never 500 the keystroke
+  }
 });
 
 /* ---------- merchant identity resolution (MIG) ---------- */

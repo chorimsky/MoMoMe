@@ -55,6 +55,18 @@ export function createApp() {
   app.use("/", lnurl);
   app.use("/api", api);
 
+  // Unmatched route → JSON 404 (not Express's default HTML).
+  app.use((_req: Request, res: Response) => {
+    res.status(404).json({ error: "not_found", message: "Not found." });
+  });
+  // Terminal error handler — generic JSON, log server-side, never leak a stack
+  // trace or internal path to the client. (4 args → Express treats as error mw.)
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error("unhandled error", err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: "server_error", message: "Something went wrong. Please try again." });
+  });
+
   // Seed only a fresh database — on restart, state is restored from SQLite.
   if (listPayments().length === 0) seed();
   // Ensure at least the initial Super Admin account exists (idempotent).

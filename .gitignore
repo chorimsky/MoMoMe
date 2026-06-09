@@ -22,3 +22,6 @@ data/
 
 # Misc
 .thumbnail
+
+# Hostinger build artifact
+momome-hostinger.zip

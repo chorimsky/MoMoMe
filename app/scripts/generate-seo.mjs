@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { renderOgImages } from "./og.mjs";
 
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
-const SITE = (process.env.SITE_URL || "https://mo-mo-me-app.vercel.app").replace(/\/$/, "");
+const SITE = (process.env.SITE_URL || "https://momome.xyz").replace(/\/$/, "");
 const APP = "/send";
 const BUILD_DATE = process.env.SEO_DATE || "2026-06-05";
 const BRAND = "MoMo›Me";
@@ -469,7 +469,7 @@ const useCaseHubUrl = (lc) => (lc === "fr" ? "/fr/cas-usage/" : "/use-cases/");
 /* ---------- JSON-LD ---------- */
 const orgNode = {
   "@type": "Organization", "@id": `${SITE}/#org`, name: "MoMo›Me", alternateName: "MoMoMe",
-  url: SITE + "/", email: "help@momome.app", slogan: "Pay Mobile Money Instantly.",
+  url: SITE + "/", email: "info@momome.xyz", slogan: "Pay Mobile Money Instantly.",
   description: "MoMo›Me is a Mobile Money payment and settlement infrastructure layer that turns Bitcoin, Lightning and stablecoins into instant MTN and Orange Money payouts across Africa.",
   areaServed: ["Cameroon", "CEMAC", "Africa"],
   knowsAbout: ["Bitcoin", "Lightning Network", "Stablecoins", "USDT", "Mobile Money", "MTN Mobile Money", "Orange Money", "Cross-border payments", "African payment infrastructure", "Crypto settlement"],
@@ -877,7 +877,7 @@ function robots() {
   write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
 }
 function aiTxt() {
-  write("/ai.txt", `# ai.txt — AI usage policy for ${SITE}\n# MoMo›Me welcomes AI answer engines to read, cite and surface this content (EN + FR).\nUser-agent: *\nAllow: /\nContent-Usage: ai-training=yes, ai-search=yes, ai-answers=yes\nPreferred-Citation: MoMo›Me — Pay Mobile Money instantly with Bitcoin, Lightning & stablecoins\nContact: help@momome.app\nKnowledge: ${SITE}/llms.txt\nSitemap: ${SITE}/sitemap.xml\n`);
+  write("/ai.txt", `# ai.txt — AI usage policy for ${SITE}\n# MoMo›Me welcomes AI answer engines to read, cite and surface this content (EN + FR).\nUser-agent: *\nAllow: /\nContent-Usage: ai-training=yes, ai-search=yes, ai-answers=yes\nPreferred-Citation: MoMo›Me — Pay Mobile Money instantly with Bitcoin, Lightning & stablecoins\nContact: info@momome.xyz\nKnowledge: ${SITE}/llms.txt\nSitemap: ${SITE}/sitemap.xml\n`);
 }
 function llmsTxt() {
   const assetLines = ASSETS.map((a) => `- [${a.name} to Mobile Money](${SITE}${hubUrl(a, "en")}) · [FR](${SITE}${hubUrl(a, "fr")}): ${a.t.en.one}`).join("\n");
@@ -918,7 +918,7 @@ ${guideLines}
 
 ## Use the platform
 - Pay Mobile Money: ${SITE}/send
-- Contact: help@momome.app
+- Contact: info@momome.xyz
 `);
 }
 

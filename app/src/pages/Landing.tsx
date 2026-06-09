@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
+import { useNarrow } from "../lib/useNarrow.js";
 import "./Landing.css";
 
 /* Simple line glyphs (rounded, friendly) for benefit + step tiles. */
@@ -99,11 +100,12 @@ const STEPS = [
 ];
 
 export function Landing() {
+  const sm = useNarrow();
   return (
     <div style={{ background: "var(--paper)", minHeight: "100vh" }}>
       <div className="lp">
         <header className="lp-top">
-          <Logo size={36} />
+          <Logo size={sm ? 28 : 36} />
           <div className="lp-actions">
             <a className="lp-link" href="#how">How it works</a>
             <ThemeToggle size={38} />

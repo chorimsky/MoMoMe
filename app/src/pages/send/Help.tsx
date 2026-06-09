@@ -36,9 +36,9 @@ export function Help({ support }: { support?: { email: string; phone: string } }
       <div style={{ marginTop: 20, padding: 16, borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", textAlign: "center" }}>
         <div style={{ fontWeight: 650, fontSize: 14.5 }}>{t("still_help")}</div>
         <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "5px 0 14px" }}>{t("team_replies")}</p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <a className="btn btn-primary" href={waLink(phone)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("chat_wa")}</a>
-          <a className="btn btn-ghost" href={telLink(phone)} style={{ flex: 1, padding: "12px", textDecoration: "none" }}>{t("call_support")}</a>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn btn-primary" href={waLink(phone)} target="_blank" rel="noopener noreferrer" style={{ flex: "1 1 140px", padding: "12px", textDecoration: "none" }}>{t("chat_wa")}</a>
+          <a className="btn btn-ghost" href={telLink(phone)} style={{ flex: "1 1 140px", padding: "12px", textDecoration: "none" }}>{t("call_support")}</a>
         </div>
       </div>
     </FlowCard>

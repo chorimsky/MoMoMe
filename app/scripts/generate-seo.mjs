@@ -493,6 +493,7 @@ header.site .wrap{display:flex;align-items:center;justify-content:space-between;
 .logo{font-family:"Bagel Fat One",Fredoka,sans-serif;font-size:25px;letter-spacing:-.03em;white-space:nowrap}
 .logo .y{color:var(--brand)}.logo .o{color:var(--accent)}.logo .g{color:var(--green)}
 nav.top{display:flex;align-items:center;gap:16px}nav.top a{color:var(--ink2);font-weight:700;font-size:14px}
+@media(max-width:560px){nav.top{gap:10px}nav.top a:not(.btn){display:none}}
 .btn{display:inline-block;background:var(--brand);color:#1c1813;font-family:Fredoka;font-weight:600;padding:11px 19px;border-radius:999px;font-size:15px;white-space:nowrap}
 .btn:hover{text-decoration:none;filter:brightness(.96)}.btn-lg{padding:15px 30px;font-size:17px}
 main{padding:26px 0 60px}.crumb{font-size:13px;color:var(--ink3);margin:6px 0 4px}.crumb a{color:var(--ink3)}

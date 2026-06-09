@@ -4,6 +4,7 @@ import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
 import { useI18n } from "../../lib/i18n.js";
+import { useNarrow } from "../../lib/useNarrow.js";
 import { api, ApiError } from "../../api/client.js";
 import { DetailsStep, MethodStep, ReviewStep, PayStep, ProcessingStep } from "./steps.js";
 import { SuccessStep } from "./Success.js";
@@ -25,6 +26,7 @@ type Tab = "pay" | "history" | "help";
 
 export function SendApp() {
   const { t, lang, setLang } = useI18n();
+  const sm = useNarrow();
   // Deep-link support: /send?tab=help (from the Contact page) or ?tab=activity
   // opens directly on that tab instead of the pay flow.
   const [params] = useSearchParams();
@@ -118,7 +120,7 @@ export function SendApp() {
     <div className="app-bg" style={{ minHeight: "100vh", background: "var(--paper)" }}>
       <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "18px clamp(16px,4vw,24px) 56px" }}>
         <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 22px" }}>
-          <Link to="/" style={{ textDecoration: "none" }}><Logo size={34} /></Link>
+          <Link to="/" style={{ textDecoration: "none" }}><Logo size={sm ? 26 : 34} /></Link>
           <nav className="nav-links" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <ThemeToggle size={34} />
             <button onClick={() => setLang(lang === "en" ? "fr" : "en")} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>

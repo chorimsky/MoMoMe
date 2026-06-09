@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
 import { useI18n } from "../../lib/i18n.js";
+import { useNarrow } from "../../lib/useNarrow.js";
 
 type Current = "terms" | "privacy" | "contact" | null;
 
@@ -13,6 +14,7 @@ function LangToggle() {
       type="button"
       onClick={() => setLang(lang === "en" ? "fr" : "en")}
       aria-label={lang === "en" ? "Passer en français" : "Switch to English"}
+      className="pg-lang"
       style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "8px 12px", borderRadius: 999, fontFamily: "inherit" }}
     >
       {lang === "en" ? "FR" : "EN"}
@@ -29,15 +31,17 @@ const FOOT_LINKS: Array<[string, string, Current]> = [
 ];
 
 export function PageTop({ langToggle = false }: { langToggle?: boolean }) {
+  const sm = useNarrow();
+  const xs = useNarrow(400);
   return (
     <header className="pg-top">
       <Link className="pg-brand" to="/" aria-label="MoMo›Me — home">
-        <Logo size={34} />
+        <Logo size={xs ? 22 : sm ? 26 : 34} />
       </Link>
       <div className="pg-actions">
         <Link className="pg-link" to="/contact">Help</Link>
         {langToggle && <LangToggle />}
-        <ThemeToggle size={38} />
+        <ThemeToggle size={xs ? 32 : 38} />
         <Link className="btn btn-primary cta-sm" to="/send">Pay<span className="cta-rest"> Mobile Money</span></Link>
       </div>
     </header>

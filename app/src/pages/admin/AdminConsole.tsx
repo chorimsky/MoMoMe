@@ -247,7 +247,7 @@ export function AdminConsole() {
             {role}
           </div>
           <ThemeToggle size={36} />
-          <Link to="/send" className="btn btn-ghost" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Customer app ↗</Link>
+          <Link to="/send" className="btn btn-ghost mm-admin-cust" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Customer app ↗</Link>
         </header>
         <main style={{ flex: 1, padding: "22px", maxWidth: 1320, width: "100%", margin: "0 auto" }}>
           <View />
@@ -267,6 +267,10 @@ export function AdminConsole() {
         }
         @media (max-width: 560px) {
           .mm-admin-search { display: none !important; }
+          /* keep the phone header to burger · breadcrumb · theme so it never
+             overflows; the role shows in the sidebar, and the customer-app link
+             is a non-essential shortcut on mobile. */
+          .mm-admin-role, .mm-admin-cust { display: none !important; }
         }
       `}</style>
     </div>

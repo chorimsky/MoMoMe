@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
@@ -14,6 +14,31 @@ const METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
 const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮" };
 const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)" };
 
+/* ---------- contact-picker helpers ---------- */
+type CC = Draft["country"];
+/** Parse a contact's phone string into a CEMAC country + national number,
+ *  recognising any supported dial code (+237/+241/+235/+242/+236) or a 00
+ *  international prefix; falls back to the current country for a bare national
+ *  number. Returns null for anything too short to be a real number. */
+function parseContactTel(raw: string, fallback: CC): { country: CC; national: string } | null {
+  let d = String(raw).replace(/\D/g, "");
+  if (!d) return null;
+  if (d.startsWith("00")) d = d.slice(2);
+  for (const co of Object.values(COUNTRIES)) {
+    const dial = co.dial.replace(/\D/g, "");
+    if (d.startsWith(dial) && d.length - dial.length >= 8) return { country: co.code as CC, national: d.slice(dial.length) };
+  }
+  return d.length >= 8 ? { country: fallback, national: d } : null;
+}
+/** From a contact's (possibly several) numbers, prefer one that maps to a
+ *  supported Mobile-Money operator; else the first parseable number. */
+function pickBestContactNumber(tels: string[] | undefined, fallback: CC): { country: CC; national: string } | null {
+  const parsed = (tels ?? [])
+    .map((t) => parseContactTel(t, fallback))
+    .filter((x): x is { country: CC; national: string } => !!x);
+  return parsed.find((p) => detectProvider(p.national, p.country)) ?? parsed[0] ?? null;
+}
+
 /* ============================================================ 1 — DETAILS */
 export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number }) {
   const { t } = useI18n();
@@ -24,29 +49,35 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
   const fee = Math.round(s.xaf * (feePct ?? FEE_PCT));
   const [resolving, setResolving] = useState(false);
   const [contactNote, setContactNote] = useState<string | null>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
   useEffect(() => { api.recentRecipients().then((r) => setRecents(r)).catch(() => {}); }, []);
 
-  // Pick a recipient's Mobile Money number straight from the device's contact
-  // book (Web Contact Picker API — Chrome/Android over HTTPS). Always offered;
-  // on devices without it, tapping explains it isn't available here.
+  // Pick a recipient straight from the device's contact book.
+  // • Chrome/Android (Web Contact Picker, HTTPS): open the real picker, take the
+  //   best Mobile-Money number, set country + national number + name.
+  // • iOS Safari / desktop (no Contact Picker API): focus the number field so the
+  //   OS keyboard's tel-autofill surfaces saved numbers — the closest native path
+  //   — with a helpful hint instead of a dead end.
   const pickContact = async () => {
     setContactNote(null);
     const nav = navigator as Navigator & {
       contacts?: { select: (props: string[], opts?: { multiple?: boolean }) => Promise<Array<{ name?: string[]; tel?: string[] }>> };
     };
-    if (!nav.contacts?.select) { setContactNote(t("contacts_unsupported")); return; }
+    if (!nav.contacts?.select || !("ContactsManager" in window)) {
+      phoneRef.current?.focus();
+      setContactNote(t("contacts_autofill_hint"));
+      return;
+    }
     try {
       const picked = await nav.contacts.select(["name", "tel"], { multiple: false });
-      const tel = picked?.[0]?.tel?.[0];
-      if (!tel) return;
-      let d = tel.replace(/\D/g, "");
-      // Strip a leading CM country code so the field holds the national number.
-      if (d.startsWith("00237")) d = d.slice(5);
-      else if (d.startsWith("237") && d.length > 9) d = d.slice(3);
-      const name = picked?.[0]?.name?.[0]?.trim();
-      set({ phone: d, ...(name ? { recipientName: name } : {}) });
+      const c0 = picked?.[0];
+      if (!c0) return; // cancelled
+      const best = pickBestContactNumber(c0.tel, s.country);
+      if (!best) { setContactNote(t("contacts_no_number")); return; }
+      const name = c0.name?.[0]?.trim();
+      set({ country: best.country, provider: COUNTRIES[best.country].providers[0], phone: best.national, ...(name ? { recipientName: name } : {}) });
     } catch { /* user cancelled or denied permission — no-op */ }
   };
 
@@ -111,7 +142,8 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
               </select>
               <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
             </div>
-            <input value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")} inputMode="tel"
+            <input ref={phoneRef} value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
+              type="tel" inputMode="tel" autoComplete="tel" name="mm-number"
               style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 15, color: "var(--ink)", outline: "none", minWidth: 0 }} />
             <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
               style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", cursor: "pointer", font: "inherit", fontWeight: 650, fontSize: 13, color: "var(--ink-2)" }}>

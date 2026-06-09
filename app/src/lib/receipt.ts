@@ -50,6 +50,13 @@ function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: n
     [s.date, whenStr(p)],
   ];
   const cx = W / 2;
+  // Brand wordmark geometry: a green lightning bolt centred (nudged right so the
+  // longer "MoMo" balances "Me"), with the letters anchored to either side — no
+  // text-width math needed, so it centres reliably after rasterisation.
+  const boltScale = 0.94;
+  const boltW = 23 * boltScale; // bolt glyph natural width (viewBox 0 0 23 50)
+  const boltCx = cx + 12;
+  const boltLeft = boltCx - boltW / 2;
   const padX = 64, rightX = W - 64;
   const rowsStart = 300, rowH = 50;
   const rowsEnd = rowsStart + rows.length * rowH;
@@ -73,9 +80,11 @@ function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: n
   <rect x="24" y="24" width="${W - 48}" height="248" fill="${C.band}"/>
 </g>
 <rect x="24" y="24" width="${W - 48}" height="${H - 48}" rx="26" fill="none" stroke="${C.line}" stroke-width="2"/>
-<text x="${cx}" y="92" font-family="${FONT}" font-size="40" font-weight="800" text-anchor="middle" letter-spacing="-1"><tspan fill="${C.brand}">MoMo</tspan><tspan fill="${C.green}">›</tspan><tspan fill="${C.accent}">Me</tspan></text>
+<text x="${(boltLeft - 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="end"><tspan fill="${C.brand}">Mo</tspan><tspan fill="${C.accent}">Mo</tspan></text>
+<g transform="translate(${boltLeft.toFixed(1)} 54) scale(${boltScale})"><path d="M15.5 1 L2 27 Q1 29 3.5 29 H9.5 L7 47 Q6.8 49.5 9 47.5 L21 22 Q22 20 19.5 20 H13.5 L17.8 3 Q18.4 0.5 15.5 1 Z" fill="${C.green}" stroke="${C.green}" stroke-width="2" stroke-linejoin="round"/></g>
+<text x="${(boltLeft + boltW + 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="start"><tspan fill="${C.brand}">M</tspan><tspan fill="${C.accent}">e</tspan></text>
 <circle cx="${cx}" cy="150" r="27" fill="${C.green}"/>
-<text x="${cx}" y="159" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">✓</text>
+<path d="M${(cx - 12).toFixed(1)} 150 l 8 9 l 16 -18" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="${cx}" y="214" font-family="${FONT}" font-size="20" font-weight="700" fill="${C.ink}" text-anchor="middle">${esc(s.title)}</text>
 <text x="${cx}" y="258" font-family="${FONT}" font-size="30" font-weight="800" fill="${C.ink}" text-anchor="middle">${esc(fmt(p.xaf))} <tspan font-size="17" fill="${C.ink3}">XAF</tspan></text>
 <line x1="24" y1="272" x2="${W - 24}" y2="272" stroke="${C.line}" stroke-width="2" stroke-dasharray="8 7"/>

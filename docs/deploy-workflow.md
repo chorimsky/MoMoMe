@@ -19,9 +19,16 @@ git add -A && git commit -m "…" && git push
 
 # 2. test on the Vercel URL (mo-mo-me-app.vercel.app)
 
-# 3. happy? ship the same code to the live site:
+# 3. happy? ship the same code to the live site — EITHER:
+#    a) GitHub Actions → "Deploy to Hostinger (production)" → Run workflow   (no laptop needed)
+#       or push a release tag:  git tag v1.2.3 && git push --tags
+#    b) locally:
 bash scripts/deploy-hostinger.sh
 ```
+
+Both build (type-checked) and rsync the same `app/dist/` to `momome.xyz`. The
+GitHub Action (`.github/workflows/deploy-hostinger.yml`) uses repo secrets
+(`HOSTINGER_*` + `HOSTINGER_SSH_KEY`) — already configured.
 
 `deploy-hostinger.sh` runs the full build (with type-check — a TS error aborts
 the deploy), uploads `app/dist/` to Hostinger over the SSH deploy key, and

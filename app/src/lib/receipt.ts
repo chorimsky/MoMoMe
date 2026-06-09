@@ -12,6 +12,7 @@ import { fmt } from "./format.js";
 export interface ReceiptStrings {
   title: string; deliveredTo: string;
   recipient: string; mobileNumber: string; amountDelivered: string; fee: string; totalPaid: string;
+  paidWith: string; amountSent: string; valueUsd: string;
   reference: string; date: string; status: string; completed: string; footer: string;
 }
 
@@ -19,6 +20,17 @@ const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"
 const fullPhone = (p: Payment) => `${COUNTRIES[p.recipient.country].dial} ${p.recipient.phone}`;
 const whenStr = (p: Payment) =>
   new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+/** What the sender actually paid: the rail and the crypto amount. Exported so the
+ *  on-screen receipt and the downloadable PNG stay identical. */
+export const cryptoMethod = (p: Payment): string =>
+  p.method === "LIGHTNING" ? "Lightning" : p.method === "ONCHAIN" ? "Bitcoin" : "USDT";
+export const cryptoSent = (p: Payment): string => {
+  const amt = p.payInstruction?.amount ?? 0;
+  if (p.method === "LIGHTNING") return `${fmt(Math.round(amt * 1e8))} sats`; // BTC → sats
+  return p.payInstruction?.amountLabel || `${amt} ${p.method === "USDT" ? "USDT" : "BTC"}`;
+};
+export const usdStr = (p: Payment): string => `≈ $${fmt(p.usd, 2)}`;
 
 /** Plain-text receipt for text share / clipboard fallback. */
 export function receiptText(p: Payment, s: ReceiptStrings): string {
@@ -28,6 +40,9 @@ export function receiptText(p: Payment, s: ReceiptStrings): string {
     `${s.deliveredTo} ${p.recipient.name || "—"}`,
     `${s.mobileNumber}: ${fullPhone(p)}`,
     `${s.totalPaid}: ${fmt(p.xaf + p.feeXaf)} XAF`,
+    `${s.paidWith}: ${cryptoMethod(p)}`,
+    `${s.amountSent}: ${cryptoSent(p)}`,
+    `${s.valueUsd}: ${usdStr(p)}`,
     `${s.reference}: ${p.ref}`,
     `${s.date}: ${whenStr(p)}`,
     `${s.status}: ${s.completed}`,
@@ -38,6 +53,10 @@ export function receiptText(p: Payment, s: ReceiptStrings): string {
 const FONT = "Arial, Helvetica, system-ui, sans-serif";
 const C = { paper: "#efeae0", card: "#ffffff", band: "#fff6d6", ink: "#1c1813", ink2: "#56504a", ink3: "#8b837a", brand: "#f5b800", accent: "#f2660d", green: "#1f9e5a", line: "#ece6da" };
 
+// Header logo region (SVG user units) — where the wordmark sits and where the
+// live logo is composited onto the canvas. Centred on the band.
+const LOGO_BOX = { x: 208, y: 50, w: 264, h: 64 };
+
 function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: number } {
   const W = 680;
   const rows: Array<[string, string]> = [
@@ -46,6 +65,9 @@ function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: n
     [s.amountDelivered, `${fmt(p.xaf)} XAF`],
     [s.fee, `${fmt(p.feeXaf)} XAF`],
     [s.totalPaid, `${fmt(p.xaf + p.feeXaf)} XAF`],
+    [s.paidWith, cryptoMethod(p)],
+    [s.amountSent, cryptoSent(p)],
+    [s.valueUsd, usdStr(p)],
     [s.reference, p.ref],
     [s.date, whenStr(p)],
   ];
@@ -72,6 +94,13 @@ function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: n
   }).join("\n");
 
   const pillW = 150, pillX = rightX - pillW;
+
+  // The built-in MoMo⚡Me wordmark — always rendered; receiptPng paints the live
+  // admin-uploaded logo over this region on the canvas when one is set.
+  const logoSvg = `<text x="${(boltLeft - 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="end"><tspan fill="${C.brand}">Mo</tspan><tspan fill="${C.accent}">Mo</tspan></text>
+<g transform="translate(${boltLeft.toFixed(1)} 54) scale(${boltScale})"><path d="M15.5 1 L2 27 Q1 29 3.5 29 H9.5 L7 47 Q6.8 49.5 9 47.5 L21 22 Q22 20 19.5 20 H13.5 L17.8 3 Q18.4 0.5 15.5 1 Z" fill="${C.green}" stroke="${C.green}" stroke-width="2" stroke-linejoin="round"/></g>
+<text x="${(boltLeft + boltW + 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="start"><tspan fill="${C.brand}">M</tspan><tspan fill="${C.accent}">e</tspan></text>`;
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * 2}" height="${H * 2}" viewBox="0 0 ${W} ${H}">
 <rect width="${W}" height="${H}" fill="${C.paper}"/>
 <defs><clipPath id="card"><rect x="24" y="24" width="${W - 48}" height="${H - 48}" rx="26"/></clipPath></defs>
@@ -80,9 +109,7 @@ function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: n
   <rect x="24" y="24" width="${W - 48}" height="248" fill="${C.band}"/>
 </g>
 <rect x="24" y="24" width="${W - 48}" height="${H - 48}" rx="26" fill="none" stroke="${C.line}" stroke-width="2"/>
-<text x="${(boltLeft - 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="end"><tspan fill="${C.brand}">Mo</tspan><tspan fill="${C.accent}">Mo</tspan></text>
-<g transform="translate(${boltLeft.toFixed(1)} 54) scale(${boltScale})"><path d="M15.5 1 L2 27 Q1 29 3.5 29 H9.5 L7 47 Q6.8 49.5 9 47.5 L21 22 Q22 20 19.5 20 H13.5 L17.8 3 Q18.4 0.5 15.5 1 Z" fill="${C.green}" stroke="${C.green}" stroke-width="2" stroke-linejoin="round"/></g>
-<text x="${(boltLeft + boltW + 2).toFixed(1)}" y="92" font-family="${FONT}" font-size="42" font-weight="800" letter-spacing="-1.5" text-anchor="start"><tspan fill="${C.brand}">M</tspan><tspan fill="${C.accent}">e</tspan></text>
+${logoSvg}
 <circle cx="${cx}" cy="150" r="27" fill="${C.green}"/>
 <path d="M${(cx - 12).toFixed(1)} 150 l 8 9 l 16 -18" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="${cx}" y="214" font-family="${FONT}" font-size="20" font-weight="700" fill="${C.ink}" text-anchor="middle">${esc(s.title)}</text>
@@ -98,8 +125,8 @@ ${rowSvg}
   return { svg, w: W, h: H };
 }
 
-/** Rasterise the receipt SVG to a PNG blob. */
-export function receiptPng(p: Payment, s: ReceiptStrings): Promise<Blob> {
+/** Rasterise the receipt SVG to a PNG blob, compositing the live brand logo. */
+export function receiptPng(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const { svg, w, h } = buildSvg(p, s);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -112,7 +139,26 @@ export function receiptPng(p: Payment, s: ReceiptStrings): Promise<Blob> {
         if (!ctx) { URL.revokeObjectURL(url); return reject(new Error("no canvas")); }
         ctx.drawImage(img, 0, 0, w * 2, h * 2);
         URL.revokeObjectURL(url);
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
+        const done = () => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
+        // Paint the LIVE admin-uploaded logo over the wordmark. Drawn straight to
+        // the canvas (raster data URL) so it always rasterises — unlike a nested
+        // SVG <image>. On any failure the wordmark stays.
+        if (logo && /^data:image\/(png|jpe?g|webp|gif)\b/i.test(logo)) {
+          const li = new Image();
+          li.onload = () => {
+            try {
+              const b = LOGO_BOX, sc = 2; // canvas is 2× the SVG units
+              ctx.fillStyle = C.band;     // erase the wordmark behind the logo
+              ctx.fillRect(b.x * sc, b.y * sc, b.w * sc, b.h * sc);
+              const k = Math.min((b.w * sc) / li.naturalWidth, (b.h * sc) / li.naturalHeight);
+              const dw = li.naturalWidth * k, dh = li.naturalHeight * k;
+              ctx.drawImage(li, b.x * sc + (b.w * sc - dw) / 2, b.y * sc + (b.h * sc - dh) / 2, dw, dh);
+            } catch { /* keep the wordmark on any error */ }
+            done();
+          };
+          li.onerror = () => done();
+          li.src = logo;
+        } else done();
       } catch (e) { URL.revokeObjectURL(url); reject(e instanceof Error ? e : new Error("raster failed")); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("svg load failed")); };
@@ -123,9 +169,9 @@ export function receiptPng(p: Payment, s: ReceiptStrings): Promise<Blob> {
 const fileName = (p: Payment) => `MoMoMe-receipt-${p.ref}.png`;
 
 /** Download the receipt PNG. */
-export async function downloadReceipt(p: Payment, s: ReceiptStrings): Promise<"ok" | "fail"> {
+export async function downloadReceipt(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<"ok" | "fail"> {
   try {
-    const blob = await receiptPng(p, s);
+    const blob = await receiptPng(p, s, logo);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = fileName(p);
@@ -136,12 +182,12 @@ export async function downloadReceipt(p: Payment, s: ReceiptStrings): Promise<"o
 }
 
 /** Share the receipt — image file if supported, else text, else clipboard. */
-export async function shareReceipt(p: Payment, s: ReceiptStrings): Promise<"shared" | "copied" | "cancel" | "fail"> {
+export async function shareReceipt(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<"shared" | "copied" | "cancel" | "fail"> {
   const text = receiptText(p, s);
   const nav = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
   // Try sharing the image file.
   try {
-    const blob = await receiptPng(p, s);
+    const blob = await receiptPng(p, s, logo);
     const file = new File([blob], fileName(p), { type: "image/png" });
     if (typeof nav.share === "function" && nav.canShare?.({ files: [file] })) {
       await nav.share({ files: [file], title: `MoMo›Me — ${s.title}`, text });

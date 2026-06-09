@@ -1,10 +1,10 @@
 import { useState, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
-import { Logo, Momo } from "../../components/atoms.js";
+import { Logo, Momo, useBrandLogo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
-import { downloadReceipt, shareReceipt, type ReceiptStrings } from "../../lib/receipt.js";
+import { downloadReceipt, shareReceipt, cryptoMethod, cryptoSent, usdStr, type ReceiptStrings } from "../../lib/receipt.js";
 import { FlowCard, Row } from "./ui.js";
 
 function fullPhone(p: Payment): string {
@@ -16,24 +16,29 @@ function when(p: Payment): string {
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {
   const { t } = useI18n();
+  const logo = useBrandLogo(); // the LIVE brand logo (admin-uploaded) → on the receipt
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2200); };
   const strings: ReceiptStrings = {
     title: t("receipt_success"), deliveredTo: t("delivered_to"),
     recipient: t("recipient"), mobileNumber: t("mobile_number"), amountDelivered: t("amount_delivered"),
-    fee: t("fee"), totalPaid: t("total_paid"), reference: t("reference"), date: t("date"),
+    fee: t("fee"), totalPaid: t("total_paid"),
+    paidWith: t("receipt_paid_with"), amountSent: t("receipt_amount_sent"), valueUsd: t("receipt_value_usd"),
+    reference: t("reference"), date: t("date"),
     status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
   };
-  const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
-  const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
-  // Mobile-Money-only itemisation — never expose USD/crypto to the customer.
+  const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
+  const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
   const rows: Array<[string, string]> = [
     [t("recipient"), payment.recipient.name || "—"],
     [t("mobile_number"), fullPhone(payment)],
     [t("amount_delivered"), fmt(payment.xaf) + " XAF"],
     [t("fee"), fmt(payment.feeXaf) + " XAF"],
     [t("total_paid"), fmt(payment.xaf + payment.feeXaf) + " XAF"],
+    [t("receipt_paid_with"), cryptoMethod(payment)],
+    [t("receipt_amount_sent"), cryptoSent(payment)],
+    [t("receipt_value_usd"), usdStr(payment)],
     [t("reference"), payment.ref],
     [t("date"), when(payment)],
   ];

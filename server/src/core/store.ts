@@ -52,6 +52,15 @@ export function claimQuote(qid: string): Quote | undefined {
   touch("store");
   return q;
 }
+/** Evict quotes past their expiry — a never-claimed quote would otherwise live
+ *  forever. Called on a timer so the quotes map can't grow without bound. */
+export function pruneExpiredQuotes(): number {
+  const now = Date.now();
+  let removed = 0;
+  for (const [qid, q] of quotes) if (Date.parse(q.expiresAt) < now) { quotes.delete(qid); removed++; }
+  if (removed) touch("store");
+  return removed;
+}
 
 export function putPayment(p: Payment) {
   payments.set(p.id, p);

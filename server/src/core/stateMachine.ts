@@ -20,9 +20,14 @@ import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { transactionStatus } from "../adapters/ibex.js";
 
-/** Available XAF payout float = base treasury − everything already paid out. */
+/** Available XAF payout float = base treasury − everything already paid out
+ *  (external_recipient) − everything RESERVED for an in-flight/held payout
+ *  (payout_float_XAF, credited at FX-lock and released on delivery→external or
+ *  on refund). Both balances are negative (credits). Because each payment
+ *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
+ *  the full float and over-commit the treasury. */
 function availableFloatXaf(): number {
-  return XAF_FLOAT_BASE + balance("external_recipient", "XAF"); // balance is negative (credits)
+  return XAF_FLOAT_BASE + balance("external_recipient", "XAF") + balance("payout_float_XAF", "XAF");
 }
 
 const SEQ: PaymentState[] = [
@@ -115,7 +120,10 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
     transition(p, "MANUAL_REVIEW", `exceeds ${p.recipient.provider} payout limit`);
     return;
   }
-  if (availableFloatXaf() < p.xaf) {
+  // availableFloatXaf() already includes THIS payment's FX-lock reservation, so a
+  // negative result means the treasury is over-committed across all delivered +
+  // in-flight payouts — hold this marginal payment rather than over-draw real money.
+  if (availableFloatXaf() < 0) {
     transition(p, "MANUAL_REVIEW", "insufficient XAF float");
     return;
   }

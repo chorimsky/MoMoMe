@@ -444,6 +444,17 @@ async function main() {
     const rn2 = nets("pay_refund");
     ok("second refund is a no-op (idempotent, ledger stays balanced)", secondRefund === false && Math.abs(rn2.BTC ?? 0) < 1e-9 && Math.abs(rn2.XAF ?? 0) < 1e-9);
 
+    // Float reservation: a payout reserves the treasury at FX-lock, so a marginal
+    // payment that over-commits the float is HELD (not over-drawn). Compute the
+    // current available float, then seed a payment whose xaf exceeds it.
+    const ledgerMod2 = await import("../src/core/ledger.js");
+    const domainMod = await import("../../shared/domain.js");
+    const availFloat = domainMod.XAF_FLOAT_BASE + ledgerMod2.balance("external_recipient", "XAF") + ledgerMod2.balance("payout_float_XAF", "XAF");
+    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN);
+    overP.xaf = availFloat + 100_000; overP.totalXaf = overP.xaf + overP.feeXaf; storeMod.putPayment(overP);
+    await confirmInbound(storeMod.findByProviderRef("h_float_over")!, BTC_IN);
+    ok("over-committing payout is held for float (MANUAL_REVIEW)", storeMod.getPayment("pay_float_over")!.state === "MANUAL_REVIEW");
+
     // Retry a MANUAL_REVIEW payment → delivered, ledger balanced, NO double-pay.
     seedPayment("pay_retry", "h_retry", BTC_IN);
     storeMod.getPayment("pay_retry")!.state = "MANUAL_REVIEW";

@@ -187,6 +187,7 @@ export async function lookupName(phone: string): Promise<{ name: string } | null
   const digits = phone.replace(/\D/g, "");
   if (nameCache.has(digits)) return nameCache.get(digits)!;
   const result = isLive() ? null : sandboxLookup(digits);
+  if (nameCache.size >= 10_000) nameCache.clear(); // bound the cache (caller input is unbounded)
   nameCache.set(digits, result);
   return result;
 }

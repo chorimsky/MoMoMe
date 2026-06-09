@@ -15,10 +15,19 @@ import { useTheme } from "../lib/theme.js";
    One shared source of truth: fetched once from /config, kept live via the
    `mm-brand-logo` event the admin Settings save dispatches. Any <Logo> uses it
    automatically, so an uploaded logo replaces the wordmark everywhere. */
-let _brandLogo: string | null = null;
+const BRAND_KEY = "mm_brand_logo";
+// Seed synchronously from localStorage so a returning visitor paints the real
+// (admin-uploaded) logo on the FIRST render — no flash of the built-in wordmark
+// before /config resolves. The fetch in the hook refreshes it (and the cache).
+let _brandLogo: string | null = (() => { try { return localStorage.getItem(BRAND_KEY); } catch { return null; } })();
 let _brandLoaded = false;
 const _brandSubs = new Set<(v: string | null) => void>();
-function setBrandLogo(v: string | null) { if (v === _brandLogo) return; _brandLogo = v; _brandSubs.forEach((f) => f(v)); }
+function setBrandLogo(v: string | null) {
+  if (v === _brandLogo) return;
+  _brandLogo = v;
+  try { v ? localStorage.setItem(BRAND_KEY, v) : localStorage.removeItem(BRAND_KEY); } catch { /* storage disabled */ }
+  _brandSubs.forEach((f) => f(v));
+}
 if (typeof window !== "undefined") window.addEventListener("mm-brand-logo", (e) => setBrandLogo((e as CustomEvent).detail ?? null));
 export function useBrandLogo(): string | null {
   const [v, setV] = useState<string | null>(_brandLogo);

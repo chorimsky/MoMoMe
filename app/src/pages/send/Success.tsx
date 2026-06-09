@@ -18,6 +18,9 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   const { t } = useI18n();
   const logo = useBrandLogo(); // the LIVE brand logo (admin-uploaded) → on the receipt
   const [busy, setBusy] = useState(false);
+  // Sender's own record shows how they paid (crypto · USD); toggle OFF for a
+  // recipient-safe, Mobile-Money-only receipt.
+  const [showCrypto, setShowCrypto] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2200); };
   const strings: ReceiptStrings = {
@@ -28,17 +31,19 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     reference: t("reference"), date: t("date"),
     status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
   };
-  const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
-  const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
+  const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo, showCrypto); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
+  const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo, showCrypto); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
   const rows: Array<[string, string]> = [
     [t("recipient"), payment.recipient.name || "—"],
     [t("mobile_number"), fullPhone(payment)],
     [t("amount_delivered"), fmt(payment.xaf) + " XAF"],
     [t("fee"), fmt(payment.feeXaf) + " XAF"],
     [t("total_paid"), fmt(payment.xaf + payment.feeXaf) + " XAF"],
-    [t("receipt_paid_with"), cryptoMethod(payment)],
-    [t("receipt_amount_sent"), cryptoSent(payment)],
-    [t("receipt_value_usd"), usdStr(payment)],
+    ...(showCrypto ? [
+      [t("receipt_paid_with"), cryptoMethod(payment)],
+      [t("receipt_amount_sent"), cryptoSent(payment)],
+      [t("receipt_value_usd"), usdStr(payment)],
+    ] as Array<[string, string]> : []),
     [t("reference"), payment.ref],
     [t("date"), when(payment)],
   ];
@@ -84,7 +89,15 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
         </div>
 
         <div style={{ padding: "8px 24px 18px", textAlign: "center" }}>
-          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 12px", lineHeight: 1.5 }}>{t("receipt_footer")}</p>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 10px", lineHeight: 1.5 }}>{t("receipt_footer")}</p>
+          {/* Sender's record (crypto · USD) ⇄ recipient-safe Mobile-Money-only. */}
+          <button type="button" role="switch" aria-checked={showCrypto} onClick={() => setShowCrypto((v) => !v)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 9, margin: "0 auto 12px", border: "1px solid var(--line)", background: "var(--surface)", borderRadius: 999, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", fontFamily: "inherit" }}>
+            <span style={{ width: 32, height: 19, borderRadius: 999, background: showCrypto ? "var(--recv)" : "var(--line)", position: "relative", transition: "background .15s", flex: "none" }}>
+              <span style={{ position: "absolute", top: 2, left: showCrypto ? 15 : 2, width: 15, height: 15, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.2)" }} />
+            </span>
+            {t("receipt_show_crypto")}
+          </button>
           {msg && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--recv)", marginBottom: 10 }}>{msg}</div>}
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button className="btn btn-ghost" disabled={busy} onClick={onDownload} style={{ flex: 1, gap: 7, fontSize: 14 }} aria-label={t("download")}>

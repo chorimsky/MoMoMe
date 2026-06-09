@@ -33,16 +33,18 @@ export const cryptoSent = (p: Payment): string => {
 export const usdStr = (p: Payment): string => `≈ $${fmt(p.usd, 2)}`;
 
 /** Plain-text receipt for text share / clipboard fallback. */
-export function receiptText(p: Payment, s: ReceiptStrings): string {
+export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true): string {
   return [
     `MoMo›Me — ${s.title}`,
     `${s.amountDelivered}: ${fmt(p.xaf)} XAF`,
     `${s.deliveredTo} ${p.recipient.name || "—"}`,
     `${s.mobileNumber}: ${fullPhone(p)}`,
     `${s.totalPaid}: ${fmt(p.xaf + p.feeXaf)} XAF`,
-    `${s.paidWith}: ${cryptoMethod(p)}`,
-    `${s.amountSent}: ${cryptoSent(p)}`,
-    `${s.valueUsd}: ${usdStr(p)}`,
+    ...(includeCrypto ? [
+      `${s.paidWith}: ${cryptoMethod(p)}`,
+      `${s.amountSent}: ${cryptoSent(p)}`,
+      `${s.valueUsd}: ${usdStr(p)}`,
+    ] : []),
     `${s.reference}: ${p.ref}`,
     `${s.date}: ${whenStr(p)}`,
     `${s.status}: ${s.completed}`,
@@ -57,17 +59,18 @@ const C = { paper: "#efeae0", card: "#ffffff", band: "#fff6d6", ink: "#1c1813", 
 // live logo is composited onto the canvas. Centred on the band.
 const LOGO_BOX = { x: 208, y: 50, w: 264, h: 64 };
 
-function buildSvg(p: Payment, s: ReceiptStrings): { svg: string; w: number; h: number } {
+function buildSvg(p: Payment, s: ReceiptStrings, includeCrypto = true): { svg: string; w: number; h: number } {
   const W = 680;
+  const cryptoRows: Array<[string, string]> = includeCrypto
+    ? [[s.paidWith, cryptoMethod(p)], [s.amountSent, cryptoSent(p)], [s.valueUsd, usdStr(p)]]
+    : [];
   const rows: Array<[string, string]> = [
     [s.recipient, p.recipient.name || "—"],
     [s.mobileNumber, fullPhone(p)],
     [s.amountDelivered, `${fmt(p.xaf)} XAF`],
     [s.fee, `${fmt(p.feeXaf)} XAF`],
     [s.totalPaid, `${fmt(p.xaf + p.feeXaf)} XAF`],
-    [s.paidWith, cryptoMethod(p)],
-    [s.amountSent, cryptoSent(p)],
-    [s.valueUsd, usdStr(p)],
+    ...cryptoRows,
     [s.reference, p.ref],
     [s.date, whenStr(p)],
   ];
@@ -126,9 +129,9 @@ ${rowSvg}
 }
 
 /** Rasterise the receipt SVG to a PNG blob, compositing the live brand logo. */
-export function receiptPng(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<Blob> {
+export function receiptPng(p: Payment, s: ReceiptStrings, logo?: string | null, includeCrypto = true): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    const { svg, w, h } = buildSvg(p, s);
+    const { svg, w, h } = buildSvg(p, s, includeCrypto);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
     const img = new Image();
     img.onload = () => {
@@ -169,9 +172,9 @@ export function receiptPng(p: Payment, s: ReceiptStrings, logo?: string | null):
 const fileName = (p: Payment) => `MoMoMe-receipt-${p.ref}.png`;
 
 /** Download the receipt PNG. */
-export async function downloadReceipt(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<"ok" | "fail"> {
+export async function downloadReceipt(p: Payment, s: ReceiptStrings, logo?: string | null, includeCrypto = true): Promise<"ok" | "fail"> {
   try {
-    const blob = await receiptPng(p, s, logo);
+    const blob = await receiptPng(p, s, logo, includeCrypto);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = fileName(p);
@@ -182,12 +185,12 @@ export async function downloadReceipt(p: Payment, s: ReceiptStrings, logo?: stri
 }
 
 /** Share the receipt — image file if supported, else text, else clipboard. */
-export async function shareReceipt(p: Payment, s: ReceiptStrings, logo?: string | null): Promise<"shared" | "copied" | "cancel" | "fail"> {
-  const text = receiptText(p, s);
+export async function shareReceipt(p: Payment, s: ReceiptStrings, logo?: string | null, includeCrypto = true): Promise<"shared" | "copied" | "cancel" | "fail"> {
+  const text = receiptText(p, s, includeCrypto);
   const nav = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
   // Try sharing the image file.
   try {
-    const blob = await receiptPng(p, s, logo);
+    const blob = await receiptPng(p, s, logo, includeCrypto);
     const file = new File([blob], fileName(p), { type: "image/png" });
     if (typeof nav.share === "function" && nav.canShare?.({ files: [file] })) {
       await nav.share({ files: [file], title: `MoMo›Me — ${s.title}`, text });

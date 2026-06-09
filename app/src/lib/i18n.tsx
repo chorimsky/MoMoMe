@@ -52,6 +52,7 @@ export const STRINGS: Dict = {
   receipt_paid_with: ["Paid with", "Payé avec"],
   receipt_amount_sent: ["Amount sent", "Montant envoyé"],
   receipt_value_usd: ["Value (USD)", "Valeur (USD)"],
+  receipt_show_crypto: ["Show how I paid (crypto · USD)", "Afficher mon paiement (crypto · USD)"],
   download: ["Download", "Télécharger"], share: ["Share", "Partager"],
   receipt_saved: ["Receipt saved", "Reçu enregistré"],
   receipt_copied: ["Receipt copied to clipboard", "Reçu copié dans le presse-papiers"],

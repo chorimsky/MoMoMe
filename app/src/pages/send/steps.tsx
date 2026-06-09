@@ -77,7 +77,8 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
       const best = pickBestContactNumber(c0.tel, s.country);
       if (!best) { setContactNote(t("contacts_no_number")); return; }
       const name = c0.name?.[0]?.trim();
-      set({ country: best.country, provider: COUNTRIES[best.country].providers[0], phone: best.national, ...(name ? { recipientName: name } : {}) });
+      const prov = detectProvider(best.national, best.country) ?? COUNTRIES[best.country].providers[0];
+      set({ country: best.country, provider: prov, phone: best.national, ...(name ? { recipientName: name, nameSource: "manual" } : {}) });
     } catch { /* user cancelled or denied permission — no-op */ }
   };
 
@@ -93,8 +94,14 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
         if (!active) return;
         // Anchor the operator to the number's prefix (overrides the manual pick).
         const prov = r.provider && c.providers.includes(r.provider) ? { provider: r.provider } : {};
-        if (r.status === "unknown") set({ recipientName: "", nameSource: "unknown", ...prov });
-        else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
+        if (r.status === "unknown") {
+          // An unrecognised number must NOT erase a name that came with it — from
+          // the device contact picker or a recent recipient. Keep it; only clear
+          // when there's no user-provided name to fall back on (typed numbers).
+          const keepName = (s.recipientName || "").trim().length >= 2 && (s.nameSource === "manual" || s.nameSource === "internal");
+          if (keepName) set({ nameSource: "manual", ...prov });
+          else set({ recipientName: "", nameSource: "unknown", ...prov });
+        } else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
       } catch {
         if (active) set({ nameSource: "manual" });
       } finally {

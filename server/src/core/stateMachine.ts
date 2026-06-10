@@ -18,7 +18,7 @@ import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
-import { transactionStatus } from "../adapters/ibex.js";
+import { transactionStatus, payInvoice, bolt11AmountMsat } from "../adapters/ibex.js";
 
 /** Available XAF payout float = base treasury − everything already paid out
  *  (external_recipient) − everything RESERVED for an in-flight/held payout
@@ -277,10 +277,10 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
       country: p.recipient.country, aggregatorRef: p.aggregator ? `${p.aggregator}:${p.payoutRef ?? ""}` : null,
     });
   } else if (status === "FAILED") {
-    // The operator rejected the payout → return the funds to the sender.
-    reversePayment(p.id);
-    transition(p, "REFUND_PENDING", "payout failed at provider");
-    transition(p, "REFUNDED", "auto-refunded after payout failure");
+    // The provider rejected the payout after accepting it → the inbound crypto must go
+    // back to the sender. Enter the refund-claim flow (sender supplies an invoice); the
+    // ledger is unwound only when the refund actually pays out (finalizeRefund).
+    beginRefund(p, "payout failed at provider");
   }
   // PENDING → leave as-is; reconciliation will re-check.
 }
@@ -373,6 +373,57 @@ export function adminRefund(p: Payment): boolean {
   transition(p, "REFUND_PENDING", "refund initiated by admin");
   transition(p, "REFUNDED", "refunded by admin");
   return true;
+}
+
+/* ============================================================
+   Refund-claim flow — when a payout can't land, the inbound crypto is returned to
+   the sender via an outbound Lightning payment to an invoice THEY supply. Guarded:
+   Lightning-only, amount-bounded (never over-pay), idempotent (the needs-destination
+   flag claims it). Settlement is confirmed by polling the pay transaction.
+   ============================================================ */
+export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: boolean; error?: string }> {
+  if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
+  if (p.payInstruction.method !== "LIGHTNING") return { ok: false, error: "refund_lightning_only" };
+  const inboundMsat = Math.round(p.payInstruction.amount * 1e11);
+  const invMsat = bolt11AmountMsat(bolt11);
+  if (invMsat == null) return { ok: false, error: "bad_invoice" };
+  // Over/under-refund guard: accept an amount-less invoice (we set the amount) or one
+  // that matches the inbound within 1%. Never pay an invoice for MORE than was received.
+  if (invMsat !== 0 && (invMsat > inboundMsat || invMsat < inboundMsat * 0.99)) return { ok: false, error: "amount_mismatch" };
+  // Claim the refund — idempotent: a second submit while in flight is rejected above.
+  p.refundNeedsDestination = false;
+  putPayment(p);
+  try {
+    const r = await payInvoice(bolt11, invMsat === 0 ? inboundMsat : undefined);
+    p.refundTxId = r.transactionId;
+    putPayment(p);
+    if (r.settled) finalizeRefund(p);
+    else void pollRefund(p.ref);
+    return { ok: true };
+  } catch (e) {
+    p.refundNeedsDestination = true; // payout never left — let the sender try another invoice
+    putPayment(p);
+    return { ok: false, error: e instanceof Error ? e.message : "refund_failed" };
+  }
+}
+
+/** The outbound refund settled — unwind the ledger (we no longer hold the inbound) and
+ *  mark REFUNDED. Idempotent. */
+function finalizeRefund(p: Payment): void {
+  if (p.state === "REFUNDED") return;
+  reversePayment(p.id);
+  transition(p, "REFUNDED", "crypto refunded to sender");
+}
+
+/** Poll the outbound refund payment to settlement (Lightning settles in seconds). */
+async function pollRefund(ref: string): Promise<void> {
+  for (const delay of [3000, 5000, 8000, 15000, 30000]) {
+    await wait(delay);
+    const p = findPaymentByRef(ref);
+    if (!p || p.state !== "REFUND_PENDING" || !p.refundTxId) return; // resolved / unknown
+    const s = await transactionStatus(p.refundTxId).catch(() => null);
+    if (s?.settled) { finalizeRefund(p); return; }
+  }
 }
 
 /** Sandbox driver: simulate rail confirmation latency, then settle. */

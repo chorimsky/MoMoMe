@@ -10,7 +10,7 @@ import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, providerFor } from "../adapters/index.js";
-import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund } from "../core/stateMachine.js";
 import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
@@ -498,6 +498,27 @@ api.post("/payments/:id/simulate", (req, res) => {
   if (liveMoney()) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled when a real-money rail is live." });
   if (p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
+});
+
+/**
+ * Refund-claim: a payment whose payout couldn't land is REFUND_PENDING; the sender
+ * submits a Lightning invoice here to receive their crypto back (paid outbound via IBEX).
+ */
+api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 10, 60_000), async (req, res) => {
+  const p = store.getPayment(req.params.id);
+  if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  const bolt11 = typeof (req.body ?? {}).bolt11 === "string" ? (req.body.bolt11 as string).trim() : "";
+  if (!/^ln(bc|tb|bcrt)\w+$/i.test(bolt11)) return res.status(400).json({ error: "bad_invoice", message: "Enter a valid Lightning invoice (starts with ln…)." });
+  const r = await completeRefund(p, bolt11);
+  if (!r.ok) {
+    const message = r.error === "amount_mismatch" ? "The invoice amount must match your original payment — or use an amount-less invoice."
+      : r.error === "not_refundable" ? "This payment isn't awaiting a refund."
+      : r.error === "refund_lightning_only" ? "Automated refunds are available for Lightning payments only."
+      : r.error === "bad_invoice" ? "Couldn't read that Lightning invoice. Please paste it again."
+      : "Couldn't process the refund. Please check the invoice and try again.";
+    return res.status(r.error === "not_refundable" ? 409 : 400).json({ error: r.error, message });
+  }
+  res.json(store.getPayment(p.id) ?? p);
 });
 
 api.get("/payments/:id", (req, res) => {

@@ -133,11 +133,13 @@ export async function payoutReady(provider: ProviderId, country: CountryCode, am
   if (!supporting.length) return { ok: false, reason: "provider_unsupported" };
   const candidates = supporting.filter((a) => eligible(a));
   if (!candidates.length) return { ok: false, reason: "rails_down" };
-  const real = candidates.filter((a) => CONFIGURED[a]() && (!requireLive || aggregatorLive(a)));
-  // No real/live rail. With real money (requireLive) that's a hard block; otherwise
-  // (sandbox/demo) a simulated payout is fine, so the flow is allowed to proceed.
-  if (!real.length) return requireLive ? { ok: false, reason: "no_live_rail" } : { ok: true };
-  for (const a of real) {
+  // Simulated payout (demo / non-real inbound): any eligible rail will handle it — a
+  // sandbox rail has no real wallet (balance null), so don't require funding here.
+  if (!requireLive) return { ok: true };
+  // Real money: require a LIVE, configured rail with real balance >= amount.
+  const live = candidates.filter((a) => CONFIGURED[a]() && aggregatorLive(a));
+  if (!live.length) return { ok: false, reason: "no_live_rail" };
+  for (const a of live) {
     const bal = await AGGREGATORS[a].balance(country, provider);
     if (bal != null && bal >= amountXaf) return { ok: true };
   }

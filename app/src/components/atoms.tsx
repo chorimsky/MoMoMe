@@ -122,29 +122,91 @@ export function ThemeToggle({ size = 36 }: { size?: number }) {
 /* ---------- Momo — the mascot ----------
    A friendly lightning character: speed, trust, Mobile Money. Used sparingly
    (welcome, success, empty, loading), never inside transactional flows. */
-export function Momo({ size = 96, mood = "happy", className }: { size?: number; mood?: "happy" | "wink" | "wow"; className?: string }) {
+export function Momo({ size = 96, mood = "happy", className, interactive = true }: { size?: number; mood?: "happy" | "wink" | "wow"; className?: string; interactive?: boolean }) {
+  // Momo — MoMoMe's own goggle-eyed capsule mascot. Idle life (blink, tuft sway, lens
+  // glint) runs via CSS; the goggle's pupil tracks the pointer and the whole character
+  // jumps with a spark when poked (tap/click). All motion respects reduced-motion.
+  const happy = mood === "happy", wow = mood === "wow", wink = mood === "wink";
+  const ref = useRef<SVGSVGElement>(null);
+  const [pupil, setPupil] = useState({ x: 0, y: 0 });
+  const [poked, setPoked] = useState(false);
+
+  useEffect(() => {
+    if (!interactive || wink) return;
+    let raf = 0;
+    const onMove = (e: PointerEvent) => {
+      if (raf) return; // throttle to one update per frame
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const el = ref.current; if (!el) return;
+        const r = el.getBoundingClientRect();
+        const ex = r.left + r.width / 2, ey = r.top + r.height * 0.42; // goggle centre
+        const dx = e.clientX - ex, dy = e.clientY - ey, d = Math.hypot(dx, dy) || 1;
+        const reach = 3.8, k = Math.min(1, d / 220); // ease toward full reach
+        setPupil({ x: +(dx / d * reach * k).toFixed(2), y: +(dy / d * reach * k).toFixed(2) });
+      });
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); if (raf) cancelAnimationFrame(raf); };
+  }, [interactive, wink]);
+
+  const poke = () => { if (!interactive) return; setPoked(true); window.setTimeout(() => setPoked(false), 760); };
+
   return (
-    <svg width={size} height={size} viewBox="0 0 96 96" className={className} role="img" aria-label="Momo the lightning mascot" style={{ flex: "none" }}>
-      {/* feet */}
-      <ellipse cx="39" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
-      <ellipse cx="59" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
-      {/* body */}
-      <circle cx="48" cy="46" r="34" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="4" />
-      {/* cheeks */}
-      <circle cx="29" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
-      <circle cx="67" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
-      {/* eyes */}
-      {mood === "wink"
-        ? <path d="M34 44 q4 3 8 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />
-        : <><circle cx="38" cy="44" r="5" fill="var(--brand-ink)" /><circle cx="39.6" cy="42.3" r="1.6" fill="#fff" /></>}
-      <circle cx="58" cy="44" r="5" fill="var(--brand-ink)" />
-      <circle cx="59.6" cy="42.3" r="1.6" fill="#fff" />
-      {/* mouth */}
-      {mood === "wow"
-        ? <ellipse cx="48" cy="58" rx="5" ry="6" fill="var(--brand-ink)" />
-        : <path d="M38 56 q10 9 20 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />}
-      {/* lightning spark */}
-      <path d="M79 16 l-10 13 h5.5 l-4.5 11 13 -15 h-5.5 z" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+    <svg ref={ref} width={size} height={size} viewBox="0 0 96 96" className={`momo ${className ?? ""}`.trim()} role="img" aria-label="Momo the lightning mascot"
+      onPointerDown={poke} style={{ flex: "none", overflow: "visible", cursor: interactive ? "pointer" : undefined }}>
+      <defs>
+        <radialGradient id="momoBody" cx="50%" cy="36%" r="72%">
+          <stop offset="52%" stopColor="var(--brand)" />
+          <stop offset="100%" stopColor="color-mix(in oklab, var(--brand) 76%, var(--brand-ink))" />
+        </radialGradient>
+      </defs>
+      <g className={poked ? "momo-inner momo-poke" : "momo-inner"}>
+        {/* lightning-bolt hair tuft (sways) */}
+        <path className="momo-tuft" d="M54 3 l-11 16 h6 l-5 11 14 -17 h-6 z" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+        {/* stubby arms */}
+        <path d="M26 52 q-10 2 -11 12" fill="none" stroke="var(--brand-ink)" strokeWidth="5" strokeLinecap="round" />
+        <path d="M70 52 q10 2 11 12" fill="none" stroke="var(--brand-ink)" strokeWidth="5" strokeLinecap="round" />
+        {/* feet */}
+        <ellipse cx="40" cy="84" rx="7" ry="5" fill="var(--brand-ink)" />
+        <ellipse cx="56" cy="84" rx="7" ry="5" fill="var(--brand-ink)" />
+        {/* capsule body with soft volume shading */}
+        <rect x="25" y="18" width="46" height="62" rx="23" fill="url(#momoBody)" stroke="var(--brand-ink)" strokeWidth="4" />
+        {/* goggle strap */}
+        <rect x="25" y="36" width="46" height="8" fill="var(--brand-ink)" />
+        {/* one big goggle: dark frame → light ring → white lens */}
+        <circle cx="48" cy="40" r="16" fill="var(--brand-ink)" />
+        <circle cx="48" cy="40" r="12.5" fill="#e9edf3" />
+        <circle cx="48" cy="40" r="9.5" fill="#fff" />
+        {/* pupil — tracks the pointer; wink shows a happy arc instead */}
+        {wink
+          ? <path d="M41 41 q7 6 14 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />
+          : <g style={{ transform: `translate(${pupil.x}px, ${pupil.y}px)`, transition: "transform .14s ease-out" }}>
+              <circle cx="48" cy="40" r={wow ? 3.6 : 4.7} fill="var(--brand-ink)" />
+              <circle cx="50" cy="38" r="1.9" fill="#fff" />
+            </g>}
+        {/* lens glint (pulses) */}
+        <circle className="momo-glint" cx="43.5" cy="35.5" r="2.4" fill="#fff" />
+        {/* eyelid — collapsed (eye open) at rest, scales closed to blink */}
+        {!wink && (
+          <g className="momo-lid">
+            <circle cx="48" cy="40" r="9.7" fill="var(--brand)" />
+            <path d="M39.6 40 h16.8" fill="none" stroke="var(--brand-ink)" strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        )}
+        {/* cheeks */}
+        <circle cx="33" cy="55" r="4.5" fill="var(--accent)" opacity="0.5" />
+        <circle cx="63" cy="55" r="4.5" fill="var(--accent)" opacity="0.5" />
+        {/* mouth */}
+        {wow
+          ? <ellipse cx="48" cy="60" rx="5" ry="6" fill="var(--brand-ink)" />
+          : <path d={happy ? "M40 57 q8 8 16 0" : "M41 58 q7 6 14 0"} fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />}
+      </g>
+      {/* spark burst on poke */}
+      <g className={poked ? "momo-spark momo-spark-on" : "momo-spark"} fill="var(--accent)" stroke="var(--brand-ink)" strokeWidth="1.5" strokeLinejoin="round">
+        <path d="M71 15 l2.3 5.2 5.2 2.3 -5.2 2.3 -2.3 5.2 -2.3 -5.2 -5.2 -2.3 5.2 -2.3 z" />
+        <path d="M19 23 l1.7 3.8 3.8 1.7 -3.8 1.7 -1.7 3.8 -1.7 -3.8 -3.8 -1.7 3.8 -1.7 z" />
+      </g>
     </svg>
   );
 }

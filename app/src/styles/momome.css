@@ -214,6 +214,23 @@ button, input, select, textarea { color: inherit; }
 .momo-celebrate { animation: momoPop .5s cubic-bezier(.34,1.56,.64,1) both, momoBob 2.8s ease-in-out .5s infinite; transform-origin: center bottom; }
 @media (prefers-reduced-motion: reduce) { .momo-bob, .momo-celebrate { animation: none; } }
 
+/* Momo idle life (blink, tuft sway, lens glint) + poke reaction (jump + spark) */
+.momo-tuft  { transform-box: fill-box; transform-origin: 50% 100%; animation: momoTuft 3.2s ease-in-out infinite; }
+.momo-lid   { transform-box: fill-box; transform-origin: center; transform: scaleY(0); animation: momoBlink 5.4s ease-in-out infinite; }
+.momo-glint { animation: momoGlint 4s ease-in-out infinite; }
+.momo-inner.momo-poke { transform-box: fill-box; transform-origin: 50% 100%; animation: momoPoke .76s cubic-bezier(.34,1.56,.64,1); }
+.momo-spark { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.momo-spark.momo-spark-on { animation: momoSpark .7s ease-out; }
+@keyframes momoTuft  { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(8deg); } }
+@keyframes momoBlink { 0%, 90%, 100% { transform: scaleY(0); } 94%, 96% { transform: scaleY(1); } }
+@keyframes momoGlint { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes momoPoke  { 0% { transform: translateY(0) scale(1); } 22% { transform: translateY(0) scale(1.1, .86); } 52% { transform: translateY(-7px) scale(.94, 1.1); } 78% { transform: translateY(0) scale(1.04, .97); } 100% { transform: translateY(0) scale(1); } }
+@keyframes momoSpark { 0% { opacity: 0; transform: scale(.4) rotate(-18deg); } 35% { opacity: 1; transform: scale(1.1) rotate(6deg); } 100% { opacity: 0; transform: scale(1.25) rotate(18deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .momo-tuft, .momo-glint, .momo-inner.momo-poke, .momo-spark.momo-spark-on { animation: none; }
+  .momo-lid { animation: none; transform: scaleY(0); }
+}
+
 /* Header CTA shortens "Pay Mobile Money" → "Pay" on small screens so the
    compact header (logo · theme toggle · CTA) always fits a phone. */
 @media (max-width: 600px) { .cta-rest { display: none; } }

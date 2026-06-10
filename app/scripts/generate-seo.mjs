@@ -589,6 +589,7 @@ function shell({ lc, url, altUrl, title, description, keywords, jsonld, body, og
   const fr = lc === "fr" ? url : altUrl;
   return `<!DOCTYPE html><html lang="${LOCALES[lc].lang}"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#FFC92E">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}">
 ${keywords ? `<meta name="keywords" content="${esc(keywords)}">` : ""}

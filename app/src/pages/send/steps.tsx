@@ -425,7 +425,8 @@ const MAX_POLL_MS = 4 * 60_000;
 export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivity }: { paymentId: string; method: Method; onDone: () => void; reset: () => void; onViewActivity: () => void }) {
   const { t } = useI18n();
   const [state, setState] = useState<PaymentState>("AWAITING_INBOUND");
-  const [outcome, setOutcome] = useState<"pending" | "review" | "failed">("pending");
+  const [outcome, setOutcome] = useState<"pending" | "review" | "failed" | "refund" | "refunded">("pending");
+  const [payment, setPayment] = useState<Payment | null>(null);
   const [slow, setSlow] = useState(false);
 
   // onDone is recreated on every parent (SendApp) render. Keep the latest in a
@@ -444,11 +445,17 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
         const p = await api.getPayment(paymentId);
         if (!active) return;
         setState(p.state);
+        setPayment(p);
         if (p.state === "DELIVERED") {
           timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
           return;
         }
-        if (FAIL_STATES.includes(p.state)) {
+        if (p.state === "REFUNDED") { setOutcome("refunded"); return; }
+        // Payout couldn't land → the sender claims their crypto back. While a refund is
+        // in flight (destination already provided) keep polling until REFUNDED.
+        if (p.state === "REFUND_PENDING") {
+          if (p.refundNeedsDestination) { setOutcome("refund"); return; }
+        } else if (FAIL_STATES.includes(p.state)) {
           // Terminal non-delivery — stop polling and show an honest outcome
           // instead of spinning forever (the prototype/earlier build would hang).
           setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
@@ -470,7 +477,9 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
     return () => { active = false; if (timer) clearTimeout(timer); };
   }, [paymentId]);
 
-  if (outcome !== "pending") {
+  if (outcome === "refund" && payment) return <RefundClaim payment={payment} reset={reset} />;
+  if (outcome === "refunded") return <RefundedCard reset={reset} />;
+  if (outcome === "review" || outcome === "failed") {
     const failed = outcome === "failed";
     return (
       <FlowCard>
@@ -525,6 +534,77 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
           );
         })}
       </div>
+    </FlowCard>
+  );
+}
+
+/* Refund-claim — a payout couldn't land; the sender pastes a Lightning invoice to
+   receive their crypto back (paid outbound via IBEX). Amount is bounded server-side. */
+function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }) {
+  const { t } = useI18n();
+  const [bolt11, setBolt11] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    const inv = bolt11.trim();
+    if (!/^ln(bc|tb)\w+$/i.test(inv)) { setErr(t("refund_input")); return; }
+    setBusy(true); setErr(null);
+    try {
+      const p = await api.refundDestination(payment.id, inv);
+      if (p.state === "REFUNDED") { setDone(true); return; }
+      for (let i = 0; i < 12; i++) { // refund in flight — poll a short while for settlement
+        await new Promise((r) => setTimeout(r, 2500));
+        const cur = await api.getPayment(payment.id);
+        if (cur.state === "REFUNDED") { setDone(true); return; }
+      }
+      setDone(true); // submitted & settling — it finalizes server-side
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("error_generic"));
+    } finally { setBusy(false); }
+  };
+
+  if (done) return <RefundedCard reset={reset} />;
+
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--warn)", fontSize: 28, fontWeight: 800 }}>↺</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_sub")}</p>
+      </div>
+      <div style={{ marginTop: 18, padding: "12px 14px", borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("refund_amount_label")}</span>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{payment.payInstruction.amountLabel}</span>
+      </div>
+      <div style={{ marginTop: 16 }}><Label>{t("refund_input")}</Label></div>
+      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="lnbc…" rows={3}
+        style={{ width: "100%", marginTop: 6, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", font: "inherit", fontSize: 13, resize: "vertical", boxSizing: "border-box" }} />
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.45 }}>{t("refund_input_hint")}</div>
+      {err && <div role="alert" style={{ marginTop: 12, padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>{err}</div>}
+      <button className="btn btn-primary" onClick={submit} disabled={busy || !bolt11.trim()} style={{ width: "100%", marginTop: 18, padding: "16px" }}>
+        {busy ? t("refund_submitting") : t("refund_submit")}
+      </button>
+      <button className="btn btn-ghost" onClick={reset} disabled={busy} style={{ width: "100%", marginTop: 8 }}>{t("try_again")}</button>
+    </FlowCard>
+  );
+}
+
+function RefundedCard({ reset }: { reset: () => void }) {
+  const { t } = useI18n();
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--recv)", fontSize: 30, fontWeight: 800 }}>✓</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_done_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_done_sub")}</p>
+      </div>
+      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 20, padding: "16px" }}>{t("try_again")}</button>
     </FlowCard>
   );
 }

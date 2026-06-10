@@ -26,7 +26,7 @@ import { transactionStatus, payInvoice, bolt11AmountMsat } from "../adapters/ibe
  *  on refund). Both balances are negative (credits). Because each payment
  *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
  *  the full float and over-commit the treasury. */
-function availableFloatXaf(): number {
+export function availableFloatXaf(): number {
   return XAF_FLOAT_BASE + balance("external_recipient", "XAF") + balance("payout_float_XAF", "XAF");
 }
 

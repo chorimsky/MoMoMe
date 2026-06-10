@@ -84,8 +84,14 @@ export async function registerAccountWebhook(): Promise<void> {
     method: "POST",
     body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
   });
+  // Already-registered is success, not failure. IBEX signals it as 409 OR as a
+  // 400 "webhook already exists" — tolerate both so boot doesn't log a false error
+  // (the account webhook is in fact present and will deliver settlements).
   if (!res.ok && res.status !== 409) {
-    throw new Error(`IBEX register account webhook failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    if (!/already exists/i.test(body)) {
+      throw new Error(`IBEX register account webhook failed: ${res.status} ${body}`);
+    }
   }
 }
 

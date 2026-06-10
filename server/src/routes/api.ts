@@ -15,14 +15,15 @@ import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  config, isLive, liveMoney, ibexConfigured, ibexLive, ibexInboundTrusted,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
-import { routingTable, routingSnapshot } from "../core/routing.js";
+import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
+import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
 import { issueToken, verifyToken, tokenFromHeaders, type Session } from "../core/adminAuth.js";
 import {
@@ -324,6 +325,14 @@ api.get("/admin/merchants", (_req, res) => {
 api.get("/admin/routing", (_req, res) => {
   res.json(routingSnapshot());
 });
+// Ops: force a payout rail up or down. Down → the pre-flight gate stops minting
+// addresses for it; up → re-enable the moment a provider (e.g. PawaPay) is fixed.
+api.post("/admin/routing/:aggregator", (req, res) => {
+  const name = req.params.aggregator as Aggregator;
+  if (name !== "pawapay" && name !== "peexit") return res.status(400).json({ error: "bad_aggregator", message: "Unknown payout rail." });
+  setAggregatorUp(name, (req.body ?? {}).up !== false);
+  res.json({ ok: true, routing: routingSnapshot() });
+});
 api.post("/admin/merchants/:id/validate", (req, res) => {
   const m = merchant.validateMerchant(req.params.id, (req.body ?? {}).displayName);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant not found." });
@@ -394,6 +403,16 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or already used — please re-quote." });
   if (Date.now() > Date.parse(quote.expiresAt)) {
     return res.status(409).json({ error: "quote_expired", message: "This quote has expired — please re-quote." });
+  }
+  // PRE-FLIGHT PAYOUT GATE — never mint a crypto inbound address unless a payout can
+  // actually land right now; otherwise a paid invoice would strand real crypto. If the
+  // inbound will be REAL crypto (IBEX + trusted), the payout rail must be live+funded.
+  // Not ready → un-claim the quote (rate still valid) and refuse, so no address exists.
+  const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
+  const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
+  if (!ready.ok) {
+    store.putQuote(quote);
+    return res.status(503).json({ error: "payouts_unavailable", reason: ready.reason, message: "Payouts to this number aren't available right now. Please try again shortly." });
   }
   const now = new Date().toISOString();
   const ref = nextRef();

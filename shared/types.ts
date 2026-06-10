@@ -124,6 +124,9 @@ export interface Payment {
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
+  /** Set when a payout couldn't land and the inbound crypto must be refunded — the
+   *  sender still needs to supply a refund destination (the refund-claim flow). */
+  refundNeedsDestination?: boolean;
   events: PaymentEvent[];
   createdAt: string;
   updatedAt: string;

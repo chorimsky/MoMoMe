@@ -11,6 +11,13 @@ function env(key: string, fallback = ""): string {
   return process.env[key] ?? fallback;
 }
 
+/** True when an *_ENV flag names production — case- and whitespace-insensitive, so
+ *  PAWAPAY_ENV="Production" / " production " behave like "production" instead of
+ *  silently falling back to sandbox (a real footgun that hid a misconfig). */
+function isProdEnv(key: string): boolean {
+  return env(key, "sandbox").trim().toLowerCase() === "production";
+}
+
 export const config = {
   port: Number(env("PORT", "4000")),
   /** Public base URL the providers can reach for webhook callbacks. */
@@ -38,7 +45,7 @@ export const config = {
     // genuinely-settled sandbox inbound is real money. This explicit opt-in lets
     // such an inbound authorize a REAL Mobile Money payout (off by default).
     allowSandboxPayout: env("IBEX_ALLOW_SANDBOX_PAYOUT") === "true",
-  }))(env("IBEX_ENV", "sandbox") !== "production"),
+  }))(!isProdEnv("IBEX_ENV")),
 
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
    *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
@@ -48,7 +55,7 @@ export const config = {
     apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
     apiKey: env("PAWAPAY_API_KEY"),
     webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
-  }))(env("PAWAPAY_ENV", "sandbox") !== "production"),
+  }))(!isProdEnv("PAWAPAY_ENV")),
 
   /** Peexit (Peex) — the SECOND Mobile Money payout aggregator. Real disbursement
    *  via SECRETKEY-header auth; activates when PEEXIT_API_KEY is set. Distinct
@@ -58,7 +65,7 @@ export const config = {
     apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://peexit.com/api/v1"),
     apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY
     webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
-  }))(env("PEEXIT_ENV", "sandbox") !== "production"),
+  }))(!isProdEnv("PEEXIT_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
    *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted

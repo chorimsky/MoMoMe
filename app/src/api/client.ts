@@ -129,6 +129,11 @@ export const api = {
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
 
+  // Refund-claim: when a payout couldn't land, the sender supplies a Lightning
+  // invoice to receive their crypto back (paid outbound via IBEX).
+  refundDestination: (id: string, bolt11: string) =>
+    req<Payment>(`/payments/${id}/refund-destination`, { method: "POST", body: JSON.stringify({ bolt11 }) }),
+
   listPayments: () => req<Payment[]>("/payments"),
 
   // The sender's distinct recent recipients (anonymous, no login) — "send again".

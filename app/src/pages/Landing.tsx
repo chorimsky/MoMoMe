@@ -130,7 +130,8 @@ export function Landing() {
           </div>
 
           <div className="hero-visual">
-            <Momo size={132} className="hero-momo" />
+            <span className="momo-hint" aria-hidden="true">poke me 👆</span>
+            <Momo size={sm ? 112 : 144} className="hero-momo" />
             <div className="hero-card" aria-hidden="true">
               <div className="pc-check">✓</div>
               <div className="pc-title">Payment delivered</div>
@@ -146,7 +147,10 @@ export function Landing() {
         </section>
 
         <section id="how" className="how">
-          <h2>How it works</h2>
+          <div className="sec-head">
+            <h2>How it works</h2>
+            <Momo size={44} className="sec-momo" />
+          </div>
           <p className="how-sub">Three simple steps. No account to manage, no waiting.</p>
           <div className="steps">
             {STEPS.map((s) => (

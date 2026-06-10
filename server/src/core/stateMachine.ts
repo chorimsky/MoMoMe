@@ -13,12 +13,12 @@ import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
-import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution } from "./routing.js";
+import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
-import { transactionStatus } from "../adapters/ibex.js";
+import { transactionStatus, payInvoice, bolt11AmountMsat } from "../adapters/ibex.js";
 
 /** Available XAF payout float = base treasury − everything already paid out
  *  (external_recipient) − everything RESERVED for an in-flight/held payout
@@ -26,7 +26,7 @@ import { transactionStatus } from "../adapters/ibex.js";
  *  on refund). Both balances are negative (credits). Because each payment
  *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
  *  the full float and over-commit the treasury. */
-function availableFloatXaf(): number {
+export function availableFloatXaf(): number {
   return XAF_FLOAT_BASE + balance("external_recipient", "XAF") + balance("payout_float_XAF", "XAF");
 }
 
@@ -53,9 +53,46 @@ function transition(p: Payment, state: PaymentState, note?: string) {
   p.updatedAt = new Date().toISOString();
   p.events.push({ at: p.updatedAt, state, note });
   putPayment(p);
+  // Observability: the settlement happy path is otherwise silent, which makes a
+  // held/stuck payout impossible to diagnose from logs. Surface the money-critical
+  // transitions (every reason a payout holds is carried in `note`).
+  if (["INBOUND_CONFIRMED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED", "MANUAL_REVIEW", "FAILED", "REFUNDED"].includes(state)) {
+    console.log(`[settle] ${p.ref} → ${state}${note ? ` · ${note}` : ""} (xaf=${p.xaf}${p.aggregator ? `, agg=${p.aggregator}` : ""})`);
+  }
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Provider failures that won't fix themselves on retry (account/config blocks like
+ *  PawaPay's PAYOUTS_NOT_ALLOWED). These take the rail down and refund immediately. */
+const HARD_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowed/i;
+
+/** Submit a payout, auto-retrying TRANSIENT failures (network/5xx) up to 3 times.
+ *  A HARD failure (config block) throws immediately — retrying is futile. disburse is
+ *  idempotent on the ref, so a retry never double-pays. */
+async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Payment) {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
+    } catch (e) {
+      lastErr = e;
+      if (HARD_PAYOUT_FAIL.test(e instanceof Error ? e.message : "")) throw e; // config block — stop
+      if (attempt < 2) await wait(1500 * (attempt + 1)); // transient — back off and retry
+    }
+  }
+  throw lastErr;
+}
+
+/** Terminal-but-recoverable: inbound crypto arrived but the payout can't land. Move to
+ *  REFUND_PENDING and flag that the sender must supply a refund destination — the crypto
+ *  is held until refunded. Replaces the old MANUAL_REVIEW limbo with a clear "we owe a
+ *  refund" state. (Ledger is NOT reversed here — we still hold the inbound asset; it's
+ *  unwound when the refund is actually paid out — the refund-claim flow.) */
+function beginRefund(p: Payment, note: string): void {
+  p.refundNeedsDestination = true;
+  transition(p, "REFUND_PENDING", note);
+}
 
 /** Inbound seen in mempool / HTLC held. Idempotent, only moves forward. */
 export function markDetected(p: Payment) {
@@ -163,13 +200,17 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   }
   p.aggregator = agg.name;
 
-  // SUBMIT the payout — exactly once, keyed on the payment ref.
+  // SUBMIT the payout — exactly once, keyed on the payment ref. Transient failures
+  // auto-retry; a HARD provider block (e.g. PAYOUTS_NOT_ALLOWED) takes the rail out
+  // of rotation and goes straight to refund — retrying a config block is futile.
   transition(p, "PAYOUT_REQUESTED");
   let res;
   try {
-    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
+    res = await submitWithRetry(agg, p);
   } catch (e) {
-    transition(p, "MANUAL_REVIEW", `payout submit failed: ${e instanceof Error ? e.message : "error"}`);
+    const msg = e instanceof Error ? e.message : "error";
+    if (HARD_PAYOUT_FAIL.test(msg)) markRailHardDown(agg.name, msg);
+    beginRefund(p, `payout failed${HARD_PAYOUT_FAIL.test(msg) ? " (rail blocked)" : ""}: ${msg}`);
     return;
   }
   if (res.status === "duplicate") {
@@ -236,10 +277,10 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
       country: p.recipient.country, aggregatorRef: p.aggregator ? `${p.aggregator}:${p.payoutRef ?? ""}` : null,
     });
   } else if (status === "FAILED") {
-    // The operator rejected the payout → return the funds to the sender.
-    reversePayment(p.id);
-    transition(p, "REFUND_PENDING", "payout failed at provider");
-    transition(p, "REFUNDED", "auto-refunded after payout failure");
+    // The provider rejected the payout after accepting it → the inbound crypto must go
+    // back to the sender. Enter the refund-claim flow (sender supplies an invoice); the
+    // ledger is unwound only when the refund actually pays out (finalizeRefund).
+    beginRefund(p, "payout failed at provider");
   }
   // PENDING → leave as-is; reconciliation will re-check.
 }
@@ -332,6 +373,57 @@ export function adminRefund(p: Payment): boolean {
   transition(p, "REFUND_PENDING", "refund initiated by admin");
   transition(p, "REFUNDED", "refunded by admin");
   return true;
+}
+
+/* ============================================================
+   Refund-claim flow — when a payout can't land, the inbound crypto is returned to
+   the sender via an outbound Lightning payment to an invoice THEY supply. Guarded:
+   Lightning-only, amount-bounded (never over-pay), idempotent (the needs-destination
+   flag claims it). Settlement is confirmed by polling the pay transaction.
+   ============================================================ */
+export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: boolean; error?: string }> {
+  if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
+  if (p.payInstruction.method !== "LIGHTNING") return { ok: false, error: "refund_lightning_only" };
+  const inboundMsat = Math.round(p.payInstruction.amount * 1e11);
+  const invMsat = bolt11AmountMsat(bolt11);
+  if (invMsat == null) return { ok: false, error: "bad_invoice" };
+  // Over/under-refund guard: accept an amount-less invoice (we set the amount) or one
+  // that matches the inbound within 1%. Never pay an invoice for MORE than was received.
+  if (invMsat !== 0 && (invMsat > inboundMsat || invMsat < inboundMsat * 0.99)) return { ok: false, error: "amount_mismatch" };
+  // Claim the refund — idempotent: a second submit while in flight is rejected above.
+  p.refundNeedsDestination = false;
+  putPayment(p);
+  try {
+    const r = await payInvoice(bolt11, invMsat === 0 ? inboundMsat : undefined);
+    p.refundTxId = r.transactionId;
+    putPayment(p);
+    if (r.settled) finalizeRefund(p);
+    else void pollRefund(p.ref);
+    return { ok: true };
+  } catch (e) {
+    p.refundNeedsDestination = true; // payout never left — let the sender try another invoice
+    putPayment(p);
+    return { ok: false, error: e instanceof Error ? e.message : "refund_failed" };
+  }
+}
+
+/** The outbound refund settled — unwind the ledger (we no longer hold the inbound) and
+ *  mark REFUNDED. Idempotent. */
+function finalizeRefund(p: Payment): void {
+  if (p.state === "REFUNDED") return;
+  reversePayment(p.id);
+  transition(p, "REFUNDED", "crypto refunded to sender");
+}
+
+/** Poll the outbound refund payment to settlement (Lightning settles in seconds). */
+async function pollRefund(ref: string): Promise<void> {
+  for (const delay of [3000, 5000, 8000, 15000, 30000]) {
+    await wait(delay);
+    const p = findPaymentByRef(ref);
+    if (!p || p.state !== "REFUND_PENDING" || !p.refundTxId) return; // resolved / unknown
+    const s = await transactionStatus(p.refundTxId).catch(() => null);
+    if (s?.settled) { finalizeRefund(p); return; }
+  }
 }
 
 /** Sandbox driver: simulate rail confirmation latency, then settle. */

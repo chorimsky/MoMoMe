@@ -490,8 +490,16 @@ h1{font-size:clamp(28px,5.2vw,46px);margin:.1em 0 .25em}h2{font-size:clamp(21px,
 p{margin:.6em 0}.wrap{max-width:880px;margin:0 auto;padding:0 20px}
 header.site{border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:20}
 header.site .wrap{display:flex;align-items:center;justify-content:space-between;height:62px;gap:12px}
-.logo{font-family:"Bagel Fat One",Fredoka,sans-serif;font-size:25px;letter-spacing:-.03em;white-space:nowrap}
+.logo{font-family:"Bagel Fat One",Fredoka,sans-serif;font-size:25px;letter-spacing:-.03em;white-space:nowrap;display:inline-flex;align-items:center;gap:8px}
 .logo .y{color:var(--brand)}.logo .o{color:var(--accent)}.logo .g{color:var(--green)}
+.momo-mark{flex:none;line-height:0}
+.momo-tuft{transform-box:fill-box;transform-origin:50% 100%;animation:mTuft 3.2s ease-in-out infinite}
+.momo-lid{transform-box:fill-box;transform-origin:center;transform:scaleY(0);animation:mBlink 5.4s ease-in-out infinite}
+.momo-glint{animation:mGlint 4s ease-in-out infinite}
+@keyframes mTuft{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(8deg)}}
+@keyframes mBlink{0%,90%,100%{transform:scaleY(0)}94%,96%{transform:scaleY(1)}}
+@keyframes mGlint{0%,100%{opacity:.5}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.momo-tuft,.momo-lid,.momo-glint{animation:none}.momo-lid{transform:scaleY(0)}}
 nav.top{display:flex;align-items:center;gap:16px}nav.top a{color:var(--ink2);font-weight:700;font-size:14px}
 @media(max-width:560px){nav.top{gap:10px}nav.top a:not(.btn){display:none}}
 .btn{display:inline-block;background:var(--brand);color:#1c1813;font-family:Fredoka;font-weight:600;padding:11px 19px;border-radius:999px;font-size:15px;white-space:nowrap}
@@ -528,10 +536,28 @@ const learnUrl = (lc) => `${LOCALES[lc].prefix}/${LOCALES[lc].learnSeg}/`;
 const covUrl = (lc) => `${LOCALES[lc].prefix}/${LOCALES[lc].covSeg}/`;
 const homeUrl = (lc) => (lc === "fr" ? "/fr/" : "/");
 
+/* Momo — MoMoMe's own goggle-eyed mascot, static SVG using this page's tokens, with
+   idle blink / tuft-sway / glint (no JS; the React app adds pointer interactivity). */
+function momo(size = 30) {
+  return `<svg class="momo-mark" width="${size}" height="${size}" viewBox="0 0 96 96" role="img" aria-label="Momo mascot" style="overflow:visible">
+<path class="momo-tuft" d="M54 3 l-11 16 h6 l-5 11 14 -17 h-6 z" fill="var(--brand)" stroke="var(--ink)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M26 52 q-10 2 -11 12" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>
+<path d="M70 52 q10 2 11 12" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>
+<ellipse cx="40" cy="84" rx="7" ry="5" fill="var(--ink)"/><ellipse cx="56" cy="84" rx="7" ry="5" fill="var(--ink)"/>
+<rect x="25" y="18" width="46" height="62" rx="23" fill="var(--brand)" stroke="var(--ink)" stroke-width="4"/>
+<rect x="25" y="36" width="46" height="8" fill="var(--ink)"/>
+<circle cx="48" cy="40" r="16" fill="var(--ink)"/><circle cx="48" cy="40" r="12.5" fill="#e9edf3"/><circle cx="48" cy="40" r="9.5" fill="#fff"/>
+<circle cx="48" cy="40" r="4.7" fill="var(--ink)"/><circle cx="50" cy="38" r="1.9" fill="#fff"/>
+<circle class="momo-glint" cx="43.5" cy="35.5" r="2.4" fill="#fff"/>
+<g class="momo-lid"><circle cx="48" cy="40" r="9.7" fill="var(--brand)"/><path d="M39.6 40 h16.8" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/></g>
+<circle cx="33" cy="55" r="4.5" fill="var(--accent)" opacity="0.5"/><circle cx="63" cy="55" r="4.5" fill="var(--accent)" opacity="0.5"/>
+<path d="M40 57 q8 8 16 0" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>
+</svg>`;
+}
 function header(lc) {
   const t = T[lc];
   return `<header class="site"><div class="wrap">
-<a class="logo" href="${homeUrl(lc)}"><span class="y">MoMo</span><span class="g">›</span><span class="o">Me</span></a>
+<a class="logo" href="${homeUrl(lc)}">${momo(30)}<span class="y">MoMo</span><span class="g">›</span><span class="o">Me</span></a>
 <nav class="top"><a href="${learnUrl(lc)}">${t.navLearn}</a><a href="${covUrl(lc)}">${t.navCov}</a><a class="btn" href="${APP}">${t.payCta}</a></nav>
 </div></header>`;
 }

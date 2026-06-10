@@ -84,8 +84,14 @@ export async function registerAccountWebhook(): Promise<void> {
     method: "POST",
     body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
   });
+  // Already-registered is success, not failure. IBEX signals it as 409 OR as a
+  // 400 "webhook already exists" — tolerate both so boot doesn't log a false error
+  // (the account webhook is in fact present and will deliver settlements).
   if (!res.ok && res.status !== 409) {
-    throw new Error(`IBEX register account webhook failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    if (!/already exists/i.test(body)) {
+      throw new Error(`IBEX register account webhook failed: ${res.status} ${body}`);
+    }
   }
 }
 
@@ -110,6 +116,35 @@ export async function transactionStatus(transactionId: string): Promise<{ settle
   const state = (inv.state?.name ?? "").toUpperCase();
   const failed = !settled && ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"].includes(state);
   return { settled, failed };
+}
+
+export interface PayResult { transactionId: string; settled: boolean; feesMsat?: number; }
+
+/** Pay a BOLT11 invoice OUTBOUND from our account — used to REFUND a sender when a
+ *  payout couldn't land. `amountMsat` is required for amount-less invoices. Returns the
+ *  pay transactionId + whether it settled synchronously (else poll transactionStatus). */
+export async function payInvoice(bolt11: string, amountMsat?: number): Promise<PayResult> {
+  const res = await ibex("/invoice/pay", {
+    method: "POST",
+    body: JSON.stringify({ accountId: config.ibex.accountId, bolt11, ...(amountMsat ? { amountMSat: amountMsat } : {}) }),
+  });
+  if (!res.ok) throw new Error(`IBEX pay-invoice failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transactionId: string; settleDateUtc?: string | null; feesMsat?: string };
+  const settled = !!d.settleDateUtc && d.settleDateUtc !== "0";
+  return { transactionId: d.transactionId, settled, feesMsat: d.feesMsat ? Number(d.feesMsat) : undefined };
+}
+
+/** Amount encoded in a BOLT11 invoice's HRP, in msat: 0 = amount-less; null = unparseable.
+ *  Used to bound a refund so we can never over-pay a sender-supplied invoice. */
+export function bolt11AmountMsat(bolt11: string): number | null {
+  const s = bolt11.trim().toLowerCase();
+  const sep = s.lastIndexOf("1"); // bech32 separator (data part excludes '1')
+  if (sep <= 0) return null;
+  const m = /^ln(bc|tb|bcrt)(\d*)([munp]?)$/.exec(s.slice(0, sep));
+  if (!m) return null;
+  if (!m[2]) return 0; // amount-less invoice
+  const factor: Record<string, number> = { m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12 };
+  return Math.round(Number(m[2]) * (factor[m[3]] ?? 1) * 1e11); // BTC→msat
 }
 
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded

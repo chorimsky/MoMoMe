@@ -10,19 +10,20 @@ import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, providerFor } from "../adapters/index.js";
-import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
 import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  config, isLive, liveMoney, ibexConfigured, ibexLive, ibexInboundTrusted,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
-import { routingTable, routingSnapshot } from "../core/routing.js";
+import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
+import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
 import { issueToken, verifyToken, tokenFromHeaders, type Session } from "../core/adminAuth.js";
 import {
@@ -324,6 +325,14 @@ api.get("/admin/merchants", (_req, res) => {
 api.get("/admin/routing", (_req, res) => {
   res.json(routingSnapshot());
 });
+// Ops: force a payout rail up or down. Down → the pre-flight gate stops minting
+// addresses for it; up → re-enable the moment a provider (e.g. PawaPay) is fixed.
+api.post("/admin/routing/:aggregator", (req, res) => {
+  const name = req.params.aggregator as Aggregator;
+  if (name !== "pawapay" && name !== "peexit") return res.status(400).json({ error: "bad_aggregator", message: "Unknown payout rail." });
+  setAggregatorUp(name, (req.body ?? {}).up !== false);
+  res.json({ ok: true, routing: routingSnapshot() });
+});
 api.post("/admin/merchants/:id/validate", (req, res) => {
   const m = merchant.validateMerchant(req.params.id, (req.body ?? {}).displayName);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant not found." });
@@ -395,6 +404,30 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   if (Date.now() > Date.parse(quote.expiresAt)) {
     return res.status(409).json({ error: "quote_expired", message: "This quote has expired — please re-quote." });
   }
+  // ── PRE-FLIGHT PAYOUT GATE ──────────────────────────────────────────────────────
+  // Before ANY inbound address/QR is minted (BTC on-chain, Lightning, or USDT), prove a
+  // payout can actually land — otherwise a paid invoice would strand real crypto. Every
+  // hard payout precondition is checked here; a failure un-claims the quote (the rate
+  // stays valid) and refuses, so no address ever exists for an un-payable transfer.
+  // (Intentional manual-review holds — large-amount approval, low-trust merchant — are
+  // deliberately NOT gated: those still pay out after operator sign-off.)
+  const block = (status: number, error: string, message: string) => {
+    store.putQuote(quote); // un-claim — the locked rate is untouched
+    return res.status(status).json({ error, message });
+  };
+  // 1) Ops kill-switch — payouts globally paused.
+  if (!getSettings().ops.acceptingPayments) return block(503, "payments_paused", "Payouts are temporarily paused. Please try again shortly.");
+  // 2) Corridor payout ceiling for this Mobile Money provider.
+  if (quote.xaf > PROVIDER_PAYOUT_MAX[recipient.provider]) return block(400, "amount_too_high", `The maximum payout to ${recipient.provider} Mobile Money is ${PROVIDER_PAYOUT_MAX[recipient.provider].toLocaleString()} XAF.`);
+  // 3) Internal XAF treasury float must cover this payout.
+  if (availableFloatXaf() < quote.xaf) return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
+  // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
+  //    inbound will be real crypto (IBEX + trusted); a simulated inbound may use a
+  //    simulated rail. This is the "service functional + has balance" check.
+  const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
+  const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
+  if (!ready.ok) return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
+  // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
   const ref = nextRef();
   let instruction;
@@ -479,6 +512,29 @@ api.post("/payments/:id/simulate", (req, res) => {
   if (liveMoney()) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled when a real-money rail is live." });
   if (p.state === "AWAITING_INBOUND") void settle(p);
   res.json(p);
+});
+
+/**
+ * Refund-claim: a payment whose payout couldn't land is REFUND_PENDING; the sender
+ * submits a Lightning invoice here to receive their crypto back (paid outbound via IBEX).
+ */
+api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 10, 60_000), async (req, res) => {
+  const p = store.getPayment(req.params.id);
+  // Ownership: only the original sender (matching device id) may direct the refund —
+  // otherwise anyone with a payment id could divert the refund to their own invoice.
+  if (!p || !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  const bolt11 = typeof (req.body ?? {}).bolt11 === "string" ? (req.body.bolt11 as string).trim() : "";
+  if (!/^ln(bc|tb|bcrt)\w+$/i.test(bolt11)) return res.status(400).json({ error: "bad_invoice", message: "Enter a valid Lightning invoice (starts with ln…)." });
+  const r = await completeRefund(p, bolt11);
+  if (!r.ok) {
+    const message = r.error === "amount_mismatch" ? "The invoice amount must match your original payment — or use an amount-less invoice."
+      : r.error === "not_refundable" ? "This payment isn't awaiting a refund."
+      : r.error === "refund_lightning_only" ? "Automated refunds are available for Lightning payments only."
+      : r.error === "bad_invoice" ? "Couldn't read that Lightning invoice. Please paste it again."
+      : "Couldn't process the refund. Please check the invoice and try again.";
+    return res.status(r.error === "not_refundable" ? 409 : 400).json({ error: r.error, message });
+  }
+  res.json(store.getPayment(p.id) ?? p);
 });
 
 api.get("/payments/:id", (req, res) => {

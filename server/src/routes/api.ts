@@ -439,7 +439,12 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
       callbackUrl: `${config.publicUrl}/webhooks/${providerFor(quote.method)}`,
     });
   } catch (e) {
-    return res.status(502).json({ error: "rail_error", message: e instanceof Error ? e.message : "Rail provider error." });
+    // Couldn't mint the inbound address (e.g. a stablecoin whose IBEX receive combo
+    // isn't enabled → "invalid combination"). Un-claim the quote and return a CLEAN,
+    // non-leaking "method unavailable" — never a raw provider error / 502.
+    console.error(`[pay] createInstruction failed (${quote.method}):`, e instanceof Error ? e.message : e);
+    store.putQuote(quote);
+    return res.status(503).json({ error: "method_unavailable", message: "This payment method isn't available right now. Please choose another or try again shortly." });
   }
   const payment: Payment = {
     id: id("pay"),

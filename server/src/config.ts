@@ -33,6 +33,9 @@ export const config = {
     clientId: env("IBEX_CLIENT_ID"),
     clientSecret: env("IBEX_CLIENT_SECRET"),
     accountId: env("IBEX_ACCOUNT_ID"),
+    // Separate IBEX account for USDT (currencyId 29, Ethereum/ERC-20) — IBEX is
+    // account-per-currency, so stablecoins can't share the Bitcoin account.
+    usdtAccountId: env("IBEX_USDT_ACCOUNT_ID"),
     webhookSecret: env("IBEX_WEBHOOK_SECRET"),
     apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
     authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),

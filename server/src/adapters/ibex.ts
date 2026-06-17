@@ -80,17 +80,21 @@ export async function rate(fromCurrencyId: number, toCurrencyId: number): Promis
  *  boot when IBEX is configured and PUBLIC_URL is publicly reachable. */
 export async function registerAccountWebhook(): Promise<void> {
   const url = `${config.publicUrl}/webhooks/ibex`;
-  const res = await ibex(`/accounts/${config.ibex.accountId}/webhooks`, {
-    method: "POST",
-    body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
-  });
-  // Already-registered is success, not failure. IBEX signals it as 409 OR as a
-  // 400 "webhook already exists" — tolerate both so boot doesn't log a false error
-  // (the account webhook is in fact present and will deliver settlements).
-  if (!res.ok && res.status !== 409) {
-    const body = await res.text();
-    if (!/already exists/i.test(body)) {
-      throw new Error(`IBEX register account webhook failed: ${res.status} ${body}`);
+  // Register on every account we receive into — the Bitcoin account AND the USDT
+  // account (if configured) — so on-chain BTC and ERC-20 USDT deposits both notify.
+  const accounts = [config.ibex.accountId, config.ibex.usdtAccountId].filter(Boolean);
+  for (const acct of accounts) {
+    const res = await ibex(`/accounts/${acct}/webhooks`, {
+      method: "POST",
+      body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
+    });
+    // Already-registered is success, not failure (IBEX returns 409 or a 400
+    // "webhook already exists") — tolerate both so boot doesn't log a false error.
+    if (!res.ok && res.status !== 409) {
+      const body = await res.text();
+      if (!/already exists/i.test(body)) {
+        throw new Error(`IBEX register account webhook failed (${acct}): ${res.status} ${body}`);
+      }
     }
   }
 }
@@ -160,8 +164,9 @@ function ipAllowed(headers: Record<string, string | string[] | undefined>): bool
 
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
-  // USDT intentionally excluded — gated per-org by IBEX; sandbox simulates it.
-  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN",
+  // USDT (Ethereum/ERC-20) is handled only when a dedicated USDT account is
+  // configured (IBEX is account-per-currency); otherwise the sandbox adapter covers it.
+  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || (m === "USDT" && !!config.ibex.usdtAccountId),
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
@@ -188,6 +193,24 @@ export const ibexAdapter: RailAdapter = {
         amount: req.amount, amountLabel: formatAmount(req.amount, "BTC"), expiresAt,
         // The settlement webhook reports the same transaction by id.
         providerRef: data.transactionId, provider: "ibex",
+      };
+    }
+
+    if (req.method === "USDT") {
+      // USDT on Ethereum (ERC-20) — a fresh receive address on the USDT account
+      // (currencyId 29). Settles via the account webhook, matched by the address.
+      const res = await ibex(`/accounts/${config.ibex.usdtAccountId}/crypto/receive-infos`, {
+        method: "POST",
+        body: JSON.stringify({ name: req.ref.slice(0, 40), network: "ethereum" }),
+      });
+      if (!res.ok) throw new Error(`IBEX USDT receive-info failed: ${res.status} ${await res.text()}`);
+      const data = (await res.json()) as { id: string; type?: string; data?: { address?: string } };
+      const addr = data.data?.address;
+      if (!addr) throw new Error("IBEX USDT receive-info returned no address");
+      return {
+        method: "USDT", code: addr, qr: addr, asset: "USDT",
+        amount: req.amount, amountLabel: formatAmount(req.amount, "USDT"), expiresAt,
+        providerRef: addr, provider: "ibex",
       };
     }
 
@@ -222,23 +245,21 @@ export const ibexAdapter: RailAdapter = {
   parseEvent(body: unknown): RailEvent | null {
     const t = (body as { transaction?: {
       id?: string; infoId?: string; amount?: number; status?: string; settledAt?: string | null;
-      transactionTypeId?: number; address?: string; metadata?: { address?: string };
+      transactionTypeId?: number; currencyId?: number; address?: string; metadata?: { address?: string };
       invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
     } }).transaction;
     if (!t) return null;
-    // Lightning (typeId 1) is matched by the transaction id (= the invoice's
-    // transactionId we stored). On-chain DEPOSITS (typeId 7) were stored with the
-    // address as providerRef — match the address IBEX echoes (address creation
-    // returns no id), falling back to id/infoId. CONFIRM the deposit payload.
     const addr = t.address ?? t.metadata?.address;
-    const providerRef = t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
+    // USDT (Ethereum/ERC-20) deposits: currencyId 29, or an 0x… receive address.
+    const isUsdt = t.currencyId === 29 || (typeof addr === "string" && addr.toLowerCase().startsWith("0x"));
+    // Lightning (typeId 1) matches by the stored transaction id. DEPOSITS — on-chain
+    // BTC (typeId 7) and ERC-20 USDT — were stored with the address as providerRef, so
+    // match the address IBEX echoes; fall back to id/infoId.
+    const providerRef = (isUsdt && addr) || t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
     if (!providerRef) return null;
     const status = (t.status ?? "").toLowerCase();
     const inv = t.invoice ?? {};
     const invState = (inv.state?.name ?? "").toUpperCase();
-    // Authoritative "paid" signal lives on the embedded invoice (receiveMsat /
-    // settleDateUtc) — check it alongside the top-level status so the webhook
-    // path agrees with transactionStatus(). The received msat is the real amount.
     const receivedMsat = typeof inv.receiveMsat === "number" && inv.receiveMsat > 0 ? inv.receiveMsat : undefined;
     if (status === "failed" || ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED"].includes(invState)) return null; // expired/failed — ignore
     const confirmed = !!t.settledAt || !!inv.settleDateUtc || receivedMsat !== undefined
@@ -246,12 +267,13 @@ export const ibexAdapter: RailAdapter = {
       || ["SETTLE", "SETTLED", "PAID", "ACCEPTED"].includes(invState);
     const detected = ["pending", "mempool", "unconfirmed", "processing", "detected"].includes(status);
     if (!confirmed && !detected) return null;
-    return {
-      providerRef,
-      kind: confirmed ? "confirmed" : "detected",
-      // IBEX reports msat on a BTC account → BTC for the underpayment guard.
-      // Prefer the invoice's actually-received msat; fall back to the tx amount.
-      amount: receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined,
-    };
+    // Amount for the underpayment guard. BTC: msat → BTC. USDT: ERC-20 base units
+    // (6 decimals) → USDT. NOTE: the exact USDT amount field/units are provisional
+    // until verified against a real deposit; assuming base-units (÷1e6) fails SAFE —
+    // if IBEX reports a larger unit the guard under-counts → MANUAL_REVIEW, never overpay.
+    let amount: number | undefined;
+    if (isUsdt) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
+    else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
+    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
   },
 };

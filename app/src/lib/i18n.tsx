@@ -114,6 +114,12 @@ export const STRINGS: Dict = {
   refund_submitting: ["Sending refund…", "Envoi du remboursement…"],
   refund_done_title: ["Refund sent", "Remboursement envoyé"],
   refund_done_sub: ["Your crypto is on its way back to your wallet.", "Votre crypto repart vers votre portefeuille."],
+  nav_home: ["Home", "Accueil"],
+  demo_label: ["Demo", "Démo"],
+  sandbox_title: ["Sandbox demo", "Démo (bac à sable)"],
+  sandbox_desc: ["This is not a real invoice — don't pay it with a wallet. Tap “I've paid” below to simulate the payment.", "Ceci n'est pas une vraie facture — ne la payez pas avec un portefeuille. Appuyez sur « J'ai payé » ci-dessous pour simuler."],
+  num_check: ["Check this number — it doesn't look like a valid MTN / Orange number.", "Vérifiez ce numéro — il ne ressemble pas à un numéro MTN / Orange valide."],
+  unverified_ack: ["I've checked this number is correct — Mobile Money payments can't be reversed.", "J'ai vérifié que ce numéro est correct — les paiements Mobile Money sont irréversibles."],
   claim_title: ["Claim your account", "Activez votre compte"],
   claim_sub: ["Every payment you receive is already yours. Claim your number to track and manage it.", "Chaque paiement reçu est déjà à vous. Activez votre numéro pour le suivre et le gérer."],
   claim_send_code: ["Send code", "Envoyer le code"],
@@ -159,14 +165,23 @@ interface I18nCtx {
 
 const Ctx = createContext<I18nCtx | null>(null);
 
+/** Initial language: a stored choice always wins; otherwise follow the browser —
+ *  Cameroon/CEMAC is largely Francophone, so any fr-* locale defaults to French
+ *  instead of forcing English on the majority. */
+function detectLang(): Lang {
+  try {
+    const stored = localStorage.getItem("momome_lang");
+    if (stored === "en" || stored === "fr") return stored;
+  } catch { /* storage disabled */ }
+  try {
+    const langs = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ""];
+    if (langs.some((l) => /^fr/i.test(l))) return "fr";
+  } catch { /* no navigator */ }
+  return "en";
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => {
-    try {
-      return (localStorage.getItem("momome_lang") as Lang) || "en";
-    } catch {
-      return "en";
-    }
-  });
+  const [lang, setLang] = useState<Lang>(detectLang);
   useEffect(() => {
     try {
       localStorage.setItem("momome_lang", lang);

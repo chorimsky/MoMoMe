@@ -126,7 +126,7 @@ export function SendApp() {
             <button onClick={() => setLang(lang === "en" ? "fr" : "en")} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
               {lang === "en" ? "FR" : "EN"}
             </button>
-            <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>Home</Link>
+            <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>{t("nav_home")}</Link>
           </nav>
         </div>
 
@@ -143,7 +143,7 @@ export function SendApp() {
 
         {demo?.demoMode && tab === "pay" && step === "details" && (
           <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>
-            <span style={{ fontWeight: 700, color: "var(--ink)" }}>🧪 Demo</span> · {demo.demoHint}
+            <span style={{ fontWeight: 700, color: "var(--ink)" }}>🧪 {t("demo_label")}</span> · {demo.demoHint}
           </div>
         )}
 

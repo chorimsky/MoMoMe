@@ -117,6 +117,9 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
   const valid = s.xaf >= MIN_XAF && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
+  // Early typo signal: a long-enough number that matches no known MTN/Orange prefix.
+  // Soft (doesn't block — prefix lists evolve) — the real guard is the review-step tick.
+  const numLooksOff = s.phone.replace(/\D/g, "").length >= 8 && !resolving && !verified && !detectProvider(s.phone.replace(/\D/g, ""), s.country);
 
   return (
     <FlowCard>
@@ -192,6 +195,10 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
               </div>
             ) : null}
           </div>
+
+      {numLooksOff && (
+        <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn)", lineHeight: 1.4 }}>{t("num_check")}</div>
+      )}
 
       <div style={{ marginTop: 24 }}>
         <Label>{t("amount_q")}</Label>
@@ -274,6 +281,9 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
   const c = COUNTRIES[s.country];
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
   const { label, expired } = useExpiry(quote.expiresAt);
+  // Wrong-number is the #1 (irreversible) error on Mobile Money. When the name
+  // isn't provider/history-verified, require an explicit "I checked the number" tick.
+  const [ack, setAck] = useState(false);
   return (
     <FlowCard>
       <Stepper i={2} />
@@ -312,12 +322,18 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         {expired ? t("rate_expired") : `${t("rate_locked")} · ${t("expires_in")} ${label}`}
       </div>
 
+      {!verified && !expired && (
+        <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 14, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--warn)", background: "var(--send-wash)", cursor: "pointer" }}>
+          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ marginTop: 2, width: 18, height: 18, flex: "none", accentColor: "var(--accent)" }} />
+          <span style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{t("unverified_ack")}</span>
+        </label>
+      )}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>
         {expired ? (
           <button className="btn btn-primary" onClick={refresh} disabled={busy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("refresh_rate")}</button>
         ) : (
-          <button className="btn btn-primary" onClick={next} disabled={busy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("confirm_payment")}</button>
+          <button className="btn btn-primary" onClick={next} disabled={busy || (!verified && !ack)} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("confirm_payment")}</button>
         )}
       </div>
     </FlowCard>
@@ -378,8 +394,8 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         {demoMode ? (
           <div style={{ width: 210, padding: "22px 16px", borderRadius: 14, border: "1px dashed var(--warn)", background: "var(--send-wash)", textAlign: "center" }}>
             <div style={{ fontSize: 26 }}>🧪</div>
-            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>Sandbox demo</div>
-            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>This is not a real invoice — don't pay it with a wallet. Tap <b>"{t("ive_paid")}"</b> below to simulate the payment.</div>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>{t("sandbox_title")}</div>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>{t("sandbox_desc")}</div>
           </div>
         ) : (
           <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>

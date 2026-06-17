@@ -235,7 +235,7 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   if (typeof xaf !== "number" || !Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
     return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
   }
-  if (!["LIGHTNING", "ONCHAIN", "USDT"].includes(method)) {
+  if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
     return res.status(400).json({ error: "bad_method", message: "Unknown payment method." });
   }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {

@@ -141,11 +141,13 @@ const METHOD_FR: Record<Method, { sub: string; arrival: string; payTitle: string
   LIGHTNING: { sub: "Rapide · arrive en quelques secondes", arrival: "En quelques secondes", payTitle: "Payer avec Lightning", payDesc: "Scannez le code pour payer instantanément. Nous livrons le Mobile Money dès réception.", codeLabel: "Code de paiement Lightning" },
   ONCHAIN: { sub: "On-chain · idéal pour les gros montants", arrival: "10–60 minutes", payTitle: "Envoyer du Bitcoin", payDesc: "Envoyez le montant exact à cette adresse Bitcoin. Nous livrons dès que votre paiement est confirmé.", codeLabel: "Adresse Bitcoin" },
   USDT: { sub: "Valeur stable", arrival: "En quelques secondes", payTitle: "Envoyer de l'USDT", payDesc: "Envoyez le montant exact à cette adresse. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDT" },
+  USDC: { sub: "Valeur stable", arrival: "En quelques secondes", payTitle: "Envoyer de l'USDC", payDesc: "Envoyez le montant exact à cette adresse. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDC" },
 };
 const METHOD_EN: Record<Method, { sub: string; payTitle: string; payDesc: string; codeLabel: string }> = {
   LIGHTNING: { sub: "Fast · arrives in seconds", payTitle: "Pay with Lightning", payDesc: "Scan the code to pay instantly. We deliver the Mobile Money the moment it arrives.", codeLabel: "Lightning payment code" },
   ONCHAIN: { sub: "On-chain · best for large amounts", payTitle: "Send Bitcoin", payDesc: "Send the exact amount to this Bitcoin address. We deliver as soon as your payment is confirmed.", codeLabel: "Bitcoin address" },
   USDT: { sub: "Stable value", payTitle: "Send USDT", payDesc: "Send the exact amount to this address. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDT address" },
+  USDC: { sub: "Stable value", payTitle: "Send USDC", payDesc: "Send the exact amount to this address. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDC address" },
 };
 
 interface I18nCtx {
@@ -190,6 +192,7 @@ const METHOD_EN_ARRIVAL: Record<Method, string> = {
   LIGHTNING: "Within seconds",
   ONCHAIN: "10–60 minutes",
   USDT: "Within seconds",
+  USDC: "Within seconds",
 };
 
 export function useI18n(): I18nCtx {

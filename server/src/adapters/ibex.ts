@@ -16,7 +16,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
@@ -162,11 +162,20 @@ function ipAllowed(headers: Record<string, string | string[] | undefined>): bool
   return raw.split(",").map((s) => s.trim()).some((ip) => allow.includes(ip));
 }
 
+/** Per-stablecoin IBEX account (IBEX is account-per-currency). USDT = currencyId
+ *  29, USDC = currencyId 30, both Ethereum/ERC-20. "" when not configured → the
+ *  method isn't handled by IBEX and the sandbox adapter covers it. */
+function stablecoinAccountId(m: Method): string {
+  if (m === "USDT") return config.ibex.usdtAccountId;
+  if (m === "USDC") return config.ibex.usdcAccountId;
+  return "";
+}
+
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
-  // USDT (Ethereum/ERC-20) is handled only when a dedicated USDT account is
-  // configured (IBEX is account-per-currency); otherwise the sandbox adapter covers it.
-  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || (m === "USDT" && !!config.ibex.usdtAccountId),
+  // Stablecoins (USDT/USDC on Ethereum) are handled only when their dedicated IBEX
+  // account is configured; otherwise the sandbox adapter covers them.
+  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || !!stablecoinAccountId(m),
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
@@ -196,20 +205,22 @@ export const ibexAdapter: RailAdapter = {
       };
     }
 
-    if (req.method === "USDT") {
-      // USDT on Ethereum (ERC-20) — a fresh receive address on the USDT account
-      // (currencyId 29). Settles via the account webhook, matched by the address.
-      const res = await ibex(`/accounts/${config.ibex.usdtAccountId}/crypto/receive-infos`, {
+    const stableAcct = stablecoinAccountId(req.method);
+    if (stableAcct) {
+      // Stablecoin on Ethereum (ERC-20) — a fresh receive address on the per-currency
+      // account (USDT=29 / USDC=30). Settles via the account webhook, matched by 0x addr.
+      const asset = METHOD_ASSET[req.method]; // "USDT" | "USDC"
+      const res = await ibex(`/accounts/${stableAcct}/crypto/receive-infos`, {
         method: "POST",
         body: JSON.stringify({ name: req.ref.slice(0, 40), network: "ethereum" }),
       });
-      if (!res.ok) throw new Error(`IBEX USDT receive-info failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw new Error(`IBEX ${asset} receive-info failed: ${res.status} ${await res.text()}`);
       const data = (await res.json()) as { id: string; type?: string; data?: { address?: string } };
       const addr = data.data?.address;
-      if (!addr) throw new Error("IBEX USDT receive-info returned no address");
+      if (!addr) throw new Error(`IBEX ${asset} receive-info returned no address`);
       return {
-        method: "USDT", code: addr, qr: addr, asset: "USDT",
-        amount: req.amount, amountLabel: formatAmount(req.amount, "USDT"), expiresAt,
+        method: req.method, code: addr, qr: addr, asset,
+        amount: req.amount, amountLabel: formatAmount(req.amount, asset), expiresAt,
         providerRef: addr, provider: "ibex",
       };
     }
@@ -250,12 +261,12 @@ export const ibexAdapter: RailAdapter = {
     } }).transaction;
     if (!t) return null;
     const addr = t.address ?? t.metadata?.address;
-    // USDT (Ethereum/ERC-20) deposits: currencyId 29, or an 0x… receive address.
-    const isUsdt = t.currencyId === 29 || (typeof addr === "string" && addr.toLowerCase().startsWith("0x"));
+    // Stablecoin (Ethereum/ERC-20) deposits: USDT=currencyId 29, USDC=30, or an 0x… addr.
+    const isStable = t.currencyId === 29 || t.currencyId === 30 || (typeof addr === "string" && addr.toLowerCase().startsWith("0x"));
     // Lightning (typeId 1) matches by the stored transaction id. DEPOSITS — on-chain
-    // BTC (typeId 7) and ERC-20 USDT — were stored with the address as providerRef, so
-    // match the address IBEX echoes; fall back to id/infoId.
-    const providerRef = (isUsdt && addr) || t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
+    // BTC (typeId 7) and ERC-20 stablecoins — were stored with the address as providerRef,
+    // so match the address IBEX echoes; fall back to id/infoId.
+    const providerRef = (isStable && addr) || t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
     if (!providerRef) return null;
     const status = (t.status ?? "").toLowerCase();
     const inv = t.invoice ?? {};
@@ -272,7 +283,7 @@ export const ibexAdapter: RailAdapter = {
     // until verified against a real deposit; assuming base-units (÷1e6) fails SAFE —
     // if IBEX reports a larger unit the guard under-counts → MANUAL_REVIEW, never overpay.
     let amount: number | undefined;
-    if (isUsdt) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
+    if (isStable) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
     else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
     return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
   },

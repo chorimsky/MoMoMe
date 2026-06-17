@@ -54,6 +54,7 @@ export const LN_ADDRESS_DOMAIN = "momome.xyz";
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure
   USDT: 150,
+  USDC: 150, // stablecoin — same low exposure as USDT
   ONCHAIN: 280, // wider; 10–60 min exposure window
 };
 
@@ -61,6 +62,7 @@ export const METHOD_ASSET: Record<Method, InboundAsset> = {
   LIGHTNING: "BTC",
   ONCHAIN: "BTC",
   USDT: "USDT",
+  USDC: "USDC",
 };
 
 /** Flat platform fee shown to the user, on top of the FX spread. */
@@ -87,6 +89,7 @@ export const QUOTE_TTL_SEC: Record<Method, number> = {
   // per-rail spread covers the slightly longer rate lock.
   LIGHTNING: 600,
   USDT: 150,
+  USDC: 150,
   ONCHAIN: 900,
 };
 
@@ -97,4 +100,5 @@ export const METHOD_META: Record<
   LIGHTNING: { name: "Lightning", arrival: "Within seconds", fast: true },
   ONCHAIN: { name: "Bitcoin", arrival: "10–60 minutes", fast: false },
   USDT: { name: "USDT", arrival: "Within seconds", fast: true },
+  USDC: { name: "USDC", arrival: "Within seconds", fast: true },
 };

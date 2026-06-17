@@ -6,8 +6,8 @@ export type CountryCode = "CM" | "GA" | "TD" | "CG" | "CF";
 export type ProviderId = "MTN" | "ORANGE" | "AIRTEL";
 
 /** Inbound rail the sender pays over. Recipient always gets Mobile Money. */
-export type Method = "LIGHTNING" | "ONCHAIN" | "USDT";
-export type InboundAsset = "BTC" | "USDT";
+export type Method = "LIGHTNING" | "ONCHAIN" | "USDT" | "USDC";
+export type InboundAsset = "BTC" | "USDT" | "USDC";
 
 export interface Country {
   name: string;
@@ -217,7 +217,7 @@ export interface LedgerEntry {
   account: LedgerAccount;
   direction: "debit" | "credit";
   amount: number;
-  currency: "BTC" | "USDT" | "XAF";
+  currency: "BTC" | "USDT" | "USDC" | "XAF";
   at: string;
 }
 
@@ -240,7 +240,7 @@ export interface Identity {
   lightningAddress: string;
   status: "Active";
   claimed: boolean;
-  balances: { XAF: number; BTC: number; USDT: number };
+  balances: { XAF: number; BTC: number; USDT: number; USDC: number };
   createdAt: string;
   lastSeen: string;
   firstPaymentRef?: string;
@@ -337,7 +337,7 @@ export interface AdminSettings {
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: {
     feePct: number;
-    spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+    spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
     /** Cost assumptions for net-margin intelligence (set from your real rail
      *  contracts): payout = Mobile Money disbursement cost as a fraction of the
      *  delivered XAF; rail = crypto-in cost as a fraction of the total billed;
@@ -355,7 +355,7 @@ export interface AdminSettings {
 
 /* ---------- liquidity ---------- */
 export interface LiquidityPool {
-  asset: "BTC" | "USDT" | "XAF";
+  asset: "BTC" | "USDT" | "USDC" | "XAF";
   label: string;
   balance: number;
   capacity: number;
@@ -369,7 +369,7 @@ export interface LiquiditySnapshot {
 export interface PricingInfo {
   feePct: number;
   eurXafPeg: number;
-  spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+  spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */

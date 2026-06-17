@@ -31,10 +31,10 @@ setInterval(() => { try { pruneExpiredQuotes(); } catch (e) { console.error("pru
 // quoting reads the cache synchronously and locks the rate at quote time.
 if (ibexConfigured()) {
   const refreshFxRates = async () => {
-    const [btc, usdt, eur] = await Promise.all([
-      ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
+    const [btc, usdt, usdc, eur] = await Promise.all([
+      ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
     ]);
-    setRates({ btcUsd: btc, usdtUsd: usdt, eurUsd: eur });
+    setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur });
   };
   void refreshFxRates().catch((e) => console.error("fx rates", e));
   setInterval(() => void refreshFxRates().catch((e) => console.error("fx rates", e)), 30_000).unref();

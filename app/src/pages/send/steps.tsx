@@ -10,9 +10,12 @@ import type { Draft } from "./SendApp.js";
 
 const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MANUAL_REVIEW"];
 
+// USDC is intentionally NOT offered yet — its IBEX receive combo isn't enabled
+// (ethereum + currencyId 30 returns "invalid combination"). To expose it once IBEX
+// enables USDC receive and IBEX_USDC_ACCOUNT_ID is set, add "USDC" to this array.
 const METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
-const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮" };
-const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)" };
+const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮", USDC: "$" };
+const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)", USDC: "oklch(0.58 0.14 250)" };
 
 /* ---------- contact-picker helpers ---------- */
 type CC = Draft["country"];

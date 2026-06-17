@@ -63,7 +63,7 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
     lightningAddress: `${cc}${phoneDigits}@${LN_ADDRESS_DOMAIN}`,
     status: "Active",
     claimed: false,
-    balances: { XAF: 0, BTC: 0, USDT: 0 },
+    balances: { XAF: 0, BTC: 0, USDT: 0, USDC: 0 },
     createdAt: now,
     lastSeen: now,
     firstPaymentRef,

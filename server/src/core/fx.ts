@@ -7,11 +7,11 @@
 import type { Method, InboundAsset } from "../../../shared/types.js";
 import { METHOD_ASSET } from "../../../shared/domain.js";
 import { getSettings } from "./settings.js";
-import { btcUsd, usdtUsd, usdXaf } from "./rates.js";
+import { btcUsd, usdtUsd, usdcUsd, usdXaf } from "./rates.js";
 
-/** Live spot in USD from IBEX (BTC/USD, USDT/USD), via the rate cache. */
+/** Live spot in USD from IBEX (BTC/USD, USDT/USD, USDC/USD), via the rate cache. */
 function spotUsd(asset: InboundAsset): number {
-  return asset === "USDT" ? usdtUsd() : btcUsd();
+  return asset === "USDT" ? usdtUsd() : asset === "USDC" ? usdcUsd() : btcUsd();
 }
 
 export interface RateQuote {
@@ -40,7 +40,7 @@ export function inboundAmount(totalXaf: number, rq: RateQuote): number {
 }
 
 export function formatAmount(amount: number, asset: InboundAsset): string {
-  return asset === "BTC" ? `${amount.toFixed(8)} BTC` : `${amount.toFixed(2)} USDT`;
+  return asset === "BTC" ? `${amount.toFixed(8)} BTC` : `${amount.toFixed(2)} ${asset}`;
 }
 
 export function usdValue(totalXaf: number, rq: RateQuote): number {

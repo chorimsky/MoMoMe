@@ -35,7 +35,7 @@ BASE="${PAWAPAY_API_URL:-https://api.pawapay.io}"
 # Resolve the API token.
 TOK="${PAWAPAY_TOKEN:-}"
 if [ -z "$TOK" ]; then
-  TOK=$(railway variables --service momome-api --kv 2>/dev/null | grep '^PAWAPAY_API_KEY=' | cut -d= -f2- || true)
+  TOK=$(railway variables --service momome-api --kv 2>/dev/null | grep -E '^PAWAPAY_API_(KEY|TOKEN)=' | head -1 | cut -d= -f2- | tr -cd 'A-Za-z0-9_.-' || true)
 fi
 [ -n "$TOK" ] || { echo "No token. Export PAWAPAY_TOKEN=... or RAILWAY_API_TOKEN=... (or run 'railway login')."; exit 1; }
 

@@ -53,7 +53,9 @@ export const config = {
   pawapay: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
-    apiKey: env("PAWAPAY_API_KEY"),
+    // Accept either name — PawaPay's dashboard/docs call it the "API token", so
+    // PAWAPAY_API_TOKEN is the intuitive var; PAWAPAY_API_KEY kept for back-compat.
+    apiKey: env("PAWAPAY_API_KEY") || env("PAWAPAY_API_TOKEN"),
     webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
   }))(!isProdEnv("PAWAPAY_ENV")),
 

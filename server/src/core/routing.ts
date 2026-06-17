@@ -150,7 +150,9 @@ export async function payoutReady(provider: ProviderId, country: CountryCode, am
 export function recordExecution(e: ExecutionLogEntry): void {
   const h = health[e.aggregator];
   if (e.status === "COMPLETED") { h.success += 1; h.totalLatencyMs += e.latencyMs; h.consecFail = 0; h.up = true; h.downSince = 0; }
-  else { h.failure += 1; h.consecFail += 1; if (h.consecFail >= 3 && h.up) { h.up = false; h.downSince = Date.now(); } } // 3 strikes → out
+  // 3 strikes → out. Re-stamp downSince on every failure-while-down too, so a FAILED
+  // probe (after the cooldown) re-arms the backoff instead of leaving the rail eligible.
+  else { h.failure += 1; h.consecFail += 1; if (h.consecFail >= 3) { h.up = false; h.downSince = Date.now(); } }
   executions.unshift(e);
   if (executions.length > 60) executions.pop();
   touch("routing");
@@ -162,7 +164,7 @@ export function recordExecution(e: ExecutionLogEntry): void {
  *  or an admin re-enable. */
 export function markRailHardDown(name: Aggregator, reason: string): void {
   const h = health[name];
-  if (h.up) h.downSince = Date.now();
+  h.downSince = Date.now(); // always re-arm the cooldown — a failed probe backs off again
   h.up = false;
   h.failure += 1;
   h.consecFail = Math.max(h.consecFail, 3);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
@@ -50,10 +50,21 @@ export function SendApp() {
   const recipient = () => ({ phone: s.phone, country: s.country, provider: s.provider, name: s.recipientName, nameSource: s.nameSource });
   const isExpiry = (e: unknown) => e instanceof ApiError && (e.status === 409 || e.status === 404);
 
-  const fail = (e: unknown) => setErr(e instanceof Error ? e.message : t("error_generic"));
+  // Remembers the action that just failed, so the error banner can offer a Retry.
+  const retryRef = useRef<null | (() => void)>(null);
+  const fail = (e: unknown) => {
+    // A dropped connection (status 0) or a browser-reported offline state → a
+    // friendly, localized message instead of a raw "Failed to fetch".
+    if ((e instanceof ApiError && e.status === 0) || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+      setErr(t("err_network"));
+    } else {
+      setErr(e instanceof Error ? e.message : t("error_generic"));
+    }
+  };
 
   /** method → review: fetch authoritative quote from the settlement engine. */
   async function toReview() {
+    retryRef.current = toReview;
     setBusy(true); setErr(null);
     try {
       setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country }));
@@ -63,6 +74,7 @@ export function SendApp() {
 
   /** Re-price in place (rate expired on the review screen). */
   async function refreshQuote() {
+    retryRef.current = refreshQuote;
     setBusy(true); setErr(null);
     try {
       setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country }));
@@ -73,6 +85,7 @@ export function SendApp() {
    *  instruction for the same quote so going Back→Forward doesn't orphan invoices. */
   async function toPay() {
     if (!quote) return;
+    retryRef.current = toPay;
     if (payment && payment.quoteId === quote.id && payment.state === "AWAITING_INBOUND") { go("pay"); return; }
     setBusy(true); setErr(null);
     try {
@@ -88,6 +101,7 @@ export function SendApp() {
 
   /** Pay screen: the invoice expired — re-price and mint a fresh instruction in place. */
   async function repay() {
+    retryRef.current = repay;
     setBusy(true); setErr(null);
     try {
       const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
@@ -99,14 +113,18 @@ export function SendApp() {
   /** pay → processing: tell the engine the inbound has been sent. */
   async function toProcessing() {
     if (!payment) return;
+    retryRef.current = toProcessing;
     setBusy(true); setErr(null);
     try {
-      // Demo: simulate the inbound (no real invoice to pay). Production:
-      // confirm checks the REAL crypto payment — it settles only if actually
-      // received (and auto-settles via webhook even without this tap).
-      if (demo?.demoMode) await api.simulatePayment(payment.id);
-      else await api.confirmPayment(payment.id);
-      go("processing");
+      // Demo: simulate the inbound (no real invoice to pay) → straight to processing.
+      if (demo?.demoMode) { await api.simulatePayment(payment.id); go("processing"); return; }
+      // Production: confirm checks the REAL inbound. If it hasn't arrived yet, DON'T
+      // leave the QR screen — tell the sender and keep them here (PayStep auto-advances
+      // the instant the rail settles, with or without this tap).
+      const p = await api.confirmPayment(payment.id);
+      setPayment(p);
+      if (p.state !== "AWAITING_INBOUND") go("processing");
+      else setErr(t("not_seen_yet"));
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
@@ -148,8 +166,14 @@ export function SendApp() {
         )}
 
         {err && (
-          <div role="alert" style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>
-            {err}
+          <div role="alert" style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <span style={{ minWidth: 0 }}>{err}</span>
+            {retryRef.current && (
+              <button onClick={() => { const r = retryRef.current; if (r) { setErr(null); r(); } }} disabled={busy}
+                style={{ flex: "none", cursor: "pointer", border: "1px solid var(--bad)", background: "transparent", color: "var(--bad)", fontWeight: 700, fontSize: 12.5, padding: "6px 12px", borderRadius: 8, fontFamily: "inherit" }}>
+                {t("retry")}
+              </button>
+            )}
           </div>
         )}
 

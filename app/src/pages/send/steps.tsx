@@ -5,6 +5,7 @@ import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../componen
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { api } from "../../api/client.js";
+import { pollMs } from "../../lib/net.js";
 import { FlowCard, Label, Stepper, Row, useExpiry } from "./ui.js";
 import type { Draft } from "./SendApp.js";
 
@@ -359,15 +360,22 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   // demo the rail isn't actually paid — tap "I've paid" to simulate it.)
   useEffect(() => {
     let active = true;
+    let id: ReturnType<typeof setTimeout>;
+    const gap = () => pollMs(2500, 6000); // back off on slow/metered links
     const poll = async () => {
-      try {
-        const p = await api.getPayment(payment.id);
-        if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
-      } catch { /* keep polling */ }
-      if (active) setTimeout(poll, 2500);
+      // Skip the round-trip while backgrounded (data/battery); resume on return.
+      if (!document.hidden) {
+        try {
+          const p = await api.getPayment(payment.id);
+          if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
+        } catch { /* keep polling */ }
+      }
+      if (active) id = setTimeout(poll, gap());
     };
-    const id = setTimeout(poll, 2500);
-    return () => { active = false; clearTimeout(id); };
+    id = setTimeout(poll, gap());
+    const onVis = () => { if (!document.hidden && active) { clearTimeout(id); poll(); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { active = false; clearTimeout(id); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payment.id]);
 
@@ -460,40 +468,45 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
     let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
     const poll = async () => {
-      try {
-        const p = await api.getPayment(paymentId);
-        if (!active) return;
-        setState(p.state);
-        setPayment(p);
-        if (p.state === "DELIVERED") {
-          timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
-          return;
+      // Skip the round-trip while the tab is backgrounded — spares metered mobile
+      // data + battery; the visibilitychange listener fetches the moment they return.
+      if (!document.hidden) {
+        try {
+          const p = await api.getPayment(paymentId);
+          if (!active) return;
+          setState(p.state);
+          setPayment(p);
+          if (p.state === "DELIVERED") {
+            timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
+            return;
+          }
+          if (p.state === "REFUNDED") { setOutcome("refunded"); return; }
+          // Payout couldn't land → the sender claims their crypto back. While a refund is
+          // in flight (destination already provided) keep polling until REFUNDED.
+          if (p.state === "REFUND_PENDING") {
+            if (p.refundNeedsDestination) { setOutcome("refund"); return; }
+          } else if (FAIL_STATES.includes(p.state)) {
+            // Terminal non-delivery — stop polling and show an honest outcome
+            // instead of spinning forever (the prototype/earlier build would hang).
+            setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
+            return;
+          }
+        } catch {
+          /* transient; keep polling */
         }
-        if (p.state === "REFUNDED") { setOutcome("refunded"); return; }
-        // Payout couldn't land → the sender claims their crypto back. While a refund is
-        // in flight (destination already provided) keep polling until REFUNDED.
-        if (p.state === "REFUND_PENDING") {
-          if (p.refundNeedsDestination) { setOutcome("refund"); return; }
-        } else if (FAIL_STATES.includes(p.state)) {
-          // Terminal non-delivery — stop polling and show an honest outcome
-          // instead of spinning forever (the prototype/earlier build would hang).
-          setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
-          return;
-        }
-      } catch {
-        /* transient; keep polling */
       }
       if (!active) return;
       const elapsed = Date.now() - started;
       if (elapsed > SLOW_AFTER_MS) setSlow(true);
       // Stop polling at the cap; the slow screen already offers "View activity".
       if (elapsed > MAX_POLL_MS) return;
-      // Ease off once we've crossed into "slow" so a stuck payment doesn't keep
-      // polling at full rate.
-      timer = setTimeout(poll, elapsed > SLOW_AFTER_MS ? 2500 : 800);
+      // Ease off once we've crossed into "slow"; back off further on a slow/metered link.
+      timer = setTimeout(poll, pollMs(elapsed > SLOW_AFTER_MS ? 2500 : 800, elapsed > SLOW_AFTER_MS ? 6000 : 2500));
     };
     poll();
-    return () => { active = false; if (timer) clearTimeout(timer); };
+    const onVis = () => { if (!document.hidden && active) { if (timer) clearTimeout(timer); poll(); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { active = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [paymentId]);
 
   if (outcome === "refund" && payment) return <RefundClaim payment={payment} reset={reset} />;

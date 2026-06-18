@@ -47,15 +47,23 @@ const senderId = ensureSenderId();
 export function getSenderId(): string { return senderId; }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-MM-Sender": senderId,
-      ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-MM-Sender": senderId,
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    // No response at all — offline / DNS / dropped connection (common on patchy
+    // mobile data). Surface as a typed network error (status 0) so the UI shows a
+    // friendly "you're offline, retry" instead of a raw "Failed to fetch".
+    throw new ApiError("network", 0);
+  }
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and
     // signal the console to fall back to the login gate.

@@ -308,6 +308,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
       <div style={{ padding: "22px 0 18px", textAlign: "center", borderBottom: "1px solid var(--line-2)" }}>
         <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("they_receive")}</div>
         <div className="num" style={{ fontSize: 42, fontWeight: 750, color: "var(--ink)", letterSpacing: "-0.03em", marginTop: 6 }}>{fmt(quote.xaf)} <span style={{ fontSize: 20, color: "var(--ink-3)" }}>XAF</span></div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4, maxWidth: 320, margin: "9px auto 0" }}>{t("cashout_note")}</div>
       </div>
 
       <div style={{ marginTop: 4 }}>

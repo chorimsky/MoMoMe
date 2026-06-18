@@ -123,6 +123,7 @@ export const STRINGS: Dict = {
   err_network: ["You appear to be offline — check your connection and try again.", "Vous semblez hors ligne — vérifiez votre connexion et réessayez."],
   retry: ["Retry", "Réessayer"],
   not_seen_yet: ["We haven't received your payment yet. Once you've paid, this updates on its own — or tap again to check.", "Nous n'avons pas encore reçu votre paiement. Une fois payé, la page se met à jour automatiquement — ou appuyez à nouveau pour vérifier."],
+  cashout_note: ["Credited in full to their Mobile Money wallet. Standard cash-out fees (operator + government levy) apply only if they withdraw — never charged by MoMoMe.", "Crédité intégralement sur leur portefeuille Mobile Money. Des frais de retrait habituels (opérateur + taxe de l'État) s'appliquent uniquement en cas de retrait — jamais facturés par MoMoMe."],
   claim_title: ["Claim your account", "Activez votre compte"],
   claim_sub: ["Every payment you receive is already yours. Claim your number to track and manage it.", "Chaque paiement reçu est déjà à vous. Activez votre numéro pour le suivre et le gérer."],
   claim_send_code: ["Send code", "Envoyer le code"],

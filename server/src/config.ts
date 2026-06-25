@@ -69,7 +69,7 @@ export const config = {
    *  from the Peex intelligence layer above. URL derives from PEEXIT_ENV. */
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
-    apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://peexit.com/api/v1"),
+    apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
     apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY
     webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
   }))(!isProdEnv("PEEXIT_ENV")),

@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds } from "./core/stateMachine.js";
@@ -14,6 +14,12 @@ assertAdminSecurity(); // fail closed on a default admin password in production
 // noise for local dev where the default password is fine.
 if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
   console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
+}
+// Peexit settles a "pending" payout ONLY via its notification webhook (no authoritative
+// status re-query exists), so a live Peexit rail without a webhook secret rejects every
+// callback and strands pending payouts. Warn loudly at boot.
+if (peexitLive() && !config.peexit.webhookSecret) {
+  console.warn("⚠️  PEEXIT is live but PEEXIT_WEBHOOK_SECRET is not set — payout callbacks will be REJECTED and pending payouts can't settle. Set PEEXIT_WEBHOOK_SECRET and configure the Peexit dashboard webhook URL.");
 }
 const app = createApp();
 

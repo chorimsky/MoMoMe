@@ -99,22 +99,26 @@ export function statusByKey(idempotencyKey: string): DisburseResult | null {
 
 /** Wallet balance (XAF) for the operator matching the provider — from
  *  GET /operators `solde`. null when not configured. */
-let balCache: { at: number; ops: Array<{ name?: string; solde?: number }> } | null = null;
+type PeexitOp = { name?: string; solde?: number; disbursement_solde?: number | null };
+let balCache: { at: number; ops: PeexitOp[] } | null = null;
+// The disbursement-specific wallet when Peexit exposes it (confirmed present on the
+// live /operators response, may be null), else the general `solde`.
+const opBalance = (o: PeexitOp) => (o.disbursement_solde != null ? Number(o.disbursement_solde) : Number(o.solde ?? 0));
 export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
   if (!peexitLive()) return null;
   try {
     if (!balCache || Date.now() - balCache.at > 15_000) {
       const res = await peex("/operators", { method: "GET" });
       if (!res.ok) return null;
-      balCache = { at: Date.now(), ops: (await res.json()) as Array<{ name?: string; solde?: number }> };
+      balCache = { at: Date.now(), ops: (await res.json()) as PeexitOp[] };
     }
     const want = provider === "ORANGE" ? "orange" : provider === "AIRTEL" ? "airtel" : "mtn";
     // Prefer the canonical country operator (e.g. "MTN-CM" / "Orange-cm"); else
     // the best same-network wallet. This reflects the wallet the payout debits,
     // so a negative MTN-CM means MTN won't route here while a funded Orange-cm will.
     const exact = balCache.ops.find((o) => (o.name ?? "").toLowerCase() === `${want}-cm`);
-    if (exact) return Number(exact.solde ?? 0);
-    const soldes = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want)).map((o) => Number(o.solde ?? 0));
+    if (exact) return opBalance(exact);
+    const soldes = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want)).map(opBalance);
     return soldes.length ? Math.max(...soldes) : 0;
   } catch { return null; }
 }

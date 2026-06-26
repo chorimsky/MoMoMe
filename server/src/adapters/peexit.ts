@@ -1,12 +1,15 @@
 /* ============================================================
    Peexit (Peex) payout adapter — the SECOND Mobile Money aggregator.
-   Real disbursement via the Peex Platform API (peexit.com): SECRETKEY-header
-   auth, POST /disbursement/request_payment. The operator (MTN/Orange) is
-   auto-detected from the recipient phone — no correspondent code. The request
-   returns a status synchronously (new/pending/paid/failed/rejected); we map it
-   and let the state machine's poll/callback settle. Same contract as PawaPay so
-   the routing engine can pick either invisibly. Idempotent on the payment ref
-   (track_id). Activates when PEEXIT_API_KEY is set; otherwise simulated.
+   Real disbursement via the Peex Platform API (prod: server.peexit.com,
+   IP-allowlisted to our egress): SECRETKEY-header auth, POST
+   /disbursement/request_payment. The operator (MTN/Orange) is auto-detected from
+   the recipient phone — no correspondent code. The request returns a status
+   synchronously (new/pending/paid/failed/rejected); the final state then arrives
+   two ways: the notification callback (HTTP Basic Auth, an array of txns) AND an
+   authoritative re-query GET /disbursement/all_requests?track_id= (the reconcile
+   backstop). Same contract as PawaPay so the routing engine can pick either
+   invisibly. Idempotent on the payment ref (track_id). Activates when
+   PEEXIT_API_KEY is set; otherwise simulated.
    ============================================================ */
 import crypto from "node:crypto";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
@@ -88,9 +91,24 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
   const local = byKey.get(idempotencyKey);
   if (!local) return null;
   if (local.simulated) return "COMPLETED";
-  // Peexit returns the status synchronously on submit; the async final state for
-  // a "pending" payout arrives via the notification webhook.
-  return statusByRef.get(idempotencyKey) ?? "PENDING";
+  const cached = statusByRef.get(idempotencyKey) ?? "PENDING";
+  if (!peexitLive()) return cached;
+  // AUTHORITATIVE re-query: GET /disbursement/all_requests?track_id= returns our
+  // requests from the last 3 days with their current status. This is what lets the
+  // reconcile backstop settle a payout even if the callback is lost, and lets the
+  // callback handler confirm the status rather than trust the posted body alone.
+  try {
+    const res = await peex(`/disbursement/all_requests?track_id=${encodeURIComponent(idempotencyKey)}`, { method: "GET" });
+    // 404 = "Transactions not found on your listing! (3 days)" → outside the
+    // window (too new or >3 days); keep the last known status.
+    if (res.status === 404 || !res.ok) return cached;
+    const arr = (await res.json()) as Array<{ track_id?: string; status?: string }>;
+    const row = Array.isArray(arr) ? (arr.find((r) => r.track_id === idempotencyKey) ?? arr[0]) : undefined;
+    if (!row?.status) return cached;
+    const mapped = mapStatus(row.status);
+    statusByRef.set(idempotencyKey, mapped);
+    return mapped;
+  } catch { return cached; }
 }
 
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
@@ -123,25 +141,39 @@ export async function availableBalanceXaf(_country: CountryCode, provider?: Prov
   } catch { return null; }
 }
 
-/* ---------- notification webhook (async final status) ---------- */
-export function verifyWebhook(rawBody: string, signature: string | undefined): boolean {
-  const secret = config.peexit.webhookSecret;
-  // No secret configured → accept only OUTSIDE production (sandbox testing). In
-  // production a missing secret means the callback can't be authenticated, so
-  // fail closed (reject) rather than trust an unauthenticated body.
-  if (!secret) return !peexitLive();
-  if (typeof signature !== "string" || !signature) return false;
-  const expect = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expect);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+/* ---------- notification callback (async final status) ---------- */
+/** Constant-time string compare that doesn't leak length via early return. */
+function safeEq(a: string, b: string): boolean {
+  const ba = Buffer.from(a), bb = Buffer.from(b);
+  if (ba.length !== bb.length) { crypto.timingSafeEqual(ba, ba); return false; }
+  return crypto.timingSafeEqual(ba, bb);
 }
 
-export function parsePayoutEvent(body: unknown): { ref: string; status: PayoutStatus } | null {
-  // ---- CONFIRM notification shape against Peexit /notifications docs ----
-  const e = body as { track_id?: string; status?: string; request?: { track_id?: string; status?: string } };
-  const ref = e.track_id ?? e.request?.track_id;
-  const status = e.status ?? e.request?.status;
-  if (!ref || !status) return null;
-  return { ref, status: mapStatus(status) };
+/** Peexit authenticates its callback with HTTP Basic Auth, using credentials we
+ *  define and hand to Peexit (per the /notifications docs — NOT an HMAC). We
+ *  validate the inbound `Authorization: Basic …` header against our configured
+ *  user/pass. No password configured → accept only OUTSIDE production (sandbox);
+ *  in production fail closed so an unauthenticated body can't settle a payout. */
+export function verifyCallbackAuth(authHeader: string | undefined): boolean {
+  const { callbackUser, callbackPass } = config.peexit;
+  if (!callbackPass) return !peexitLive();
+  if (typeof authHeader !== "string" || !authHeader.toLowerCase().startsWith("basic ")) return false;
+  let decoded: string;
+  try { decoded = Buffer.from(authHeader.slice(6).trim(), "base64").toString("utf8"); } catch { return false; }
+  const i = decoded.indexOf(":");
+  if (i < 0) return false;
+  return safeEq(decoded.slice(0, i), callbackUser) && safeEq(decoded.slice(i + 1), callbackPass);
+}
+
+/** The callback body is an ARRAY of transaction objects (Peexit posts all
+ *  non-transmitted transactions), each carrying track_id + status. Returns one
+ *  {ref,status} per recognizable entry. */
+export function parsePayoutEvents(body: unknown): { ref: string; status: PayoutStatus }[] {
+  const list = Array.isArray(body) ? body : [body];
+  const out: { ref: string; status: PayoutStatus }[] = [];
+  for (const item of list) {
+    const e = item as { track_id?: string; status?: string };
+    if (e?.track_id && e.status) out.push({ ref: e.track_id, status: mapStatus(e.status) });
+  }
+  return out;
 }

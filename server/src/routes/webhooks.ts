@@ -16,15 +16,26 @@ import { onPayoutResult } from "../core/stateMachine.js";
 export const webhooks = Router();
 
 // Peexit payout callback — the second aggregator's async confirmation/failure.
+// Authenticated with HTTP Basic Auth (credentials we gave Peexit). The body is an
+// ARRAY of transactions. We ack fast, then for each one confirm the AUTHORITATIVE
+// status via GET /disbursement/all_requests (so a spoofed body can't settle an
+// unpaid payout); if the re-query is inconclusive we fall back to the
+// Basic-Auth-authenticated body status.
 webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  const sig = req.headers["x-peexit-signature"];
-  if (!peexit.verifyWebhook(raw, Array.isArray(sig) ? sig[0] : sig)) return res.status(401).json({ error: "bad_signature" });
-  let event;
-  try { event = peexit.parsePayoutEvent(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
-  if (!event) return res.json({ ok: true, ignored: true });
-  void onPayoutResult(event.ref, event.status).catch((e) => console.error("peexit payout result", event!.ref, e));
+  const auth = req.headers["authorization"];
+  if (!peexit.verifyCallbackAuth(Array.isArray(auth) ? auth[0] : auth)) return res.status(401).json({ error: "unauthorized" });
+  let events;
+  try { events = peexit.parsePayoutEvents(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
   res.json({ ok: true });
+  for (const ev of events) {
+    if (!peexit.statusByKey(ev.ref)) continue; // not one of ours
+    void (async () => {
+      const q = await peexit.queryStatus(ev.ref);
+      const status = q === "COMPLETED" || q === "FAILED" ? q : ev.status;
+      if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status);
+    })().catch((e) => console.error("peexit payout result", ev.ref, e));
+  }
 });
 
 // PawaPay payout callback — async confirmation/failure of a Mobile Money payout.

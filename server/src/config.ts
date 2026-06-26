@@ -70,8 +70,13 @@ export const config = {
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
-    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY
-    webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
+    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY (outbound, header SECRETKEY)
+    // Peexit's notification callback authenticates with HTTP Basic Auth using
+    // credentials WE define and hand to Peexit (NOT an HMAC signature). We
+    // validate the inbound Authorization header against these. Sandbox default
+    // per Peexit docs is peex/peex_callback; production creds are ours to set.
+    callbackUser: env("PEEXIT_CALLBACK_USER", "peex"),
+    callbackPass: env("PEEXIT_CALLBACK_PASS"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
@@ -173,7 +178,7 @@ export function assertLiveConfig(): void {
   if (!config.pawapay.apiKey) missing.push("PAWAPAY_API_KEY");
   if (!config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
   if (!config.peexit.apiKey) missing.push("PEEXIT_API_KEY");
-  if (!config.peexit.webhookSecret) missing.push("PEEXIT_WEBHOOK_SECRET");
+  if (!config.peexit.callbackPass) missing.push("PEEXIT_CALLBACK_PASS");
   if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.push("PEEX_WEBHOOK_SECRET");
   if (missing.length) {
     throw new Error(`RAILS_MODE=live but missing: ${missing.join(", ")}. Set them or use RAILS_MODE=sandbox.`);

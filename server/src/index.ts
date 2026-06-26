@@ -15,11 +15,12 @@ assertAdminSecurity(); // fail closed on a default admin password in production
 if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
   console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
 }
-// Peexit settles a "pending" payout ONLY via its notification webhook (no authoritative
-// status re-query exists), so a live Peexit rail without a webhook secret rejects every
-// callback and strands pending payouts. Warn loudly at boot.
-if (peexitLive() && !config.peexit.webhookSecret) {
-  console.warn("⚠️  PEEXIT is live but PEEXIT_WEBHOOK_SECRET is not set — payout callbacks will be REJECTED and pending payouts can't settle. Set PEEXIT_WEBHOOK_SECRET and configure the Peexit dashboard webhook URL.");
+// Peexit's notification callback authenticates with HTTP Basic Auth using
+// credentials we hand to Peexit. Without PEEXIT_CALLBACK_PASS set, a live rail
+// rejects every callback (fail-closed) — the reconcile backstop still settles via
+// the authoritative /disbursement/all_requests re-query, but callbacks won't.
+if (peexitLive() && !config.peexit.callbackPass) {
+  console.warn("⚠️  PEEXIT is live but PEEXIT_CALLBACK_PASS is not set — payout callbacks will be REJECTED (settlement falls back to slower reconcile polling). Set PEEXIT_CALLBACK_USER/PEEXIT_CALLBACK_PASS and give them to Peexit with your callback URL.");
 }
 const app = createApp();
 

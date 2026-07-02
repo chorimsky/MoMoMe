@@ -138,6 +138,58 @@ export async function payInvoice(bolt11: string, amountMsat?: number): Promise<P
   return { transactionId: d.transactionId, settled, feesMsat: d.feesMsat ? Number(d.feesMsat) : undefined };
 }
 
+/* ---------- treasury withdrawal (OUTBOUND sweeps) ----------
+   The platform accumulates crypto in its IBEX accounts as customers pay in. These
+   let an admin sweep that inventory to a treasury wallet. All are real money — the
+   caller (core/treasury) enforces the withdrawable ceiling, gating and audit. */
+
+/** Real per-account balances from GET /v2/account, keyed by accountId →
+ *  {currencyId, balance}. `balance` is in the account's smallest unit (BTC accounts
+ *  in msat; stablecoin accounts in ERC-20 base units). Throws on lookup failure. */
+export async function accountBalances(): Promise<Record<string, { currencyId: number; balance: number }>> {
+  const res = await ibex("/v2/account", { method: "GET" });
+  if (!res.ok) throw new Error(`IBEX account list failed: ${res.status} ${await res.text()}`);
+  const rows = (await res.json()) as Array<{ id?: string; currencyId?: number; balance?: number }>;
+  const out: Record<string, { currencyId: number; balance: number }> = {};
+  for (const r of rows) if (r.id) out[r.id] = { currencyId: Number(r.currencyId ?? 0), balance: Number(r.balance ?? 0) };
+  return out;
+}
+
+/** Withdraw BTC ON-CHAIN to a Bitcoin address. `amountMsat` is the BTC account's
+ *  smallest unit (msat). Returns the pay transaction id + provider status. */
+export async function sendOnchain(address: string, amountMsat: number): Promise<{ txId: string; status: string }> {
+  const res = await ibex("/v2/onchain/send", {
+    method: "POST",
+    body: JSON.stringify({ accountId: config.ibex.accountId, address, amount: amountMsat }),
+  });
+  if (!res.ok) throw new Error(`IBEX onchain-send failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transactionHub?: { id?: string }; status?: string };
+  return { txId: String(d.transactionHub?.id ?? ""), status: d.status ?? "INITIATED" };
+}
+
+/** Withdraw BTC over Lightning to a Lightning ADDRESS (user@domain). Resolves the
+ *  address's LNURL-pay params (its .well-known endpoint), bounds-checks the amount,
+ *  then pays via IBEX /v2/lnurl/pay/send. `amountMsat` must be within min/maxSendable. */
+export async function payLightningAddress(lnAddress: string, amountMsat: number): Promise<PayResult> {
+  const [name, domain] = lnAddress.split("@");
+  if (!name || !domain) throw new Error("invalid lightning address");
+  const lnurl = await fetch(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`);
+  if (!lnurl.ok) throw new Error(`lightning-address resolve failed: ${lnurl.status}`);
+  const params = (await lnurl.json()) as { tag?: string; callback?: string; minSendable?: number; maxSendable?: number };
+  if (params.tag !== "payRequest" || !params.callback) throw new Error("not a valid LNURL-pay address");
+  if ((params.minSendable && amountMsat < params.minSendable) || (params.maxSendable && amountMsat > params.maxSendable)) {
+    throw new Error("amount outside the destination's min/max sendable");
+  }
+  const res = await ibex("/v2/lnurl/pay/send", {
+    method: "POST",
+    body: JSON.stringify({ params: JSON.stringify(params), amount: amountMsat, accountId: config.ibex.accountId }),
+  });
+  if (!res.ok) throw new Error(`IBEX lnurl-pay failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transaction?: { id?: string }; hash?: string; settleDateUtc?: number | string | null };
+  const settled = !!d.settleDateUtc && d.settleDateUtc !== "0" && d.settleDateUtc !== 0;
+  return { transactionId: String(d.transaction?.id ?? d.hash ?? ""), settled };
+}
+
 /** Amount encoded in a BOLT11 invoice's HRP, in msat: 0 = amount-less; null = unparseable.
  *  Used to bound a refund so we can never over-pay a sender-supplied invoice. */
 export function bolt11AmountMsat(bolt11: string): number | null {

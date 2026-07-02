@@ -8,6 +8,7 @@ import type {
   Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
+  TreasuryPool, TreasuryWithdrawal, TreasuryRail,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 
@@ -162,6 +163,11 @@ export const api = {
   claimIdentity: (id: string) => req<Identity>(`/admin/identities/${id}/claim`, { method: "POST" }),
 
   adminLiquidity: () => req<LiquiditySnapshot>("/admin/liquidity"),
+  adminTreasury: () => req<{ pools: TreasuryPool[]; destinations: AdminSettings["treasury"]; history: TreasuryWithdrawal[] }>("/admin/treasury"),
+  saveTreasuryDestinations: (d: Partial<AdminSettings["treasury"]>) =>
+    req<{ destinations: AdminSettings["treasury"] }>("/admin/treasury/destinations", { method: "PUT", body: JSON.stringify(d) }),
+  treasuryWithdraw: (rail: TreasuryRail, amount: number) =>
+    req<{ ok: boolean; entry?: TreasuryWithdrawal }>("/admin/treasury/withdraw", { method: "POST", body: JSON.stringify({ rail, amount }) }),
   adminPricing: () => req<PricingInfo>("/admin/pricing"),
   adminRevenue: (period = "30d") => req<RevenueReport>(`/admin/revenue?period=${period}`),
   adminCompliance: () => req<ComplianceSnapshot>("/admin/compliance"),

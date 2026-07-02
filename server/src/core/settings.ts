@@ -18,6 +18,8 @@ const DEFAULTS: AdminSettings = {
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
+  // Treasury sweep destinations — all unset until an operator configures them.
+  treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
 };
 
 let settings: AdminSettings = DEFAULTS;
@@ -35,6 +37,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
+    treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
   };
 });
 
@@ -54,6 +57,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
+    treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
   };
   touch("settings");
   return settings;

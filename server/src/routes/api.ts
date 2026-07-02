@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
-  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport,
+  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
@@ -20,6 +20,7 @@ import {
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
+import * as treasury from "../core/treasury.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
@@ -142,6 +143,12 @@ api.use("/admin", (req, res, next) => {
   // than "payments" section access — a Support Agent can view but not move funds.
   if (/^\/payments\/[^/]+\/(retry|refund)$/.test(sub) && !canMovePaymentFunds(role)) {
     return res.status(403).json({ error: "forbidden", message: "Your role can't retry or refund payments." });
+  }
+  // Treasury sweep / destination config moves or redirects REAL crypto out of the
+  // platform wallet — the strictest gate: Super Admin only (viewing balances is fine
+  // for the liquidity section above; only the mutations are locked down here).
+  if (/^\/treasury\/(withdraw|destinations)$/.test(sub) && !isSuperAdmin(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Treasury withdrawals are Super Admin only." });
   }
   next();
 });
@@ -732,6 +739,57 @@ api.get("/admin/liquidity", (_req, res) => {
       { asset: "XAF", label: "XAF payout float", balance: xafFloat, capacity: XAF_FLOAT_CAPACITY },
     ],
   });
+});
+
+/* ---------- treasury (crypto wallet sweep) ----------
+   View: live IBEX balances, sender-owed liabilities, safely-withdrawable, stored
+   destinations, and the withdrawal history. Mutations (destinations, withdraw) are
+   Super-Admin gated in the /admin middleware above. */
+api.get("/admin/treasury", async (_req, res) => {
+  const pools = await treasury.treasuryPools();
+  res.json({ pools, destinations: getSettings().treasury, history: treasury.withdrawalHistory() });
+});
+
+// A treasury address: a Lightning address (user@domain), a bech32/base58 BTC address,
+// or an 0x… ERC-20 address. Loose validation — the rail's send call is authoritative.
+function looksLikeAddress(v: unknown): v is string {
+  if (typeof v !== "string" || v.length > 120) return false;
+  const s = v.trim();
+  return s === "" || /^[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s) || /^(bc1|[13])[a-z0-9]{20,}$/i.test(s) || /^0x[0-9a-f]{40}$/i.test(s);
+}
+api.put("/admin/treasury/destinations", (req, res) => {
+  const b = (req.body ?? {}) as Partial<AdminSettings["treasury"]>;
+  const fields: (keyof AdminSettings["treasury"])[] = ["lnAddress", "btcOnchain", "usdtAddress", "usdcAddress"];
+  const patch: Partial<AdminSettings["treasury"]> = {};
+  for (const f of fields) {
+    if (b[f] === undefined) continue;
+    if (!looksLikeAddress(b[f])) return res.status(400).json({ error: "bad_address", message: `That ${f} doesn't look like a valid address.` });
+    patch[f] = (b[f] as string).trim();
+  }
+  const s = updateSettings({ treasury: { ...getSettings().treasury, ...patch } });
+  res.json({ destinations: s.treasury });
+});
+
+api.post("/admin/treasury/withdraw", async (req, res) => {
+  const { rail, amount } = (req.body ?? {}) as { rail?: TreasuryRail; amount?: number };
+  if (!rail || !["lightning", "onchain", "usdt", "usdc"].includes(rail)) {
+    return res.status(400).json({ error: "bad_rail", message: "Choose a valid withdrawal rail." });
+  }
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  }
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await treasury.withdraw(rail, amount, by);
+  if (!r.ok) {
+    const message = r.error === "no_destination" ? "No destination is configured for this rail — set one first."
+      : r.error === "stablecoin_unavailable" ? "USDT/USDC withdrawals aren't available yet (IBEX hasn't enabled stablecoin send)."
+      : r.error === "balance_unavailable" ? "Couldn't confirm the wallet balance right now. Please try again shortly."
+      : r.error === "exceeds_withdrawable" ? "That exceeds the withdrawable balance (funds owed to senders are protected)."
+      : r.error === "bad_amount" ? "Enter a valid amount."
+      : "The withdrawal couldn't be sent. Please try again.";
+    return res.status(r.error === "exceeds_withdrawable" || r.error === "no_destination" ? 400 : 502).json({ error: r.error, message, entry: r.entry });
+  }
+  res.json({ ok: true, entry: r.entry });
 });
 
 /* ---------- pricing / FX engine ---------- */

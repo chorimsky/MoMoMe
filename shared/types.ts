@@ -351,6 +351,45 @@ export interface AdminSettings {
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
   };
+  /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
+   *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until
+   *  its destination is set. Empty string = unset. */
+  treasury: {
+    /** Lightning address (user@domain) for BTC withdrawals over Lightning. */
+    lnAddress: string;
+    /** On-chain Bitcoin address for BTC withdrawals. */
+    btcOnchain: string;
+    /** ERC-20 (Ethereum) address for USDT withdrawals. */
+    usdtAddress: string;
+    /** ERC-20 (Ethereum) address for USDC withdrawals. */
+    usdcAddress: string;
+  };
+}
+
+/* ---------- treasury withdrawal ---------- */
+export type TreasuryRail = "lightning" | "onchain" | "usdt" | "usdc";
+/** One crypto pool's real (on-rail) balance, what's owed to senders, and the
+ *  safely-withdrawable remainder. All in the asset's natural unit (BTC / USDT / USDC). */
+export interface TreasuryPool {
+  asset: "BTC" | "USDT" | "USDC";
+  rails: TreasuryRail[];
+  balance: number;       // real IBEX account balance
+  liabilities: number;   // crypto owed to held / refund-pending senders
+  withdrawable: number;  // max(0, balance − liabilities)
+  balanceKnown: boolean; // false when the live balance couldn't be fetched
+}
+/** An append-only record of an executed (or attempted) treasury withdrawal. */
+export interface TreasuryWithdrawal {
+  id: string;
+  at: string;
+  rail: TreasuryRail;
+  asset: "BTC" | "USDT" | "USDC";
+  amount: number;
+  destination: string;
+  by: string;            // admin username
+  status: "sent" | "settled" | "failed";
+  txId?: string;
+  error?: string;
 }
 
 /* ---------- liquidity ---------- */

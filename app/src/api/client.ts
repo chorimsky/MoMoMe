@@ -8,7 +8,7 @@ import type {
   Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
-  TreasuryPool, TreasuryWithdrawal, TreasuryRail,
+  TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 
@@ -173,6 +173,11 @@ export const api = {
   adminCompliance: () => req<ComplianceSnapshot>("/admin/compliance"),
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
+  adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[] }>("/admin/momo"),
+  momoCashout: (phone: string, amount: number, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, country }) }),
+  momoCashin: (phone: string, amount: number, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, country }) }),
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),

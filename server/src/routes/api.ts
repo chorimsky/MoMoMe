@@ -21,6 +21,7 @@ import {
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
 import * as treasury from "../core/treasury.js";
+import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
@@ -98,7 +99,7 @@ function sectionForPath(sub: string): Section | null {
   const map: Record<string, Section> = {
     overview: "overview", payments: "payments", quotes: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
-    "mobile-money": "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
+    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     notifications: "notifications", health: "health", settings: "settings",
@@ -149,6 +150,11 @@ api.use("/admin", (req, res, next) => {
   // for the liquidity section above; only the mutations are locked down here).
   if (/^\/treasury\/(withdraw|destinations)$/.test(sub) && !isSuperAdmin(role)) {
     return res.status(403).json({ error: "forbidden", message: "Treasury withdrawals are Super Admin only." });
+  }
+  // Manual Mobile Money cash-in / cash-out moves real funds — same fund-movement
+  // gate as payment retry/refund (Ops Manager + Super Admin).
+  if (/^\/momo\/(cashout|cashin)$/.test(sub) && !canMovePaymentFunds(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Your role can't move Mobile Money funds." });
   }
   next();
 });
@@ -791,6 +797,50 @@ api.post("/admin/treasury/withdraw", async (req, res) => {
   }
   res.json({ ok: true, entry: r.entry });
 });
+
+/* ---------- Mobile Money ops (manual cash-in / cash-out) ----------
+   View: live rail balances + op history (mobilemoney section). Mutations
+   (cashout/cashin) require fund-movement rights, gated in the /admin middleware. */
+api.get("/admin/momo", async (_req, res) => {
+  const [balances, history] = [await momoOps.balances("CM"), momoOps.history()];
+  res.json({ balances, history });
+});
+
+api.post("/admin/momo/cashout", async (req, res) => {
+  const { phone, amount, country } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode };
+  const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.cashout(phone, cc as CountryCode, amount, by);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+api.post("/admin/momo/cashin", async (req, res) => {
+  const { phone, amount, country } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode };
+  const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.cashin(phone, cc as CountryCode, amount, by);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+function momoErrStatus(e?: string): number {
+  return e === "rail_unavailable" || e === "peexit_cashin_unavailable" ? 503 : e === "bad_number" || e === "bad_amount" || e === "insufficient_balance" ? 400 : 502;
+}
+function momoErrMessage(e?: string): string {
+  switch (e) {
+    case "bad_number": return "That doesn't look like a supported MTN/Orange number.";
+    case "bad_amount": return "Enter a valid amount.";
+    case "insufficient_balance": return "The rail's wallet balance is below this amount.";
+    case "rail_unavailable": return "That rail isn't live/reachable right now.";
+    case "peexit_cashin_unavailable": return "Orange cash-in via Peexit isn't available yet (Collect API not wired).";
+    default: return "The operation couldn't be completed. Please try again.";
+  }
+}
 
 /* ---------- pricing / FX engine ---------- */
 api.get("/admin/pricing", (_req, res) => {

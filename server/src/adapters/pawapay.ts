@@ -134,6 +134,47 @@ export async function queryStatusByPayoutId(payoutId: string): Promise<PayoutSta
   } catch { return "PENDING"; }
 }
 
+/* ---------- cash-in (DEPOSIT — collect FROM a Mobile Money account) ----------
+   The mirror of a payout: POST /v2/deposits requests money from the payer, who
+   approves on their phone. Idempotent on depositId. Used by the admin Mobile
+   Money ops panel (manual cash-in), not the customer send flow. */
+export interface DepositResult { status: "accepted" | "duplicate"; providerRef: string; simulated: boolean; }
+
+export async function deposit(req: DisburseRequest): Promise<DepositResult> {
+  const real = pawapayLive();
+  const depositId = real ? payoutIdFor(req.idempotencyKey) : id("dep");
+  if (!real) return { status: "accepted", providerRef: depositId, simulated: true };
+  const res = await fetch(`${config.pawapay.apiUrl}/v2/deposits`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${config.pawapay.apiKey}` },
+    body: JSON.stringify({
+      depositId,
+      payer: { type: "MMO", accountDetails: { phoneNumber: msisdn(req.phone, req.country), provider: correspondent(req.provider, req.country) } },
+      amount: String(req.xaf), // XAF is zero-decimal
+      currency: "XAF",
+      customerMessage: "MoMoMe cash-in", // ≤ 22 chars
+    }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { status?: string; failureReason?: { failureCode?: string; failureMessage?: string } };
+  const s = (data.status ?? "").toUpperCase();
+  if (!["ACCEPTED", "DUPLICATE_IGNORED"].includes(s)) {
+    const why = data.failureReason ? `${data.failureReason.failureCode}: ${data.failureReason.failureMessage}` : `HTTP ${res.status} ${JSON.stringify(data)}`;
+    throw new Error(`PawaPay deposit not accepted: ${why}`);
+  }
+  return { status: s === "DUPLICATE_IGNORED" ? "duplicate" : "accepted", providerRef: depositId, simulated: false };
+}
+
+/** Authoritative deposit status: GET /v2/deposits/{id} → data.status. */
+export async function queryDepositStatus(depositId: string): Promise<PayoutStatus> {
+  try {
+    const res = await fetch(`${config.pawapay.apiUrl}/v2/deposits/${depositId}`, { headers: { authorization: `Bearer ${config.pawapay.apiKey}` } });
+    if (!res.ok) return "PENDING";
+    const d = (await res.json()) as { status?: string; data?: { status?: string } };
+    if ((d.status ?? "").toUpperCase() === "NOT_FOUND") return "PENDING";
+    return mapStatus(d.data?.status);
+  } catch { return "PENDING"; }
+}
+
 /** Re-query a payout's status by payment ref — backstop for a lost callback. */
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);

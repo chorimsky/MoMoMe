@@ -392,6 +392,27 @@ export interface TreasuryWithdrawal {
   error?: string;
 }
 
+/* ---------- admin Mobile Money ops (manual cash-in / cash-out) ---------- */
+export type MomoOpKind = "cashout" | "cashin";
+export type MomoRail = "pawapay" | "peexit";
+/** An append-only record of a manual admin Mobile Money operation — a cash-out
+ *  (disburse to a number) or cash-in (collect from a number) via PawaPay/Peexit. */
+export interface MomoOp {
+  id: string;
+  at: string;
+  kind: MomoOpKind;
+  provider: ProviderId;   // MTN / ORANGE — detected from the number
+  rail: MomoRail;
+  phone: string;
+  amount: number;         // XAF
+  by: string;             // admin username
+  status: "accepted" | "completed" | "failed";
+  providerRef?: string;
+  error?: string;
+}
+/** A rail's live Mobile Money wallet balance (XAF), null when unavailable. */
+export interface MomoRailBalance { rail: MomoRail; label: string; balanceXaf: number | null; }
+
 /* ---------- liquidity ---------- */
 export interface LiquidityPool {
   asset: "BTC" | "USDT" | "USDC" | "XAF";

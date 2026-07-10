@@ -77,11 +77,11 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
   const rail = railFor(provider);
-  if (rail === "peexit") return { ok: false, error: "peexit_cashin_unavailable" };
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashin", provider, rail, phone, amount, by, status: "accepted" };
   try {
-    const res = await pawapay.deposit({ idempotencyKey: opId, provider, country, phone, xaf: amount });
+    const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount };
+    const res = rail === "peexit" ? await peexit.collect(req) : await pawapay.deposit(req);
     op.providerRef = res.providerRef;
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "deposit_failed";

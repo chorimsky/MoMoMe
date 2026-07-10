@@ -87,6 +87,35 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
   return String(reqObj.id ?? req.idempotencyKey);
 }
 
+/* ---------- cash-in (COLLECTION — request payment FROM a number) ----------
+   Peex Collect API: POST /collection/me (SECRETKEY). The account holder approves
+   the debit on their phone. Same-currency domestic collection → fxrate 1, XAF→XAF.
+   Used by the admin cash-in ops for Orange (MTN→PawaPay). Some fields
+   (aml_cft flag, sender/recipient split) are best-effort per the docs; the surfaced
+   error will name anything Peexit rejects. */
+export async function collect(req: DisburseRequest): Promise<{ status: "accepted"; providerRef: string; simulated: boolean }> {
+  if (!peexitLive()) return { status: "accepted", providerRef: id("pxc"), simulated: true };
+  const { first, last } = splitName(req.name);
+  const res = await peex("/collection/me", {
+    method: "POST",
+    body: JSON.stringify({
+      track_id: req.idempotencyKey,
+      mobile_phone: localMsisdn(req.phone),
+      amount: req.xaf,
+      from_currency: "XAF", to_currency: "XAF", fxrate: 1,
+      aml_cft: 0,
+      sender_first_name: "MoMoMe", sender_last_name: "Pay", sender_mobile_phone: "677000000", sender_country: "CM",
+      first_name: first, last_name: last,
+      to_country: req.country, // ISO Alpha-2 (e.g. CM)
+      purpose: "FAMILY", fund_origin: "SALES_AND_BUSINESS_DEVELOPMENT",
+    }),
+  });
+  if (!res.ok) throw new Error(`Peexit collection failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { status?: number; error?: string; message?: string; data?: { id?: number | string; status?: string } };
+  if (typeof data.status === "number" && data.status >= 400) throw new Error(`Peexit collection rejected: ${data.status} ${data.error ?? data.message ?? ""}`);
+  return { status: "accepted", providerRef: String(data.data?.id ?? req.idempotencyKey), simulated: false };
+}
+
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;

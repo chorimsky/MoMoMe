@@ -152,7 +152,7 @@ export async function deposit(req: DisburseRequest): Promise<DepositResult> {
       payer: { type: "MMO", accountDetails: { phoneNumber: msisdn(req.phone, req.country), provider: correspondent(req.provider, req.country) } },
       amount: String(req.xaf), // XAF is zero-decimal
       currency: "XAF",
-      customerMessage: "MoMoMe cash-in", // ≤ 22 chars
+      customerMessage: "MoMoMe cashin", // ≤22 chars, alphanumeric + space ONLY (PawaPay rejects punctuation)
     }),
   });
   const data = (await res.json().catch(() => ({}))) as { status?: string; failureReason?: { failureCode?: string; failureMessage?: string } };

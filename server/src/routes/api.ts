@@ -838,7 +838,9 @@ function momoErrMessage(e?: string): string {
     case "insufficient_balance": return "The rail's wallet balance is below this amount.";
     case "rail_unavailable": return "That rail isn't live/reachable right now.";
     case "peexit_cashin_unavailable": return "Orange cash-in via Peexit isn't available yet (Collect API not wired).";
-    default: return "The operation couldn't be completed. Please try again.";
+    // Anything else is the raw provider/rail error (a rejected payout/deposit) —
+    // surface it verbatim; this is an operator tool, the real reason is what helps.
+    default: return e ? `Rail rejected the operation — ${e}` : "The operation couldn't be completed. Please try again.";
   }
 }
 

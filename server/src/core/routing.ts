@@ -26,14 +26,20 @@ const AGGREGATORS: Record<Aggregator, AggregatorAdapter> = {
 /** Which aggregators have real credentials (→ settle for real). */
 const CONFIGURED: Record<Aggregator, () => boolean> = { pawapay: pawapayConfigured, peexit: peexitConfigured };
 
-/** Which corridors each aggregator can execute. */
+/** Which corridors each aggregator can execute.
+ *  PawaPay's account is NOT activated (deposits + payouts NOT_ALLOWED for MTN_MOMO_CMR
+ *  / ORANGE_CMR), so it's taken OUT of rotation entirely — leaving it would let the
+ *  balance-driven selectFundedAggregator pick its (funded) wallet and fail every MTN
+ *  payout → refund. Peexit auto-detects the operator and serves BOTH MTN and Orange.
+ *  RESTORE pawapay: ["MTN","ORANGE","AIRTEL"] once PawaPay enables the account. */
 const SUPPORTS: Record<Aggregator, ProviderId[]> = {
-  pawapay: ["MTN", "ORANGE", "AIRTEL"],
+  pawapay: [],
   peexit: ["MTN", "ORANGE"],
 };
 
-/** Preferred aggregator per corridor — used while it's available. */
-const PREFERRED: Record<ProviderId, Aggregator> = { MTN: "pawapay", ORANGE: "peexit", AIRTEL: "pawapay" };
+/** Preferred aggregator per corridor — used while it's available. Both operators go
+ *  to Peexit while PawaPay is out (restore MTN/AIRTEL→pawapay when it's re-enabled). */
+const PREFERRED: Record<ProviderId, Aggregator> = { MTN: "peexit", ORANGE: "peexit", AIRTEL: "peexit" };
 
 /** After a rail is taken out of rotation, allow ONE probe payment through this long
  *  after, to re-test whether it has recovered (the "timed re-probe" half of recovery). */

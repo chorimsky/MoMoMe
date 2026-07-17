@@ -175,10 +175,12 @@ export function assertAdminSecurity(): void {
 export function assertLiveConfig(): void {
   if (!isLive()) return;
   const missing: string[] = [];
-  if (!config.pawapay.apiKey) missing.push("PAWAPAY_API_KEY");
-  if (!config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
+  // Need at least one LIVE, webhook-secured payout rail. Peexit is the active rail
+  // (serves both operators); PawaPay is OPTIONAL — out of rotation until its account
+  // is activated — so only enforce its creds when PawaPay is actually live.
   if (!config.peexit.apiKey) missing.push("PEEXIT_API_KEY");
   if (!config.peexit.callbackPass) missing.push("PEEXIT_CALLBACK_PASS");
+  if (pawapayLive() && !config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
   if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.push("PEEX_WEBHOOK_SECRET");
   if (missing.length) {
     throw new Error(`RAILS_MODE=live but missing: ${missing.join(", ")}. Set them or use RAILS_MODE=sandbox.`);

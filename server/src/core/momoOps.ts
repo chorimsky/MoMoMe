@@ -20,21 +20,27 @@ register("momoops", () => ops.slice(0, 200), (d: MomoOp[]) => { ops.push(...d); 
 export function history(): MomoOp[] { return ops.slice(0, 50); }
 function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop(); touch("momoops"); }
 
-/** MTN/Airtel → PawaPay, Orange → Peexit (the corridor design). */
-function railFor(provider: ProviderId): MomoRail { return provider === "ORANGE" ? "peexit" : "pawapay"; }
+/** Peexit auto-detects the operator and serves BOTH MTN and Orange from one API
+ *  (disbursement + collection), so it's the rail for both. PawaPay's account is not
+ *  activated (deposits + payouts NOT_ALLOWED), so it's bypassed here until PawaPay
+ *  enables it — at which point restore MTN→pawapay. Routing is per-operator only via
+ *  the wallet balance (Peexit keeps separate MTN-CM / Orange-cm wallets). */
+function railFor(_provider: ProviderId): MomoRail { return "peexit"; }
 const statusLabel = (s: PayoutStatus): MomoOp["status"] => (s === "COMPLETED" ? "completed" : s === "FAILED" ? "failed" : "accepted");
 const railBalance = (rail: MomoRail, country: CountryCode, provider: ProviderId) =>
   rail === "peexit" ? peexit.availableBalanceXaf(country, provider) : pawapay.availableBalanceXaf(country);
 
-/** Live XAF wallet balance per rail (null when the rail isn't live/reachable). */
+/** Live Peexit XAF wallet balance per operator (MTN-CM / Orange-cm); null when
+ *  unreachable. Both matter — Peexit serves both operators, and a negative/low MTN
+ *  wallet is exactly why MTN can't route until it's topped up. */
 export async function balances(country: CountryCode): Promise<MomoRailBalance[]> {
-  const [pp, px] = await Promise.all([
-    pawapay.availableBalanceXaf(country).catch(() => null),
+  const [mtn, orange] = await Promise.all([
+    peexit.availableBalanceXaf(country, "MTN").catch(() => null),
     peexit.availableBalanceXaf(country, "ORANGE").catch(() => null),
   ]);
   return [
-    { rail: "pawapay", label: "PawaPay · MTN", balanceXaf: pp },
-    { rail: "peexit", label: "Peexit · Orange", balanceXaf: px },
+    { rail: "peexit", label: "Peexit · MTN", balanceXaf: mtn },
+    { rail: "peexit", label: "Peexit · Orange", balanceXaf: orange },
   ];
 }
 

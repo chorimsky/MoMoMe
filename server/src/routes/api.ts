@@ -277,41 +277,6 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
-/* ==== TEMPORARY DIAGNOSTIC — remove after Peexit collection is resolved ====
-   Probes Peexit endpoints FROM the whitelisted Railway IP (can't be done from a
-   dev machine — server.peexit.com is IP-locked). Sends the disbursement SECRETKEY
-   with an EMPTY body so each call fails at AUTH (401 "key does not exist" → key not
-   registered for that service) or VALIDATION (400 → key ACCEPTED, wrong/empty body)
-   — never creates a real disbursement or collection. Read-only diagnosis. */
-api.get("/debug/peexit-probe", async (_req, res) => {
-  const base = config.peexit.apiUrl;
-  const key = config.peexit.apiKey;
-  const cands: Array<[string, string]> = [
-    ["GET", "/operators"],
-    ["POST", "/disbursement/request_payment"],
-    ["POST", "/collection/me"],
-    ["POST", "/collection/request_payment"],
-    ["POST", "/collect/me"],
-    ["POST", "/collect/request_payment"],
-    ["POST", "/collection/request"],
-    ["POST", "/remittance/payment_request"],
-  ];
-  const probes: Array<Record<string, unknown>> = [];
-  for (const [method, path] of cands) {
-    try {
-      const r = await fetch(`${base}${path}`, {
-        method,
-        headers: { "content-type": "application/json", SECRETKEY: key },
-        ...(method === "POST" ? { body: "{}" } : {}),
-      });
-      probes.push({ path, status: r.status, body: (await r.text()).slice(0, 180) });
-    } catch (e) {
-      probes.push({ path, error: e instanceof Error ? e.message : "err" });
-    }
-  }
-  res.json({ base, env: config.peexit.env, keyTail: key ? key.slice(-6) : "(unset)", probes });
-});
-
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

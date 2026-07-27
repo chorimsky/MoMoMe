@@ -277,6 +277,24 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
+/* ==== TEMPORARY — settle whether the collect 401 is AUTH or schema ====
+   Sends a SCHEMA-VALID collect body but an invalid phone ("000000000") so it can't
+   create a real collection. If this returns 401 → the key is NOT authorized for the
+   Collect service (Peexit-side). If it returns a phone/provider error → auth passed.
+   Remove after diagnosis. */
+api.get("/debug/peexit-collect-auth", async (_req, res) => {
+  try {
+    const r = await fetch(`${config.peexit.apiUrl}/collection/request_payment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey },
+      body: JSON.stringify({ track_id: "authtest", phone: "000000000", amount: 1, currency: "XAF", country: "CM", customer_name: "Auth Test" }),
+    });
+    res.json({ endpoint: "/collection/request_payment", status: r.status, body: (await r.text()).slice(0, 320) });
+  } catch (e) {
+    res.json({ error: e instanceof Error ? e.message : "err" });
+  }
+});
+
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

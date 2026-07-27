@@ -113,6 +113,24 @@ export async function collect(req: DisburseRequest): Promise<{ status: "accepted
   return { status: "accepted", providerRef: String(reqObj.id ?? req.idempotencyKey), simulated: false };
 }
 
+/** Authoritative COLLECTION status by track_id — GET /collection/all_requests?track_id=.
+ *  The row carries `paid_time` (set once the payer approves = COMPLETED) and, on some
+ *  responses, a `status`. 404 = outside the 3-day window / not found → null. Used to
+ *  settle a "pending" cash-in (a collection is async — the payer approves on their
+ *  phone). Returns null when not live. */
+export async function collectStatus(trackId: string): Promise<PayoutStatus | null> {
+  if (!peexitLive()) return null;
+  try {
+    const res = await peex(`/collection/all_requests?track_id=${encodeURIComponent(trackId)}`, { method: "GET" });
+    if (res.status === 404 || !res.ok) return null;
+    const d = (await res.json()) as { paid_time?: string | null; status?: string } | Array<{ paid_time?: string | null; status?: string }>;
+    const row = Array.isArray(d) ? d[0] : d;
+    if (!row) return null;
+    if (row.status) return mapStatus(row.status);
+    return row.paid_time ? "COMPLETED" : "PENDING";
+  } catch { return null; }
+}
+
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;

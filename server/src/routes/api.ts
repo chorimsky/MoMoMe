@@ -277,24 +277,6 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
-/* ==== TEMPORARY — verify Peexit collection status for accepted cash-ins (read-only) ==== */
-api.get("/debug/peexit-collect-status", async (_req, res) => {
-  const key = config.peexit.apiKey;
-  const cap = async (path: string) => {
-    try { const r = await fetch(`${config.peexit.apiUrl}${path}`, { headers: { SECRETKEY: key } }); return { status: r.status, body: (await r.text()).slice(0, 500) }; }
-    catch (e) { return { error: e instanceof Error ? e.message : "err" }; }
-  };
-  const accepted = momoOps.history().filter((o) => o.kind === "cashin");
-  const results: Record<string, unknown> = {};
-  for (const o of accepted.slice(0, 4)) {
-    results[o.id] = {
-      phone: o.phone, amount: o.amount, status: o.status, error: o.error,
-      collection_all_requests: await cap(`/collection/all_requests?track_id=${encodeURIComponent(o.id)}`),
-    };
-  }
-  res.json({ cashinCount: accepted.length, results });
-});
-
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

@@ -20,6 +20,21 @@ register("momoops", () => ops.slice(0, 200), (d: MomoOp[]) => { ops.push(...d); 
 export function history(): MomoOp[] { return ops.slice(0, 50); }
 function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop(); touch("momoops"); }
 
+/** A cash-in (collection) is async — the payer approves on their phone. Re-query the
+ *  authoritative collection status for recent still-"accepted" cash-ins and settle them
+ *  to completed/failed, so the admin sees the real outcome (paid) instead of a stuck
+ *  "accepted". Called on the reconcile loop. */
+export async function reconcilePendingCashins(): Promise<void> {
+  const now = Date.now();
+  for (const o of ops) {
+    if (o.kind !== "cashin" || o.status !== "accepted" || o.rail !== "peexit") continue;
+    if (now - Date.parse(o.at) > 24 * 3600_000) continue; // only the last day
+    const s = await peexit.collectStatus(o.id).catch(() => null);
+    if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); }
+    else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; touch("momoops"); }
+  }
+}
+
 /** Peexit auto-detects the operator and serves BOTH MTN and Orange from one API
  *  (disbursement + collection), so it's the rail for both. PawaPay's account is not
  *  activated (deposits + payouts NOT_ALLOWED), so it's bypassed here until PawaPay

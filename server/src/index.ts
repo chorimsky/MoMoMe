@@ -3,6 +3,7 @@ import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexCo
 import { flushAll } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds } from "./core/stateMachine.js";
+import { reconcilePendingCashins } from "./core/momoOps.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
 import { setRates, CCY } from "./core/rates.js";
 
@@ -27,6 +28,7 @@ const app = createApp();
 // Backstop: re-query payouts AND inbounds stuck awaiting a (possibly lost) callback.
 setInterval(() => {
   void reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
+  void reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
   if (ibexConfigured()) {
     void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
     void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));

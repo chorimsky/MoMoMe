@@ -70,7 +70,11 @@ export const config = {
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
-    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY (outbound, header SECRETKEY)
+    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY (outbound disbursement + /operators)
+    // The Collect API (cash-in / collection/me) is a SEPARATE Peexit product with its
+    // OWN partner SECRETKEY — the disbursement key returns 401 "key does not exist".
+    // Falls back to the disbursement key if Peexit ever unifies them.
+    collectKey: env("PEEXIT_COLLECT_KEY") || env("PEEXIT_API_KEY"),
     // Peexit's notification callback authenticates with HTTP Basic Auth using
     // credentials WE define and hand to Peexit (NOT an HMAC signature). We
     // validate the inbound Authorization header against these. Sandbox default

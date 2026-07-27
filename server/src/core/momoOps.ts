@@ -46,7 +46,7 @@ export async function balances(country: CountryCode): Promise<MomoRailBalance[]>
 
 /** CASH-OUT: disburse XAF to a Mobile Money number. Routes by the number's operator,
  *  requires the rail live + funded ≥ amount, records an audit entry. */
-export async function cashout(phone: string, country: CountryCode, amount: number, by: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
+export async function cashout(phone: string, country: CountryCode, amount: number, by: string, name?: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
@@ -58,7 +58,7 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashout", provider, rail, phone, amount, by, status: "accepted" };
   try {
-    const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount };
+    const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount, name };
     const res = rail === "peexit" ? await peexit.disburse(req) : await pawapay.disburse(req);
     op.providerRef = res.providerRef;
     // Real rails settle async; reflect the current status if already terminal.
@@ -76,9 +76,9 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
 }
 
 /** CASH-IN: request XAF FROM a Mobile Money number (the payer approves on their
- *  phone). PawaPay only for now — Peexit's Collect API isn't wired yet (fails closed).
- *  A deposit is PENDING until the payer approves, so it records as "accepted". */
-export async function cashin(phone: string, country: CountryCode, amount: number, by: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
+ *  phone). MTN→PawaPay deposit, Orange→Peexit collection. Pending until the payer
+ *  approves, so it records as "accepted". `name` → the payer's name (customer_name). */
+export async function cashin(phone: string, country: CountryCode, amount: number, by: string, name?: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
@@ -86,7 +86,7 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashin", provider, rail, phone, amount, by, status: "accepted" };
   try {
-    const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount };
+    const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount, name };
     const res = rail === "peexit" ? await peexit.collect(req) : await pawapay.deposit(req);
     op.providerRef = res.providerRef;
   } catch (e) {

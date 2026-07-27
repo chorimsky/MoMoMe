@@ -174,10 +174,10 @@ export const api = {
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
   adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[] }>("/admin/momo"),
-  momoCashout: (phone: string, amount: number, country: CountryCode = "CM") =>
-    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, country }) }),
-  momoCashin: (phone: string, amount: number, country: CountryCode = "CM") =>
-    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, country }) }),
+  momoCashout: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
+  momoCashin: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),

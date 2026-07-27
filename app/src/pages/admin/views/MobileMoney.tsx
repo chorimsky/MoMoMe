@@ -4,7 +4,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance } from "@shared/types.js";
-import { PROVIDERS, COUNTRIES } from "@shared/domain.js";
+import { PROVIDERS, COUNTRIES, detectProvider } from "@shared/domain.js";
 import { canMovePaymentFunds } from "@shared/roles.js";
 import { api } from "../../../api/client.js";
 import { Card, Field, Grid, KV, Pill, SectionTitle } from "../AdminUI.js";
@@ -110,9 +110,10 @@ export function MobileMoneyView() {
 }
 
 /* ============================================================
-   Cash-in / cash-out — manual Mobile Money ops. Routes MTN→PawaPay, Orange→Peexit.
-   Viewing balances is open to the Mobile Money section; running an op requires
-   fund-movement rights (Ops Manager / Super Admin), enforced server-side too.
+   Cash-in / cash-out — manual Mobile Money ops. Both operators route via Peexit
+   (PawaPay is out of rotation until its account is activated). Viewing balances is
+   open to the Mobile Money section; running an op requires fund-movement rights
+   (Ops Manager / Super Admin), enforced server-side too.
    ============================================================ */
 function MomoOpsPanel() {
   const { role } = useAdminUser();
@@ -129,7 +130,7 @@ function MomoOpsPanel() {
 
   return (
     <div style={{ marginTop: 26 }}>
-      <SectionTitle t="Cash-in / Cash-out" s="Manual Mobile Money operations. MTN routes via PawaPay, Orange via Peexit." />
+      <SectionTitle t="Cash-in / Cash-out" s="Manual Mobile Money operations, routed by the number's operator (both via Peexit)." />
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 12 }}>{err}</div>}
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
@@ -147,7 +148,7 @@ function MomoOpsPanel() {
         </Grid>
       )}
 
-      {canMove ? <MomoForm onDone={load} onOp={(o) => setHistory((h) => [o, ...h])} />
+      {canMove ? <MomoForm balances={balances ?? []} onDone={load} onOp={(o) => setHistory((h) => [o, ...h])} />
         : <p style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Running cash-in / cash-out requires an Operations Manager or Super Admin.</p>}
 
       {history.length > 0 && (
@@ -171,28 +172,39 @@ function MomoOpsPanel() {
   );
 }
 
-function MomoForm({ onDone, onOp }: { onDone: () => Promise<void>; onOp: (o: MomoOp) => void }) {
+function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onDone: () => Promise<void>; onOp: (o: MomoOp) => void }) {
   const [kind, setKind] = useState<"cashout" | "cashin">("cashout");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
+  const [name, setName] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "bad" | "recv"; text: string } | null>(null);
 
   const amt = Number(amount);
-  const valid = phone.replace(/\D/g, "").length >= 8 && amt > 0;
+  const digits = phone.replace(/\D/g, "");
+  // Live operator detection (same prefix logic the backend routes on).
+  const provider = digits.length >= 8 ? detectProvider(digits, "CM") : null;
+  const opLabel = provider === "ORANGE" ? "Orange" : provider === "MTN" ? "MTN" : null;
+  const bal = opLabel ? (balances.find((b) => b.label === `Peexit · ${opLabel}`)?.balanceXaf ?? null) : null;
+  const overBalance = kind === "cashout" && bal != null && amt > bal;
+  const unknownOperator = digits.length >= 8 && !provider;
+  const valid = !!provider && amt > 0 && !overBalance;
+  const reset = () => { setPhone(""); setAmount(""); setName(""); setConfirming(false); };
+  const inputStyle = { padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)" } as const;
 
   const run = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = kind === "cashout" ? await api.momoCashout(phone, amt) : await api.momoCashin(phone, amt);
+      const r = kind === "cashout" ? await api.momoCashout(phone, amt, name || undefined) : await api.momoCashin(phone, amt, name || undefined);
       if (r.op) onOp(r.op);
       setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${amt} XAF → ${phone} (${r.op?.status ?? "accepted"}).` : `Cash-in requested: ${amt} XAF ← ${phone}. The payer approves on their phone.` });
-      setPhone(""); setAmount(""); setConfirming(false);
+      reset();
       await onDone();
     } catch (e) {
       setMsg({ tone: "bad", text: e instanceof Error ? e.message : "Operation failed." });
       setConfirming(false);
+      void onDone(); // refresh history so the failed op (recorded server-side) shows
     } finally { setBusy(false); }
   };
 
@@ -209,13 +221,26 @@ function MomoForm({ onDone, onOp }: { onDone: () => Promise<void>; onOp: (o: Mom
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input value={phone} onChange={(e) => { setPhone(e.target.value.replace(/[^0-9]/g, "")); setConfirming(false); }}
-          inputMode="tel" placeholder="MTN / Orange number"
-          className="num" style={{ padding: "9px 11px", fontSize: 13, width: 190, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)" }} />
+          inputMode="tel" placeholder="MTN / Orange number" className="num" style={{ ...inputStyle, width: 180 }} />
         <input value={amount} onChange={(e) => { setAmount(e.target.value.replace(/[^0-9]/g, "")); setConfirming(false); }}
-          inputMode="numeric" placeholder="Amount (XAF)"
-          className="num" style={{ padding: "9px 11px", fontSize: 13, width: 140, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)" }} />
+          inputMode="numeric" placeholder="Amount (XAF)" className="num" style={{ ...inputStyle, width: 130 }} />
+        <input value={name} onChange={(e) => { setName(e.target.value); setConfirming(false); }}
+          placeholder={kind === "cashin" ? "Payer name (optional)" : "Recipient name (optional)"} style={{ ...inputStyle, width: 200 }} />
       </div>
-      <div style={{ marginTop: 12 }}>
+
+      {/* live routing / balance feedback */}
+      <div style={{ marginTop: 8, fontSize: 12, minHeight: 17 }}>
+        {provider && (
+          <span style={{ color: "var(--ink-3)" }}>
+            {opLabel} · via Peexit
+            {bal != null && <> · wallet <span className="num" style={{ color: overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(bal)} XAF</span></>}
+          </span>
+        )}
+        {unknownOperator && <span style={{ color: "var(--warn)" }}>Unrecognized operator — use an MTN (67x / 650–4 / 680–4) or Orange (69x / 655–9 / 685–9) number.</span>}
+        {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the {opLabel} wallet.</span>}
+      </div>
+
+      <div style={{ marginTop: 8 }}>
         {!confirming ? (
           <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={() => setConfirming(true)} style={{ padding: "9px 16px" }}>
             {kind === "cashout" ? "Cash-out…" : "Cash-in…"}
@@ -224,8 +249,8 @@ function MomoForm({ onDone, onOp }: { onDone: () => Promise<void>; onOp: (o: Mom
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
               {kind === "cashout"
-                ? <>Send <b className="num">{amt} XAF</b> to <span className="num">{phone}</span>? This moves real money.</>
-                : <>Request <b className="num">{amt} XAF</b> from <span className="num">{phone}</span>? They'll be prompted to approve on their phone.</>}
+                ? <>Send <b className="num">{amt} XAF</b> to <span className="num">{phone}</span> ({opLabel})? This moves real money.</>
+                : <>Request <b className="num">{amt} XAF</b> from <span className="num">{phone}</span> ({opLabel})? They'll be prompted to approve on their phone.</>}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={run} style={{ padding: "9px 16px" }}>{busy ? "Working…" : "Confirm"}</button>
@@ -234,7 +259,7 @@ function MomoForm({ onDone, onOp }: { onDone: () => Promise<void>; onOp: (o: Mom
           </div>
         )}
       </div>
-      {msg && <div style={{ fontSize: 12.5, fontWeight: 600, color: `var(--${msg.tone})`, marginTop: 12 }}>{msg.text}</div>}
+      {msg && <div style={{ fontSize: 12.5, fontWeight: 600, color: `var(--${msg.tone})`, marginTop: 12, lineHeight: 1.45, wordBreak: "break-word" }}>{msg.text}</div>}
     </div>
   );
 }

@@ -807,23 +807,23 @@ api.get("/admin/momo", async (_req, res) => {
 });
 
 api.post("/admin/momo/cashout", async (req, res) => {
-  const { phone, amount, country } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode };
+  const { phone, amount, country, name } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode; name?: string };
   const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
   if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
   const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
-  const r = await momoOps.cashout(phone, cc as CountryCode, amount, by);
+  const r = await momoOps.cashout(phone, cc as CountryCode, amount, by, typeof name === "string" ? name.trim().slice(0, 60) : undefined);
   if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
   res.json({ ok: true, op: r.op });
 });
 
 api.post("/admin/momo/cashin", async (req, res) => {
-  const { phone, amount, country } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode };
+  const { phone, amount, country, name } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode; name?: string };
   const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
   if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
   const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
-  const r = await momoOps.cashin(phone, cc as CountryCode, amount, by);
+  const r = await momoOps.cashin(phone, cc as CountryCode, amount, by, typeof name === "string" ? name.trim().slice(0, 60) : undefined);
   if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
   res.json({ ok: true, op: r.op });
 });

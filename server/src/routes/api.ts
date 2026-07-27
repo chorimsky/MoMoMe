@@ -274,6 +274,9 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
     estimateOnly: method === "ONCHAIN",
   };
   store.putQuote(quote);
+  res.json(quote);
+});
+
 /* ==== TEMPORARY — dump the exact Peexit collection request + response (for Peexit support) ====
    Shows headers → payload → response for /collection/request_payment, plus a same-key
    /operators call for contrast (valid there, rejected for collection). Invalid phone so

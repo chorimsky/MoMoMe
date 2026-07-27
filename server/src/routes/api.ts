@@ -274,6 +274,9 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
     estimateOnly: method === "ONCHAIN",
   };
   store.putQuote(quote);
+  res.json(quote);
+});
+
 /* ==== TEMPORARY — find Peexit's accurate available balance (partner/account endpoints) ==== */
 api.get("/debug/peexit-balance", async (_req, res) => {
   const key = config.peexit.apiKey;

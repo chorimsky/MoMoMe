@@ -277,6 +277,17 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
+/* ==== TEMPORARY — inspect Peexit operator wallets + our computed cash-out balances ==== */
+api.get("/debug/peexit-ops", async (_req, res) => {
+  let operators: unknown;
+  try {
+    const r = await fetch(`${config.peexit.apiUrl}/operators`, { headers: { SECRETKEY: config.peexit.apiKey } });
+    const raw = (await r.json()) as Array<Record<string, unknown>>;
+    operators = Array.isArray(raw) ? raw.map((o) => ({ id: o.id, name: o.name, tag: o.tag, solde: o.solde, disbursement_solde: o.disbursement_solde })) : raw;
+  } catch (e) { operators = { error: e instanceof Error ? e.message : "err" }; }
+  res.json({ operators, computedCashoutBalances: await momoOps.balances("CM") });
+});
+
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

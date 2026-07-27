@@ -277,26 +277,6 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
-/* ==== TEMPORARY — dump the exact Peexit collection request + response (for Peexit support) ====
-   Shows headers → payload → response for /collection/request_payment, plus a same-key
-   /operators call for contrast (valid there, rejected for collection). Invalid phone so
-   no real collection is created. Remove after sharing with Peexit. */
-api.get("/debug/peexit-collect-log", async (_req, res) => {
-  const key = config.peexit.apiKey;
-  const url = `${config.peexit.apiUrl}/collection/request_payment`;
-  const headers = { "content-type": "application/json", SECRETKEY: key };
-  const body = { track_id: "log-test", phone: "000000000", amount: 100, currency: "XAF", country: "CM", customer_name: "Log Test" };
-  const cap = async (u: string, init: RequestInit) => {
-    try { const r = await fetch(u, init); return { status: r.status, body: (await r.text()).slice(0, 300) }; }
-    catch (e) { return { error: e instanceof Error ? e.message : "err" }; }
-  };
-  res.json({
-    REQUEST: { method: "POST", url, headers, payload: body },
-    RESPONSE: await cap(url, { method: "POST", headers, body: JSON.stringify(body) }),
-    SAME_KEY_on_operators: await cap(`${config.peexit.apiUrl}/operators`, { method: "GET", headers: { SECRETKEY: key } as Record<string, string> }),
-  });
-});
-
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

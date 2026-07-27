@@ -198,7 +198,13 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
     try {
       const r = kind === "cashout" ? await api.momoCashout(phone, amt, name || undefined) : await api.momoCashin(phone, amt, name || undefined);
       if (r.op) onOp(r.op);
-      setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${amt} XAF → ${phone} (${r.op?.status ?? "accepted"}).` : `Cash-in requested: ${amt} XAF ← ${phone}. The payer approves on their phone.` });
+      // A payout can be accepted then rejected by the rail (op.status === "failed") →
+      // show that clearly instead of "sent (failed)".
+      if (r.op?.status === "failed") {
+        setMsg({ tone: "bad", text: `Cash-out to ${phone} was rejected by the rail${r.op.error ? ` — ${r.op.error}` : ""}.` });
+      } else {
+        setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${amt} XAF → ${phone}.` : `Cash-in requested: ${amt} XAF ← ${phone}. The payer approves on their phone.` });
+      }
       reset();
       await onDone();
     } catch (e) {

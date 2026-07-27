@@ -128,26 +128,36 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     // 404 = "Transactions not found on your listing! (3 days)" → outside the
     // window (too new or >3 days); keep the last known status.
     if (res.status === 404 || !res.ok) return cached;
-    const arr = (await res.json()) as Array<{ track_id?: string; status?: string }>;
+    const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string }>;
     const row = Array.isArray(arr) ? (arr.find((r) => r.track_id === idempotencyKey) ?? arr[0]) : undefined;
     if (!row?.status) return cached;
     const mapped = mapStatus(row.status);
     statusByRef.set(idempotencyKey, mapped);
+    // Capture the rejection reason (e.g. INSUFFICIENT_FUND_TO_PAY_TX) so callers can
+    // explain WHY a payout failed instead of a bare "failed".
+    if (mapped === "FAILED") failReasonByRef.set(idempotencyKey, row.payment_proof || row.message || "rejected");
     return mapped;
   } catch { return cached; }
+}
+
+const failReasonByRef = new Map<string, string>();
+/** The last rejection reason for a payout ref (from queryStatus), if any. */
+export function failReason(idempotencyKey: string): string | undefined {
+  return failReasonByRef.get(idempotencyKey);
 }
 
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }
 
-/** Wallet balance (XAF) for the operator matching the provider — from
- *  GET /operators `solde`. null when not configured. */
+/** DISBURSABLE balance (XAF) for the provider. A PAYOUT debits the operator's
+ *  DISBURSEMENT wallet — the one exposing `disbursement_solde` (the "-api" wallet,
+ *  e.g. mtn-api / orange-api). The "-cm" operators are COLLECTION-side (solde only)
+ *  and must NOT be used for payout funding: reading mtn-cm's positive `solde` made a
+ *  negative disbursement wallet look funded → payouts passed the check then failed
+ *  with INSUFFICIENT_FUND_TO_PAY_TX. null when not configured/reachable. */
 type PeexitOp = { name?: string; solde?: number; disbursement_solde?: number | null };
 let balCache: { at: number; ops: PeexitOp[] } | null = null;
-// The disbursement-specific wallet when Peexit exposes it (confirmed present on the
-// live /operators response, may be null), else the general `solde`.
-const opBalance = (o: PeexitOp) => (o.disbursement_solde != null ? Number(o.disbursement_solde) : Number(o.solde ?? 0));
 export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
   if (!peexitLive()) return null;
   try {
@@ -157,12 +167,12 @@ export async function availableBalanceXaf(_country: CountryCode, provider?: Prov
       balCache = { at: Date.now(), ops: (await res.json()) as PeexitOp[] };
     }
     const want = provider === "ORANGE" ? "orange" : provider === "AIRTEL" ? "airtel" : "mtn";
-    // Prefer the canonical country operator (e.g. "MTN-CM" / "Orange-cm"); else
-    // the best same-network wallet. This reflects the wallet the payout debits,
-    // so a negative MTN-CM means MTN won't route here while a funded Orange-cm will.
-    const exact = balCache.ops.find((o) => (o.name ?? "").toLowerCase() === `${want}-cm`);
-    if (exact) return opBalance(exact);
-    const soldes = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want)).map(opBalance);
+    const matches = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want));
+    // The wallet a payout actually debits: the one with a disbursement_solde.
+    const disb = matches.filter((o) => o.disbursement_solde != null);
+    if (disb.length) return Math.max(...disb.map((o) => Number(o.disbursement_solde)));
+    // No explicit disbursement wallet exposed → fall back to solde of matching operators.
+    const soldes = matches.map((o) => Number(o.solde ?? 0));
     return soldes.length ? Math.max(...soldes) : 0;
   } catch { return null; }
 }

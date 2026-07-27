@@ -64,6 +64,8 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
     // Real rails settle async; reflect the current status if already terminal.
     const status = rail === "peexit" ? await peexit.queryStatus(opId) : await pawapay.queryStatus(opId);
     if (status) op.status = statusLabel(status);
+    // A payout accepted-then-rejected (e.g. INSUFFICIENT_FUND_TO_PAY_TX) → capture why.
+    if (op.status === "failed") op.error = (rail === "peexit" ? peexit.failReason(opId) : undefined) ?? "rejected by the rail";
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "send_failed";
     record(op);

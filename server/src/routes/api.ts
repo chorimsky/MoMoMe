@@ -274,7 +274,23 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
     estimateOnly: method === "ONCHAIN",
   };
   store.putQuote(quote);
-  res.json(quote);
+/* ==== TEMPORARY — find Peexit's accurate available balance (partner/account endpoints) ==== */
+api.get("/debug/peexit-balance", async (_req, res) => {
+  const key = config.peexit.apiKey;
+  const cap = async (path: string) => {
+    try { const r = await fetch(`${config.peexit.apiUrl}${path}`, { headers: { SECRETKEY: key } }); return { status: r.status, body: (await r.text()).slice(0, 700) }; }
+    catch (e) { return { error: e instanceof Error ? e.message : "err" }; }
+  };
+  res.json({
+    operators_full: await cap("/operators"),
+    collection_me: await cap("/collection/me"),
+    disbursement_me: await cap("/disbursement/me"),
+    disbursement_partner: await cap("/disbursement/partner"),
+    partner: await cap("/partner"),
+    partner_me: await cap("/partner/me"),
+    me: await cap("/me"),
+    balance: await cap("/balance"),
+  });
 });
 
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →

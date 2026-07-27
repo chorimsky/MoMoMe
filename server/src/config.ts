@@ -70,7 +70,11 @@ export const config = {
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
-    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY — SAME key for disbursement AND collection in production (per Peexit)
+    // the Peexit SECRETKEY — SAME key for disbursement AND collection. STRIP stray
+    // surrounding quotes/whitespace: a trailing `"` in the env var passed /operators
+    // + disbursement (lenient) but the Collect service exact-matches → 401 "key does
+    // not exist". Sanitizing fixes collection without breaking the others.
+    apiKey: (env("PEEXIT_API_KEY") || "").trim().replace(/^["']+|["']+$/g, ""),
     // Peexit's notification callback authenticates with HTTP Basic Auth using
     // credentials WE define and hand to Peexit (NOT an HMAC signature). We
     // validate the inbound Authorization header against these. Sandbox default

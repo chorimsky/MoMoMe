@@ -30,17 +30,17 @@ const statusLabel = (s: PayoutStatus): MomoOp["status"] => (s === "COMPLETED" ? 
 const railBalance = (rail: MomoRail, country: CountryCode, provider: ProviderId) =>
   rail === "peexit" ? peexit.availableBalanceXaf(country, provider) : pawapay.availableBalanceXaf(country);
 
-/** Live Peexit XAF wallet balance per operator (MTN-CM / Orange-cm); null when
- *  unreachable. Both matter — Peexit serves both operators, and a negative/low MTN
- *  wallet is exactly why MTN can't route until it's topped up. */
-export async function balances(country: CountryCode): Promise<MomoRailBalance[]> {
-  const [mtn, orange] = await Promise.all([
-    peexit.availableBalanceXaf(country, "MTN").catch(() => null),
-    peexit.availableBalanceXaf(country, "ORANGE").catch(() => null),
+/** Accurate account balances (XAF): the PAYOUT balance (disbursement_solde, shared by
+ *  both operators — gates every cash-out) and the COLLECTION balance (collect_solde,
+ *  what cash-in fills). null when unreachable. */
+export async function balances(_country: CountryCode): Promise<MomoRailBalance[]> {
+  const [payout, collect] = await Promise.all([
+    peexit.availableBalanceXaf("CM").catch(() => null),
+    peexit.collectBalanceXaf().catch(() => null),
   ]);
   return [
-    { rail: "peexit", label: "Peexit · MTN", balanceXaf: mtn },
-    { rail: "peexit", label: "Peexit · Orange", balanceXaf: orange },
+    { rail: "peexit", label: "Peexit payout wallet", balanceXaf: payout },
+    { rail: "peexit", label: "Peexit collection wallet", balanceXaf: collect },
   ];
 }
 

@@ -135,17 +135,21 @@ function MomoOpsPanel() {
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
           {balances.map((b) => {
-            const neg = b.balanceXaf != null && b.balanceXaf < 0;
+            const isPayout = b.label.toLowerCase().includes("payout");
+            const underfunded = isPayout && b.balanceXaf != null && b.balanceXaf <= 0;
             return (
               <div key={b.label} className="card" style={{ padding: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{b.label}</div>
-                  <span className="num" style={{ fontSize: 16, fontWeight: 800, color: b.balanceXaf == null ? "var(--warn)" : neg ? "var(--bad)" : "var(--recv)", whiteSpace: "nowrap" }}>
+                  <span className="num" style={{ fontSize: 16, fontWeight: 800, color: b.balanceXaf == null ? "var(--warn)" : underfunded ? "var(--bad)" : "var(--recv)", whiteSpace: "nowrap" }}>
                     {b.balanceXaf == null ? "—" : `${fmt(b.balanceXaf)} XAF`}
                   </span>
                 </div>
-                <div style={{ fontSize: 11.5, color: neg ? "var(--bad)" : "var(--ink-3)", marginTop: 4 }}>
-                  {b.balanceXaf == null ? "Not live / unreachable" : neg ? "Payout wallet underfunded — top up Peexit to enable payouts" : "Payout (disbursement) wallet balance"}
+                <div style={{ fontSize: 11.5, color: underfunded ? "var(--bad)" : "var(--ink-3)", marginTop: 4 }}>
+                  {b.balanceXaf == null ? "Not live / unreachable"
+                    : underfunded ? "Empty — top up the Peexit payout balance to enable payouts"
+                    : isPayout ? "Available for payouts (disbursement balance)"
+                    : "Collected balance (filled by cash-in)"}
                 </div>
               </div>
             );
@@ -191,8 +195,10 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
   // Live operator detection (same prefix logic the backend routes on).
   const provider = digits.length >= 8 ? detectProvider(digits, "CM") : null;
   const opLabel = provider === "ORANGE" ? "Orange" : provider === "MTN" ? "MTN" : null;
-  const bal = opLabel ? (balances.find((b) => b.label === `Peexit · ${opLabel}`)?.balanceXaf ?? null) : null;
-  const overBalance = kind === "cashout" && bal != null && amt > bal;
+  // A cash-out debits the shared Peexit PAYOUT wallet (disbursement_solde) — not a
+  // per-operator balance.
+  const payoutBal = balances.find((b) => b.label.toLowerCase().includes("payout"))?.balanceXaf ?? null;
+  const overBalance = kind === "cashout" && payoutBal != null && amt > payoutBal;
   const unknownOperator = digits.length >= 8 && !provider;
   const valid = !!provider && amt > 0 && !overBalance;
   const reset = () => { setPhone(""); setAmount(""); setName(""); setConfirming(false); };
@@ -244,11 +250,11 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
         {provider && (
           <span style={{ color: "var(--ink-3)" }}>
             {opLabel} · via Peexit
-            {bal != null && <> · wallet <span className="num" style={{ color: overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(bal)} XAF</span></>}
+            {kind === "cashout" && payoutBal != null && <> · payout wallet <span className="num" style={{ color: payoutBal <= 0 || overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(payoutBal)} XAF</span></>}
           </span>
         )}
         {unknownOperator && <span style={{ color: "var(--warn)" }}>Unrecognized operator — use an MTN (67x / 650–4 / 680–4) or Orange (69x / 655–9 / 685–9) number.</span>}
-        {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the {opLabel} wallet.</span>}
+        {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the Peexit payout wallet.</span>}
       </div>
 
       <div style={{ marginTop: 8 }}>

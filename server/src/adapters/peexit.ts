@@ -150,31 +150,40 @@ export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }
 
-/** DISBURSABLE balance (XAF) for the provider. A PAYOUT debits the operator's
- *  DISBURSEMENT wallet — the one exposing `disbursement_solde` (the "-api" wallet,
- *  e.g. mtn-api / orange-api). The "-cm" operators are COLLECTION-side (solde only)
- *  and must NOT be used for payout funding: reading mtn-cm's positive `solde` made a
- *  negative disbursement wallet look funded → payouts passed the check then failed
- *  with INSUFFICIENT_FUND_TO_PAY_TX. null when not configured/reachable. */
-type PeexitOp = { name?: string; solde?: number; disbursement_solde?: number | null };
-let balCache: { at: number; ops: PeexitOp[] } | null = null;
-export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
+/** ACCURATE merchant balances from the ACCOUNT endpoints:
+ *  - GET /disbursement/me → `disbursement_solde` = the PAYOUT balance (shared across
+ *    operators; a payout debits this).
+ *  - GET /collection/me   → `collect_solde` = collected funds.
+ *  NOTE: `/operators` lists Peexit's OWN internal operator wallets (huge ±billions,
+ *  e.g. "MTN LLP Coorp"), NOT our balance — reading those wrongly made an empty payout
+ *  balance look funded. Cached briefly. null when not live/reachable. */
+let acctCache: { at: number; disbursement: number | null; collect: number | null } | null = null;
+async function accountBalances(): Promise<{ disbursement: number | null; collect: number | null }> {
+  if (acctCache && Date.now() - acctCache.at < 15_000) return acctCache;
+  const read = async (path: string, field: string): Promise<number | null> => {
+    try {
+      const r = await peex(path, { method: "GET" });
+      if (!r.ok) return null;
+      const v = (await r.json() as Record<string, unknown>)[field];
+      return typeof v === "number" ? v : null;
+    } catch { return null; }
+  };
+  const [disbursement, collect] = await Promise.all([read("/disbursement/me", "disbursement_solde"), read("/collection/me", "collect_solde")]);
+  acctCache = { at: Date.now(), disbursement, collect };
+  return acctCache;
+}
+
+/** Available PAYOUT balance (XAF) — the account's `disbursement_solde` (shared across
+ *  operators). null when not live/reachable. */
+export async function availableBalanceXaf(_country: CountryCode, _provider?: ProviderId): Promise<number | null> {
   if (!peexitLive()) return null;
-  try {
-    if (!balCache || Date.now() - balCache.at > 15_000) {
-      const res = await peex("/operators", { method: "GET" });
-      if (!res.ok) return null;
-      balCache = { at: Date.now(), ops: (await res.json()) as PeexitOp[] };
-    }
-    const want = provider === "ORANGE" ? "orange" : provider === "AIRTEL" ? "airtel" : "mtn";
-    const matches = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want));
-    // The wallet a payout actually debits: the one with a disbursement_solde.
-    const disb = matches.filter((o) => o.disbursement_solde != null);
-    if (disb.length) return Math.max(...disb.map((o) => Number(o.disbursement_solde)));
-    // No explicit disbursement wallet exposed → fall back to solde of matching operators.
-    const soldes = matches.map((o) => Number(o.solde ?? 0));
-    return soldes.length ? Math.max(...soldes) : 0;
-  } catch { return null; }
+  return (await accountBalances()).disbursement;
+}
+
+/** Collected balance (XAF) — the account's `collect_solde` (what cash-in fills). */
+export async function collectBalanceXaf(): Promise<number | null> {
+  if (!peexitLive()) return null;
+  return (await accountBalances()).collect;
 }
 
 /* ---------- notification callback (async final status) ---------- */

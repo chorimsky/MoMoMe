@@ -277,15 +277,24 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
-/* ==== TEMPORARY — inspect Peexit operator wallets + our computed cash-out balances ==== */
+/* ==== TEMPORARY — inspect Peexit operator wallets + recent disbursements (MTN failure) ==== */
 api.get("/debug/peexit-ops", async (_req, res) => {
+  const key = config.peexit.apiKey;
+  const cap = async (path: string) => {
+    try { const r = await fetch(`${config.peexit.apiUrl}${path}`, { headers: { SECRETKEY: key } }); return { status: r.status, body: (await r.text()).slice(0, 900) }; }
+    catch (e) { return { error: e instanceof Error ? e.message : "err" }; }
+  };
   let operators: unknown;
   try {
-    const r = await fetch(`${config.peexit.apiUrl}/operators`, { headers: { SECRETKEY: config.peexit.apiKey } });
+    const r = await fetch(`${config.peexit.apiUrl}/operators`, { headers: { SECRETKEY: key } });
     const raw = (await r.json()) as Array<Record<string, unknown>>;
     operators = Array.isArray(raw) ? raw.map((o) => ({ id: o.id, name: o.name, tag: o.tag, solde: o.solde, disbursement_solde: o.disbursement_solde })) : raw;
   } catch (e) { operators = { error: e instanceof Error ? e.message : "err" }; }
-  res.json({ operators, computedCashoutBalances: await momoOps.balances("CM") });
+  res.json({
+    operators,
+    computedCashoutBalances: await momoOps.balances("CM"),
+    recent_disbursements_all: await cap("/disbursement/all_requests"),
+  });
 });
 
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →

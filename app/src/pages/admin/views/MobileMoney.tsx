@@ -134,7 +134,7 @@ function MomoOpsPanel() {
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
           {balances.map((b) => (
-            <div key={b.rail} className="card" style={{ padding: 16 }}>
+            <div key={b.label} className="card" style={{ padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{b.label}</div>
                 <span className="num" style={{ fontSize: 18, fontWeight: 800, color: b.balanceXaf == null ? "var(--warn)" : "var(--ink)" }}>

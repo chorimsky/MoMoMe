@@ -41,10 +41,10 @@ function mapStatus(s: string | undefined): PayoutStatus {
   return "PENDING"; // new / pending / processing
 }
 
-async function peex(path: string, init: RequestInit, key: string = config.peexit.apiKey): Promise<Response> {
+async function peex(path: string, init: RequestInit): Promise<Response> {
   return fetch(`${config.peexit.apiUrl}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", SECRETKEY: key, ...(init.headers ?? {}) },
+    headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey, ...(init.headers ?? {}) },
   });
 }
 
@@ -109,7 +109,7 @@ export async function collect(req: DisburseRequest): Promise<{ status: "accepted
       to_country: req.country, // ISO Alpha-2 (e.g. CM)
       purpose: "FAMILY", fund_origin: "SALES_AND_BUSINESS_DEVELOPMENT",
     }),
-  }, config.peexit.collectKey); // Collect API uses its own SECRETKEY (falls back to the disbursement key)
+  }); // collection uses the SAME SECRETKEY as disbursement (Peexit production)
   if (!res.ok) throw new Error(`Peexit collection failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as { status?: number; error?: string; message?: string; data?: { id?: number | string; status?: string } };
   if (typeof data.status === "number" && data.status >= 400) throw new Error(`Peexit collection rejected: ${data.status} ${data.error ?? data.message ?? ""}`);

@@ -290,10 +290,14 @@ api.get("/debug/peexit-ops", async (_req, res) => {
     const raw = (await r.json()) as Array<Record<string, unknown>>;
     operators = Array.isArray(raw) ? raw.map((o) => ({ id: o.id, name: o.name, tag: o.tag, solde: o.solde, disbursement_solde: o.disbursement_solde })) : raw;
   } catch (e) { operators = { error: e instanceof Error ? e.message : "err" }; }
+  const hist = momoOps.history();
+  const failed = hist.find((o) => o.kind === "cashout" && o.status === "failed");
   res.json({
     operators,
     computedCashoutBalances: await momoOps.balances("CM"),
-    recent_disbursements_all: await cap("/disbursement/all_requests"),
+    momoHistory: hist.slice(0, 6).map((o) => ({ id: o.id, kind: o.kind, provider: o.provider, phone: o.phone, amount: o.amount, status: o.status, providerRef: o.providerRef, error: o.error })),
+    failedCashout: failed ? { trackId: failed.id, phone: failed.phone, providerRef: failed.providerRef } : null,
+    disbursementStatus: failed ? await cap(`/disbursement/all_requests?track_id=${encodeURIComponent(failed.id)}`) : null,
   });
 });
 

@@ -10,12 +10,12 @@ import { FlowCard, Row } from "./ui.js";
 function fullPhone(p: Payment): string {
   return COUNTRIES[p.recipient.country].dial + " " + p.recipient.phone;
 }
-function when(p: Payment): string {
-  return new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+function when(p: Payment, lang: "en" | "fr"): string {
+  return new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const logo = useBrandLogo(); // the LIVE brand logo (admin-uploaded) → on the receipt
   const [busy, setBusy] = useState(false);
   // Sender's own record shows how they paid (crypto · USD); toggle OFF for a
@@ -45,7 +45,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
       [t("receipt_value_usd"), usdStr(payment)],
     ] as Array<[string, string]> : []),
     [t("reference"), payment.ref],
-    [t("date"), when(payment)],
+    [t("date"), when(payment, lang)],
   ];
   // Notch that punches the "ticket" perforation — coloured to match the scrim.
   const notch = (side: "left" | "right"): CSSProperties => ({
@@ -117,7 +117,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
 }
 
 export function SuccessStep({ payment, reset }: { payment: Payment; reset: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [showReceipt, setShowReceipt] = useState(false);
   return (
     <FlowCard>
@@ -146,7 +146,7 @@ export function SuccessStep({ payment, reset }: { payment: Payment; reset: () =>
         <hr className="hair" />
         <Row k={t("reference")} v={payment.ref} />
         <hr className="hair" />
-        <Row k={t("date_time")} v={when(payment)} />
+        <Row k={t("date_time")} v={when(payment, lang)} />
       </div>
 
       <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 18, padding: "16px" }}>{t("make_another")}</button>

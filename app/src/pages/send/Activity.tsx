@@ -11,15 +11,16 @@ import { Receipt } from "./Success.js";
 const ST_TONE: Record<DisplayStatus, string> = { Completed: "var(--recv)", Pending: "var(--warn)", Failed: "var(--bad)" };
 type Filter = "All" | DisplayStatus;
 
-function rel(p: Payment): string {
+function rel(p: Payment, lang: "en" | "fr", yesterday: string): string {
+  const loc = lang === "fr" ? "fr-FR" : "en-GB";
   const days = Math.floor((Date.now() - Date.parse(p.createdAt)) / 86400_000);
-  if (days <= 0) return new Date(p.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-  if (days === 1) return "Yesterday";
-  return new Date(p.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  if (days <= 0) return new Date(p.createdAt).toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
+  if (days === 1) return yesterday;
+  return new Date(p.createdAt).toLocaleDateString(loc, { day: "2-digit", month: "short" });
 }
 
 export function Activity() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [rows, setRows] = useState<Payment[] | null>(null);
   const [filter, setFilter] = useState<Filter>("All");
   const [receipt, setReceipt] = useState<Payment | null>(null);
@@ -67,7 +68,7 @@ export function Activity() {
                 <div style={{ textAlign: "right", flex: "none" }}>
                   <div className="num" style={{ fontWeight: 700, fontSize: 14 }}>{fmt(r.xaf)} XAF</div>
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: ST_TONE[r.displayStatus], marginTop: 1 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: ST_TONE[r.displayStatus] }} />{TSTAT[r.displayStatus]} · {rel(r)}
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: ST_TONE[r.displayStatus] }} />{TSTAT[r.displayStatus]} · {rel(r, lang, t("yesterday"))}
                   </div>
                 </div>
               </button>

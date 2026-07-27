@@ -309,6 +309,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("they_receive")}</div>
         <div className="num" style={{ fontSize: 42, fontWeight: 750, color: "var(--ink)", letterSpacing: "-0.03em", marginTop: 6 }}>{fmt(quote.xaf)} <span style={{ fontSize: 20, color: "var(--ink-3)" }}>XAF</span></div>
         <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4, maxWidth: 320, margin: "9px auto 0" }}>{t("cashout_note")}</div>
+        {quote.estimateOnly && <div style={{ fontSize: 11.5, color: "var(--warn)", fontWeight: 600, lineHeight: 1.4, maxWidth: 320, margin: "6px auto 0" }}>{t("onchain_estimate")}</div>}
       </div>
 
       <div style={{ marginTop: 4 }}>
@@ -371,7 +372,9 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
         } catch { /* keep polling */ }
       }
-      if (active) id = setTimeout(poll, gap());
+      // Stop once the invoice has expired — no point burning metered data polling a
+      // dead invoice; the "code expired / refresh" UI takes over.
+      if (active && Date.parse(inst.expiresAt) > Date.now()) id = setTimeout(poll, gap());
     };
     id = setTimeout(poll, gap());
     const onVis = () => { if (!document.hidden && active) { clearTimeout(id); poll(); } };
@@ -394,7 +397,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
           <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{recName}</div>
           <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
-          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>
+          {method === "LIGHTNING" && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>}
           <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("reference")} · {payment.ref}</div>
         </div>
       </div>
@@ -578,27 +581,32 @@ function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }
   const [bolt11, setBolt11] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [result, setResult] = useState<null | "refunded" | "settling">(null);
 
   const submit = async () => {
-    const inv = bolt11.trim();
-    if (!/^ln(bc|tb)\w+$/i.test(inv)) { setErr(t("refund_input")); return; }
+    // Accept exactly what wallets copy: a `lightning:` URI prefix, uppercase, and
+    // any surrounding whitespace — normalise before validating so a valid invoice is
+    // never falsely rejected on the money-back path.
+    const inv = bolt11.trim().replace(/^lightning:/i, "").trim().toLowerCase();
+    if (!/^ln(bc|tb|bcrt)[0-9][a-z0-9]+$/.test(inv)) { setErr(t("refund_input")); return; }
     setBusy(true); setErr(null);
     try {
       const p = await api.refundDestination(payment.id, inv);
-      if (p.state === "REFUNDED") { setDone(true); return; }
+      if (p.state === "REFUNDED") { setResult("refunded"); return; }
       for (let i = 0; i < 12; i++) { // refund in flight — poll a short while for settlement
         await new Promise((r) => setTimeout(r, 2500));
         const cur = await api.getPayment(payment.id);
-        if (cur.state === "REFUNDED") { setDone(true); return; }
+        if (cur.state === "REFUNDED") { setResult("refunded"); return; }
       }
-      setDone(true); // submitted & settling — it finalizes server-side
+      // Submitted but not yet confirmed — DON'T claim it's done. Show a settling state.
+      setResult("settling");
     } catch (e) {
       setErr(e instanceof Error ? e.message : t("error_generic"));
     } finally { setBusy(false); }
   };
 
-  if (done) return <RefundedCard reset={reset} />;
+  if (result === "refunded") return <RefundedCard reset={reset} />;
+  if (result === "settling") return <RefundSettlingCard reset={reset} />;
 
   return (
     <FlowCard>
@@ -636,6 +644,24 @@ function RefundedCard({ reset }: { reset: () => void }) {
         </div>
         <h2 style={{ fontSize: 22 }}>{t("refund_done_title")}</h2>
         <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_done_sub")}</p>
+      </div>
+      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 20, padding: "16px" }}>{t("try_again")}</button>
+    </FlowCard>
+  );
+}
+
+/* Refund submitted but not yet confirmed — an honest "on its way / check Activity"
+   state instead of a premature green "done". */
+function RefundSettlingCard({ reset }: { reset: () => void }) {
+  const { t } = useI18n();
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--warn)", fontSize: 28, fontWeight: 800 }}>↺</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_settling_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_settling_sub")}</p>
       </div>
       <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 20, padding: "16px" }}>{t("try_again")}</button>
     </FlowCard>

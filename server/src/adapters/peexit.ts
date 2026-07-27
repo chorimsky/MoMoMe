@@ -89,23 +89,22 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
 
 /* ---------- cash-in (COLLECTION — request payment FROM a number) ----------
    Peex Collect API: POST /collection/request_payment (SAME SECRETKEY as disbursement;
-   the docs' /collection/me is a different resource that 401s "key does not exist" —
-   confirmed by probing from the whitelisted IP). Mirrors /disbursement/request_payment:
-   the account holder approves the debit on their phone. */
+   the docs' /collection/me is a GET for account info, which is why POSTing it 401'd).
+   Required body (confirmed from Peexit's own 422 validation): track_id, phone, amount,
+   currency, country, customer_name — a DIFFERENT schema from disbursement (phone not
+   mobile_phone; a single customer_name not first/last). The payer approves on their
+   phone. */
 export async function collect(req: DisburseRequest): Promise<{ status: "accepted"; providerRef: string; simulated: boolean }> {
   if (!peexitLive()) return { status: "accepted", providerRef: id("pxc"), simulated: true };
-  const { first, last } = splitName(req.name);
   const res = await peex("/collection/request_payment", {
     method: "POST",
     body: JSON.stringify({
-      amount: req.xaf,
       track_id: req.idempotencyKey,
-      mobile_phone: localMsisdn(req.phone), // the payer we collect FROM
+      phone: localMsisdn(req.phone),   // the payer we collect FROM
+      amount: req.xaf,
       currency: "XAF",
-      sender_first_name: "MoMoMe", sender_last_name: "Pay", sender_mobile_phone: "677000000",
-      first_name: first, last_name: last,
-      country: req.country, // ISO Alpha-2 (e.g. CM)
-      purpose: "FAMILY", fund_origin: "SALARY",
+      country: req.country,            // ISO Alpha-2 (e.g. CM)
+      customer_name: (req.name && req.name.trim()) || "Customer",
     }),
   });
   if (!res.ok) throw new Error(`Peexit collection failed: ${res.status} ${await res.text()}`);

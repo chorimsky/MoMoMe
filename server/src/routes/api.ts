@@ -277,22 +277,6 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   res.json(quote);
 });
 
-/* ==== TEMPORARY — read the collection endpoint's required-field validation error ====
-   POSTs an EMPTY body to /collection/request_payment so Peexit's 422 lists the exact
-   required fields (no collection is created). Remove after the body is finalized. */
-api.get("/debug/peexit-collect-fields", async (_req, res) => {
-  try {
-    const r = await fetch(`${config.peexit.apiUrl}/collection/request_payment`, {
-      method: "POST",
-      headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey },
-      body: "{}",
-    });
-    res.json({ status: r.status, body: await r.text() });
-  } catch (e) {
-    res.json({ error: e instanceof Error ? e.message : "err" });
-  }
-});
-
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {

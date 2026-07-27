@@ -134,17 +134,22 @@ function MomoOpsPanel() {
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 12 }}>{err}</div>}
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
-          {balances.map((b) => (
-            <div key={b.label} className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{b.label}</div>
-                <span className="num" style={{ fontSize: 18, fontWeight: 800, color: b.balanceXaf == null ? "var(--warn)" : "var(--ink)" }}>
-                  {b.balanceXaf == null ? "—" : `${fmt(b.balanceXaf)} XAF`}
-                </span>
+          {balances.map((b) => {
+            const neg = b.balanceXaf != null && b.balanceXaf < 0;
+            return (
+              <div key={b.label} className="card" style={{ padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{b.label}</div>
+                  <span className="num" style={{ fontSize: 16, fontWeight: 800, color: b.balanceXaf == null ? "var(--warn)" : neg ? "var(--bad)" : "var(--recv)", whiteSpace: "nowrap" }}>
+                    {b.balanceXaf == null ? "—" : `${fmt(b.balanceXaf)} XAF`}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11.5, color: neg ? "var(--bad)" : "var(--ink-3)", marginTop: 4 }}>
+                  {b.balanceXaf == null ? "Not live / unreachable" : neg ? "Payout wallet underfunded — top up Peexit to enable payouts" : "Payout (disbursement) wallet balance"}
+                </div>
               </div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>{b.balanceXaf == null ? "Not live / unreachable" : "Wallet balance"}</div>
-            </div>
-          ))}
+            );
+          })}
         </Grid>
       )}
 

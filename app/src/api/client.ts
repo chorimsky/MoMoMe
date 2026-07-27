@@ -49,9 +49,15 @@ export function getSenderId(): string { return senderId; }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  // Timeout so a STALLED (half-open) connection — the dominant failure mode on 2G/
+  // metered data in the target market — fails cleanly instead of hanging the spinner
+  // forever. Abort → same typed network error as a dropped connection.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      signal: ctrl.signal,
       headers: {
         "Content-Type": "application/json",
         "X-MM-Sender": senderId,
@@ -60,10 +66,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch {
-    // No response at all — offline / DNS / dropped connection (common on patchy
-    // mobile data). Surface as a typed network error (status 0) so the UI shows a
-    // friendly "you're offline, retry" instead of a raw "Failed to fetch".
+    // No response at all — offline / DNS / dropped connection / timeout (common on
+    // patchy mobile data). Surface as a typed network error (status 0) so the UI shows
+    // a friendly "you're offline, retry" instead of a raw "Failed to fetch" or a hang.
     throw new ApiError("network", 0);
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and

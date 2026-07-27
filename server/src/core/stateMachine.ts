@@ -322,6 +322,23 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   }
 }
 
+/** Backstop for a refund whose outbound Lightning payment was submitted (refundTxId
+ *  set) but not confirmed before a restart or after pollRefund's window elapsed —
+ *  without this it strands in REFUND_PENDING with the ledger un-reversed even though
+ *  the sats went out. Re-query the pay transaction and finalize any that settled.
+ *  Idempotent (finalizeRefund no-ops once REFUNDED). */
+export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
+  const cutoff = Date.now() - maxAgeMs;
+  for (const p of listPayments()) {
+    if (p.state !== "REFUND_PENDING" || !p.refundTxId || p.refundNeedsDestination) continue;
+    if (Date.parse(p.updatedAt) > cutoff) continue;
+    try {
+      const s = await transactionStatus(p.refundTxId);
+      if (s?.settled) finalizeRefund(p);
+    } catch (e) { console.error("reconcile refund", p.id, e); }
+  }
+}
+
 /** Admin: re-attempt delivery of a stuck payment. Exactly-once: reuses the
  *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay).
  *  Honours the same real-money safety as the settle path and only marks DELIVERED

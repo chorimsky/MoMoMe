@@ -2,7 +2,7 @@ import { createApp } from "./app.js";
 import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds } from "./core/stateMachine.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
 import { setRates, CCY } from "./core/rates.js";
 
@@ -27,7 +27,10 @@ const app = createApp();
 // Backstop: re-query payouts AND inbounds stuck awaiting a (possibly lost) callback.
 setInterval(() => {
   void reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
-  if (ibexConfigured()) void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+  if (ibexConfigured()) {
+    void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+    void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
+  }
 }, 30_000).unref();
 
 // Evict expired quotes so the in-memory quotes map can't grow without bound.

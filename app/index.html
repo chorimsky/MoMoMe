@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<!-- Don't let iOS turn the recipient's Mobile Money number into a tap-to-call link. -->
+<meta name="format-detection" content="telephone=no" />
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -12,7 +15,9 @@
 <meta name="theme-color" content="#1c1813" media="(prefers-color-scheme: dark)" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<!-- "default" = opaque status bar with system-adaptive (readable) text. black-translucent
+     would force white status text, which vanishes on the light default theme. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="MoMoMe" />
 <meta name="description" content="Pay any MTN or Orange Money number instantly. MoMo›Me turns Bitcoin, Lightning and stablecoins (USDT) into Mobile Money across Africa — no account, no card, delivered in seconds." />
 <meta name="keywords" content="Bitcoin to Mobile Money, Lightning to Mobile Money, USDT to Mobile Money, stablecoin to Mobile Money, crypto to Mobile Money, MTN Mobile Money, Orange Money, crypto cashout Africa, withdraw Bitcoin Cameroon, African payment infrastructure, crypto settlement Africa" />

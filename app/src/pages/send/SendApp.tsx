@@ -206,7 +206,7 @@ export function SendApp() {
       </div>
 
       {showTabs && (
-        <nav aria-label="Main navigation" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50, display: "flex", background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "env(safe-area-inset-bottom)", boxShadow: "0 -4px 18px oklch(0 0 0 / 0.06)" }}>
+        <nav aria-label="Main navigation" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50, display: "flex", background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "env(safe-area-inset-bottom)", paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)", boxShadow: "0 -4px 18px oklch(0 0 0 / 0.06)" }}>
           {([["pay", t("tab_pay"), "pay"], ["history", t("tab_activity"), "activity"], ["help", t("tab_help"), "help"]] as const).map(([k, label, ic]) => {
             const on = tab === k;
             return (

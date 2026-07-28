@@ -20,8 +20,23 @@ import { renderOgImages } from "./og.mjs";
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 const SITE = (process.env.SITE_URL || "https://momome.xyz").replace(/\/$/, "");
 const APP = "/send";
-const BUILD_DATE = process.env.SEO_DATE || "2026-06-05";
+// lastmod: pin with SEO_DATE for a reproducible build, else stamp today so the
+// sitemap never ships a stale date (it was hard-coded to a fixed past date).
+const BUILD_DATE = process.env.SEO_DATE || new Date().toISOString().slice(0, 10);
 const BRAND = "MoMo›Me";
+// Google Search Console meta-tag verification token (optional; URL-prefix method).
+// Set GSC_VERIFICATION at build to emit <meta name="google-site-verification"> on
+// every prerendered page. The DNS-TXT method (Domain property) needs no code.
+const GSC = process.env.GSC_VERIFICATION || "";
+// Public SPA routes worth indexing — served by the app shell, same URL in EN/FR
+// (language is a client toggle, so no separate /fr/ path and no hreflang pair).
+const APP_PAGES = [
+  { path: "/send", priority: 0.9, changefreq: "weekly" },
+  { path: "/claim", priority: 0.5, changefreq: "monthly" },
+  { path: "/contact", priority: 0.5, changefreq: "monthly" },
+  { path: "/terms", priority: 0.3, changefreq: "yearly" },
+  { path: "/privacy", priority: 0.3, changefreq: "yearly" },
+];
 
 /* ---------- helpers ---------- */
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -598,6 +613,7 @@ ${keywords ? `<meta name="keywords" content="${esc(keywords)}">` : ""}
 <link rel="alternate" hreflang="fr" href="${SITE}${fr}">
 <link rel="alternate" hreflang="x-default" href="${SITE}${en}">
 <meta name="robots" content="index,follow,max-image-preview:large">
+${GSC ? `<meta name="google-site-verification" content="${esc(GSC)}">` : ""}
 <meta property="og:type" content="website"><meta property="og:site_name" content="${esc(BRAND)}"><meta property="og:locale" content="${lc === "fr" ? "fr_FR" : "en_US"}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}"><meta property="og:image" content="${img}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
@@ -896,13 +912,17 @@ function sitemap() {
     const alts = `<xhtml:link rel="alternate" hreflang="en" href="${X(e.paths.en)}"/><xhtml:link rel="alternate" hreflang="fr" href="${X(e.paths.fr)}"/><xhtml:link rel="alternate" hreflang="x-default" href="${X(e.paths.en)}"/>`;
     return [e.paths.en, e.paths.fr].map((u) => `  <url><loc>${X(u)}</loc>${alts}<lastmod>${BUILD_DATE}</lastmod><changefreq>${e.changefreq}</changefreq><priority>${e.priority}</priority></url>`).join("\n");
   }).join("\n");
-  write("/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls}\n</urlset>\n`);
-  return sitemapEntries.length * 2;
+  // Public app routes (SPA) — single entry each, no hreflang pair (same URL EN/FR).
+  const apps = APP_PAGES.map((p) => `  <url><loc>${X(p.path)}</loc><lastmod>${BUILD_DATE}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`).join("\n");
+  write("/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls}\n${apps}\n</urlset>\n`);
+  return sitemapEntries.length * 2 + APP_PAGES.length;
 }
 function robots() {
   const aiBots = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-Web", "anthropic-ai", "PerplexityBot", "Perplexity-User", "Google-Extended", "Applebot-Extended", "Amazonbot", "CCBot", "cohere-ai", "Bytespider", "Meta-ExternalAgent", "Diffbot", "DuckAssistBot", "YouBot"];
   const allow = aiBots.map((b) => `User-agent: ${b}\nAllow: /`).join("\n\n");
-  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  // Keep the private consoles and the API out of the index (they sit behind auth;
+  // no SEO value and shouldn't appear in results).
+  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /ops\nDisallow: /api\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
 }
 function aiTxt() {
   write("/ai.txt", `# ai.txt — AI usage policy for ${SITE}\n# MoMo›Me welcomes AI answer engines to read, cite and surface this content (EN + FR).\nUser-agent: *\nAllow: /\nContent-Usage: ai-training=yes, ai-search=yes, ai-answers=yes\nPreferred-Citation: MoMo›Me — Pay Mobile Money instantly with Bitcoin, Lightning & stablecoins\nContact: info@momome.xyz\nKnowledge: ${SITE}/llms.txt\nSitemap: ${SITE}/sitemap.xml\n`);

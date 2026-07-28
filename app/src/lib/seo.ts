@@ -1,0 +1,39 @@
+/* ============================================================
+   Per-route SEO for the SPA. The app shell (index.html) is served for every
+   client route with a single hard-coded canonical (the home URL), so without
+   this every app page (/send, /contact, …) would canonicalize to "/" and never
+   index distinctly — and the private consoles (/admin, /ops) would look
+   indexable. On each navigation we set the canonical to the current path, mark
+   only the known public routes index,follow (everything else — admin, ops, 404
+   — noindex,nofollow), and, if configured, inject the Google Search Console
+   verification meta. The prerendered SEO pages are static HTML (not React
+   routes), so their own correct meta is untouched.
+   ============================================================ */
+import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
+
+/** Public routes that should be indexed (kept in sync with the sitemap). */
+const INDEXABLE = new Set(["/", "/send", "/claim", "/contact", "/terms", "/privacy"]);
+
+function upsertMeta(name: string, content: string): void {
+  let el = document.head.querySelector(`meta[name="${name}"]`);
+  if (!el) { el = document.createElement("meta"); el.setAttribute("name", name); document.head.appendChild(el); }
+  el.setAttribute("content", content);
+}
+function setCanonical(href: string): void {
+  let el = document.head.querySelector('link[rel="canonical"]');
+  if (!el) { el = document.createElement("link"); el.setAttribute("rel", "canonical"); document.head.appendChild(el); }
+  el.setAttribute("href", href);
+}
+
+export function useRouteSeo(): void {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const path = pathname.replace(/\/+$/, "") || "/"; // normalize trailing slash
+    const indexable = INDEXABLE.has(path);
+    upsertMeta("robots", indexable ? "index,follow,max-image-preview:large" : "noindex,nofollow");
+    setCanonical(window.location.origin + (path === "/" ? "/" : path));
+    const gsc = (import.meta.env as Record<string, string | undefined>).VITE_GSC_VERIFICATION;
+    if (gsc) upsertMeta("google-site-verification", gsc);
+  }, [pathname]);
+}

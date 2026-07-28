@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
+import { useRouteSeo } from "./lib/seo.js";
 import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
@@ -21,6 +22,7 @@ function ChunkFallback() {
 }
 
 export function App() {
+  useRouteSeo(); // per-route canonical + robots (index public pages, noindex admin/ops/404)
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

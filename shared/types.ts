@@ -393,10 +393,12 @@ export interface TreasuryWithdrawal {
 }
 
 /* ---------- admin Mobile Money ops (manual cash-in / cash-out) ---------- */
-export type MomoOpKind = "cashout" | "cashin";
+export type MomoOpKind = "cashout" | "cashin" | "transfer_out" | "transfer_in";
 export type MomoRail = "pawapay" | "peexit";
-/** An append-only record of a manual admin Mobile Money operation — a cash-out
- *  (disburse to a number) or cash-in (collect from a number) via PawaPay/Peexit. */
+/** An append-only record of a manual admin Mobile Money operation. A cash-out
+ *  (disburse to a number) or cash-in (collect from a number) via PawaPay/Peexit;
+ *  or the two legs of a wallet REBALANCE (transfer_out = disburse payout→treasury
+ *  phone, transfer_in = collect treasury phone→collection), linked by transferId. */
 export interface MomoOp {
   id: string;
   at: string;
@@ -409,6 +411,8 @@ export interface MomoOp {
   status: "accepted" | "completed" | "failed";
   providerRef?: string;
   error?: string;
+  /** Links the two legs of a payout→collection wallet rebalance. */
+  transferId?: string;
 }
 /** A rail's live Mobile Money wallet balance (XAF), null when unavailable. */
 export interface MomoRailBalance { rail: MomoRail; label: string; balanceXaf: number | null; }

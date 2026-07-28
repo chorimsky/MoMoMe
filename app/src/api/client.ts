@@ -186,6 +186,8 @@ export const api = {
     req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
   momoCashin: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
     req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
+  momoTransfer: (phone: string, amount: number) =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/transfer", { method: "POST", body: JSON.stringify({ phone, amount }) }),
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),

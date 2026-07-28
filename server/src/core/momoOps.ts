@@ -20,18 +20,29 @@ register("momoops", () => ops.slice(0, 200), (d: MomoOp[]) => { ops.push(...d); 
 export function history(): MomoOp[] { return ops.slice(0, 50); }
 function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop(); touch("momoops"); }
 
-/** A cash-in (collection) is async — the payer approves on their phone. Re-query the
- *  authoritative collection status for recent still-"accepted" cash-ins and settle them
- *  to completed/failed, so the admin sees the real outcome (paid) instead of a stuck
- *  "accepted". Called on the reconcile loop. */
+/** Reconcile async admin Mobile Money ops (called on the reconcile loop):
+ *  - cash-in / transfer_in (collections): the payer approves on their phone, so re-query
+ *    the authoritative collection status and settle "accepted" → completed/failed.
+ *  - transfer_out (a rebalance's disburse leg): once it COMPLETES, fire the matching
+ *    collect leg (transfer_in) — so we only pull from the treasury phone AFTER the
+ *    payout has actually landed there. Idempotent. */
 export async function reconcilePendingCashins(): Promise<void> {
   const now = Date.now();
   for (const o of ops) {
-    if (o.kind !== "cashin" || o.status !== "accepted" || o.rail !== "peexit") continue;
-    if (now - Date.parse(o.at) > 24 * 3600_000) continue; // only the last day
-    const s = await peexit.collectStatus(o.id).catch(() => null);
-    if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); }
-    else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; touch("momoops"); }
+    if (o.rail !== "peexit" || now - Date.parse(o.at) > 24 * 3600_000) continue; // only the last day
+    if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
+      const s = await peexit.collectStatus(o.id).catch(() => null);
+      if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); }
+      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; touch("momoops"); }
+    } else if (o.kind === "transfer_out") {
+      if (o.status === "accepted") {
+        const s = await peexit.queryStatus(o.id).catch(() => null);
+        if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); await fireCollectLeg(o); }
+        else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); touch("momoops"); }
+      } else if (o.status === "completed") {
+        await fireCollectLeg(o); // idempotent backstop: ensure leg 2 exists
+      }
+    }
   }
 }
 
@@ -114,5 +125,70 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   }
   record(op);
   console.log(`[momo] cashin ${amount} XAF ← ${phone} via ${rail} by ${by} (accepted — awaiting payer approval)`);
+  return { ok: true, op };
+}
+
+/* ============================================================
+   WALLET REBALANCE — Payout wallet → Collection wallet.
+   Peexit has no internal wallet-to-wallet transfer API, so we move balance by
+   round-tripping through an admin-controlled treasury Mobile Money number:
+     leg 1 (transfer_out): DISBURSE the amount to the treasury number → payout ↓
+     leg 2 (transfer_in):  COLLECT the same amount back            → collection ↑
+   Leg 2 is only fired once leg 1 actually COMPLETES (here if it settled inline,
+   else by the reconcile loop), so we never request a collection against money the
+   treasury phone hasn't received yet. Per-leg Peexit fees apply, so the net moved
+   is slightly less than the amount. The reverse (collection → payout) is NOT
+   possible via the API — nothing credits the disbursement wallet except Peexit's
+   own settlement — so only this direction is offered.
+   ============================================================ */
+
+/** Fire the collect leg (transfer_in) of a completed rebalance. Idempotent: no-ops
+ *  if a transfer_in for this transferId already exists (fired or attempted). */
+async function fireCollectLeg(outOp: MomoOp): Promise<void> {
+  if (!outOp.transferId) return;
+  if (ops.some((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId)) return;
+  const inId = id("mmo");
+  const inOp: MomoOp = { id: inId, at: new Date().toISOString(), kind: "transfer_in", provider: outOp.provider, rail: "peexit", phone: outOp.phone, amount: outOp.amount, by: outOp.by, status: "accepted", transferId: outOp.transferId };
+  try {
+    const res = await peexit.collect({ idempotencyKey: inId, provider: outOp.provider, country: "CM", phone: outOp.phone, xaf: outOp.amount, name: "MoMoMe Treasury" });
+    inOp.providerRef = res.providerRef;
+  } catch (e) {
+    inOp.status = "failed"; inOp.error = e instanceof Error ? e.message : "collect_failed";
+  }
+  record(inOp);
+  console.log(`[momo] rebalance leg 2/2 (collect) ${outOp.amount} XAF ← ${outOp.phone} (transfer ${outOp.transferId}, ${inOp.status})`);
+}
+
+/** Rebalance the Peexit Payout wallet → Collection wallet via a controlled treasury
+ *  number. Requires the payout balance to cover the amount; records the disburse leg
+ *  and (once it settles) the collect leg. */
+export async function transferToCollection(treasuryPhone: string, amount: number, by: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
+  const provider = detectProvider(treasuryPhone, "CM");
+  if (!provider) return { ok: false, error: "bad_number" };
+  const payoutBal = await peexit.availableBalanceXaf("CM").catch(() => null);
+  if (payoutBal == null) return { ok: false, error: "rail_unavailable" };
+  if (payoutBal < amount) return { ok: false, error: "insufficient_balance" };
+  const transferId = id("mmt");
+  const opId = id("mmo");
+  const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "transfer_out", provider, rail: "peexit", phone: treasuryPhone, amount, by, status: "accepted", transferId };
+  try {
+    const req: DisburseRequest = { idempotencyKey: opId, provider, country: "CM", phone: treasuryPhone, xaf: amount, name: "MoMoMe Treasury" };
+    const res = await peexit.disburse(req);
+    op.providerRef = res.providerRef;
+    const status = await peexit.queryStatus(opId);
+    if (status) op.status = statusLabel(status);
+    if (op.status === "failed") op.error = peexit.failReason(opId) ?? "rejected by the rail";
+  } catch (e) {
+    op.status = "failed"; op.error = e instanceof Error ? e.message : "transfer_failed";
+    record(op);
+    console.error(`[momo] rebalance leg 1/2 FAILED ${amount} XAF → ${treasuryPhone} by ${by}: ${op.error}`);
+    return { ok: false, error: op.error, op };
+  }
+  record(op);
+  console.log(`[momo] rebalance leg 1/2 (disburse) ${amount} XAF → ${treasuryPhone} by ${by} (transfer ${transferId}, ${op.status})`);
+  // If the disburse already settled inline (sandbox / fast rail), collect now; else
+  // the reconcile loop fires leg 2 once it completes.
+  if (op.status === "completed") await fireCollectLeg(op);
   return { ok: true, op };
 }

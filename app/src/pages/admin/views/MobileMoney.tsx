@@ -164,16 +164,20 @@ function MomoOpsPanel() {
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 750, color: "var(--ink-3)", marginBottom: 8 }}>Recent operations</div>
           <div className="card" style={{ padding: 0 }}>
-            {history.map((o) => (
+            {history.map((o) => {
+              const tag = o.kind === "cashout" ? "OUT" : o.kind === "cashin" ? "IN"
+                : o.kind === "transfer_out" ? "↦ REBAL" : "REBAL ↤";
+              return (
               <div key={o.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
                 <span style={{ color: "var(--ink-2)" }}>
-                  <b>{o.kind === "cashout" ? "OUT" : "IN"}</b> {fmt(o.amount)} XAF · {o.provider} · <span className="num">{o.phone}</span>
+                  <b>{tag}</b> {fmt(o.amount)} XAF · {o.provider} · <span className="num">{o.phone}</span>
                 </span>
                 <span style={{ color: o.status === "failed" ? "var(--bad)" : o.status === "completed" ? "var(--recv)" : "var(--ink-3)", fontWeight: 650 }}>
                   {o.status}{o.error ? ` · ${o.error}` : ""}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -181,8 +185,11 @@ function MomoOpsPanel() {
   );
 }
 
+type MomoMode = "cashout" | "cashin" | "transfer";
+const MODE_LABEL: Record<MomoMode, string> = { cashout: "Cash-out (send)", cashin: "Cash-in (collect)", transfer: "Rebalance (payout→collect)" };
+
 function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onDone: () => Promise<void>; onOp: (o: MomoOp) => void }) {
-  const [kind, setKind] = useState<"cashout" | "cashin">("cashout");
+  const [kind, setKind] = useState<MomoMode>("cashout");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [name, setName] = useState("");
@@ -195,10 +202,11 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
   // Live operator detection (same prefix logic the backend routes on).
   const provider = digits.length >= 8 ? detectProvider(digits, "CM") : null;
   const opLabel = provider === "ORANGE" ? "Orange" : provider === "MTN" ? "MTN" : null;
-  // A cash-out debits the shared Peexit PAYOUT wallet (disbursement_solde) — not a
-  // per-operator balance.
+  // Cash-out AND a rebalance both DEBIT the shared Peexit PAYOUT wallet
+  // (disbursement_solde) — a rebalance disburses to the treasury number first.
+  const debitsPayout = kind === "cashout" || kind === "transfer";
   const payoutBal = balances.find((b) => b.label.toLowerCase().includes("payout"))?.balanceXaf ?? null;
-  const overBalance = kind === "cashout" && payoutBal != null && amt > payoutBal;
+  const overBalance = debitsPayout && payoutBal != null && amt > payoutBal;
   const unknownOperator = digits.length >= 8 && !provider;
   const valid = !!provider && amt > 0 && !overBalance;
   const reset = () => { setPhone(""); setAmount(""); setName(""); setConfirming(false); };
@@ -207,12 +215,16 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
   const run = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = kind === "cashout" ? await api.momoCashout(phone, amt, name || undefined) : await api.momoCashin(phone, amt, name || undefined);
+      const r = kind === "cashout" ? await api.momoCashout(phone, amt, name || undefined)
+        : kind === "cashin" ? await api.momoCashin(phone, amt, name || undefined)
+        : await api.momoTransfer(phone, amt);
       if (r.op) onOp(r.op);
       // A payout can be accepted then rejected by the rail (op.status === "failed") →
       // show that clearly instead of "sent (failed)".
       if (r.op?.status === "failed") {
-        setMsg({ tone: "bad", text: `Cash-out to ${phone} was rejected by the rail${r.op.error ? ` — ${r.op.error}` : ""}.` });
+        setMsg({ tone: "bad", text: `The ${kind === "transfer" ? "rebalance disburse leg" : "cash-out"} to ${phone} was rejected by the rail${r.op.error ? ` — ${r.op.error}` : ""}.` });
+      } else if (kind === "transfer") {
+        setMsg({ tone: "recv", text: `Rebalance started: ${amt} XAF disbursed to ${phone}. Once it lands, the same amount is collected back into the collection wallet — approve on the treasury phone.` });
       } else {
         setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${amt} XAF → ${phone}.` : `Cash-in requested: ${amt} XAF ← ${phone}. The payer approves on their phone.` });
       }
@@ -227,22 +239,33 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
 
   return (
     <div className="card" style={{ padding: 18 }}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-        {(["cashout", "cashin"] as const).map((k) => (
-          <button key={k} type="button" onClick={() => { setKind(k); setConfirming(false); }}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {(["cashout", "cashin", "transfer"] as const).map((k) => (
+          <button key={k} type="button" onClick={() => { setKind(k); setConfirming(false); setMsg(null); }}
             style={{ cursor: "pointer", padding: "7px 14px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 13, fontWeight: 650, fontFamily: "inherit",
               background: kind === k ? "var(--accent)" : "transparent", color: kind === k ? "var(--accent-ink)" : "var(--ink-2)" }}>
-            {k === "cashout" ? "Cash-out (send)" : "Cash-in (collect)"}
+            {MODE_LABEL[k]}
           </button>
         ))}
       </div>
+
+      {kind === "transfer" && (
+        <p style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, margin: "0 0 12px" }}>
+          Moves balance <b>Payout → Collection</b> by disbursing to a treasury number you control, then collecting it back.
+          Peexit has no direct wallet transfer, so real money round-trips through the phone — <b>per-leg fees apply</b>. The reverse
+          (collection → payout) isn't possible via the API; only Peexit's settlement credits the payout wallet.
+        </p>
+      )}
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input value={phone} onChange={(e) => { setPhone(e.target.value.replace(/[^0-9]/g, "")); setConfirming(false); }}
-          inputMode="tel" placeholder="MTN / Orange number" className="num" style={{ ...inputStyle, width: 180 }} />
+          inputMode="tel" placeholder={kind === "transfer" ? "Treasury number (you control)" : "MTN / Orange number"} className="num" style={{ ...inputStyle, width: kind === "transfer" ? 230 : 180 }} />
         <input value={amount} onChange={(e) => { setAmount(e.target.value.replace(/[^0-9]/g, "")); setConfirming(false); }}
           inputMode="numeric" placeholder="Amount (XAF)" className="num" style={{ ...inputStyle, width: 130 }} />
-        <input value={name} onChange={(e) => { setName(e.target.value); setConfirming(false); }}
-          placeholder={kind === "cashin" ? "Payer name (optional)" : "Recipient name (optional)"} style={{ ...inputStyle, width: 200 }} />
+        {kind !== "transfer" && (
+          <input value={name} onChange={(e) => { setName(e.target.value); setConfirming(false); }}
+            placeholder={kind === "cashin" ? "Payer name (optional)" : "Recipient name (optional)"} style={{ ...inputStyle, width: 200 }} />
+        )}
       </div>
 
       {/* live routing / balance feedback */}
@@ -250,7 +273,7 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
         {provider && (
           <span style={{ color: "var(--ink-3)" }}>
             {opLabel} · via Peexit
-            {kind === "cashout" && payoutBal != null && <> · payout wallet <span className="num" style={{ color: payoutBal <= 0 || overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(payoutBal)} XAF</span></>}
+            {debitsPayout && payoutBal != null && <> · payout wallet <span className="num" style={{ color: payoutBal <= 0 || overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(payoutBal)} XAF</span></>}
           </span>
         )}
         {unknownOperator && <span style={{ color: "var(--warn)" }}>Unrecognized operator — use an MTN (67x / 650–4 / 680–4) or Orange (69x / 655–9 / 685–9) number.</span>}
@@ -260,14 +283,16 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
       <div style={{ marginTop: 8 }}>
         {!confirming ? (
           <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={() => setConfirming(true)} style={{ padding: "9px 16px" }}>
-            {kind === "cashout" ? "Cash-out…" : "Cash-in…"}
+            {kind === "cashout" ? "Cash-out…" : kind === "cashin" ? "Cash-in…" : "Rebalance…"}
           </button>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
               {kind === "cashout"
                 ? <>Send <b className="num">{amt} XAF</b> to <span className="num">{phone}</span> ({opLabel})? This moves real money.</>
-                : <>Request <b className="num">{amt} XAF</b> from <span className="num">{phone}</span> ({opLabel})? They'll be prompted to approve on their phone.</>}
+                : kind === "cashin"
+                ? <>Request <b className="num">{amt} XAF</b> from <span className="num">{phone}</span> ({opLabel})? They'll be prompted to approve on their phone.</>
+                : <>Rebalance <b className="num">{amt} XAF</b> Payout → Collection via <span className="num">{phone}</span> ({opLabel})? This disburses to the treasury number, then collects it back — real money moves and per-leg fees apply.</>}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={run} style={{ padding: "9px 16px" }}>{busy ? "Working…" : "Confirm"}</button>

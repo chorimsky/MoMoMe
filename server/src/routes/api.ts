@@ -153,7 +153,7 @@ api.use("/admin", (req, res, next) => {
   }
   // Manual Mobile Money cash-in / cash-out moves real funds — same fund-movement
   // gate as payment retry/refund (Ops Manager + Super Admin).
-  if (/^\/momo\/(cashout|cashin)$/.test(sub) && !canMovePaymentFunds(role)) {
+  if (/^\/momo\/(cashout|cashin|transfer)$/.test(sub) && !canMovePaymentFunds(role)) {
     return res.status(403).json({ error: "forbidden", message: "Your role can't move Mobile Money funds." });
   }
   next();
@@ -824,6 +824,18 @@ api.post("/admin/momo/cashin", async (req, res) => {
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
   const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
   const r = await momoOps.cashin(phone, cc as CountryCode, amount, by, typeof name === "string" ? name.trim().slice(0, 60) : undefined);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+// Rebalance the Peexit Payout wallet → Collection wallet through a controlled
+// treasury number (disburse then collect). Same fund-movement gate as cash-out.
+api.post("/admin/momo/transfer", async (req, res) => {
+  const { phone, amount } = (req.body ?? {}) as { phone?: string; amount?: number };
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid treasury Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.transferToCollection(phone, amount, by);
   if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
   res.json({ ok: true, op: r.op });
 });

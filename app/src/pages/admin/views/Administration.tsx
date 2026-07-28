@@ -32,6 +32,10 @@ function UserManagement() {
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState("");
   const [rowMsg, setRowMsg] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+  // Staged, confirm-before-apply for the two privileged/irreversible actions:
+  // a role change (privilege escalation) and account deletion.
+  const [pendingRole, setPendingRole] = useState<{ id: string; role: AdminRole } | null>(null);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const load = () => api.adminUsers().then((r) => setUsers(r.users)).catch(() => setErr("Couldn't load accounts."));
   useEffect(() => { load(); }, []);
@@ -50,8 +54,8 @@ function UserManagement() {
   };
 
   const changeRole = async (u: AdminUserView, role: AdminRole) => {
-    setRowMsg(null);
-    try { await api.adminUpdateUser(u.id, { role }); await load(); }
+    setRowMsg(null); setPendingRole(null);
+    try { await api.adminUpdateUser(u.id, { role }); await load(); setRowMsg({ id: u.id, ok: true, text: `✓ Role updated to ${role}.` }); }
     catch (e) { setRowMsg({ id: u.id, ok: false, text: e instanceof Error ? e.message : "Couldn't update role." }); }
   };
 
@@ -65,7 +69,7 @@ function UserManagement() {
   };
 
   const removeUser = async (u: AdminUserView) => {
-    setRowMsg(null);
+    setRowMsg(null); setConfirmDel(null);
     try { await api.adminDeleteUser(u.id); await load(); }
     catch (e) { setRowMsg({ id: u.id, ok: false, text: e instanceof Error ? e.message : "Couldn't delete." }); }
   };
@@ -115,7 +119,8 @@ function UserManagement() {
                     </div>
                   </div>
                   <div style={{ flex: "0 0 auto", minWidth: 150 }}>
-                    <select value={u.role} disabled={lockLastSuper} onChange={(e) => changeRole(u, e.target.value as AdminRole)}
+                    <select value={pendingRole?.id === u.id ? pendingRole.role : u.role} disabled={lockLastSuper}
+                      onChange={(e) => { setRowMsg(null); setConfirmDel(null); setPendingRole({ id: u.id, role: e.target.value as AdminRole }); }}
                       aria-label={`Role for ${u.username}`} title={lockLastSuper ? "The last Super Admin's role can't change." : ROLE_ACCESS_LABEL[u.role]}
                       style={{ ...inp, cursor: lockLastSuper ? "not-allowed" : "pointer", width: "100%", opacity: lockLastSuper ? 0.6 : 1 }}>
                       {ADMIN_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -130,12 +135,28 @@ function UserManagement() {
                       <button type="button" className="btn btn-ghost" disabled={lockLastSuper}
                         title={lockLastSuper ? "Can't delete the last Super Admin." : "Delete account"}
                         style={{ fontSize: 12, padding: "7px 11px", color: lockLastSuper ? "var(--ink-3)" : "var(--bad)", opacity: lockLastSuper ? 0.5 : 1 }}
-                        onClick={() => removeUser(u)}>
+                        onClick={() => { setRowMsg(null); setPendingRole(null); setConfirmDel(u.id); }}>
                         Delete
                       </button>
                     )}
                   </div>
                 </div>
+                {/* Confirm a staged role change before it touches permissions. */}
+                {pendingRole?.id === u.id && pendingRole.role !== u.role && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>Change <strong>{u.username}</strong> to <strong>{pendingRole.role}</strong>?</span>
+                    <button type="button" className="btn btn-primary" style={{ fontSize: 12.5, padding: "6px 13px" }} onClick={() => changeRole(u, pendingRole.role)}>Confirm</button>
+                    <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 11px" }} onClick={() => setPendingRole(null)}>Cancel</button>
+                  </div>
+                )}
+                {/* Confirm irreversible account deletion. */}
+                {confirmDel === u.id && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "var(--bad)", fontWeight: 600 }}>Delete <strong>{u.username}</strong>? This can't be undone.</span>
+                    <button type="button" className="btn btn-primary" style={{ fontSize: 12.5, padding: "6px 13px", background: "var(--bad)", borderColor: "var(--bad)" }} onClick={() => removeUser(u)}>Delete account</button>
+                    <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 11px" }} onClick={() => setConfirmDel(null)}>Cancel</button>
+                  </div>
+                )}
                 {resetFor === u.id && (
                   <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
                     <input value={resetPw} onChange={(e) => setResetPw(e.target.value)} type="password" placeholder="new password (min 8)" aria-label={`New password for ${u.username}`} style={{ ...inp, flex: "1 1 200px" }} />

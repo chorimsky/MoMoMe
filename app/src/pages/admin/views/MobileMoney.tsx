@@ -1,6 +1,6 @@
 /* ============================================================
-   Mobile Money — PawaPay providers, routing and configuration.
-   Data: api.adminMobileMoney().
+   Mobile Money — providers, routing and configuration for the active payout rail.
+   Data: api.adminMobileMoney() (aggregator name derived from live config).
    ============================================================ */
 import { useEffect, useState } from "react";
 import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance } from "@shared/types.js";
@@ -28,11 +28,11 @@ export function MobileMoneyView() {
   }, []);
 
   if (err) return <Failed t="Mobile Money" msg={err} />;
-  if (!data || !routing) return <Loading t="Mobile Money" s="PawaPay providers, routing and configuration." />;
+  if (!data || !routing) return <Loading t="Mobile Money" s="Providers, routing and configuration." />;
 
   return (
     <div>
-      <SectionTitle t="Mobile Money" s="PawaPay providers, routing and configuration." />
+      <SectionTitle t="Mobile Money" s="Providers, routing and configuration." />
 
       <Grid cols={3} gap={16} style={{ marginBottom: 16 }}>
         {data.providers.map((p) => (
@@ -48,7 +48,7 @@ export function MobileMoneyView() {
       </Grid>
 
       <Grid cols={2} gap={16}>
-        <Card title="PawaPay configuration" sub="Managed via environment variables in production.">
+        <Card title={`${data.aggregator} configuration`} sub="Active payout rail · managed via environment variables in production.">
           <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
             <Field label="Environment" value={data.environment} />
             <Field label="Payout confirmation" value={data.payoutConfirmation} />

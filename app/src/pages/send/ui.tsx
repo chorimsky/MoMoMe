@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useI18n } from "../../lib/i18n.js";
 
 /** Live countdown to an ISO expiry. Ticks every second. */
 export function useExpiry(iso: string): { secondsLeft: number; expired: boolean; label: string } {
@@ -22,7 +23,8 @@ export function Label({ children }: { children: ReactNode }) {
 }
 
 export function Stepper({ i }: { i: number }) {
-  const steps = ["Details", "Method", "Review", "Pay"];
+  const { t } = useI18n();
+  const steps = [t("step_details"), t("step_method"), t("step_review"), t("step_pay")];
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
       {steps.map((s, n) => (

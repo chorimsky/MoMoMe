@@ -14,12 +14,15 @@ export interface ReceiptStrings {
   recipient: string; mobileNumber: string; amountDelivered: string; fee: string; totalPaid: string;
   paidWith: string; amountSent: string; valueUsd: string;
   reference: string; date: string; status: string; completed: string; footer: string;
+  /** BCP-47 locale for the date on the receipt — matches the app language so the
+   *  downloaded/shared receipt reads the same as the on-screen one. Defaults en-GB. */
+  locale?: string;
 }
 
 const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fullPhone = (p: Payment) => `${COUNTRIES[p.recipient.country].dial} ${p.recipient.phone}`;
-const whenStr = (p: Payment) =>
-  new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const whenStr = (p: Payment, locale = "en-GB") =>
+  new Date(p.createdAt).toLocaleString(locale, { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 /** What the sender actually paid: the rail and the crypto amount. Exported so the
  *  on-screen receipt and the downloadable PNG stay identical. */
@@ -46,7 +49,7 @@ export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true)
       `${s.valueUsd}: ${usdStr(p)}`,
     ] : []),
     `${s.reference}: ${p.ref}`,
-    `${s.date}: ${whenStr(p)}`,
+    `${s.date}: ${whenStr(p, s.locale)}`,
     `${s.status}: ${s.completed}`,
   ].join("\n");
 }
@@ -72,7 +75,7 @@ function buildSvg(p: Payment, s: ReceiptStrings, includeCrypto = true): { svg: s
     [s.totalPaid, `${fmt(p.xaf + p.feeXaf)} XAF`],
     ...cryptoRows,
     [s.reference, p.ref],
-    [s.date, whenStr(p)],
+    [s.date, whenStr(p, s.locale)],
   ];
   const cx = W / 2;
   // Brand wordmark geometry: a green lightning bolt centred (nudged right so the

@@ -1008,13 +1008,19 @@ api.get("/admin/delivery", (_req, res) => {
   res.json(snapshot);
 });
 
-/* ---------- mobile money (PawaPay) ---------- */
+/* ---------- mobile money ---------- */
 api.get("/admin/mobile-money", (_req, res) => {
   const all = store.listPayments();
+  // Show the ACTIVE payout rail's config, not a hardcoded one. Peexit serves both
+  // MTN and Orange today (PawaPay is out of rotation); fall back to PawaPay only if
+  // it's the sole configured rail, else default to the Peexit view.
+  const activeRail: "peexit" | "pawapay" = peexitConfigured() || !pawapayConfigured() ? "peexit" : "pawapay";
+  const railKey = activeRail === "peexit" ? config.peexit.apiKey : config.pawapay.apiKey;
   const info: import("../../../shared/types.js").MobileMoneyInfo = {
+    aggregator: activeRail === "peexit" ? "Peexit" : "PawaPay",
     environment: isLive() ? "Production" : "Sandbox",
-    webhookUrl: `${config.publicUrl}/webhooks/pawapay`,
-    apiKeyMasked: config.pawapay.apiKey ? `pawapay_••••${config.pawapay.apiKey.slice(-4)}` : "pawapay_sandbox_••••",
+    webhookUrl: `${config.publicUrl}/webhooks/${activeRail}`,
+    apiKeyMasked: railKey ? `${activeRail}_••••${railKey.slice(-4)}` : `${activeRail}_sandbox_••••`,
     payoutConfirmation: "Async callback + reconciliation",
     providers: (() => {
       // Status from real aggregator health: a provider is Online when an

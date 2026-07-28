@@ -10,6 +10,7 @@ import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
 import { api } from "../api/client.js";
 import { useTheme } from "../lib/theme.js";
+import { useI18n } from "../lib/i18n.js";
 
 /* ---------- brand logo (uploaded via admin → shown app-wide) ----------
    One shared source of truth: fetched once from /config, kept live via the
@@ -307,8 +308,9 @@ export function Flag({ country, size = 18 }: { country: CountryCode; size?: numb
 
 /* ---------- copy field ---------- */
 export function CopyField({ value, label, mono = true }: { value: string; label?: string; mono?: boolean }) {
+  const { t } = useI18n();
   const [done, setDone] = useState(false);
-  const copy = () => {
+  const doCopy = () => {
     try {
       navigator.clipboard.writeText(value);
     } catch {
@@ -317,13 +319,14 @@ export function CopyField({ value, label, mono = true }: { value: string; label?
     setDone(true);
     setTimeout(() => setDone(false), 1400);
   };
+  const copyLabel = t("copy");
   return (
-    <button type="button" onClick={copy} title="Copy" aria-label={label ? `Copy ${label}` : "Copy"} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", font: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
+    <button type="button" onClick={doCopy} title={copyLabel} aria-label={label ? `${copyLabel} ${label}` : copyLabel} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", font: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{ minWidth: 0, flex: 1 }}>
         {label && <span style={{ display: "block", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--ink-3)", fontWeight: 700, marginBottom: 2 }}>{label}</span>}
         <span className={mono ? "mono" : ""} style={{ fontSize: 12.5, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{value}</span>
       </span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: done ? "var(--recv)" : "var(--accent)", flex: "none" }}>{done ? "Copied" : "Copy"}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: done ? "var(--recv)" : "var(--accent)", flex: "none" }}>{done ? t("copied") : copyLabel}</span>
     </button>
   );
 }

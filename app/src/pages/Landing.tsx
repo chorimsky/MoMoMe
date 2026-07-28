@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import { useNarrow } from "../lib/useNarrow.js";
+import { useI18n } from "../lib/i18n.js";
 import "./Landing.css";
 
 /* Simple line glyphs (rounded, friendly) for benefit + step tiles. */
@@ -78,12 +79,14 @@ function Icon({ n, size = 28 }: { n: string; size?: number }) {
   return <svg className={`ico ico-${n}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{I[n] ?? I.bolt}</svg>;
 }
 
+// Benefit tiles / steps carry i18n KEYS (resolved at render); network chips carry
+// brand names (not translated).
 const WHY = [
-  { icon: "bolt", t: "Fast", d: "Delivered in seconds, not days." },
-  { icon: "smile", t: "Simple", d: "Just a number and an amount." },
-  { icon: "shield", t: "Trusted", d: "Name-checked before every payment." },
-  { icon: "globe", t: "Available", d: "Send from anywhere, anytime." },
-  { icon: "tag", t: "Affordable", d: "One small upfront fee. No surprises." },
+  { icon: "bolt", t: "lp_why_fast_t", d: "lp_why_fast_d" },
+  { icon: "smile", t: "lp_why_simple_t", d: "lp_why_simple_d" },
+  { icon: "shield", t: "lp_why_trusted_t", d: "lp_why_trusted_d" },
+  { icon: "globe", t: "lp_why_available_t", d: "lp_why_available_d" },
+  { icon: "tag", t: "lp_why_affordable_t", d: "lp_why_affordable_d" },
 ];
 
 const NETS = [
@@ -94,38 +97,43 @@ const NETS = [
 ];
 
 const STEPS = [
-  { ic: "number", n: "01", t: "Enter number & amount", d: "Add the recipient's MTN or Orange Money number and how much you'd like to pay." },
-  { ic: "shield", n: "02", t: "Confirm & pay", d: "We check the recipient's name and show exactly what arrives — then you confirm." },
-  { ic: "send", n: "03", t: "Money arrives", d: "The recipient is credited on their Mobile Money account in seconds, with a receipt to match." },
+  { ic: "number", n: "01", t: "lp_step1_t", d: "lp_step1_d" },
+  { ic: "shield", n: "02", t: "lp_step2_t", d: "lp_step2_d" },
+  { ic: "send", n: "03", t: "lp_step3_t", d: "lp_step3_d" },
 ];
 
 export function Landing() {
   const sm = useNarrow();
+  const { t, lang, setLang } = useI18n();
   return (
     <div style={{ background: "var(--paper)", minHeight: "100vh" }}>
       <div className="lp">
         <header className="lp-top">
           <Logo size={sm ? 28 : 36} />
           <div className="lp-actions">
-            <a className="lp-link" href="#how">How it works</a>
+            <a className="lp-link" href="#how">{t("lp_how")}</a>
+            <button type="button" className="lp-link" onClick={() => setLang(lang === "en" ? "fr" : "en")}
+              aria-label={t("lp_switch_lang")} style={{ cursor: "pointer", border: "none", background: "none", font: "inherit", fontWeight: 700 }}>
+              {lang === "en" ? "FR" : "EN"}
+            </button>
             <ThemeToggle size={38} />
-            <Link className="btn btn-primary cta-sm" to="/send">Pay<span className="cta-rest"> Mobile Money</span></Link>
+            <Link className="btn btn-primary cta-sm" to="/send">{t("lp_cta_pay")}<span className="cta-rest"> Mobile Money</span></Link>
           </div>
         </header>
 
         <section className="hero">
           <div className="hero-text">
-            <div className="eyebrow">⚡ Instant Mobile Money</div>
-            <h1>Send money to any Mobile Money number.</h1>
-            <p className="lede">Pay MTN &amp; Orange Money accounts directly — delivered in seconds, from anywhere in the world.</p>
+            <div className="eyebrow">{t("lp_eyebrow")}</div>
+            <h1>{t("lp_h1")}</h1>
+            <p className="lede">{t("lp_lede")}</p>
             <div className="cta-row">
-              <Link className="btn btn-primary btn-lg" to="/send">Send Mobile Money</Link>
-              <a className="btn btn-ghost btn-lg" href="#how">How it works</a>
+              <Link className="btn btn-primary btn-lg" to="/send">{t("lp_cta_send")}</Link>
+              <a className="btn btn-ghost btn-lg" href="#how">{t("lp_how")}</a>
             </div>
             <div className="trust">
-              <span><span className="tdot" /> Delivered in seconds</span>
-              <span><span className="tdot" /> MTN &amp; Orange Money</span>
-              <span><span className="tdot" /> Secure &amp; private</span>
+              <span><span className="tdot" /> {t("lp_trust_1")}</span>
+              <span><span className="tdot" /> {t("lp_trust_2")}</span>
+              <span><span className="tdot" /> {t("lp_trust_3")}</span>
             </div>
           </div>
 
@@ -134,13 +142,13 @@ export function Landing() {
             <Momo size={sm ? 112 : 144} className="hero-momo" />
             <div className="hero-card" aria-hidden="true">
               <div className="pc-check">✓</div>
-              <div className="pc-title">Payment delivered</div>
-              <div className="pc-amt">50,000 <span>XAF</span></div>
-              <div className="pc-sub">delivered to MTN Mobile Money</div>
+              <div className="pc-title">{t("lp_pc_title")}</div>
+              <div className="pc-amt">50 000 <span>XAF</span></div>
+              <div className="pc-sub">{t("lp_pc_sub")}</div>
               <div className="pc-rows">
-                <div className="r"><span>Recipient</span><span>NANA JEAN PAUL</span></div>
-                <div className="r"><span>Reference</span><span>MMM-2026-000123</span></div>
-                <div className="r"><span>Arrival</span><span style={{ color: "var(--recv)" }}>Instant</span></div>
+                <div className="r"><span>{t("lp_pc_recipient")}</span><span>NANA JEAN PAUL</span></div>
+                <div className="r"><span>{t("lp_pc_reference")}</span><span>MMM-2026-000123</span></div>
+                <div className="r"><span>{t("lp_pc_arrival")}</span><span style={{ color: "var(--recv)" }}>{t("lp_pc_instant")}</span></div>
               </div>
             </div>
           </div>
@@ -148,39 +156,39 @@ export function Landing() {
 
         <section id="how" className="how">
           <div className="sec-head">
-            <h2>How it works</h2>
+            <h2>{t("lp_how")}</h2>
             <Momo size={44} className="sec-momo" />
           </div>
-          <p className="how-sub">Three simple steps. No account to manage, no waiting.</p>
+          <p className="how-sub">{t("lp_how_sub")}</p>
           <div className="steps">
             {STEPS.map((s) => (
               <div className="step" key={s.n}>
                 <div className="step-ic"><Icon n={s.ic} /></div>
                 <div className="n">{s.n}</div>
-                <h3>{s.t}</h3>
-                <p>{s.d}</p>
+                <h3>{t(s.t)}</h3>
+                <p>{t(s.d)}</p>
               </div>
             ))}
           </div>
         </section>
 
         <section className="why">
-          <h2>Why MomoMe</h2>
-          <p className="how-sub">Built for speed, clarity and trust.</p>
+          <h2>{t("lp_why_title")}</h2>
+          <p className="how-sub">{t("lp_why_sub")}</p>
           <div className="why-grid">
             {WHY.map((b) => (
               <div className="why-card" key={b.t}>
                 <div className="why-ic"><Icon n={b.icon} /></div>
-                <h3>{b.t}</h3>
-                <p>{b.d}</p>
+                <h3>{t(b.t)}</h3>
+                <p>{t(b.d)}</p>
               </div>
             ))}
           </div>
         </section>
 
         <section className="nets">
-          <h2>Pay however suits you</h2>
-          <p className="how-sub">Fund your payment with Bitcoin, Lightning or USDT — your recipient only ever receives Mobile Money.</p>
+          <h2>{t("lp_nets_title")}</h2>
+          <p className="how-sub">{t("lp_nets_sub")}</p>
           <div className="nets-row">
             {NETS.map((n) => (
               <div className="net-chip" key={n.t}>
@@ -204,13 +212,13 @@ export function Landing() {
           <a href="/fr/" lang="fr">Français</a>
         </nav>
         <footer className="lp-foot">
-          <span className="c">© 2026 MoMo›Me · Secure Mobile Money payments</span>
+          <span className="c">{t("lp_foot_copy")}</span>
           <nav className="lp-foot-links" aria-label="Footer">
-            <Link to="/claim">Claim your account</Link>
-            <Link to="/contact">Help</Link>
-            <Link to="/terms">Terms</Link>
-            <Link to="/privacy">Privacy</Link>
-            <Link to="/admin">For partners →</Link>
+            <Link to="/claim">{t("lp_foot_claim")}</Link>
+            <Link to="/contact">{t("lp_foot_help")}</Link>
+            <Link to="/terms">{t("lp_foot_terms")}</Link>
+            <Link to="/privacy">{t("lp_foot_privacy")}</Link>
+            <Link to="/admin">{t("lp_foot_partners")}</Link>
           </nav>
         </footer>
       </div>

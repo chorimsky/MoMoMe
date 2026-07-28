@@ -475,12 +475,15 @@ export interface DeliverySnapshot {
   providers: Array<{ id: ProviderId; successRatePct: number; avgDeliverySec: number; failures: number; pending: number; volumeXaf: number }>;
 }
 
-/* ---------- mobile money (PawaPay) ---------- */
+/* ---------- mobile money ---------- */
 export interface MobileMoneyInfo {
+  /** Human name of the active payout aggregator (e.g. "Peexit") — the rail whose
+   *  environment/webhook/key are shown below. Derived from live config, not hardcoded. */
+  aggregator: string;
   environment: string;
   webhookUrl: string;
   apiKeyMasked: string;
-  /** Payouts are confirmed asynchronously by the PawaPay callback (+ reconciliation backstop). */
+  /** Payouts are confirmed asynchronously by the rail's callback (+ reconciliation backstop). */
   payoutConfirmation: string;
   providers: Array<{ id: ProviderId; status: "Online" | "Offline" | "Maintenance"; successRatePct: number; maxPayoutXaf: number }>;
   routing: Array<{ country: CountryCode; providers: ProviderId[] }>;

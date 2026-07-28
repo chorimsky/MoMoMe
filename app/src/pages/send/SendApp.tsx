@@ -141,7 +141,7 @@ export function SendApp() {
           <Link to="/" style={{ textDecoration: "none" }}><Logo size={sm ? 26 : 34} /></Link>
           <nav className="nav-links" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <ThemeToggle size={34} />
-            <button onClick={() => setLang(lang === "en" ? "fr" : "en")} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
+            <button onClick={() => setLang(lang === "en" ? "fr" : "en")} aria-label={lang === "en" ? "Passer en français" : "Switch to English"} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
               {lang === "en" ? "FR" : "EN"}
             </button>
             <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>{t("nav_home")}</Link>

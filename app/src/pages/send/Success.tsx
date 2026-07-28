@@ -30,6 +30,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     paidWith: t("receipt_paid_with"), amountSent: t("receipt_amount_sent"), valueUsd: t("receipt_value_usd"),
     reference: t("reference"), date: t("date"),
     status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
+    locale: lang === "fr" ? "fr-FR" : "en-GB",
   };
   const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo, showCrypto); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
   const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo, showCrypto); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };

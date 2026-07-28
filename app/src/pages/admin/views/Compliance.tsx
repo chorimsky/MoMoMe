@@ -40,7 +40,7 @@ const OBLIGATIONS: Array<{ area: string; basis: string; status: OblStatus; note:
   { area: "Structuring / smurfing detection", basis: "FATF/GABAC typologies", status: "built", note: "Rolling-window aggregation per number opens a high-severity case." },
   { area: "Sanctions / terrorism-financing screening", basis: "Règlement N°04/24 (UNSC 1267/1373/1988/2231…)", status: "partial", note: "Watchlist screening + case built; wire a daily UNSC list feed and a payout-halting freeze state." },
   { area: "10-year record retention", basis: "CEMAC AML standard", status: "built", note: "Retention configured; tamper-evident hash-chained event log. Add the KYC-document archive." },
-  { area: "Tamper-evident audit trail", basis: "Evidentiary integrity", status: "built", note: "SHA-256 chained events; integrity verified on every load." },
+  { area: "Tamper-evident audit trail", basis: "Evidentiary integrity", status: "built", note: "HMAC-keyed hash chain + signed high-water-mark anchor — detects insider edits, re-ordering and truncation; verified on every load." },
   { area: "Compliance officer & governance", basis: "COBAC R-2023/01 (responsable conformité)", status: "partial", note: "Designate the officer in Settings; board-approved policy, training and independent audit are organizational." },
   { area: "Repatriation-proof payout gate", basis: "★ BEAC Instruction N°002/GR/2026 (inbound remittance pre-financing)", status: "gap", note: "Your exact model: no wallet credit is meant to precede proof of FX repatriation (SWIFT). Highest legal exposure — build the evidence gate." },
   { area: "Monthly BEAC declarations (Annexes I–III, by the 5th)", basis: "BEAC Instruction N°002/GR/2026", status: "partial", note: "CSV export exists; the Annex I–III format and submission are still manual." },
@@ -83,7 +83,9 @@ export function ComplianceView() {
             <span style={{ width: 12, height: 12, borderRadius: "50%", background: m.integrityOk ? "var(--recv)" : "var(--bad)", flex: "none", boxShadow: m.integrityOk ? "0 0 0 4px color-mix(in oklab, var(--recv) 20%, transparent)" : "0 0 0 4px color-mix(in oklab, var(--bad) 22%, transparent)" }} />
             <div>
               <div style={{ fontWeight: 750, fontSize: 14 }}>{m.integrityOk ? "Audit chain intact" : "⚠ Audit chain BROKEN"}</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{fmt(m.eventCount)} tamper-evident events · SHA-256 chained · {data.thresholds.retentionYears}-yr retention</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+                {fmt(m.eventCount)} events · {m.chainKeyed ? "HMAC-keyed + anchored" : <span style={{ color: "var(--warn)" }}>hash-only — set COMPLIANCE_HMAC_KEY</span>} · {data.thresholds.retentionYears}-yr retention
+              </div>
             </div>
           </div>
           <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
@@ -126,7 +128,7 @@ export function ComplianceView() {
 
       {/* case queue */}
       <Card title="Case queue" sub={`Detection: CTR ≥ ${fmt(data.thresholds.ctrXaf)} · CDD ≥ ${fmt(data.thresholds.cddXaf)} · structuring ≥ ${fmt(data.thresholds.structuringXaf)}/${data.thresholds.structuringWindowH}h`} pad={false} style={{ marginBottom: 16 }}
-        action={<button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("cases")}>↓ Export</button>}>
+        action={canFile ? <button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("cases")}>↓ Export</button> : undefined}>
         {data.cases.length === 0 && <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>No compliance cases. Detection runs continuously.</div>}
         {data.cases.map((c) => (
           <CaseRow key={c.id} c={c} canFile={canFile} onDone={load} />
@@ -136,7 +138,7 @@ export function ComplianceView() {
       <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
         {/* STR register */}
         <Card title="STR register" sub="Filed suspicious-transaction reports → ANIF" pad={false}
-          action={<button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("strs")}>↓ Export</button>}>
+          action={canFile ? <button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("strs")}>↓ Export</button> : undefined}>
           {data.strs.length === 0 && <div style={{ padding: "16px 20px", fontSize: 12.5, color: "var(--ink-3)" }}>No STRs filed.</div>}
           {data.strs.map((r, i) => (
             <div key={r.id} style={{ padding: "11px 16px", borderTop: i ? "1px solid var(--line-2)" : "none" }}>
@@ -152,7 +154,7 @@ export function ComplianceView() {
 
         {/* CTR register */}
         <Card title="CTR register" sub={`Transactions ≥ ${fmt(data.thresholds.ctrXaf)} XAF`} pad={false}
-          action={<button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("ctr")}>↓ Export</button>}>
+          action={canFile ? <button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("ctr")}>↓ Export</button> : undefined}>
           {data.ctr.length === 0 && <div style={{ padding: "16px 20px", fontSize: 12.5, color: "var(--ink-3)" }}>No threshold transactions.</div>}
           {data.ctr.map((r, i) => (
             <div key={r.ref + i} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "11px 16px", borderTop: i ? "1px solid var(--line-2)" : "none", fontSize: 12.5 }}>
@@ -168,7 +170,7 @@ export function ComplianceView() {
       <Grid cols={2} gap={16}>
         {/* tamper-evident event log */}
         <Card title="Audit chain" sub="Append-only, hash-chained compliance events" pad={false}
-          action={<button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("events")}>↓ Export</button>}>
+          action={canFile ? <button type="button" className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => exportCsv("events")}>↓ Export</button> : undefined}>
           {data.events.length === 0 && <div style={{ padding: "16px 20px", fontSize: 12.5, color: "var(--ink-3)" }}>No events yet.</div>}
           <div style={{ maxHeight: 360, overflowY: "auto" }}>
             {data.events.map((e) => (

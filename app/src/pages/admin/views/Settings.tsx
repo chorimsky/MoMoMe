@@ -38,6 +38,8 @@ export function SettingsView() {
   const [company, setCompany] = useState<AdminSettings["company"] | null>(null);
   const [channels, setChannels] = useState<AdminSettings["channels"] | null>(null);
   const [ops, setOps] = useState<AdminSettings["ops"] | null>(null);
+  const [compliance, setCompliance] = useState<AdminSettings["compliance"] | null>(null);
+  const [watchlistText, setWatchlistText] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -62,7 +64,8 @@ export function SettingsView() {
     api.adminSettings()
       .then(async (s) => {
         if (!alive) return;
-        setCompany(s.company); setChannels(s.channels); setOps(s.ops);
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setCompliance(s.compliance);
+        setWatchlistText((s.compliance.sanctionsList ?? []).join("\n"));
         setLogoRaw(s.company.logo ?? null);
         // A logo on a solid background shows as a box in dark mode; a logo with
         // lots of empty padding renders too small. Offer a cleaned-up version
@@ -92,7 +95,7 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops) return <Loading t="Settings" s="General configuration and operational controls." />;
+  if (!company || !channels || !ops || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
 
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
 
@@ -124,6 +127,7 @@ export function SettingsView() {
   };
   const toggle = (k: keyof AdminSettings["channels"], v: boolean) => { setChannels((c) => ({ ...c!, [k]: v })); setDirty(true); };
   const editOps = (patch: Partial<AdminSettings["ops"]>) => { setOps((o) => ({ ...o!, ...patch })); setDirty(true); };
+  const editCompliance = (patch: Partial<AdminSettings["compliance"]>) => { setCompliance((c) => ({ ...c!, ...patch })); setDirty(true); };
 
   // Validation — block save on bad input.
   const emailErr = EMAIL_RE.test(company.email) ? undefined : "Enter a valid email.";
@@ -131,14 +135,24 @@ export function SettingsView() {
   const brandErr = company.brand.trim() ? undefined : "Brand name is required.";
   const thresholdErr = Number.isFinite(ops.payoutApprovalXaf) && ops.payoutApprovalXaf >= MIN_XAF && ops.payoutApprovalXaf <= MAX_XAF
     ? undefined : `Must be ${fmt(MIN_XAF)}–${fmt(MAX_XAF)} XAF.`;
-  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr);
+  const posXaf = (n: number) => Number.isFinite(n) && n > 0 && n <= 1_000_000_000;
+  const ctrErr = posXaf(compliance.ctrThresholdXaf) ? undefined : "Enter a positive XAF amount.";
+  const cddErr = posXaf(compliance.cddThresholdXaf) ? undefined : "Enter a positive XAF amount.";
+  const structXafErr = posXaf(compliance.structuringXaf) ? undefined : "Enter a positive XAF amount.";
+  const structWinErr = Number.isFinite(compliance.structuringWindowH) && compliance.structuringWindowH >= 1 && compliance.structuringWindowH <= 720 ? undefined : "1–720 hours.";
+  const retentionErr = Number.isFinite(compliance.retentionYears) && compliance.retentionYears >= 1 && compliance.retentionYears <= 30 ? undefined : "1–30 years.";
+  const complianceErr = ctrErr || cddErr || structXafErr || structWinErr || retentionErr;
+  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr);
 
   const save = async () => {
     if (invalid) return;
     setSaving(true); setErr(null);
     try {
-      const next = await api.saveSettings({ company, channels, ops });
-      setCompany(next.company); setChannels(next.channels); setOps(next.ops);
+      // Newline/comma-separated watchlist → deduped array of trimmed entries.
+      const sanctionsList = Array.from(new Set(watchlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))).slice(0, 500);
+      const next = await api.saveSettings({ company, channels, ops, compliance: { ...compliance, sanctionsList } });
+      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setCompliance(next.compliance);
+      setWatchlistText((next.compliance.sanctionsList ?? []).join("\n"));
       setDirty(false); setSaved(true);
       // Let the console shell refresh its brand logo without a reload.
       try { window.dispatchEvent(new CustomEvent("mm-brand-logo", { detail: next.company.logo })); } catch { /* noop */ }
@@ -247,6 +261,34 @@ export function SettingsView() {
               Payouts at or above this amount hold for manual review before disbursing. Set it low when moving real money.
             </p>
           </div>
+        </Card>
+
+        <Card title="Compliance (AML/CFT)" sub="CEMAC / ANIF controls — thresholds, officer and sanctions watchlist.">
+          <Grid cols={1} gap={14} style={{ marginTop: 4 }}>
+            <LabeledInput label="Designated compliance officer" value={compliance.officer} onChange={(v) => editCompliance({ officer: v })} />
+            <LabeledInput label="Reporting entity" value={compliance.reportingEntity} onChange={(v) => editCompliance({ reportingEntity: v })} />
+            <Grid cols={2} gap={12}>
+              <LabeledInput label="CTR threshold" type="number" suffix="XAF" mono error={ctrErr}
+                value={String(compliance.ctrThresholdXaf)} onChange={(v) => editCompliance({ ctrThresholdXaf: Number(v) })} />
+              <LabeledInput label="CDD trigger" type="number" suffix="XAF" mono error={cddErr}
+                value={String(compliance.cddThresholdXaf)} onChange={(v) => editCompliance({ cddThresholdXaf: Number(v) })} />
+              <LabeledInput label="Structuring amount" type="number" suffix="XAF" mono error={structXafErr}
+                value={String(compliance.structuringXaf)} onChange={(v) => editCompliance({ structuringXaf: Number(v) })} />
+              <LabeledInput label="Structuring window" type="number" suffix="h" mono error={structWinErr}
+                value={String(compliance.structuringWindowH)} onChange={(v) => editCompliance({ structuringWindowH: Number(v) })} />
+              <LabeledInput label="Record retention" type="number" suffix="yr" mono error={retentionErr}
+                value={String(compliance.retentionYears)} onChange={(v) => editCompliance({ retentionYears: Number(v) })} />
+            </Grid>
+            <div>
+              <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 6 }}>Sanctions / TF watchlist</div>
+              <textarea value={watchlistText} onChange={(e) => { setWatchlistText(e.target.value); setDirty(true); }} rows={3}
+                placeholder="One name or MSISDN per line — screened against every transaction."
+                style={{ width: "100%", padding: "9px 11px", fontSize: 12.5, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)", fontFamily: "inherit", resize: "vertical" }} />
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5 }}>
+                Interim list — wire a daily UNSC consolidated-list feed for production. Confirm all thresholds against the current CEMAC/BEAC texts.
+              </div>
+            </div>
+          </Grid>
         </Card>
 
         <Card title="Security & session" sub="Admin access to this console.">

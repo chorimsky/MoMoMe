@@ -48,17 +48,40 @@ register("compliance", () => ({ cases, strs, events }),
     if (d.events) events.push(...d.events);
   });
 
-/* ---------- tamper-evident hash chain ---------- */
+/* ---------- tamper-evident hash chain ----------
+   Keyed with a server secret (COMPLIANCE_HMAC_KEY, falling back to
+   ADMIN_SESSION_SECRET) so a privileged insider who can edit the persisted DB but
+   cannot read the app secret CANNOT recompute a valid chain after altering an
+   event — the whole point of the legal guard. Without a secret it degrades to a
+   plain hash (accidental-tamper detection only) and warns once at boot.
+   A separately-persisted, MAC-signed ANCHOR (head seq + hash) additionally catches
+   TAIL-TRUNCATION: deleting the last N events leaves 1..k self-consistent, but the
+   anchor still expects k+N, and its MAC can't be forged. */
 const GENESIS = "0";
-/** Canonical, order-stable serialization of an event's signed fields. */
+const HMAC_KEY = process.env.COMPLIANCE_HMAC_KEY || process.env.ADMIN_SESSION_SECRET || "";
+if (!HMAC_KEY) console.warn("⚠️  COMPLIANCE_HMAC_KEY/ADMIN_SESSION_SECRET unset — the compliance audit chain detects accidental corruption but NOT a privileged insider. Set COMPLIANCE_HMAC_KEY in production.");
+function digest(s: string): string {
+  return HMAC_KEY ? crypto.createHmac("sha256", HMAC_KEY).update(s).digest("hex") : crypto.createHash("sha256").update(s).digest("hex");
+}
+/** Injective, order-stable serialization (JSON array — no delimiter-injection
+ *  across free-text fields, undefined ≠ ""). */
 function canonical(e: Omit<ComplianceEvent, "hash">): string {
-  return `${e.seq}|${e.at}|${e.actor}|${e.action}|${e.caseId ?? ""}|${e.ref ?? ""}|${e.detail ?? ""}|${e.prevHash}`;
+  return JSON.stringify([e.seq, e.at, e.actor, e.action, e.caseId ?? null, e.ref ?? null, e.detail ?? null, e.prevHash]);
 }
-function hashEvent(e: Omit<ComplianceEvent, "hash">): string {
-  return crypto.createHash("sha256").update(canonical(e)).digest("hex");
+function hashEvent(e: Omit<ComplianceEvent, "hash">): string { return digest(canonical(e)); }
+
+let anchor: { seq: number; hash: string; mac: string } | null = null;
+register("compliance_anchor", () => anchor, (d: typeof anchor) => { anchor = d; });
+const macAnchor = (seq: number, hash: string) => digest(`anchor|${seq}|${hash}`);
+function setAnchor(seq: number, hash: string): void {
+  anchor = { seq, hash, mac: macAnchor(seq, hash) };
+  touch("compliance_anchor");
 }
-/** Append a signed event to the chain. `at` is passed in (callers stamp time) so
- *  the module stays free of ambient clock reads at construction. */
+// Trust-on-first-use bootstrap for chains persisted before anchoring existed.
+if (!anchor && events.length) setAnchor(events.length, events[events.length - 1].hash);
+
+/** Append a signed event to the chain and advance the anchor. `at` defaults to now
+ *  for convenience; callers may pass an explicit ISO timestamp. */
 function appendEvent(at: string, actor: string, action: string, extra?: { caseId?: string; ref?: string; detail?: string }): ComplianceEvent {
   const prevHash = events.length ? events[events.length - 1].hash : GENESIS;
   const base: Omit<ComplianceEvent, "hash"> = {
@@ -67,9 +90,11 @@ function appendEvent(at: string, actor: string, action: string, extra?: { caseId
   };
   const ev: ComplianceEvent = { ...base, hash: hashEvent(base) };
   events.push(ev);
+  setAnchor(ev.seq, ev.hash);
   return ev;
 }
-/** Recompute the whole chain — true when nothing was altered or re-ordered. */
+/** Recompute the whole chain AND check it against the signed anchor — true only
+ *  when nothing was altered, re-ordered, or truncated. */
 export function verifyIntegrity(): boolean {
   let prev = GENESIS;
   for (let i = 0; i < events.length; i++) {
@@ -78,6 +103,11 @@ export function verifyIntegrity(): boolean {
     const { hash, ...rest } = e;
     if (hashEvent(rest) !== hash) return false;
     prev = hash;
+  }
+  if (anchor) {
+    if (anchor.mac !== macAnchor(anchor.seq, anchor.hash)) return false;   // anchor forged/corrupted
+    const head = events.length ? events[events.length - 1].hash : GENESIS;
+    if (events.length !== anchor.seq || head !== anchor.hash) return false; // truncated / extended
   }
   return true;
 }
@@ -97,28 +127,36 @@ function sanctionsHit(phone: string, name: string | undefined, list: string[]): 
     if (!e) continue;
     const eDigits = entry.replace(/\D/g, "");
     if (eDigits.length >= 6 && digits.endsWith(eDigits)) return entry;
-    if (name && norm(name).includes(e)) return entry;
-    if (norm(phone).includes(e)) return entry;
+    // Name match: exact, whole-token (single-word entry), or full multi-word phrase —
+    // NOT loose substring (which flagged "al" inside "Alain").
+    if (name) {
+      const n = norm(name);
+      const multi = e.includes(" ");
+      if (n === e || (multi && n.includes(e)) || (!multi && n.split(/\s+/).includes(e))) return entry;
+    }
   }
   return null;
 }
 
-const caseKeys = () => new Set(cases.map((c) => `${c.type}:${c.ref ?? c.subjectPhone}`));
+const keyOf = (type: ComplianceCaseType, subject: string) => `${type}:${subject}`;
+const caseKeys = () => new Set(cases.map((c) => keyOf(c.type, c.ref ?? c.subjectPhone)));
 const sevOf = (t: ComplianceCaseType): ComplianceSeverity =>
   t === "sanctions" || t === "structuring" ? "high" : t === "ctr_threshold" || t === "high_risk" ? "medium" : "low";
 
-/** Open a case if one of the same (type, subject) isn't already on file. Returns
- *  the case (new or existing). Records a CASE_OPENED event for new cases. */
-function openCase(at: string, type: ComplianceCaseType, subjectPhone: string, amountXaf: number, rationale: string, opts?: { ref?: string; subjectName?: string }): ComplianceCase | null {
-  const key = `${type}:${opts?.ref ?? subjectPhone}`;
-  if (caseKeys().has(key)) return cases.find((c) => `${c.type}:${c.ref ?? c.subjectPhone}` === key) ?? null;
+/** Open a case if one of the same (type, subject) isn't already on file. `keys` is
+ *  the live dedup set for THIS scan — checked and updated in O(1) so a scan over N
+ *  transactions stays linear (rebuilding the set per call would be quadratic).
+ *  Records a CASE_OPENED event for genuinely new cases. */
+function openCase(keys: Set<string>, at: string, type: ComplianceCaseType, subjectPhone: string, amountXaf: number, rationale: string, opts?: { ref?: string; subjectName?: string }): void {
+  const key = keyOf(type, opts?.ref ?? subjectPhone);
+  if (keys.has(key)) return;
+  keys.add(key);
   const c: ComplianceCase = {
     id: id("cmp"), at, type, severity: sevOf(type),
     subjectPhone, subjectName: opts?.subjectName, ref: opts?.ref, amountXaf, rationale, status: "open",
   };
   cases.unshift(c);
   appendEvent(at, "system", "CASE_OPENED", { caseId: c.id, ref: c.ref, detail: `${type} · ${rationale}` });
-  return c;
 }
 
 /** Run the rule set over the current transaction stream and open any new cases.
@@ -127,6 +165,7 @@ function openCase(at: string, type: ComplianceCaseType, subjectPhone: string, am
 export function scanCompliance(now: string = new Date().toISOString()): void {
   const s = getSettings().compliance;
   const before = cases.length;
+  const keys = caseKeys(); // live dedup set for this scan (O(1) checks → linear scan)
   const pays = listPayments();
 
   // Sanctions screening runs on EVERY counterparty (even a mere quote) — screening
@@ -134,25 +173,25 @@ export function scanCompliance(now: string = new Date().toISOString()): void {
   for (const p of pays) {
     const phone = p.recipient.phone, name = p.recipient.name;
     const hit = sanctionsHit(phone, name, s.sanctionsList);
-    if (hit) openCase(now, "sanctions", phone, p.xaf, `Counterparty matches watchlist entry "${hit}"`, { ref: p.ref, subjectName: name });
+    if (hit) openCase(keys, now, "sanctions", phone, p.xaf, `Counterparty matches watchlist entry "${hit}"`, { ref: p.ref, subjectName: name });
     if (!occurred(p)) continue;
     if (p.xaf >= s.ctrThresholdXaf) {
-      openCase(now, "ctr_threshold", phone, p.xaf, `Transaction ≥ reporting threshold (${s.ctrThresholdXaf.toLocaleString()} XAF)`, { ref: p.ref, subjectName: name });
+      openCase(keys, now, "ctr_threshold", phone, p.xaf, `Transaction ≥ reporting threshold (${s.ctrThresholdXaf.toLocaleString()} XAF)`, { ref: p.ref, subjectName: name });
     } else if (p.xaf >= s.cddThresholdXaf) {
-      openCase(now, "cdd_trigger", phone, p.xaf, `Occasional transaction ≥ CDD threshold (${s.cddThresholdXaf.toLocaleString()} XAF)`, { ref: p.ref, subjectName: name });
+      openCase(keys, now, "cdd_trigger", phone, p.xaf, `Occasional transaction ≥ CDD threshold (${s.cddThresholdXaf.toLocaleString()} XAF)`, { ref: p.ref, subjectName: name });
     }
     const v = peex.getVerification(p.ref);
     if (v?.signal === "review" || payoutBlocked(phone)) {
-      openCase(now, "high_risk", phone, p.xaf, v?.signal === "review" ? `Intelligence flagged for review (risk ${v.riskScore})` : "Low-trust / blocked merchant", { ref: p.ref, subjectName: name });
+      openCase(keys, now, "high_risk", phone, p.xaf, v?.signal === "review" ? `Intelligence flagged for review (risk ${v.riskScore})` : "Low-trust / blocked merchant", { ref: p.ref, subjectName: name });
     }
   }
 
   // Admin cash-in/out are transactions too — screen + threshold them.
   for (const o of momoOps.history()) {
     const hit = sanctionsHit(o.phone, undefined, s.sanctionsList);
-    if (hit) openCase(now, "sanctions", o.phone, o.amount, `Cash ${o.kind} counterparty matches watchlist "${hit}"`, { ref: o.id });
-    if (o.amount >= s.ctrThresholdXaf) openCase(now, "ctr_threshold", o.phone, o.amount, `Admin ${o.kind} ≥ reporting threshold`, { ref: o.id });
-    else if (o.amount >= s.cddThresholdXaf) openCase(now, "cdd_trigger", o.phone, o.amount, `Admin ${o.kind} ≥ CDD threshold`, { ref: o.id });
+    if (hit) openCase(keys, now, "sanctions", o.phone, o.amount, `Cash ${o.kind} counterparty matches watchlist "${hit}"`, { ref: o.id });
+    if (o.amount >= s.ctrThresholdXaf) openCase(keys, now, "ctr_threshold", o.phone, o.amount, `Admin ${o.kind} ≥ reporting threshold`, { ref: o.id });
+    else if (o.amount >= s.cddThresholdXaf) openCase(keys, now, "cdd_trigger", o.phone, o.amount, `Admin ${o.kind} ≥ CDD threshold`, { ref: o.id });
   }
 
   // Structuring / smurfing: many sub-threshold transactions from one number that
@@ -160,14 +199,15 @@ export function scanCompliance(now: string = new Date().toISOString()): void {
   const cutoff = Date.parse(now) - s.structuringWindowH * 3600_000;
   const byPhone = new Map<string, { sum: number; n: number; name?: string; maxSingle: number }>();
   for (const p of pays) {
-    if (!occurred(p) || Date.parse(p.createdAt) < cutoff) continue;
+    const t = Date.parse(p.createdAt);
+    if (!occurred(p) || Number.isNaN(t) || t < cutoff) continue; // a bad timestamp must not silently widen the window
     const g = byPhone.get(p.recipient.phone) ?? { sum: 0, n: 0, name: p.recipient.name, maxSingle: 0 };
     g.sum += p.xaf; g.n += 1; g.maxSingle = Math.max(g.maxSingle, p.xaf);
     byPhone.set(p.recipient.phone, g);
   }
   for (const [phone, g] of byPhone) {
     if (g.sum >= s.structuringXaf && g.n >= 3 && g.maxSingle < s.ctrThresholdXaf) {
-      openCase(now, "structuring", phone, g.sum, `${g.n} sub-threshold transactions totalling ${g.sum.toLocaleString()} XAF in ${s.structuringWindowH}h`, { subjectName: g.name });
+      openCase(keys, now, "structuring", phone, g.sum, `${g.n} sub-threshold transactions totalling ${g.sum.toLocaleString()} XAF in ${s.structuringWindowH}h`, { subjectName: g.name });
     }
   }
 
@@ -215,9 +255,10 @@ export function report(): ComplianceReport {
   const open = cases.filter((c) => c.status === "open");
   const ctr = cases.filter((c) => c.type === "ctr_threshold")
     .map((c) => ({ ref: c.ref ?? c.id, at: c.at, phone: c.subjectPhone, name: c.subjectName, amountXaf: c.amountXaf }));
-  const auditEvents = listPayments()
-    .flatMap((p) => p.events.map((e) => ({ at: e.at, ref: p.ref, event: e.state })))
-    .sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+  // Actionable (open, then escalated) cases first so none fall off the display cap
+  // and become un-dispositionable. Stable sort preserves newest-first within a rank.
+  const caseRank = (c: ComplianceCase) => (c.status === "open" ? 0 : c.status === "escalated" ? 1 : 2);
+  const orderedCases = [...cases].sort((a, b) => caseRank(a) - caseRank(b));
   return {
     officer: s.officer || null,
     reportingEntity: s.reportingEntity,
@@ -228,19 +269,22 @@ export function report(): ComplianceReport {
       highSeverityOpen: open.filter((c) => c.severity === "high").length,
       reportedCases: cases.filter((c) => c.status === "reported").length,
       strFiled: strs.length, ctrCount: ctr.length, retentionYears: s.retentionYears,
-      integrityOk: verifyIntegrity(), eventCount: events.length,
+      integrityOk: verifyIntegrity(), eventCount: events.length, chainKeyed: !!HMAC_KEY,
     },
-    cases: cases.slice(0, 100),
-    strs: strs.slice(0, 100),
-    ctr: ctr.slice(0, 100),
+    cases: orderedCases.slice(0, 200),
+    strs: strs.slice(0, 200),
+    ctr: ctr.slice(0, 200),
     events: events.slice(-100).reverse(),
   };
 }
 
 /* ---------- regulator export (CSV) ---------- */
 const csvCell = (v: unknown): string => {
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = String(v ?? "");
+  // Neutralize spreadsheet formula injection: a cell beginning with = + - @ (or a
+  // control char) can execute when the regulator opens the CSV in Excel/Sheets.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 const csv = (rows: (string | number | undefined)[][]): string => rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
 
@@ -250,8 +294,10 @@ export function exportCsv(type: "cases" | "strs" | "ctr" | "events"): string {
       ...strs.map((r) => [r.id, r.at, r.filedBy, r.reportingEntity, r.caseId, r.subjectPhone, r.subjectName, r.ref, r.amountXaf, r.reason])]);
   }
   if (type === "ctr") {
+    // Full register — NOT the display-capped report().ctr (a regulator export must
+    // include every threshold transaction).
     return csv([["reference", "at", "phone", "name", "amount_xaf"],
-      ...report().ctr.map((r) => [r.ref, r.at, r.phone, r.name, r.amountXaf])]);
+      ...cases.filter((c) => c.type === "ctr_threshold").map((c) => [c.ref ?? c.id, c.at, c.subjectPhone, c.subjectName, c.amountXaf])]);
   }
   if (type === "events") {
     return csv([["seq", "at", "actor", "action", "case_id", "ref", "detail", "hash"],

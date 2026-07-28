@@ -641,6 +641,9 @@ export interface ComplianceReport {
     strFiled: number; ctrCount: number; retentionYears: number;
     /** Hash chain verified end-to-end (tamper-evidence intact). */
     integrityOk: boolean; eventCount: number;
+    /** True when the chain is HMAC-keyed with a server secret (resists a privileged
+     *  insider). False = plain hash — accidental-corruption detection only. */
+    chainKeyed: boolean;
   };
   cases: ComplianceCase[];
   strs: SuspiciousTransactionReport[];

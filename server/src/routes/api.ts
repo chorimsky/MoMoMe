@@ -157,11 +157,13 @@ api.use("/admin", (req, res, next) => {
   if (/^\/momo\/(cashout|cashin|transfer)$/.test(sub) && !canMovePaymentFunds(role)) {
     return res.status(403).json({ error: "forbidden", message: "Your role can't move Mobile Money funds." });
   }
-  // Compliance dispositions and report filing (STR/ANIF) are the compliance-officer
-  // function — Compliance Officer + Super Admin only. Viewing the console is open to
-  // the compliance section above; only the case actions are gated here.
-  if (/^\/compliance\/(cases|str)\b/.test(sub) && !canFileReports(role)) {
-    return res.status(403).json({ error: "forbidden", message: "Only a Compliance Officer can disposition cases or file reports." });
+  // Compliance dispositions, report filing (STR/ANIF) AND the CSV export are the
+  // compliance-officer function — Compliance Officer + Super Admin only. The export
+  // carries the confidential STR register + subject PII, so a general (e.g. Read-Only)
+  // console viewer must not be able to pull it. Viewing the dashboard is open to the
+  // compliance section; the STR register within it is stripped for non-officers below.
+  if (/^\/compliance\/(cases|str|export)\b/.test(sub) && !canFileReports(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Only a Compliance Officer can disposition cases, file reports or export." });
   }
   next();
 });
@@ -697,6 +699,31 @@ api.put("/admin/settings", (req, res) => {
       return res.status(400).json({ error: "bad_ops", message: `Approval threshold must be ${MIN_XAF}–${MAX_XAF} XAF.` });
     }
   }
+  const cp = patch.compliance;
+  if (cp) {
+    const posXaf = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n > 0 && n <= 1_000_000_000;
+    for (const k of ["ctrThresholdXaf", "cddThresholdXaf", "structuringXaf"] as const) {
+      if (cp[k] !== undefined && !posXaf(cp[k])) return res.status(400).json({ error: "bad_compliance", message: `${k} must be a positive XAF amount.` });
+    }
+    // CDD is the lower, occasional-transaction trigger; it must not exceed the CTR
+    // reporting threshold or mid-band transactions would fall through both rules.
+    if (cp.ctrThresholdXaf !== undefined && cp.cddThresholdXaf !== undefined && cp.cddThresholdXaf > cp.ctrThresholdXaf) {
+      return res.status(400).json({ error: "bad_compliance", message: "CDD trigger must be ≤ the CTR threshold." });
+    }
+    if (cp.structuringWindowH !== undefined && !(Number.isFinite(cp.structuringWindowH) && cp.structuringWindowH >= 1 && cp.structuringWindowH <= 720)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Structuring window must be 1–720 hours." });
+    }
+    if (cp.retentionYears !== undefined && !(Number.isFinite(cp.retentionYears) && cp.retentionYears >= 1 && cp.retentionYears <= 30)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Retention must be 1–30 years." });
+    }
+    if (cp.sanctionsList !== undefined && (!Array.isArray(cp.sanctionsList) || cp.sanctionsList.some((x) => typeof x !== "string") || cp.sanctionsList.length > 1000)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Watchlist must be a list of ≤1000 strings." });
+    }
+    // Cap free-text lengths defensively.
+    if (typeof cp.officer === "string") cp.officer = cp.officer.slice(0, 120);
+    if (typeof cp.reportingEntity === "string") cp.reportingEntity = cp.reportingEntity.slice(0, 200);
+    if (Array.isArray(cp.sanctionsList)) cp.sanctionsList = cp.sanctionsList.map((x) => x.slice(0, 200));
+  }
   res.json(updateSettings(patch));
 });
 
@@ -961,9 +988,14 @@ api.get("/admin/revenue", (req, res) => {
 /* ---------- compliance ---------- */
 // AML/CFT compliance console — runs detection then returns the full report
 // (cases, STRs, CTR register, tamper-evident event log, posture metrics).
-api.get("/admin/compliance", (_req, res) => {
+api.get("/admin/compliance", (req, res) => {
   compliance.scanCompliance();
-  res.json(compliance.report());
+  const rep = compliance.report();
+  // The STR register is officer-confidential (tipping-off risk) — hide it from
+  // non-filing roles (e.g. Read Only) who can still see the dashboard/cases.
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (!role || !canFileReports(role)) rep.strs = [];
+  res.json(rep);
 });
 
 // Disposition a case: clear (false positive) or escalate (needs officer follow-up).

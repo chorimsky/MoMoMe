@@ -24,6 +24,15 @@ export interface Draft {
 type Step = "details" | "method" | "review" | "pay" | "processing" | "success";
 type Tab = "pay" | "history" | "help";
 
+/** Bottom-nav glyphs — filled bolt for Pay (active), clock for Activity, ? for Help. */
+function TabIcon({ name, active }: { name: "pay" | "activity" | "help"; active: boolean }) {
+  const c = active ? "var(--accent)" : "var(--ink-3)";
+  const p = { width: 23, height: 23, viewBox: "0 0 24 24", fill: "none", stroke: c, strokeWidth: 1.9, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (name === "pay") return <svg {...p}><path d="M13 2 4.5 13H10l-1 9 10.5-12H13.5z" fill={active ? c : "none"} /></svg>;
+  if (name === "activity") return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>;
+  return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.4-1 .8-1 1.6" /><circle cx="12" cy="16.6" r="0.7" fill={c} stroke="none" /></svg>;
+}
+
 export function SendApp() {
   const { t, lang, setLang } = useI18n();
   const sm = useNarrow();
@@ -140,9 +149,12 @@ export function SendApp() {
     go("details");
   }
 
+  // Bottom tab bar shows on the home/details, activity and help screens; it hides
+  // during the focused payment steps (method→success) for a native, task-modal feel.
+  const showTabs = tab !== "pay" || step === "details";
   return (
-    <div className="app-bg" style={{ minHeight: "100vh", background: "var(--paper)" }}>
-      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "18px clamp(16px,4vw,24px) 56px" }}>
+    <div className="app-bg" style={{ background: "var(--paper)" }}>
+      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: `18px clamp(16px,4vw,24px) ${showTabs ? "calc(84px + env(safe-area-inset-bottom))" : "calc(40px + env(safe-area-inset-bottom))"}` }}>
         <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 22px" }}>
           <Link to="/" style={{ textDecoration: "none" }}><Logo size={sm ? 26 : 34} /></Link>
           <nav className="nav-links" style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -153,17 +165,6 @@ export function SendApp() {
             <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>{t("nav_home")}</Link>
           </nav>
         </div>
-
-        {(tab !== "pay" || step === "details") && (
-          <div style={{ display: "flex", gap: 4, justifyContent: "center", margin: "0 auto 16px", maxWidth: 320, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 999, padding: 4 }}>
-            {([["pay", t("tab_pay")], ["history", t("tab_activity")], ["help", t("tab_help")]] as const).map(([k, l]) => (
-              <button key={k} onClick={() => { setTab(k); if (k === "pay") go("details"); }}
-                style={{ flex: 1, cursor: "pointer", border: "none", padding: "9px 0", borderRadius: 999, fontSize: 13.5, fontWeight: 650, fontFamily: "inherit", background: tab === k ? "var(--accent)" : "transparent", color: tab === k ? "var(--accent-ink)" : "var(--ink-2)" }}>
-                {l}
-              </button>
-            ))}
-          </div>
-        )}
 
         {demo?.demoMode && tab === "pay" && step === "details" && (
           <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>
@@ -203,6 +204,21 @@ export function SendApp() {
           </div>
         )}
       </div>
+
+      {showTabs && (
+        <nav aria-label="Main navigation" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50, display: "flex", background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "env(safe-area-inset-bottom)", boxShadow: "0 -4px 18px oklch(0 0 0 / 0.06)" }}>
+          {([["pay", t("tab_pay"), "pay"], ["history", t("tab_activity"), "activity"], ["help", t("tab_help"), "help"]] as const).map(([k, label, ic]) => {
+            const on = tab === k;
+            return (
+              <button key={k} type="button" aria-current={on ? "page" : undefined} onClick={() => { setTab(k); if (k === "pay") go("details"); }}
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 0 9px", minHeight: 54, border: "none", background: "transparent", cursor: "pointer", color: on ? "var(--accent)" : "var(--ink-3)", fontFamily: "inherit" }}>
+                <TabIcon name={ic} active={on} />
+                <span style={{ fontSize: 11, fontWeight: on ? 750 : 600 }}>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

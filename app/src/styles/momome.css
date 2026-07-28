@@ -122,6 +122,7 @@
 /* ---- reset / base ---- */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   font-family: var(--font-body);
   background: var(--paper);
@@ -129,7 +130,16 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: "ss01", "cv01";
+  /* ---- mobile-native feel ---- */
+  overscroll-behavior-y: none;              /* no browser pull-to-refresh / rubber-band */
+  -webkit-tap-highlight-color: transparent; /* no grey flash on tap */
 }
+/* Fast native taps (kill the 300ms delay, block double-tap zoom) on all controls. */
+button, a, label, [role="button"], input, select, textarea { touch-action: manipulation; }
+/* ≥16px inputs so iOS never zooms the viewport when a field is focused. */
+input, select, textarea { font-size: max(16px, 1em); }
+/* Respect the notch / status bar when installed to the home screen (viewport-fit=cover). */
+.app-bg { padding-top: env(safe-area-inset-top); min-height: 100vh; min-height: 100dvh; }
 ::selection { background: var(--accent-wash); color: var(--ink); }
 
 h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; margin: 0; letter-spacing: -0.015em; line-height: 1.04; }

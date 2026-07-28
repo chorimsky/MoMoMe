@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/generate-seo.mjs",
+    "build": "node scripts/gen-icons.mjs && tsc --noEmit && vite build && node scripts/generate-seo.mjs",
     "seo": "node scripts/generate-seo.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"

@@ -24,6 +24,16 @@ export function setRates(r: { btcUsd?: number | null; usdtUsd?: number | null; u
   };
 }
 
+/** True only when we hold a real IBEX pull that's recent enough to price on.
+ *  The background refresh runs every 30s, so anything older than a few minutes
+ *  means the feed is dead (or never populated) — and pricing real crypto on a
+ *  stale/fallback rate would over- or under-charge the customer. Quoting must
+ *  refuse when this is false AND real money can move. */
+const MAX_RATE_AGE_MS = 5 * 60_000;
+export function ratesFresh(maxAgeMs: number = MAX_RATE_AGE_MS): boolean {
+  return !!cache && Date.now() - cache.at < maxAgeMs;
+}
+
 export function btcUsd(): number { return cache?.btcUsd ?? FALLBACK.btcUsd; }
 export function usdtUsd(): number { return cache?.usdtUsd ?? FALLBACK.usdtUsd; }
 export function usdcUsd(): number { return cache?.usdcUsd ?? FALLBACK.usdcUsd; }

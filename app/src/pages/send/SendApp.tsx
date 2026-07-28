@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
-import { useI18n } from "../../lib/i18n.js";
+import { useI18n, errMessage } from "../../lib/i18n.js";
 import { useNarrow } from "../../lib/useNarrow.js";
 import { api, ApiError } from "../../api/client.js";
 import { DetailsStep, MethodStep, ReviewStep, PayStep, ProcessingStep } from "./steps.js";
@@ -53,13 +53,11 @@ export function SendApp() {
   // Remembers the action that just failed, so the error banner can offer a Retry.
   const retryRef = useRef<null | (() => void)>(null);
   const fail = (e: unknown) => {
-    // A dropped connection (status 0) or a browser-reported offline state → a
-    // friendly, localized message instead of a raw "Failed to fetch".
-    if ((e instanceof ApiError && e.status === 0) || (typeof navigator !== "undefined" && navigator.onLine === false)) {
-      setErr(t("err_network"));
-    } else {
-      setErr(e instanceof Error ? e.message : t("error_generic"));
-    }
+    // A browser-reported offline state → the friendly offline copy; otherwise map the
+    // server's stable error CODE to a localized message (Francophone-first market),
+    // falling back to the server message only for unknown codes.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) setErr(t("err_network"));
+    else setErr(errMessage(e, t));
   };
 
   /** method → review: fetch authoritative quote from the settlement engine. */
@@ -104,6 +102,14 @@ export function SendApp() {
     retryRef.current = repay;
     setBusy(true); setErr(null);
     try {
+      // DOUBLE-PAY GUARD: a Lightning invoice is often paid right at expiry. Before
+      // minting a replacement the user would pay AGAIN, re-check the current payment —
+      // if it has already left AWAITING_INBOUND (the inbound was seen / is settling),
+      // go to processing instead of handing out a second invoice.
+      if (payment) {
+        const cur = await api.getPayment(payment.id).catch(() => null);
+        if (cur && cur.state !== "AWAITING_INBOUND") { setPayment(cur); go("processing"); return; }
+      }
       const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
       setQuote(q);
       setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient() }));

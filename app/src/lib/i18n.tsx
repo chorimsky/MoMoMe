@@ -125,11 +125,23 @@ export const STRINGS: Dict = {
   num_check: ["Check this number — it doesn't look like a valid MTN / Orange number.", "Vérifiez ce numéro — il ne ressemble pas à un numéro MTN / Orange valide."],
   unverified_ack: ["I've checked this number is correct — Mobile Money payments can't be reversed.", "J'ai vérifié que ce numéro est correct — les paiements Mobile Money sont irréversibles."],
   err_network: ["You appear to be offline — check your connection and try again.", "Vous semblez hors ligne — vérifiez votre connexion et réessayez."],
+  // Server error codes → localized messages (mapped by errMessage()).
+  err_quote_expired: ["The rate expired — please start again to get a fresh quote.", "Le taux a expiré — recommencez pour obtenir un nouveau devis."],
+  err_no_quote: ["This quote is no longer valid — please start again.", "Ce devis n'est plus valide — veuillez recommencer."],
+  err_bad_amount: ["Enter an amount between 500 and 5,000,000 XAF.", "Saisissez un montant entre 500 et 5 000 000 XAF."],
+  err_amount_too_high: ["That amount is above the maximum payout for this operator.", "Ce montant dépasse le paiement maximum pour cet opérateur."],
+  err_payments_paused: ["Payments are paused for a moment — please try again shortly.", "Les paiements sont momentanément suspendus — réessayez sous peu."],
+  err_payouts_unavailable: ["Payouts to this number aren't available right now — please try again shortly.", "Les paiements vers ce numéro sont indisponibles pour l'instant — réessayez sous peu."],
+  err_rates_unavailable: ["Live exchange rates are momentarily unavailable — please try again in a moment.", "Les taux de change en direct sont momentanément indisponibles — réessayez dans un instant."],
+  err_method_unavailable: ["This payment method isn't available right now — try another.", "Ce moyen de paiement n'est pas disponible actuellement — essayez-en un autre."],
+  err_bad_recipient: ["Check the recipient's number and try again.", "Vérifiez le numéro du destinataire et réessayez."],
+  err_generic: ["Something went wrong — please try again.", "Une erreur s'est produite — veuillez réessayer."],
   retry: ["Retry", "Réessayer"],
   not_seen_yet: ["We haven't received your payment yet. Once you've paid, this updates on its own — or tap again to check.", "Nous n'avons pas encore reçu votre paiement. Une fois payé, la page se met à jour automatiquement — ou appuyez à nouveau pour vérifier."],
   cashout_note: ["Credited in full to their Mobile Money wallet. Standard cash-out fees (operator + government levy) apply only if they withdraw — never charged by MoMoMe.", "Crédité intégralement sur leur portefeuille Mobile Money. Des frais de retrait habituels (opérateur + taxe de l'État) s'appliquent uniquement en cas de retrait — jamais facturés par MoMoMe."],
   onchain_estimate: ["Estimate — the final amount is set by the on-chain rate when your payment arrives.", "Estimation — le montant final est fixé au taux on-chain à la réception de votre paiement."],
   yesterday: ["Yesterday", "Hier"],
+  refund_needed: ["Refund — claim it", "Remboursement — à réclamer"],
   claim_title: ["Claim your account", "Activez votre compte"],
   claim_sub: ["Every payment you receive is already yours. Claim your number to track and manage it.", "Chaque paiement reçu est déjà à vous. Activez votre numéro pour le suivre et le gérer."],
   claim_send_code: ["Send code", "Envoyer le code"],
@@ -233,6 +245,16 @@ function detectLang(): Lang {
     if (langs.some((l) => /^fr/i.test(l))) return "fr";
   } catch { /* no navigator */ }
   return "en";
+}
+
+/** Localize an API error: a network error → offline copy; a known server error
+ *  `code` → its localized string; otherwise the server's (English) message, then a
+ *  generic localized line. Pass the component's `t`. */
+export function errMessage(err: unknown, t: (key: string) => string): string {
+  const e = err as { code?: string; status?: number; message?: string } | undefined;
+  if (e?.status === 0) return t("err_network");
+  if (e?.code && STRINGS[`err_${e.code}`]) return t(`err_${e.code}`);
+  return (e?.message && e.message) || t("err_generic");
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {

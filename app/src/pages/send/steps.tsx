@@ -3,7 +3,7 @@ import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
-import { useI18n } from "../../lib/i18n.js";
+import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api } from "../../api/client.js";
 import { pollMs } from "../../lib/net.js";
 import { FlowCard, Label, Stepper, Row, useExpiry } from "./ui.js";
@@ -576,12 +576,16 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
 
 /* Refund-claim — a payout couldn't land; the sender pastes a Lightning invoice to
    receive their crypto back (paid outbound via IBEX). Amount is bounded server-side. */
-function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }) {
+export function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }) {
   const { t } = useI18n();
   const [bolt11, setBolt11] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<null | "refunded" | "settling">(null);
+  // Don't setState after unmount (navigating away mid-poll) — avoids React warnings
+  // and wasted getPayment requests on metered data.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   const submit = async () => {
     // Accept exactly what wallets copy: a `lightning:` URI prefix, uppercase, and
@@ -592,17 +596,20 @@ function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }
     setBusy(true); setErr(null);
     try {
       const p = await api.refundDestination(payment.id, inv);
+      if (!mounted.current) return;
       if (p.state === "REFUNDED") { setResult("refunded"); return; }
       for (let i = 0; i < 12; i++) { // refund in flight — poll a short while for settlement
         await new Promise((r) => setTimeout(r, 2500));
+        if (!mounted.current) return;
         const cur = await api.getPayment(payment.id);
+        if (!mounted.current) return;
         if (cur.state === "REFUNDED") { setResult("refunded"); return; }
       }
       // Submitted but not yet confirmed — DON'T claim it's done. Show a settling state.
       setResult("settling");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : t("error_generic"));
-    } finally { setBusy(false); }
+      if (mounted.current) setErr(errMessage(e, t));
+    } finally { if (mounted.current) setBusy(false); }
   };
 
   if (result === "refunded") return <RefundedCard reset={reset} />;

@@ -7,7 +7,7 @@ import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
-import { ratesMeta } from "../core/rates.js";
+import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, providerFor } from "../adapters/index.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
@@ -263,6 +263,14 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {
     return res.status(400).json({ error: "bad_country", message: "Unsupported country." });
   }
+  // PRICING SAFETY: never quote real money on a stale/fallback FX rate. The feed
+  // refreshes every 30s; if it's dead (or never populated on a cold boot during an
+  // IBEX outage) the cache falls back to a hardcoded BTC price, which would over- or
+  // under-charge the customer. Refuse when real value can move and rates aren't fresh.
+  // (Sandbox/demo has no real money, so a fallback rate is harmless there.)
+  if (liveMoney() && !ratesFresh()) {
+    return res.status(503).json({ error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." });
+  }
   const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
   const totalXaf = xaf + feeXaf;
   const rq = rateFor(method);
@@ -416,8 +424,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   const detected = detectProvider(recipient.phone, recipient.country);
   if (detected && country.providers.includes(detected)) recipient.provider = detected;
   // Never store a null/blank name — fall back to the number so downstream UI
-  // (activity, receipts) and the identity layer always have a string.
-  if (typeof recipient.name !== "string" || !recipient.name.trim()) recipient.name = recipient.phone;
+  // (activity, receipts) and the identity layer always have a string. Sanitize +
+  // cap (it's forwarded to the payout aggregator's disburse({name}) and stored): strip
+  // control chars, collapse whitespace, cap at 60 — matches the admin cash-out cap.
+  const cleanName = typeof recipient.name === "string"
+    ? recipient.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60)
+    : "";
+  recipient.name = cleanName || recipient.phone;
   // Atomically claim the quote BEFORE any async work — a locked rate becomes
   // exactly one payment even if two requests race on the same quoteId (the
   // loser gets 404). A claimed quote is gone, so the rate can't be replayed.

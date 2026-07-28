@@ -81,19 +81,23 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
     }
     let message = `Request failed (${res.status})`;
+    let code: string | undefined;
     try {
       const body = await res.json();
       if (body?.message) message = body.message;
+      if (typeof body?.error === "string") code = body.error; // stable code for i18n mapping
     } catch {
       /* non-JSON error */
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, code);
   }
   return res.json() as Promise<T>;
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  // `code` is the server's stable error slug (e.g. "quote_expired") — map it to a
+  // localized string; `message` is the English fallback for unknown codes.
+  constructor(message: string, public status: number, public code?: string) {
     super(message);
     this.name = "ApiError";
   }

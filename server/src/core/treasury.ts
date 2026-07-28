@@ -36,6 +36,21 @@ function record(e: TreasuryWithdrawal): void {
   touch("treasury");
 }
 
+// Serialize withdrawals so two concurrent sweeps can't each pass the withdrawable
+// ceiling (which doesn't net out in-flight sends) and over-draw the treasury.
+let wChain: Promise<unknown> = Promise.resolve();
+function withWithdrawLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = wChain.then(fn, fn);
+  wChain = run.then(() => {}, () => {});
+  return run;
+}
+/** An identical withdrawal (same rail, amount, actor) not-yet-failed within the
+ *  window is a double-submit — return it instead of sending crypto twice. */
+function recentWithdrawal(rail: TreasuryRail, amount: number, by: string, windowMs = 90_000): TreasuryWithdrawal | undefined {
+  const now = Date.now();
+  return withdrawals.find((w) => w.rail === rail && w.amount === amount && w.by === by && w.status !== "failed" && now - Date.parse(w.at) < windowMs);
+}
+
 /** IBEX account balance (smallest unit, by currencyId) → the asset's natural unit. */
 function toDisplay(currencyId: number, bal: number): number {
   if (currencyId === 0) return bal / 1e11;            // MSAT → BTC
@@ -88,6 +103,9 @@ export async function withdraw(rail: TreasuryRail, amount: number, by: string): 
   // Stablecoin send is not enabled on the IBEX org yet (receive returns 403) and the
   // crypto-send flow is unverified — fail closed rather than guess a real transfer.
   if (rail === "usdt" || rail === "usdc") return { ok: false, error: "stablecoin_unavailable" };
+  return withWithdrawLock(async () => {
+  const dupe = recentWithdrawal(rail, amount, by);
+  if (dupe) return { ok: false, error: "duplicate", entry: dupe };
   // Live withdrawable ceiling — refuse if we can't confirm the balance, or the amount
   // would eat into sender-owed crypto.
   const pool = (await treasuryPools()).find((p) => p.asset === asset);
@@ -115,4 +133,5 @@ export async function withdraw(rail: TreasuryRail, amount: number, by: string): 
   record(entry);
   console.log(`[treasury] withdraw ${amount} ${asset} via ${rail} → ${dest} by ${by} (${entry.status}, tx=${entry.txId ?? "-"})`);
   return { ok: true, entry };
+  });
 }

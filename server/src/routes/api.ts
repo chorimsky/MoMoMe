@@ -672,6 +672,21 @@ api.get("/admin/settings", (_req, res) => {
 });
 api.put("/admin/settings", (req, res) => {
   const patch = (req.body ?? {}) as Partial<AdminSettings>;
+  // RBAC on privileged sections. This generic PUT reaches everyone with `settings`
+  // access (incl. Finance Manager) and merges whatever it's handed — so it must NOT
+  // be a back door around the stricter dedicated routes.
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  const superAdmin = !!role && isSuperAdmin(role);
+  // Treasury sweep destinations move REAL crypto — managed ONLY via the Super-Admin,
+  // address-validated /admin/treasury/destinations route, never here (this path had
+  // no gate and no validation → a lesser role could repoint the sweep to their wallet).
+  if (patch.treasury !== undefined) {
+    return res.status(403).json({ error: "forbidden", message: "Manage treasury destinations under Liquidity (Super Admin)." });
+  }
+  // Ops guardrails (kill-switch, payout-approval threshold) and AML/compliance controls
+  // are Super-Admin-only risk settings; drop them from lesser roles so their legitimate
+  // company/pricing/channel saves still succeed.
+  if (!superAdmin) { delete patch.ops; delete patch.compliance; }
   const pr = patch.pricing;
   if (pr) {
     const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;
@@ -825,9 +840,11 @@ api.post("/admin/treasury/withdraw", async (req, res) => {
       : r.error === "stablecoin_unavailable" ? "USDT/USDC withdrawals aren't available yet (IBEX hasn't enabled stablecoin send)."
       : r.error === "balance_unavailable" ? "Couldn't confirm the wallet balance right now. Please try again shortly."
       : r.error === "exceeds_withdrawable" ? "That exceeds the withdrawable balance (funds owed to senders are protected)."
+      : r.error === "duplicate" ? "An identical withdrawal was just submitted — not repeating it (avoids sending crypto twice)."
       : r.error === "bad_amount" ? "Enter a valid amount."
       : "The withdrawal couldn't be sent. Please try again.";
-    return res.status(r.error === "exceeds_withdrawable" || r.error === "no_destination" ? 400 : 502).json({ error: r.error, message, entry: r.entry });
+    const status = r.error === "exceeds_withdrawable" || r.error === "no_destination" ? 400 : r.error === "duplicate" ? 409 : 502;
+    return res.status(status).json({ error: r.error, message, entry: r.entry });
   }
   res.json({ ok: true, entry: r.entry });
 });
@@ -875,6 +892,7 @@ api.post("/admin/momo/transfer", async (req, res) => {
 });
 
 function momoErrStatus(e?: string): number {
+  if (e === "duplicate") return 409;
   return e === "rail_unavailable" || e === "peexit_cashin_unavailable" ? 503 : e === "bad_number" || e === "bad_amount" || e === "insufficient_balance" ? 400 : 502;
 }
 function momoErrMessage(e?: string): string {
@@ -882,6 +900,7 @@ function momoErrMessage(e?: string): string {
     case "bad_number": return "That doesn't look like a supported MTN/Orange number.";
     case "bad_amount": return "Enter a valid amount.";
     case "insufficient_balance": return "The rail's wallet balance is below this amount.";
+    case "duplicate": return "An identical operation was just submitted — not repeating it (avoids a double payment). Wait a moment if this is intentional.";
     case "rail_unavailable": return "That rail isn't live/reachable right now.";
     case "peexit_cashin_unavailable": return "Orange cash-in via Peexit isn't available yet (Collect API not wired).";
     // Anything else is the raw provider/rail error (a rejected payout/deposit) —

@@ -92,7 +92,9 @@ export const config = {
     // Master password-reset key (/admin/forgot). Defaults to ADMIN_PASSWORD for
     // back-compat; set a distinct long ADMIN_RECOVERY_KEY in production.
     recoveryKey: env("ADMIN_RECOVERY_KEY") || env("ADMIN_PASSWORD", "momome-admin"),
-    passwordIsDefault: !process.env.ADMIN_PASSWORD,
+    // Default when unset OR set to the publicly-known dev value — either way it's
+    // not a secret, so production must refuse it.
+    passwordIsDefault: !process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === "momome-admin",
   },
 
   /** Peex — OPTIONAL intelligence / verification / metadata layer.
@@ -177,16 +179,23 @@ export function assertAdminSecurity(): void {
 /** Fail fast if live (Mobile Money payout) mode is on but a payout provider
  *  isn't configured. IBEX is validated separately (assertIbexConfig). */
 export function assertLiveConfig(): void {
-  if (!isLive()) return;
-  const missing: string[] = [];
-  // Need at least one LIVE, webhook-secured payout rail. Peexit is the active rail
-  // (serves both operators); PawaPay is OPTIONAL — out of rotation until its account
-  // is activated — so only enforce its creds when PawaPay is actually live.
-  if (!config.peexit.apiKey) missing.push("PEEXIT_API_KEY");
-  if (!config.peexit.callbackPass) missing.push("PEEXIT_CALLBACK_PASS");
-  if (pawapayLive() && !config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
-  if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.push("PEEX_WEBHOOK_SECRET");
-  if (missing.length) {
-    throw new Error(`RAILS_MODE=live but missing: ${missing.join(", ")}. Set them or use RAILS_MODE=sandbox.`);
+  // Gate on liveMoney() — NOT just isLive() (RAILS_MODE) — so a deploy that turns a
+  // rail production (e.g. PEEXIT_ENV=production) while RAILS_MODE=sandbox still gets
+  // its callback secrets enforced. Real money can move the moment any rail is live.
+  if (!liveMoney() && !isLive()) return;
+  const missing = new Set<string>();
+  // Any LIVE payout rail must have its callback secret set (else its async
+  // confirmations can't be verified and settlement silently degrades).
+  if (peexitLive() && !config.peexit.callbackPass) missing.add("PEEXIT_CALLBACK_PASS");
+  if (pawapayLive() && !config.pawapay.webhookSecret) missing.add("PAWAPAY_WEBHOOK_SECRET");
+  if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.add("PEEX_WEBHOOK_SECRET");
+  // RAILS_MODE=live must have the primary payout rail (Peexit) fully configured —
+  // fail fast rather than boot a live deploy that can't pay out. PawaPay is optional.
+  if (isLive()) {
+    if (!config.peexit.apiKey) missing.add("PEEXIT_API_KEY");
+    if (!config.peexit.callbackPass) missing.add("PEEXIT_CALLBACK_PASS");
+  }
+  if (missing.size) {
+    throw new Error(`Live money is active but missing: ${[...missing].join(", ")}. Set them or run fully in sandbox.`);
   }
 }

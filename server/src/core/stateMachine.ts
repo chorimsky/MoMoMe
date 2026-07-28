@@ -347,6 +347,12 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
 
+  // Re-apply the money-safety guards that confirmInbound enforces (retry is a manual
+  // operator OVERRIDE of the approval-threshold hold, but it must NOT be able to
+  // breach the corridor cap or over-draw the treasury float — those aren't approvals).
+  if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) return false;
+  if (availableFloatXaf() < 0) return false;
+
   // Is THIS payment's crypto inbound real money? (Same test as confirmInbound.)
   const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
   // Reuse the original aggregator (idempotent on the ref); else pick a funded one,

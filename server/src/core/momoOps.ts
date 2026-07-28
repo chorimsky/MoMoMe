@@ -20,6 +20,26 @@ register("momoops", () => ops.slice(0, 200), (d: MomoOp[]) => { ops.push(...d); 
 export function history(): MomoOp[] { return ops.slice(0, 50); }
 function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop(); touch("momoops"); }
 
+/* ---- concurrency + idempotency guards for manual money ops ----
+   Node is single-threaded but async, so two requests can interleave at an `await`.
+   These make a balance-read → rail-submit atomic w.r.t. other ops, and reject an
+   exact-duplicate submission — the two things client-side "busy"/confirm can't. */
+let opChain: Promise<unknown> = Promise.resolve();
+/** Serialize money mutations so no two concurrent ops both observe the full balance
+ *  and overdraw the shared Peexit wallets. */
+function withMomoLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = opChain.then(fn, fn);
+  opChain = run.then(() => {}, () => {});
+  return run;
+}
+/** An exact prior op — same (kind, phone, amount, actor), not failed, within the
+ *  window — means this is a double-click / client-retry / replay. Returning it
+ *  instead of submitting again prevents a second REAL disbursement. */
+function recentDuplicate(kind: MomoOp["kind"], phone: string, amount: number, by: string, windowMs = 90_000): MomoOp | undefined {
+  const now = Date.now();
+  return ops.find((o) => o.kind === kind && o.phone === phone && o.amount === amount && o.by === by && o.status !== "failed" && now - Date.parse(o.at) < windowMs);
+}
+
 /** Reconcile async admin Mobile Money ops (called on the reconcile loop):
  *  - cash-in / transfer_in (collections): the payer approves on their phone, so re-query
  *    the authoritative collection status and settle "accepted" → completed/failed.
@@ -29,7 +49,11 @@ function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop
 export async function reconcilePendingCashins(): Promise<void> {
   const now = Date.now();
   for (const o of ops) {
-    if (o.rail !== "peexit" || now - Date.parse(o.at) > 24 * 3600_000) continue; // only the last day
+    // Rebalance legs get a wider window (72h): if leg-1's disburse only completes
+    // after a rail delay / restart gap, leg-2 must still fire rather than strand the
+    // funds on the treasury phone. Plain cash-ins settle fast → keep the 24h scan.
+    const maxAge = o.kind === "transfer_out" || o.kind === "transfer_in" ? 72 : 24;
+    if (o.rail !== "peexit" || now - Date.parse(o.at) > maxAge * 3600_000) continue;
     if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
       const s = await peexit.collectStatus(o.id).catch(() => null);
       if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); }
@@ -99,6 +123,9 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
+  return withMomoLock(async () => {
+  const dup = recentDuplicate("cashout", phone, amount, by);
+  if (dup) return { ok: false, error: "duplicate", op: dup };
   const rail = railFor(provider);
   // Rail must be live + funded ≥ amount (mirrors the send-flow pre-flight gate).
   const bal = await railBalance(rail, country, provider);
@@ -126,6 +153,7 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   record(op);
   console.log(`[momo] cashout ${amount} XAF → ${phone} via ${rail} by ${by} (${op.status})`);
   return { ok: true, op };
+  });
 }
 
 /** CASH-IN: request XAF FROM a Mobile Money number (the payer approves on their
@@ -135,6 +163,9 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
+  return withMomoLock(async () => {
+  const dup = recentDuplicate("cashin", phone, amount, by);
+  if (dup) return { ok: false, error: "duplicate", op: dup };
   const rail = railFor(provider);
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashin", provider, rail, phone, amount, by, status: "accepted" };
@@ -151,6 +182,7 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   record(op);
   console.log(`[momo] cashin ${amount} XAF ← ${phone} via ${rail} by ${by} (accepted — awaiting payer approval)`);
   return { ok: true, op };
+  });
 }
 
 /* ============================================================
@@ -191,6 +223,9 @@ export async function transferToCollection(treasuryPhone: string, amount: number
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "bad_amount" };
   const provider = detectProvider(treasuryPhone, "CM");
   if (!provider) return { ok: false, error: "bad_number" };
+  return withMomoLock(async () => {
+  const dup = recentDuplicate("transfer_out", treasuryPhone, amount, by);
+  if (dup) return { ok: false, error: "duplicate", op: dup };
   const payoutBal = await peexit.availableBalanceXaf("CM").catch(() => null);
   if (payoutBal == null) return { ok: false, error: "rail_unavailable" };
   if (payoutBal < amount) return { ok: false, error: "insufficient_balance" };
@@ -217,4 +252,5 @@ export async function transferToCollection(treasuryPhone: string, amount: number
   // the reconcile loop fires leg 2 once it completes.
   if (op.status === "completed") await fireCollectLeg(op);
   return { ok: true, op };
+  });
 }

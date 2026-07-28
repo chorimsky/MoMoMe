@@ -5,9 +5,10 @@
    index distinctly — and the private consoles (/admin, /ops) would look
    indexable. On each navigation we set the canonical to the current path, mark
    only the known public routes index,follow (everything else — admin, ops, 404
-   — noindex,nofollow), and, if configured, inject the Google Search Console
-   verification meta. The prerendered SEO pages are static HTML (not React
-   routes), so their own correct meta is untouched.
+   — noindex,nofollow). The prerendered SEO pages are static HTML (not React
+   routes), so their own correct meta is untouched. (Google Search Console
+   verification is injected into the static HTML at build time — see vite.config —
+   because Google's meta-tag verifier fetches raw HTML and doesn't run JS.)
    ============================================================ */
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
@@ -33,7 +34,5 @@ export function useRouteSeo(): void {
     const indexable = INDEXABLE.has(path);
     upsertMeta("robots", indexable ? "index,follow,max-image-preview:large" : "noindex,nofollow");
     setCanonical(window.location.origin + (path === "/" ? "/" : path));
-    const gsc = (import.meta.env as Record<string, string | undefined>).VITE_GSC_VERIFICATION;
-    if (gsc) upsertMeta("google-site-verification", gsc);
   }, [pathname]);
 }

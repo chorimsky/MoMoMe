@@ -123,9 +123,10 @@ export async function collectStatus(trackId: string): Promise<PayoutStatus | nul
   try {
     const res = await peex(`/collection/all_requests?track_id=${encodeURIComponent(trackId)}`, { method: "GET" });
     if (res.status === 404 || !res.ok) return null;
-    const d = (await res.json()) as { paid_time?: string | null; status?: string } | Array<{ paid_time?: string | null; status?: string }>;
+    const d = (await res.json()) as { paid_time?: string | null; status?: string; fees?: number } | Array<{ paid_time?: string | null; status?: string; fees?: number }>;
     const row = Array.isArray(d) ? d[0] : d;
     if (!row) return null;
+    if (typeof row.fees === "number") feeByRef.set(trackId, row.fees); // Peexit reports the exact fee on the row
     if (row.status) return mapStatus(row.status);
     return row.paid_time ? "COMPLETED" : "PENDING";
   } catch { return null; }
@@ -146,8 +147,9 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     // 404 = "Transactions not found on your listing! (3 days)" → outside the
     // window (too new or >3 days); keep the last known status.
     if (res.status === 404 || !res.ok) return cached;
-    const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string }>;
+    const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string; fees?: number }>;
     const row = Array.isArray(arr) ? (arr.find((r) => r.track_id === idempotencyKey) ?? arr[0]) : undefined;
+    if (row && typeof row.fees === "number") feeByRef.set(idempotencyKey, row.fees);
     if (!row?.status) return cached;
     const mapped = mapStatus(row.status);
     statusByRef.set(idempotencyKey, mapped);
@@ -164,6 +166,13 @@ export function failReason(idempotencyKey: string): string | undefined {
   return failReasonByRef.get(idempotencyKey);
 }
 
+const feeByRef = new Map<string, number>();
+/** The actual fee (XAF) Peexit charged for an op ref, once its settled row was read
+ *  (disbursement or collection). undefined until known. */
+export function feeXafFor(idempotencyKey: string): number | undefined {
+  return feeByRef.get(idempotencyKey);
+}
+
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }
@@ -175,20 +184,43 @@ export function statusByKey(idempotencyKey: string): DisburseResult | null {
  *  NOTE: `/operators` lists Peexit's OWN internal operator wallets (huge ±billions,
  *  e.g. "MTN LLP Coorp"), NOT our balance — reading those wrongly made an empty payout
  *  balance look funded. Cached briefly. null when not live/reachable. */
-let acctCache: { at: number; disbursement: number | null; collect: number | null } | null = null;
-async function accountBalances(): Promise<{ disbursement: number | null; collect: number | null }> {
+type Acct = {
+  at: number;
+  disbursement: number | null; collect: number | null;
+  // fee schedule per operator, as the account reports it (orange_fees / mtn_fees)
+  disbMtn: number | null; disbOrange: number | null;
+  collMtn: number | null; collOrange: number | null;
+};
+let acctCache: Acct | null = null;
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+async function accountBalances(): Promise<Acct> {
   if (acctCache && Date.now() - acctCache.at < 15_000) return acctCache;
-  const read = async (path: string, field: string): Promise<number | null> => {
+  const read = async (path: string): Promise<Record<string, unknown>> => {
     try {
       const r = await peex(path, { method: "GET" });
-      if (!r.ok) return null;
-      const v = (await r.json() as Record<string, unknown>)[field];
-      return typeof v === "number" ? v : null;
-    } catch { return null; }
+      if (!r.ok) return {};
+      return (await r.json()) as Record<string, unknown>;
+    } catch { return {}; }
   };
-  const [disbursement, collect] = await Promise.all([read("/disbursement/me", "disbursement_solde"), read("/collection/me", "collect_solde")]);
-  acctCache = { at: Date.now(), disbursement, collect };
+  // /disbursement/me → { disbursement_solde, mtn_fees, orange_fees, ... }
+  // /collection/me   → { collect_solde, mtn_fees, orange_fees, ... }
+  const [d, c] = await Promise.all([read("/disbursement/me"), read("/collection/me")]);
+  acctCache = {
+    at: Date.now(),
+    disbursement: num(d.disbursement_solde), collect: num(c.collect_solde),
+    disbMtn: num(d.mtn_fees), disbOrange: num(d.orange_fees),
+    collMtn: num(c.mtn_fees), collOrange: num(c.orange_fees),
+  };
   return acctCache;
+}
+
+/** The account's fee schedule (as Peexit reports it on /disbursement/me + /collection/me).
+ *  Values are the raw `mtn_fees` / `orange_fees` numbers; null when absent/not live.
+ *  Whether these are % or flat XAF is marked by the caller after inspection. */
+export async function feeSchedule(): Promise<{ disbMtn: number | null; disbOrange: number | null; collMtn: number | null; collOrange: number | null } | null> {
+  if (!peexitLive()) return null;
+  const a = await accountBalances();
+  return { disbMtn: a.disbMtn, disbOrange: a.disbOrange, collMtn: a.collMtn, collOrange: a.collOrange };
 }
 
 /** Available PAYOUT balance (XAF) — the account's `disbursement_solde` (shared across

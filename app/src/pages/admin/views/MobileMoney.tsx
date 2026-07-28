@@ -3,7 +3,7 @@
    Data: api.adminMobileMoney() (aggregator name derived from live config).
    ============================================================ */
 import { useEffect, useState } from "react";
-import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance } from "@shared/types.js";
+import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance, MomoFeeInfo, ProviderId } from "@shared/types.js";
 import { PROVIDERS, COUNTRIES, detectProvider } from "@shared/domain.js";
 import { canMovePaymentFunds } from "@shared/roles.js";
 import { api } from "../../../api/client.js";
@@ -115,15 +115,26 @@ export function MobileMoneyView() {
    open to the Mobile Money section; running an op requires fund-movement rights
    (Ops Manager / Super Admin), enforced server-side too.
    ============================================================ */
+/** Estimate the rail fee (XAF) for an amount, from the account fee schedule.
+ *  Percentage schedules scale with the amount; flat schedules are a fixed XAF. */
+export function estFee(fees: MomoFeeInfo | null, dir: "disburse" | "collect", provider: ProviderId | null, amount: number): number | null {
+  if (!fees || !provider || !(amount > 0)) return null;
+  const rate = dir === "disburse" ? (provider === "MTN" ? fees.disburse.mtn : fees.disburse.orange)
+    : (provider === "MTN" ? fees.collect.mtn : fees.collect.orange);
+  if (rate == null) return null;
+  return fees.pct ? Math.round((amount * rate) / 100) : rate;
+}
+
 function MomoOpsPanel() {
   const { role } = useAdminUser();
   const canMove = canMovePaymentFunds(role);
   const [balances, setBalances] = useState<MomoRailBalance[] | null>(null);
+  const [fees, setFees] = useState<MomoFeeInfo | null>(null);
   const [history, setHistory] = useState<MomoOp[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
   const load = async () => {
-    try { const d = await api.adminMomo(); setBalances(d.balances); setHistory(d.history); }
+    try { const d = await api.adminMomo(); setBalances(d.balances); setHistory(d.history); setFees(d.fees); }
     catch { setErr("Couldn't load Mobile Money balances."); }
   };
   useEffect(() => { void load(); }, []);
@@ -157,7 +168,7 @@ function MomoOpsPanel() {
         </Grid>
       )}
 
-      {canMove ? <MomoForm balances={balances ?? []} onDone={load} onOp={(o) => setHistory((h) => [o, ...h])} />
+      {canMove ? <MomoForm balances={balances ?? []} fees={fees} onDone={load} onOp={(o) => setHistory((h) => [o, ...h])} />
         : <p style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Running cash-in / cash-out requires an Operations Manager or Super Admin.</p>}
 
       {history.length > 0 && (
@@ -171,6 +182,7 @@ function MomoOpsPanel() {
               <div key={o.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
                 <span style={{ color: "var(--ink-2)" }}>
                   <b>{tag}</b> {fmt(o.amount)} XAF · {o.provider} · <span className="num">{o.phone}</span>
+                  {o.feeXaf != null && <span style={{ color: "var(--ink-3)" }}> · fee <span className="num">{fmt(o.feeXaf)}</span></span>}
                 </span>
                 <span style={{ color: o.status === "failed" ? "var(--bad)" : o.status === "completed" ? "var(--recv)" : "var(--ink-3)", fontWeight: 650 }}>
                   {o.status}{o.error ? ` · ${o.error}` : ""}
@@ -188,7 +200,10 @@ function MomoOpsPanel() {
 type MomoMode = "cashout" | "cashin" | "transfer";
 const MODE_LABEL: Record<MomoMode, string> = { cashout: "Cash-out (send)", cashin: "Cash-in (collect)", transfer: "Rebalance (payout→collect)" };
 
-function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onDone: () => Promise<void>; onOp: (o: MomoOp) => void }) {
+const QUICK = [10_000, 25_000, 50_000, 100_000];
+const TREASURY_KEY = "momo_treasury_phone";
+
+function MomoForm({ balances, fees, onDone, onOp }: { balances: MomoRailBalance[]; fees: MomoFeeInfo | null; onDone: () => Promise<void>; onOp: (o: MomoOp) => void }) {
   const [kind, setKind] = useState<MomoMode>("cashout");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
@@ -196,6 +211,13 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "bad" | "recv"; text: string } | null>(null);
+
+  // Remember the treasury number so a rebalance is one tap next time.
+  useEffect(() => {
+    if (kind === "transfer" && !phone) {
+      try { const saved = localStorage.getItem(TREASURY_KEY); if (saved) setPhone(saved); } catch { /* no storage */ }
+    }
+  }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const amt = Number(amount);
   const digits = phone.replace(/\D/g, "");
@@ -209,12 +231,20 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
   const overBalance = debitsPayout && payoutBal != null && amt > payoutBal;
   const unknownOperator = digits.length >= 8 && !provider;
   const valid = !!provider && amt > 0 && !overBalance;
-  const reset = () => { setPhone(""); setAmount(""); setName(""); setConfirming(false); };
+  const reset = () => { setPhone(kind === "transfer" ? phone : ""); setAmount(""); setName(""); setConfirming(false); };
   const inputStyle = { padding: "9px 11px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)" } as const;
+
+  // Cost estimates from the account fee schedule (null when Peexit doesn't expose it).
+  const feeDisb = estFee(fees, "disburse", provider, amt);
+  const feeColl = estFee(fees, "collect", provider, amt);
+  const roundTripFee = (feeDisb ?? 0) + (feeColl ?? 0);
+  const effPct = amt > 0 && (feeDisb != null || feeColl != null) ? (roundTripFee / amt) * 100 : null;
+  const wastefulRebalance = kind === "transfer" && ((effPct != null && effPct >= 8) || (amt > 0 && amt < 1000));
 
   const run = async () => {
     setBusy(true); setMsg(null);
     try {
+      if (kind === "transfer") { try { localStorage.setItem(TREASURY_KEY, phone); } catch { /* no storage */ } }
       const r = kind === "cashout" ? await api.momoCashout(phone, amt, name || undefined)
         : kind === "cashin" ? await api.momoCashin(phone, amt, name || undefined)
         : await api.momoTransfer(phone, amt);
@@ -224,9 +254,9 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
       if (r.op?.status === "failed") {
         setMsg({ tone: "bad", text: `The ${kind === "transfer" ? "rebalance disburse leg" : "cash-out"} to ${phone} was rejected by the rail${r.op.error ? ` — ${r.op.error}` : ""}.` });
       } else if (kind === "transfer") {
-        setMsg({ tone: "recv", text: `Rebalance started: ${amt} XAF disbursed to ${phone}. Once it lands, the same amount is collected back into the collection wallet — approve on the treasury phone.` });
+        setMsg({ tone: "recv", text: `Rebalance started: ${fmt(amt)} XAF disbursed to ${phone}. Once it lands, the same amount is collected back into the collection wallet — approve on the treasury phone.` });
       } else {
-        setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${amt} XAF → ${phone}.` : `Cash-in requested: ${amt} XAF ← ${phone}. The payer approves on their phone.` });
+        setMsg({ tone: "recv", text: kind === "cashout" ? `Cash-out sent: ${fmt(amt)} XAF → ${phone}.` : `Cash-in requested: ${fmt(amt)} XAF ← ${phone}. The payer approves on their phone.` });
       }
       reset();
       await onDone();
@@ -252,8 +282,9 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
       {kind === "transfer" && (
         <p style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, margin: "0 0 12px" }}>
           Moves balance <b>Payout → Collection</b> by disbursing to a treasury number you control, then collecting it back.
-          Peexit has no direct wallet transfer, so real money round-trips through the phone — <b>per-leg fees apply</b>. The reverse
-          (collection → payout) isn't possible via the API; only Peexit's settlement credits the payout wallet.
+          Peexit has no direct wallet transfer, so real money round-trips through the phone — <b>fees are charged on both legs</b>.
+          Cheaper alternatives: for the reverse (collection → payout) ask Peexit to settle — it can't be done via the API, and
+          right-sizing the payout float avoids repeat round-trips.
         </p>
       )}
 
@@ -268,6 +299,16 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
         )}
       </div>
 
+      {/* quick amounts */}
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        {QUICK.map((q) => (
+          <button key={q} type="button" onClick={() => { setAmount(String(q)); setConfirming(false); }}
+            style={{ cursor: "pointer", padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)", background: amt === q ? "var(--accent-wash)" : "var(--surface-2)", color: amt === q ? "var(--accent)" : "var(--ink-3)", fontSize: 11.5, fontWeight: 650, fontFamily: "inherit" }}>
+            {fmt(q / 1000)}k
+          </button>
+        ))}
+      </div>
+
       {/* live routing / balance feedback */}
       <div style={{ marginTop: 8, fontSize: 12, minHeight: 17 }}>
         {provider && (
@@ -280,7 +321,21 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
         {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the Peexit payout wallet.</span>}
       </div>
 
-      <div style={{ marginTop: 8 }}>
+      {/* cost preview */}
+      {provider && amt > 0 && (feeDisb != null || feeColl != null) && (
+        <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>
+          {kind === "cashout" && feeDisb != null && <>Est. fee <b className="num">{fmt(feeDisb)} XAF</b> · debits payout ~<span className="num">{fmt(amt + feeDisb)}</span> XAF</>}
+          {kind === "cashin" && feeColl != null && <>Est. fee <b className="num">{fmt(feeColl)} XAF</b> · collection nets ~<span className="num">{fmt(Math.max(0, amt - feeColl))}</span> XAF</>}
+          {kind === "transfer" && <>Est. round-trip fee <b className="num">{fmt(roundTripFee)} XAF</b>{effPct != null && <> (<span className="num">{fmt(effPct, 1)}%</span>)</>} · net into collection ~<span className="num">{fmt(Math.max(0, amt - (feeColl ?? 0)))}</span> XAF</>}
+        </div>
+      )}
+      {wastefulRebalance && (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--warn)", fontWeight: 600, lineHeight: 1.45 }}>
+          ⚠ Fees are a large share of this rebalance — move larger amounts less often, or use Peexit settlement, to cut cost.
+        </div>
+      )}
+
+      <div style={{ marginTop: 10 }}>
         {!confirming ? (
           <button type="button" className="btn btn-primary" disabled={!valid || busy} onClick={() => setConfirming(true)} style={{ padding: "9px 16px" }}>
             {kind === "cashout" ? "Cash-out…" : kind === "cashin" ? "Cash-in…" : "Rebalance…"}
@@ -289,10 +344,10 @@ function MomoForm({ balances, onDone, onOp }: { balances: MomoRailBalance[]; onD
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
               {kind === "cashout"
-                ? <>Send <b className="num">{amt} XAF</b> to <span className="num">{phone}</span> ({opLabel})? This moves real money.</>
+                ? <>Send <b className="num">{fmt(amt)} XAF</b> to <span className="num">{phone}</span> ({opLabel})? This moves real money{feeDisb != null && <> · fee ~<span className="num">{fmt(feeDisb)}</span> XAF</>}.</>
                 : kind === "cashin"
-                ? <>Request <b className="num">{amt} XAF</b> from <span className="num">{phone}</span> ({opLabel})? They'll be prompted to approve on their phone.</>
-                : <>Rebalance <b className="num">{amt} XAF</b> Payout → Collection via <span className="num">{phone}</span> ({opLabel})? This disburses to the treasury number, then collects it back — real money moves and per-leg fees apply.</>}
+                ? <>Request <b className="num">{fmt(amt)} XAF</b> from <span className="num">{phone}</span> ({opLabel})? They'll be prompted to approve on their phone{feeColl != null && <> · nets ~<span className="num">{fmt(Math.max(0, amt - feeColl))}</span> XAF</>}.</>
+                : <>Rebalance <b className="num">{fmt(amt)} XAF</b> Payout → Collection via <span className="num">{phone}</span> ({opLabel})? Disburses then collects it back — real money moves{roundTripFee > 0 && <>, ~<span className="num">{fmt(roundTripFee)}</span> XAF in fees</>}.</>}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={run} style={{ padding: "9px 16px" }}>{busy ? "Working…" : "Confirm"}</button>

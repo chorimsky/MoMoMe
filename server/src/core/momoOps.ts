@@ -7,7 +7,7 @@
    / gates). Every op is recorded in an append-only audit log. Gating (Ops-Manager+)
    is enforced at the route.
    ============================================================ */
-import type { CountryCode, MomoOp, MomoRail, MomoRailBalance, ProviderId } from "../../../shared/types.js";
+import type { CountryCode, MomoFeeInfo, MomoOp, MomoRail, MomoRailBalance, ProviderId } from "../../../shared/types.js";
 import { detectProvider } from "../../../shared/domain.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
@@ -32,12 +32,12 @@ export async function reconcilePendingCashins(): Promise<void> {
     if (o.rail !== "peexit" || now - Date.parse(o.at) > 24 * 3600_000) continue; // only the last day
     if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
       const s = await peexit.collectStatus(o.id).catch(() => null);
-      if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); }
+      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); }
       else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; touch("momoops"); }
     } else if (o.kind === "transfer_out") {
       if (o.status === "accepted") {
         const s = await peexit.queryStatus(o.id).catch(() => null);
-        if (s === "COMPLETED") { o.status = "completed"; touch("momoops"); await fireCollectLeg(o); }
+        if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); await fireCollectLeg(o); }
         else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); touch("momoops"); }
       } else if (o.status === "completed") {
         await fireCollectLeg(o); // idempotent backstop: ensure leg 2 exists
@@ -70,6 +70,29 @@ export async function balances(_country: CountryCode): Promise<MomoRailBalance[]
   ];
 }
 
+/** The active rail's fee schedule, for cost-aware ops in the admin UI. Small values
+ *  (≤100) are treated as percentages (MoMo aggregator fees are ~1–3%); larger values
+ *  as flat XAF. null when the rail doesn't expose fees / isn't live. */
+export async function feeInfo(): Promise<MomoFeeInfo | null> {
+  const s = await peexit.feeSchedule().catch(() => null);
+  if (!s) return null;
+  const vals = [s.disbMtn, s.disbOrange, s.collMtn, s.collOrange].filter((v): v is number => v != null && v > 0);
+  if (!vals.length) return null;
+  // Normalize to a single representation. MoMo aggregator fees are ~1–3%, so:
+  //  - all < 1        → fractions (0.017) → percent ×100
+  //  - all ≤ 20       → already percent (1.7)
+  //  - otherwise      → flat XAF per op
+  const allFraction = vals.every((v) => v < 1);
+  const pct = allFraction || vals.every((v) => v <= 20);
+  const scale = allFraction ? 100 : 1;
+  const norm = (v: number | null): number | null => (v == null ? null : pct ? +(v * scale).toFixed(3) : v);
+  return {
+    rail: "peexit", pct,
+    disburse: { mtn: norm(s.disbMtn), orange: norm(s.disbOrange) },
+    collect: { mtn: norm(s.collMtn), orange: norm(s.collOrange) },
+  };
+}
+
 /** CASH-OUT: disburse XAF to a Mobile Money number. Routes by the number's operator,
  *  requires the rail live + funded ≥ amount, records an audit entry. */
 export async function cashout(phone: string, country: CountryCode, amount: number, by: string, name?: string): Promise<{ ok: boolean; error?: string; op?: MomoOp }> {
@@ -92,6 +115,8 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
     if (status) op.status = statusLabel(status);
     // A payout accepted-then-rejected (e.g. INSUFFICIENT_FUND_TO_PAY_TX) → capture why.
     if (op.status === "failed") op.error = (rail === "peexit" ? peexit.failReason(opId) : undefined) ?? "rejected by the rail";
+    if (rail === "peexit") op.feeXaf = peexit.feeXafFor(opId); // actual fee, when the row reported it
+
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "send_failed";
     record(op);
@@ -179,6 +204,7 @@ export async function transferToCollection(treasuryPhone: string, amount: number
     const status = await peexit.queryStatus(opId);
     if (status) op.status = statusLabel(status);
     if (op.status === "failed") op.error = peexit.failReason(opId) ?? "rejected by the rail";
+    op.feeXaf = peexit.feeXafFor(opId);
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "transfer_failed";
     record(op);

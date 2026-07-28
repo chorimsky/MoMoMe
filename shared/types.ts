@@ -411,11 +411,26 @@ export interface MomoOp {
   status: "accepted" | "completed" | "failed";
   providerRef?: string;
   error?: string;
+  /** Actual fee the rail charged for this op (XAF), captured from the settled row
+   *  when the rail reports it. undefined until known. */
+  feeXaf?: number;
   /** Links the two legs of a payout→collection wallet rebalance. */
   transferId?: string;
 }
 /** A rail's live Mobile Money wallet balance (XAF), null when unavailable. */
 export interface MomoRailBalance { rail: MomoRail; label: string; balanceXaf: number | null; }
+/** The rail's fee schedule (XAF or %, as the rail reports it), for cost-aware ops.
+ *  Values are null when the rail doesn't expose them. `pctOf` marks whether a value
+ *  is a percentage (true) or a flat XAF amount (false/undefined). */
+export interface MomoFeeInfo {
+  rail: MomoRail;
+  /** Fee to DISBURSE (cash-out / rebalance leg 1), per operator. */
+  disburse: { mtn: number | null; orange: number | null };
+  /** Fee to COLLECT (cash-in / rebalance leg 2), per operator. */
+  collect: { mtn: number | null; orange: number | null };
+  /** True when the numbers above are percentages of the amount; false = flat XAF. */
+  pct: boolean;
+}
 
 /* ---------- liquidity ---------- */
 export interface LiquidityPool {

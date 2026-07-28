@@ -802,8 +802,8 @@ api.post("/admin/treasury/withdraw", async (req, res) => {
    View: live rail balances + op history (mobilemoney section). Mutations
    (cashout/cashin) require fund-movement rights, gated in the /admin middleware. */
 api.get("/admin/momo", async (_req, res) => {
-  const [balances, history] = [await momoOps.balances("CM"), momoOps.history()];
-  res.json({ balances, history });
+  const [balances, fees] = await Promise.all([momoOps.balances("CM"), momoOps.feeInfo().catch(() => null)]);
+  res.json({ balances, history: momoOps.history(), fees });
 });
 
 api.post("/admin/momo/cashout", async (req, res) => {

@@ -32,7 +32,8 @@ import {
   verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
-import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import * as compliance from "../core/compliance.js";
 import { rateLimit, rateLimitReset, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
@@ -155,6 +156,12 @@ api.use("/admin", (req, res, next) => {
   // gate as payment retry/refund (Ops Manager + Super Admin).
   if (/^\/momo\/(cashout|cashin|transfer)$/.test(sub) && !canMovePaymentFunds(role)) {
     return res.status(403).json({ error: "forbidden", message: "Your role can't move Mobile Money funds." });
+  }
+  // Compliance dispositions and report filing (STR/ANIF) are the compliance-officer
+  // function — Compliance Officer + Super Admin only. Viewing the console is open to
+  // the compliance section above; only the case actions are gated here.
+  if (/^\/compliance\/(cases|str)\b/.test(sub) && !canFileReports(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Only a Compliance Officer can disposition cases or file reports." });
   }
   next();
 });
@@ -952,33 +959,43 @@ api.get("/admin/revenue", (req, res) => {
 });
 
 /* ---------- compliance ---------- */
+// AML/CFT compliance console — runs detection then returns the full report
+// (cases, STRs, CTR register, tamper-evident event log, posture metrics).
 api.get("/admin/compliance", (_req, res) => {
-  const ids = listIdentities();
-  const verified = ids.filter((i) => i.claimed).length;
-  const pays = store.listPayments();
-  // Flag large, failed, OR Peex-review transactions — annotate each with the
-  // Peex risk signal so the intelligence layer visibly feeds the review queue.
-  const flagged = pays
-    .map((p) => {
-      const v = peex.getVerification(p.ref);
-      const large = p.xaf >= 100_000;
-      const failed = p.displayStatus === "Failed";
-      const peexReview = v?.signal === "review";
-      if (!large && !failed && !peexReview) return null;
-      let reason: string;
-      let level: "warn" | "bad";
-      if (failed) { reason = "Failed delivery — review"; level = "bad"; }
-      else if (peexReview) { reason = `Peex flagged for review (risk ${v!.riskScore})`; level = "warn"; }
-      else { reason = "Large transaction"; level = "warn"; }
-      return { ref: p.ref, phone: p.recipient.phone, amountXaf: p.xaf, reason, level, peexRisk: v?.riskScore, peexSignal: v?.signal };
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null)
-    .slice(0, 10);
-  const audit = pays
-    .flatMap((p) => p.events.map((e) => ({ at: e.at, ref: p.ref, event: e.state })))
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 14);
-  res.json({ kyc: { verified, pending: ids.length - verified, rejected: 0 }, flagged, audit });
+  compliance.scanCompliance();
+  res.json(compliance.report());
+});
+
+// Disposition a case: clear (false positive) or escalate (needs officer follow-up).
+api.post("/admin/compliance/cases/:id/dispose", (req, res) => {
+  const { status, note } = (req.body ?? {}) as { status?: string; note?: string };
+  if (status !== "cleared" && status !== "escalated") return res.status(400).json({ error: "bad_status", message: "Status must be cleared or escalated." });
+  if (typeof note !== "string" || note.trim().length < 3) return res.status(400).json({ error: "bad_note", message: "A disposition note is required." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "officer";
+  const r = compliance.disposeCase(req.params.id, status, by, note.trim().slice(0, 500));
+  if (!r.ok) return res.status(r.error === "not_found" ? 404 : 409).json({ error: r.error, message: r.error === "already_reported" ? "This case has already been reported." : "Case not found." });
+  res.json({ ok: true });
+});
+
+// File a Suspicious Transaction Report (déclaration de soupçon → ANIF) from a case.
+api.post("/admin/compliance/str", (req, res) => {
+  const { caseId, reason } = (req.body ?? {}) as { caseId?: string; reason?: string };
+  if (typeof caseId !== "string" || !caseId) return res.status(400).json({ error: "bad_case", message: "A case id is required." });
+  if (typeof reason !== "string" || reason.trim().length < 10) return res.status(400).json({ error: "bad_reason", message: "A suspicion narrative (≥10 chars) is required." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "officer";
+  const r = compliance.fileSTR(caseId, by, reason.trim().slice(0, 2000));
+  if (!r.ok) return res.status(r.error === "not_found" ? 404 : 409).json({ error: r.error, message: r.error === "already_reported" ? "An STR was already filed for this case." : "Case not found." });
+  res.json({ ok: true, str: r.str });
+});
+
+// Regulator-ready CSV export (cases / STRs / CTR register / tamper-evident log).
+api.get("/admin/compliance/export", (req, res) => {
+  const type = String(req.query.type ?? "cases");
+  if (!["cases", "strs", "ctr", "events"].includes(type)) return res.status(400).json({ error: "bad_type" });
+  const body = compliance.exportCsv(type as "cases" | "strs" | "ctr" | "events");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="momome-compliance-${type}.csv"`);
+  res.send(body);
 });
 
 /* ---------- delivery management ---------- */

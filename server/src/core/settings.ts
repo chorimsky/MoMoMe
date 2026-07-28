@@ -20,6 +20,15 @@ const DEFAULTS: AdminSettings = {
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
+  // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
+  // CTR/large-transaction reporting at 5,000,000 XAF; CDD/identification at
+  // 1,000,000 XAF for occasional transactions; 10-year record retention.
+  compliance: {
+    officer: "", reportingEntity: "MoMo›Me",
+    ctrThresholdXaf: 5_000_000, cddThresholdXaf: 1_000_000,
+    structuringWindowH: 24, structuringXaf: 5_000_000,
+    sanctionsList: [], retentionYears: 10,
+  },
 };
 
 let settings: AdminSettings = DEFAULTS;
@@ -38,6 +47,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
+    compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}) },
   };
 });
 
@@ -58,6 +68,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
+    compliance: { ...settings.compliance, ...(patch.compliance ?? {}) },
   };
   touch("settings");
   return settings;

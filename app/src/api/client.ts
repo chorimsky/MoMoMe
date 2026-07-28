@@ -5,7 +5,7 @@
 import type {
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
-  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
+  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceReport, SuspiciousTransactionReport, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
@@ -178,7 +178,24 @@ export const api = {
     req<{ ok: boolean; entry?: TreasuryWithdrawal }>("/admin/treasury/withdraw", { method: "POST", body: JSON.stringify({ rail, amount }) }),
   adminPricing: () => req<PricingInfo>("/admin/pricing"),
   adminRevenue: (period = "30d") => req<RevenueReport>(`/admin/revenue?period=${period}`),
-  adminCompliance: () => req<ComplianceSnapshot>("/admin/compliance"),
+  adminCompliance: () => req<ComplianceReport>("/admin/compliance"),
+  complianceDispose: (id: string, status: "cleared" | "escalated", note: string) =>
+    req<{ ok: boolean }>(`/admin/compliance/cases/${id}/dispose`, { method: "POST", body: JSON.stringify({ status, note }) }),
+  complianceFileSTR: (caseId: string, reason: string) =>
+    req<{ ok: boolean; str?: SuspiciousTransactionReport }>("/admin/compliance/str", { method: "POST", body: JSON.stringify({ caseId, reason }) }),
+  complianceExportCsv: async (type: "cases" | "strs" | "ctr" | "events"): Promise<"ok" | "fail"> => {
+    try {
+      const res = await fetch(`${BASE}/admin/compliance/export?type=${type}`, { headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {} });
+      if (!res.ok) return "fail";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `momome-compliance-${type}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return "ok";
+    } catch { return "fail"; }
+  },
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
   adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[]; fees: MomoFeeInfo | null }>("/admin/momo"),

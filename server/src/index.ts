@@ -4,6 +4,7 @@ import { flushAll } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
+import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
 import { setRates, CCY } from "./core/rates.js";
 
@@ -33,6 +34,9 @@ setInterval(() => {
     void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
     void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   }
+  // AML/CFT detection — open compliance cases for reportable activity (CTR/CDD,
+  // structuring, sanctions, high-risk). Read-only over payments; never blocks money.
+  try { scanCompliance(); } catch (e) { console.error("compliance scan", e); }
 }, 30_000).unref();
 
 // Evict expired quotes so the in-memory quotes map can't grow without bound.

@@ -351,6 +351,26 @@ export interface AdminSettings {
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
   };
+  /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
+   *  configurable so they track the current regulation; defaults follow the
+   *  CEMAC standard. */
+  compliance: {
+    /** Designated compliance officer (name/username) — the AML responsible person. */
+    officer: string;
+    /** Legal reporting entity named on regulatory reports. */
+    reportingEntity: string;
+    /** Large-transaction reporting threshold (systematic report). */
+    ctrThresholdXaf: number;
+    /** Occasional-transaction CDD / identification trigger. */
+    cddThresholdXaf: number;
+    /** Structuring window (hours) and the cumulative XAF that trips a smurfing alert. */
+    structuringWindowH: number;
+    structuringXaf: number;
+    /** Names / MSISDNs screened as a sanctions / terrorism-financing watchlist. */
+    sanctionsList: string[];
+    /** AML record retention (years). CEMAC standard = 10. */
+    retentionYears: number;
+  };
   /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
    *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until
    *  its destination is set. Empty string = unset. */
@@ -546,6 +566,86 @@ export interface ComplianceSnapshot {
     peexSignal?: "clear" | "review";
   }>;
   audit: Array<{ at: string; ref: string; event: string }>;
+}
+
+/* ============================================================
+   AML / CFT compliance engine (CEMAC Règlement N°01 / GABAC / ANIF Cameroun).
+   A tamper-evident, retained record of detection → case → disposition → report.
+   ============================================================ */
+/** Why a transaction was flagged. Maps to the CEMAC obligation it satisfies. */
+export type ComplianceCaseType =
+  | "ctr_threshold"   // large transaction ≥ reporting threshold (systematic report)
+  | "cdd_trigger"     // occasional transaction ≥ CDD/identification threshold
+  | "structuring"     // smurfing — sub-threshold txns aggregating over a window
+  | "sanctions"       // subject matches a sanctions / terrorism-financing list
+  | "high_risk"       // intelligence signal / low-trust / high-risk profile
+  | "manual";         // opened by a compliance officer
+export type ComplianceSeverity = "low" | "medium" | "high";
+/** Case lifecycle. Dispositions are recorded in the immutable event log. */
+export type ComplianceCaseStatus = "open" | "cleared" | "escalated" | "reported";
+
+export interface ComplianceCase {
+  id: string;
+  at: string;             // ISO — when the case opened
+  type: ComplianceCaseType;
+  severity: ComplianceSeverity;
+  subjectPhone: string;
+  subjectName?: string;
+  ref?: string;           // payment / op reference, when tied to one
+  amountXaf: number;
+  rationale: string;      // human-readable reason for the flag
+  status: ComplianceCaseStatus;
+  officer?: string;       // who dispositioned it
+  dispositionNote?: string;
+  dispositionAt?: string;
+  strId?: string;         // linked Suspicious Transaction Report, if filed
+}
+
+/** A filed Suspicious Transaction Report (Déclaration de soupçon → ANIF). */
+export interface SuspiciousTransactionReport {
+  id: string;             // internal reference (e.g. STR-2026-000001)
+  at: string;
+  filedBy: string;        // designated compliance officer
+  reportingEntity: string;
+  caseId: string;
+  subjectPhone: string;
+  subjectName?: string;
+  ref?: string;
+  amountXaf: number;
+  reason: string;         // suspicion narrative
+}
+
+/** One entry in the append-only, hash-chained compliance event log — the legal
+ *  guard. Every open / disposition / STR filing writes an event; the chain lets
+ *  anyone prove the record was neither altered nor backdated. */
+export interface ComplianceEvent {
+  seq: number;            // monotonic sequence
+  at: string;
+  actor: string;          // "system" or officer username
+  action: string;         // CASE_OPENED · CASE_CLEARED · CASE_ESCALATED · STR_FILED
+  caseId?: string;
+  ref?: string;
+  detail?: string;
+  prevHash: string;       // hash of the previous event (genesis = "0")
+  hash: string;           // sha256(prevHash + canonical(event without hash))
+}
+
+/** The compliance console payload. */
+export interface ComplianceReport {
+  officer: string | null;         // designated compliance officer (settings)
+  reportingEntity: string;
+  thresholds: { ctrXaf: number; cddXaf: number; structuringWindowH: number; structuringXaf: number; retentionYears: number };
+  kyc: { verified: number; pending: number; rejected: number };
+  metrics: {
+    openCases: number; highSeverityOpen: number; reportedCases: number;
+    strFiled: number; ctrCount: number; retentionYears: number;
+    /** Hash chain verified end-to-end (tamper-evidence intact). */
+    integrityOk: boolean; eventCount: number;
+  };
+  cases: ComplianceCase[];
+  strs: SuspiciousTransactionReport[];
+  ctr: Array<{ ref: string; at: string; phone: string; name?: string; amountXaf: number }>;
+  events: ComplianceEvent[];
 }
 
 /* ---------- Peex integration panel (optional intelligence layer) ---------- */

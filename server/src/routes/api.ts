@@ -23,6 +23,10 @@ import { getSettings, updateSettings } from "../core/settings.js";
 import * as treasury from "../core/treasury.js";
 import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
+import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
+import { getDevice, enrollDevice } from "../core/deviceAccount.js";
+import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery } from "../core/account.js";
+import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
 import type { Aggregator } from "../../../shared/types.js";
@@ -233,18 +237,74 @@ function senderOf(req: { headers: Record<string, string | string[] | undefined> 
   return typeof s === "string" && s ? s : undefined;
 }
 
+const SIG_SKEW_MS = 300_000; // ±5 min tolerance (real phone clocks drift)
+function hdr(req: ReqLike, name: string): string | undefined {
+  const v = req.headers[name];
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === "string" && s ? s : undefined;
+}
+type ReqLike = { headers: Record<string, string | string[] | undefined>; method?: string; url?: string; rawBody?: Buffer };
+
+/**
+ * Verify the per-request signature: ECDSA-P256 over
+ *   `${METHOD}\n${path}\n${ts}\n${base64(sha256(rawBody))}`
+ * against the device's enrolled public key, with a fresh timestamp. The client
+ * signs the exact bytes it sends; we hash `rawBody` (see app.ts keepRaw) so the
+ * hashes match without re-serialising.
+ */
+async function verifyDeviceSig(req: ReqLike, authPub: JsonWebKey): Promise<boolean> {
+  const ts = hdr(req, "x-mm-ts");
+  const sigB64 = hdr(req, "x-mm-sig");
+  if (!ts || !sigB64) return false;
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Math.abs(Date.now() - tsNum) > SIG_SKEW_MS) return false;
+  try {
+    const key = await webcrypto.subtle.importKey("jwk", authPub, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const bodyHash = await webcrypto.subtle.digest("SHA-256", req.rawBody ?? new Uint8Array(0));
+    const bodyHashB64 = Buffer.from(bodyHash).toString("base64");
+    const msg = new TextEncoder().encode(`${(req.method ?? "GET").toUpperCase()}\n${req.url ?? ""}\n${ts}\n${bodyHashB64}`);
+    const sig = Buffer.from(sigB64, "base64");
+    return await webcrypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig, msg);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The AUTHENTICATED owner of a request:
+ *  • unknown/unenrolled id → the id itself (legacy bearer — unchanged behaviour);
+ *  • enrolled id → the id ONLY if the request carries a valid signature, else
+ *    undefined (a stolen id without the private key can no longer act).
+ */
+async function ownerOf(req: ReqLike): Promise<string | undefined> {
+  const id = senderOf(req);
+  if (!id) return undefined;
+  const dev = getDevice(id);
+  if (!dev) return id; // not enrolled yet → legacy path
+  return (await verifyDeviceSig(req, dev.authPub)) ? id : undefined;
+}
+
+/** The vault scope for a request: the anchored ACCOUNT id if the device has one,
+ *  else its (authenticated) device id — so every device on the same phone shares
+ *  one encrypted contact book. */
+async function vaultOwnerOf(req: ReqLike): Promise<string | undefined> {
+  const dev = await ownerOf(req);
+  if (!dev) return undefined;
+  return accountOf(dev) ?? dev;
+}
+
 /** True when the request carries a valid admin session token (any role). */
 function isAdminRequest(req: { headers: Record<string, string | string[] | undefined> }): boolean {
   return !!verifyToken(tokenFromHeaders(req.headers));
 }
 
 /** May this requester view this payment? Admins always; otherwise the request's
- *  anonymous sender id must match the payment's. Prevents enumerating other
- *  people's payments/ledgers by id (the id is the only thing the caller needs). */
-function mayViewPayment(req: { headers: Record<string, string | string[] | undefined> }, senderId: string | undefined): boolean {
+ *  AUTHENTICATED owner (signed, for enrolled devices) must match the payment's.
+ *  Prevents enumerating other people's payments/ledgers by id. */
+async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promise<boolean> {
   if (!senderId) return true;          // legacy/seed payments with no owner
   if (isAdminRequest(req)) return true; // admin console (e.g. ledger drawer)
-  return senderOf(req) === senderId;
+  return (await ownerOf(req)) === senderId;
 }
 
 /* ---------- quotes ---------- */
@@ -489,7 +549,7 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     displayStatus: "Pending",
     method: quote.method,
     recipient,
-    senderId: senderOf(req), // anonymous device id — attributes the payment to its sender
+    senderId: await ownerOf(req), // authenticated device id — attributes the payment to its sender
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
@@ -562,7 +622,7 @@ api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 
   const p = store.getPayment(req.params.id);
   // Ownership: only the original sender (matching device id) may direct the refund —
   // otherwise anyone with a payment id could divert the refund to their own invoice.
-  if (!p || !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   const bolt11 = typeof (req.body ?? {}).bolt11 === "string" ? (req.body.bolt11 as string).trim() : "";
   if (!/^ln(bc|tb|bcrt)\w+$/i.test(bolt11)) return res.status(400).json({ error: "bad_invoice", message: "Enter a valid Lightning invoice (starts with ln…)." });
   const r = await completeRefund(p, bolt11);
@@ -577,22 +637,22 @@ api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 
   res.json(store.getPayment(p.id) ?? p);
 });
 
-api.get("/payments/:id", (req, res) => {
+api.get("/payments/:id", async (req, res) => {
   const p = store.getPayment(req.params.id);
   // 404 (not 403) on a non-owned payment too, so the id space can't be probed.
-  if (!p || !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   res.json(p);
 });
 
 // Sender-scoped: a customer sees only their OWN payments (by anonymous device id).
-api.get("/payments", (req, res) => {
-  const sid = senderOf(req);
+api.get("/payments", async (req, res) => {
+  const sid = await ownerOf(req);
   res.json(sid ? store.listPayments().filter((p) => p.senderId === sid) : []);
 });
 
 /** The sender's distinct recent recipients — powers "send again" quick-pick. */
-api.get("/me/recipients", (req, res) => {
-  const sid = senderOf(req);
+api.get("/me/recipients", async (req, res) => {
+  const sid = await ownerOf(req);
   if (!sid) return res.json([]);
   const seen = new Set<string>();
   const out: Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }> = [];
@@ -606,10 +666,100 @@ api.get("/me/recipients", (req, res) => {
   res.json(out);
 });
 
-api.get("/ledger/:paymentId", (req, res) => {
+api.get("/ledger/:paymentId", async (req, res) => {
   const p = store.getPayment(req.params.paymentId);
-  if (p && !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (p && !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   res.json(entriesFor(req.params.paymentId));
+});
+
+/* ---------- encrypted contact vault (zero-knowledge) ----------
+   The server stores/returns opaque ciphertext only; all crypto is on-device.
+   Scoped to the anonymous sender/device id — a missing id means no vault. */
+api.get("/me/vault", async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.json([]);
+  const since = typeof req.query.since === "string" ? req.query.since : undefined;
+  res.json(listVault(sid, since));
+});
+
+api.put("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
+  const body = (req.body ?? {}) as { ciphertext?: unknown; iv?: unknown; ver?: unknown };
+  const ciphertext = typeof body.ciphertext === "string" ? body.ciphertext : "";
+  const iv = typeof body.iv === "string" ? body.iv : "";
+  const ver = typeof body.ver === "number" ? body.ver : 1;
+  // Opaque blobs only — reject anything implausibly large (≈48KB ciphertext cap).
+  if (!ciphertext || !iv || ciphertext.length > 48_000 || iv.length > 128) {
+    return res.status(400).json({ error: "bad_record", message: "Invalid vault record." });
+  }
+  res.json(upsertVault(sid, { recordId: String(req.params.recordId).slice(0, 64), ciphertext, iv, ver }));
+});
+
+api.delete("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
+  const rec = deleteVault(sid, String(req.params.recordId).slice(0, 64));
+  if (!rec) return res.status(404).json({ error: "not_found", message: "Not found." });
+  res.json(rec);
+});
+
+/* ---------- device enrollment (proof-of-possession) ----------
+   Trust-on-first-use: a device registers its public keypair for its id. This
+   call is intentionally UNSIGNED (it establishes the key); afterwards every
+   request for that id must be signed. Re-enrolling a different key → 409, and
+   the client rotates to a fresh id. */
+api.post("/me/devices", rateLimitMiddleware("device_enroll", 20, 60_000), (req, res) => {
+  const id = senderOf(req);
+  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  const body = (req.body ?? {}) as { authPub?: JsonWebKey; wrapPub?: JsonWebKey };
+  const okJwk = (k?: JsonWebKey) => !!k && k.kty === "EC" && k.crv === "P-256" && typeof k.x === "string" && typeof k.y === "string";
+  if (!okJwk(body.authPub) || !okJwk(body.wrapPub)) return res.status(400).json({ error: "bad_key", message: "Invalid device key." });
+  const r = enrollDevice(id, body.authPub as JsonWebKey, body.wrapPub as JsonWebKey);
+  if (!r.ok) return res.status(409).json({ error: "device_conflict", message: "This device id is already enrolled with a different key." });
+  res.json({ ok: true, deviceId: id });
+});
+
+/* ---------- Phase 4 — phone-anchor + E2E recovery ----------
+   Anchor a device to a phone (portable account); a recovery-code-wrapped vault
+   key is escrowed so a new device can restore it. The OTP authorises account
+   access; only the recovery code (held by the user) can unwrap the key. */
+function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number; iv: string; ct: string } {
+  const o = b as { salt?: unknown; iterations?: unknown; iv?: unknown; ct?: unknown };
+  return !!o && typeof o.salt === "string" && o.salt.length <= 128 && typeof o.iterations === "number"
+    && typeof o.iv === "string" && o.iv.length <= 128 && typeof o.ct === "string" && o.ct.length <= 4096;
+}
+
+api.post("/me/anchor/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+  if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const r = requestAnchor(String((req.body ?? {}).phone ?? ""));
+  if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
+  res.json({ sent: true, devCode: isLive() ? undefined : r.code }); // devCode sandbox-only
+});
+
+api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const dev = await ownerOf(req);
+  if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const { phone, code, recovery } = (req.body ?? {}) as { phone?: string; code?: string; recovery?: unknown };
+  const v = verifyAnchorCode(String(phone ?? ""), String(code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  const accountId = linkDevice(dev, String(phone));
+  reassignVault(dev, accountId); // move this device's existing contacts into the shared account
+  if (recovery !== undefined) {
+    if (!validRecoveryBlob(recovery)) return res.status(400).json({ error: "bad_recovery", message: "Invalid recovery data." });
+    putRecovery(accountId, recovery);
+  }
+  res.json({ ok: true, accountId });
+});
+
+api.post("/me/anchor/restore", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const dev = await ownerOf(req);
+  if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const { phone, code } = (req.body ?? {}) as { phone?: string; code?: string };
+  const v = verifyAnchorCode(String(phone ?? ""), String(code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  const accountId = linkDevice(dev, String(phone)); // join the account on this device
+  res.json({ accountId, records: listVault(accountId), recovery: getRecovery(accountId) ?? null });
 });
 
 /* ---------- admin ---------- */

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo, useBrandLogo } from "../../components/atoms.js";
@@ -18,6 +18,26 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   const { t, lang } = useI18n();
   const logo = useBrandLogo(); // the LIVE brand logo (admin-uploaded) → on the receipt
   const [busy, setBusy] = useState(false);
+  // Accessible modal: focus the dialog on open, trap Tab inside it, close on
+  // Escape, and restore focus to the trigger on unmount.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = dialogRef.current;
+    const prev = document.activeElement as HTMLElement | null;
+    node?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      if (e.key === "Tab" && node) {
+        const f = node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); prev?.focus?.(); };
+  }, [onClose]);
   // Sender's own record shows how they paid (crypto · USD); toggle OFF for a
   // recipient-safe, Mobile-Money-only receipt.
   const [showCrypto, setShowCrypto] = useState(true);
@@ -56,7 +76,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   });
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "grid", placeItems: "center", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease" }}>
+      <div ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-modal="true" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease", outline: "none" }}>
         {/* header — branded band + success badge + the delivered amount */}
         <div style={{ background: "var(--brand-wash)", padding: "20px 24px 22px", textAlign: "center" }}>
           <Logo size={28} />
@@ -117,7 +137,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   );
 }
 
-export function SuccessStep({ payment, reset }: { payment: Payment; reset: () => void }) {
+export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payment; reset: () => void; onViewActivity: () => void }) {
   const { t, lang } = useI18n();
   const [showReceipt, setShowReceipt] = useState(false);
   return (
@@ -150,8 +170,13 @@ export function SuccessStep({ payment, reset }: { payment: Payment; reset: () =>
         <Row k={t("date_time")} v={when(payment, lang)} />
       </div>
 
-      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 18, padding: "16px" }}>{t("make_another")}</button>
-      <button className="btn btn-ghost" onClick={() => setShowReceipt(true)} style={{ width: "100%", marginTop: 8 }}>{t("view_receipt")}</button>
+      <button className="btn btn-primary btn-block" onClick={reset} style={{ marginTop: 18 }}>{t("make_another")}</button>
+      {/* Give a clear path into transaction history — before this, Success
+          dead-ended and the sender had to "Make another" just to reach Activity. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button className="btn btn-ghost" onClick={() => setShowReceipt(true)} style={{ flex: 1 }}>{t("view_receipt")}</button>
+        <button className="btn btn-ghost" onClick={onViewActivity} style={{ flex: 1 }}>{t("view_activity")}</button>
+      </div>
 
       {showReceipt && <Receipt payment={payment} onClose={() => setShowReceipt(false)} />}
     </FlowCard>

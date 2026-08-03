@@ -31,9 +31,33 @@
   .mm-ov { grid-template-columns: 1fr; }
 }
 
-/* Data tables scroll horizontally instead of crushing on small screens. */
-.mm-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.mm-tablewrap > .mm-table { min-width: 660px; }
+/* Data tables scroll horizontally (with momentum) instead of crushing on small
+   screens. Min-width scales with column count so 7-column tables get room to
+   breathe instead of everything being squeezed to a flat 660px. */
+.mm-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.mm-tablewrap > .mm-table { min-width: 640px; }
+.mm-tablewrap > .mm-table[data-cols="6"] { min-width: 780px; }
+.mm-tablewrap > .mm-table[data-cols="7"] { min-width: 900px; }
+.mm-tablewrap > .mm-table[data-cols="8"] { min-width: 1000px; }
 
 /* Toolbars wrap their controls on narrow screens. */
 .mm-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ============================================================
+   Mobile-native operator fixes (phones): stop iOS input-zoom, floor
+   touch targets, and make the drawer nav comfortably tappable.
+   ============================================================ */
+@media (max-width: 640px) {
+  /* ≥16px on every admin field so focusing one never zooms the viewport. All
+     admin inputs are 12.5–14px, so forcing 16px here is strictly an improvement. */
+  .mm-admin-main input,
+  .mm-admin-main select,
+  .mm-admin-main textarea,
+  .mm-admin-side input {
+    font-size: 16px !important;
+  }
+  /* Fingertip-sized nav + controls in the mobile drawer / header. */
+  .mm-admin-side nav button { min-height: 44px; }
+  .mm-admin-burger { min-width: 44px; min-height: 44px; display: inline-flex !important; align-items: center; justify-content: center; }
+  .mm-admin-main .btn { min-height: 44px; }
+}

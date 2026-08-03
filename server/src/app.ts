@@ -45,10 +45,13 @@ export function createApp() {
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().
   app.use("/webhooks", webhooks);
 
+  // Stash the raw request bytes so the device-signature check can hash the EXACT
+  // body the client signed (re-stringifying the parsed body would reorder keys).
+  const keepRaw = (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => { req.rawBody = buf; };
   // Large bodies only on the authenticated settings route (base64 brand logo);
   // a tight limit everywhere else caps unauthenticated large-body DoS.
-  app.use("/api/admin/settings", express.json({ limit: "768kb" }));
-  app.use(express.json({ limit: "32kb" }));
+  app.use("/api/admin/settings", express.json({ limit: "768kb", verify: keepRaw }));
+  app.use(express.json({ limit: "32kb", verify: keepRaw }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

@@ -15,7 +15,7 @@ export function useExpiry(iso: string): { secondsLeft: number; expired: boolean;
 }
 
 export function FlowCard({ children }: { children: ReactNode }) {
-  return <div className="card" style={{ padding: "var(--pad)", boxShadow: "var(--shadow-sm)", animation: "riseIn .32s ease" }}>{children}</div>;
+  return <div className="card" style={{ padding: "clamp(15px, 3.6vw, 19px)", boxShadow: "var(--shadow-sm)", animation: "riseIn .32s ease" }}>{children}</div>;
 }
 
 export function Label({ children }: { children: ReactNode }) {

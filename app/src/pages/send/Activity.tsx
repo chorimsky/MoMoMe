@@ -46,12 +46,12 @@ export function Activity() {
 
   return (
     <FlowCard>
-      <h2 style={{ fontSize: 24 }}>{t("activity_title")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 18px" }}>{t("activity_sub")}</p>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+      <h2 style={{ fontSize: 20 }}>{t("activity_title")}</h2>
+      <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px" }}>{t("activity_sub")}</p>
+      <div role="group" aria-label={t("activity_title")} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
         {(["All", "Completed", "Pending", "Failed"] as Filter[]).map((x) => (
-          <button key={x} onClick={() => setFilter(x)}
-            style={{ flex: 1, cursor: "pointer", padding: "8px 0", borderRadius: 9, fontSize: 12, fontWeight: 650, fontFamily: "inherit", border: `1px solid ${filter === x ? "var(--accent)" : "var(--line)"}`, background: filter === x ? "var(--accent-wash)" : "var(--surface)", color: filter === x ? "var(--accent)" : "var(--ink-2)" }}>
+          <button key={x} onClick={() => setFilter(x)} aria-pressed={filter === x}
+            style={{ flex: 1, cursor: "pointer", padding: "11px 0", minHeight: 42, borderRadius: 9, fontSize: 12.5, fontWeight: 650, fontFamily: "inherit", border: `1px solid ${filter === x ? "var(--accent)" : "var(--line)"}`, background: filter === x ? "var(--accent-wash)" : "var(--surface)", color: filter === x ? "var(--accent)" : "var(--ink-2)" }}>
             {TSTAT[x]}
           </button>
         ))}
@@ -68,7 +68,7 @@ export function Activity() {
             const openable = r.displayStatus === "Completed" || refund;
             return (
               <button key={r.id} type="button" disabled={!openable} onClick={() => { if (refund) setRefunding(r); else if (r.displayStatus === "Completed") setReceipt(r); }}
-                style={{ width: "100%", textAlign: "left", font: "inherit", display: "flex", alignItems: "center", gap: 12, padding: "13px 8px", margin: "0 -8px", borderRadius: 10, border: "none", borderBottom: i < visible.length - 1 ? "1px solid var(--line-2)" : "none", background: refund ? "var(--bad-wash)" : "transparent", cursor: openable ? "pointer" : "default" }}
+                style={{ width: "100%", textAlign: "left", font: "inherit", display: "flex", alignItems: "center", gap: 12, padding: "10px 8px", margin: "0 -8px", borderRadius: 10, border: "none", borderBottom: i < visible.length - 1 ? "1px solid var(--line-2)" : "none", background: refund ? "var(--bad-wash)" : "transparent", cursor: openable ? "pointer" : "default" }}
                 onMouseEnter={(e) => { if (openable && !refund) e.currentTarget.style.background = "var(--surface-2)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = refund ? "var(--bad-wash)" : "transparent"; }}>
                 <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--surface-2)", border: "1px solid var(--line)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, color: "var(--ink-2)", flex: "none" }}>{initials(r.recipient.name)}</div>

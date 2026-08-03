@@ -181,6 +181,7 @@ export function OpsDashboard() {
               <span className="dot" style={{ background: "var(--recv)", animation: "pulse 1.4s infinite" }} />live · 2s
             </span>
             <ThemeToggle size={36} />
+            <Link to="/admin" className="btn btn-ghost" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Admin ↗</Link>
             <Link to="/" className="btn btn-ghost" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>← Home</Link>
           </div>
         </div>

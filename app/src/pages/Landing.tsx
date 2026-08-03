@@ -106,10 +106,10 @@ export function Landing() {
   const sm = useNarrow();
   const { t, lang, setLang } = useI18n();
   return (
-    <div style={{ background: "var(--paper)", minHeight: "100vh" }}>
+    <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="lp">
         <header className="lp-top">
-          <Logo size={sm ? 28 : 36} />
+          <Link to="/" aria-label="MoMo›Me — home" style={{ textDecoration: "none", display: "inline-flex" }}><Logo size={sm ? 28 : 36} /></Link>
           <div className="lp-actions">
             <a className="lp-link" href="#how">{t("lp_how")}</a>
             <button type="button" className="lp-link" onClick={() => setLang(lang === "en" ? "fr" : "en")}

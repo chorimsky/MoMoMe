@@ -7,17 +7,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Identity } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
-import { Logo, Spinner, ThemeToggle } from "../components/atoms.js";
+import { Spinner } from "../components/atoms.js";
+import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
-import { useNarrow } from "../lib/useNarrow.js";
 import { api, ApiError } from "../api/client.js";
 import { FlowCard, Label } from "./send/ui.js";
 
 type Step = "number" | "otp" | "done";
 
 export function Claim() {
-  const { t, lang, setLang } = useI18n();
-  const sm = useNarrow();
+  const { t } = useI18n();
   const [step, setStep] = useState<Step>("number");
   const [country, setCountry] = useState<keyof typeof COUNTRIES>("CM");
   const [phone, setPhone] = useState("6 90 55 18 72");
@@ -51,18 +50,9 @@ export function Claim() {
   const validNumber = phone.replace(/\D/g, "").length >= 8;
 
   return (
-    <div className="app-bg" style={{ minHeight: "100vh", background: "var(--paper)" }}>
-      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "18px clamp(16px,4vw,24px) 56px" }}>
-        <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 22px" }}>
-          <Link to="/" style={{ textDecoration: "none" }}><Logo size={sm ? 26 : 34} /></Link>
-          <nav style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <ThemeToggle size={34} />
-            <button onClick={() => setLang(lang === "en" ? "fr" : "en")} aria-label={lang === "en" ? "Passer en français" : "Switch to English"} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
-              {lang === "en" ? "FR" : "EN"}
-            </button>
-            <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>{t("nav_home")}</Link>
-          </nav>
-        </div>
+    <div className="app-bg" style={{ background: "var(--paper)" }}>
+      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "12px clamp(16px,4vw,24px) 40px" }}>
+        <SiteHeader />
 
         {err && (
           <div role="alert" style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>{err}</div>
@@ -127,6 +117,7 @@ export function Claim() {
             </FlowCard>
           )}
         </div>
+        <SiteFooter current="claim" />
       </div>
     </div>
   );

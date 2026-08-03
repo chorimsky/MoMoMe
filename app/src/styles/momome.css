@@ -65,6 +65,27 @@
   --shadow:    0 6px 18px oklch(0.45 0.03 70 / 0.07), 0 1px 2px oklch(0.45 0.03 70 / 0.04);
   --shadow-lg: 0 16px 40px oklch(0.4 0.04 70 / 0.10), 0 3px 10px oklch(0.4 0.04 70 / 0.05);
   --shadow-pop: 0 24px 64px oklch(0.35 0.05 70 / 0.16);
+
+  /* ---- systematic scales (added: one source of truth for spacing/type/geometry) ---- */
+  /* spacing scale — replaces magic 4/6/8/10/13/16 paddings */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
+  /* fluid type — scales down on 320px phones, up on desktop */
+  --fs-display: clamp(30px, 7vw, 46px);
+  --fs-h1: clamp(26px, 5.5vw, 38px);
+  --fs-h2: clamp(21px, 3.8vw, 27px);
+  --fs-h3: clamp(17px, 2.6vw, 20px);
+  --fs-body: 15px;
+  --fs-sm: 13px;
+  /* minimum comfortable touch target (Apple HIG 44 / Material 48) */
+  --tap-min: 44px;
+  --r-pill: 999px;
+  /* readable amber for text-on-light (base --warn fails WCAG as small text) */
+  --warn-ink: oklch(0.52 0.13 60);
+  /* shared container widths */
+  --w-narrow: 480px;
+  --w-page:   1000px;
+  --w-wide:   1200px;
 }
 
 [data-theme="dark"] {
@@ -94,9 +115,13 @@
   --recv-wash: oklch(0.30 0.05 158);
 
   --warn: oklch(0.76 0.14 74);
+  --warn-ink: oklch(0.82 0.13 76);      /* lighter amber text on dark */
   --bad:  oklch(0.66 0.17 25);
   --bad-wash: oklch(0.30 0.05 25);
+  --info:      oklch(0.70 0.12 250);    /* was missing a dark value */
   --info-wash: oklch(0.30 0.05 250);
+  --lightning: oklch(0.80 0.15 78);     /* was missing a dark value */
+  --tron:      oklch(0.68 0.17 18);     /* was missing a dark value */
 
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
   --shadow:    0 6px 20px oklch(0 0 0 / 0.4);
@@ -171,6 +196,78 @@ a { color: inherit; }
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
 }
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+/* ============================================================
+   Layout + control utilities — shared across public / app / admin
+   so every page composes the same responsive primitives instead of
+   re-declaring widths, stacks and chips inline.
+   ============================================================ */
+/* centered, padded, width-capped column */
+.container        { width: 100%; max-width: var(--w-page); margin-inline: auto; padding-inline: clamp(16px, 4vw, 24px); }
+.container-narrow { max-width: var(--w-narrow); }
+.container-wide   { max-width: var(--w-wide); }
+/* vertical rhythm + wrapping rows */
+.stack   { display: flex; flex-direction: column; gap: var(--gap); }
+.cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); }
+.grid    { display: grid; gap: var(--gap); }
+/* momentum horizontal scroller with hidden scrollbar (recents rows, tables) */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain; }
+.scroll-x::-webkit-scrollbar { display: none; }
+/* uppercase micro-label / eyebrow (was inlined ~27×) */
+.overline { font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 750; color: var(--ink-3); }
+/* guarantee a comfortable tap target on any interactive element */
+.tap { min-height: var(--tap-min); min-width: var(--tap-min); }
+
+/* full-width / large CTA — was inlined as {width:100%; padding:16px} ~10× */
+.btn-block { width: 100%; padding: 16px 22px; min-height: var(--tap-min); }
+.btn-sm    { padding: 8px 14px; font-size: 13.5px; }
+
+/* chip — the shared "pill of mutually-exclusive / toggle buttons" pattern
+   (amount quick-pick, activity filters, method rows) with real touch height
+   and ARIA-driven selected state. */
+.chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--tap-min); padding: 10px 14px;
+  border-radius: var(--r-pill); border: 1.5px solid var(--line);
+  background: var(--surface); color: var(--ink-2);
+  font-family: var(--font-display); font-weight: 600; font-size: 13.5px;
+  cursor: pointer; white-space: nowrap; user-select: none;
+  transition: transform .12s ease, border-color .16s ease, background .16s ease, color .16s ease;
+}
+.chip:active { transform: translateY(1px) scale(0.99); }
+.chip[aria-pressed="true"], .chip.is-active {
+  border-color: var(--accent); color: var(--ink); background: var(--accent-wash);
+}
+
+/* segmented control — a contiguous row of chips sharing one track */
+.seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: var(--surface-2); border: 1px solid var(--line); }
+.seg-item {
+  flex: 1; min-height: 40px; padding: 8px 14px; border: 0; border-radius: var(--r-pill);
+  background: transparent; color: var(--ink-2); font-family: var(--font-display); font-weight: 600; font-size: 13.5px;
+  cursor: pointer; white-space: nowrap;
+}
+.seg-item[aria-selected="true"], .seg-item.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* ---- shared site header (logo · lang · theme · CTA) ---- */
+.site-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0 14px; }
+.site-header .site-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ---- shared site footer (Home · Pay · Claim · Help · Terms · Privacy) ---- */
+.site-foot {
+  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
+}
+.site-foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 4px; }
+.site-foot-links a {
+  display: inline-flex; align-items: center; min-height: 40px;
+  padding: 8px 11px; border-radius: 9px;
+  font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none;
+}
+.site-foot-links a:hover { background: var(--surface-2); color: var(--ink); }
+.site-foot-links a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
+.site-foot .c { font-size: 12px; color: var(--ink-3); }
+.site-foot-partners { font-size: 12px; color: var(--ink-3); text-decoration: none; padding: 6px 10px; }
+.site-foot-partners:hover { color: var(--ink-2); }
 
 /* Form controls inherit the theme ink colour by default — native <button>,
    <select> and <textarea> otherwise use the system text colour (black), which
@@ -251,3 +348,8 @@ button, input, select, textarea { color: inherit; }
 /* Header CTA shortens "Pay Mobile Money" → "Pay" on small screens so the
    compact header (logo · theme toggle · CTA) always fits a phone. */
 @media (max-width: 600px) { .cta-rest { display: none; } }
+
+/* ---- mobile: floor every button at a fingertip-sized tap target ---- */
+@media (max-width: 640px) {
+  .btn { min-height: var(--tap-min); }
+}

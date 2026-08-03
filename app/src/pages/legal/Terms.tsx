@@ -8,7 +8,7 @@ export function Terms() {
   }, []);
 
   return (
-    <DocShell kicker="Legal" title="Terms of Service" updated="1 June 2026" current="terms">
+    <DocShell kicker="Legal" title="Terms of Service" updated="1 June 2026" current="terms" langToggle>
       <Summary>
         MoMo›Me lets you send money to MTN Mobile Money and Orange Money accounts. You tell us where it
         should go and how much; we show you the exact amount that will arrive before you confirm. Payments

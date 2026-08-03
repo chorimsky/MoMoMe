@@ -9,8 +9,11 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
+  VaultRecord,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
+import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
+import { idbGet, idbSet } from "../lib/idb.js";
 
 export interface AdminSessionUser { id: string; username: string; role: AdminRole; }
 
@@ -35,25 +38,85 @@ export function getAdminToken(): string | null { return adminToken; }
    and sent on every request so the backend can attribute and filter the sender's
    payments. */
 const SENDER_KEY = "mm_sender_id";
+function newId(): string {
+  return crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
 function ensureSenderId(): string {
   try {
     let v = localStorage.getItem(SENDER_KEY);
-    if (!v) { v = (crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`); localStorage.setItem(SENDER_KEY, v); }
+    if (!v) { v = newId(); localStorage.setItem(SENDER_KEY, v); }
     return v;
   } catch {
-    return "anon"; // storage blocked (private mode) — degrade to a single anon bucket
+    // Storage blocked (private mode): use a fresh PER-SESSION id, never a shared
+    // global bucket — otherwise private-mode users would share one another's data.
+    return `eph_${newId()}`;
   }
 }
-const senderId = ensureSenderId();
+let senderId = ensureSenderId();
 export function getSenderId(): string { return senderId; }
 
+/* ---------- device proof-of-possession (signed requests) ----------
+   The device enrols a keypair for its id (trust-on-first-use) and signs every
+   request thereafter, so a stolen id can't act without the private key. Enrolment
+   is best-effort and non-blocking: until it succeeds the server still accepts the
+   id unsigned (legacy path), so the app never breaks. See lib/deviceAccount.ts. */
+const ENROLLED_IDB = "mm_dev_enrolled";
+let signingActive = false;
+
+async function enrollDevice(id: string, authPub: JsonWebKey, wrapPub: JsonWebKey): Promise<"ok" | "conflict" | "error"> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(`${BASE}/me/devices`, {
+        method: "POST", signal: ctrl.signal,
+        headers: { "Content-Type": "application/json", "X-MM-Sender": id },
+        body: JSON.stringify({ authPub, wrapPub }),
+      });
+      if (res.ok) return "ok";
+      if (res.status === 409) return "conflict";
+      return "error";
+    } finally { clearTimeout(timer); }
+  } catch { return "error"; }
+}
+
+/** Enrol + activate signing. Runs once at startup; every req() awaits it. */
+const deviceReady: Promise<void> = (async () => {
+  try {
+    const enrolledId = await idbGet<string>(ENROLLED_IDB);
+    if (enrolledId === senderId) { signingActive = true; return; }
+    const { authPubJwk, wrapPubJwk } = await devicePublicKeys();
+    let result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+    if (result === "conflict") {
+      // Our keys don't own this id (e.g. IndexedDB was cleared but the id persisted).
+      // Rotate to a fresh id and enrol there — the old id's data is unrecoverable
+      // (the accepted end-to-end tradeoff), but the app keeps working.
+      senderId = newId();
+      try { localStorage.setItem(SENDER_KEY, senderId); } catch { /* ignore */ }
+      result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+    }
+    if (result === "ok") { await idbSet(ENROLLED_IDB, senderId); signingActive = true; }
+    // "error" (offline): stay unsigned and retry next load; server still accepts the id.
+  } catch { /* never block the app on enrolment */ }
+})();
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  await deviceReady; // keys loaded + (best-effort) enrolled before we sign
   let res: Response;
   // Timeout so a STALLED (half-open) connection — the dominant failure mode on 2G/
   // metered data in the target market — fails cleanly instead of hanging the spinner
   // forever. Abort → same typed network error as a dropped connection.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20_000);
+  // Sign the request (proof-of-possession) once the device is enrolled. The server
+  // verifies the signature for enrolled ids; unsigned is accepted only pre-enrolment.
+  const method = (init?.method ?? "GET").toUpperCase();
+  const bodyStr = typeof init?.body === "string" ? init.body : "";
+  let sigHeaders: Record<string, string> = {};
+  if (signingActive) {
+    try { const { ts, sig } = await signRequest(method, path, bodyStr); sigHeaders = { "X-MM-Ts": ts, "X-MM-Sig": sig }; }
+    catch { /* signing failed → send unsigned */ }
+  }
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
@@ -61,6 +124,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       headers: {
         "Content-Type": "application/json",
         "X-MM-Sender": senderId,
+        ...sigHeaders,
         ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
         ...(init?.headers ?? {}),
       },
@@ -159,6 +223,22 @@ export const api = {
 
   // The sender's distinct recent recipients (anonymous, no login) — "send again".
   recentRecipients: () => req<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>("/me/recipients"),
+
+  // Encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts).
+  vaultList: (since?: string) => req<VaultRecord[]>(`/me/vault${since ? `?since=${encodeURIComponent(since)}` : ""}`),
+  vaultPut: (recordId: string, body: { ciphertext: string; iv: string; ver: number }) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: "PUT", body: JSON.stringify(body) }),
+  vaultDelete: (recordId: string) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: "DELETE" }),
+
+  // Phase 4 — phone-anchor + E2E recovery. `recovery` is the vault key wrapped by
+  // the user's recovery code (server-opaque). Restore returns account records + blob.
+  anchorRequest: (phone: string) =>
+    req<{ sent: boolean; devCode?: string }>("/me/anchor/request", { method: "POST", body: JSON.stringify({ phone }) }),
+  anchorVerify: (phone: string, code: string, recovery: unknown) =>
+    req<{ ok: boolean; accountId: string }>("/me/anchor/verify", { method: "POST", body: JSON.stringify({ phone, code, recovery }) }),
+  anchorRestore: (phone: string, code: string) =>
+    req<{ accountId: string; records: VaultRecord[]; recovery: { salt: string; iterations: number; iv: string; ct: string } | null }>("/me/anchor/restore", { method: "POST", body: JSON.stringify({ phone, code }) }),
 
   ledger: (paymentId: string) => req<LedgerEntry[]>(`/ledger/${paymentId}`),
 

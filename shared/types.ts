@@ -93,6 +93,35 @@ export interface Recipient {
   nameSource: NameSource;
 }
 
+/* ---------- Contacts (E2E-encrypted) ----------
+   The plaintext shape lives ONLY on the device. It is serialized, encrypted
+   with the device vault key, and synced to the server as an opaque VaultRecord
+   (ciphertext) — the server never sees these fields. See
+   docs/device-account-and-contacts.md. */
+export interface Contact {
+  id: string;               // client-generated uuid (also the VaultRecord.recordId)
+  name: string;
+  phone: string;            // local digits
+  country: CountryCode;
+  provider: ProviderId;
+  favorite: boolean;
+  note?: string;
+  source: "manual" | "picker" | "payment";
+  lastPaidAt?: string;      // ISO — set when a payment to this number succeeds
+  createdAt: string;        // ISO
+  updatedAt: string;        // ISO
+}
+
+/** What the server stores/returns for the vault — opaque ciphertext only. */
+export interface VaultRecord {
+  recordId: string;
+  ciphertext: string;       // base64( AES-256-GCM( vaultKey, JSON(Contact) ) )
+  iv: string;               // base64 (96-bit, per record)
+  ver: number;              // envelope schema version
+  updatedAt: string;        // ISO — server-assigned on write, drives delta sync
+  deleted: boolean;         // tombstone (kept so other devices learn of deletes)
+}
+
 export interface PaymentEvent {
   at: string; // ISO
   state: PaymentState;

@@ -208,6 +208,12 @@ export function AdminConsole() {
             );
           })}
         </nav>
+        {/* Exit-to-customer-app lives in the sidebar footer so it stays reachable
+            in the mobile drawer (the header shortcut is hidden < 560px). */}
+        <Link to="/send" onClick={() => setNavOpen(false)}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44, margin: "0 12px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+          Customer app <span aria-hidden="true">↗</span>
+        </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderTop: "1px solid var(--line)" }}>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "var(--accent-ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flex: "none", textTransform: "uppercase" }}>{username.slice(0, 2)}</div>
           <div style={{ minWidth: 0, flex: 1 }}>
@@ -247,6 +253,7 @@ export function AdminConsole() {
             {role}
           </div>
           <ThemeToggle size={36} />
+          <Link to="/ops" className="btn btn-ghost mm-admin-cust" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Ops ↗</Link>
           <Link to="/send" className="btn btn-ghost mm-admin-cust" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Customer app ↗</Link>
         </header>
         <main style={{ flex: 1, padding: "22px", maxWidth: 1320, width: "100%", margin: "0 auto" }}>

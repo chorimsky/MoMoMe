@@ -8,7 +8,7 @@ export function Privacy() {
   }, []);
 
   return (
-    <DocShell kicker="Legal" title="Privacy Policy" updated="1 June 2026" current="privacy">
+    <DocShell kicker="Legal" title="Privacy Policy" updated="1 June 2026" current="privacy" langToggle>
       <Summary>
         We collect only what we need to move your money and meet our legal duties: who is paying, who is being
         paid, and how much. We don’t sell your data, and we don’t ask you to open an account to send a payment.

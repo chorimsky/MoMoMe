@@ -125,11 +125,11 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
   return (
     <FlowCard>
       <Stepper i={0} />
-      <h2 style={{ fontSize: 25, marginTop: 16 }}>{t("pay_title")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 20px", lineHeight: 1.5 }}>{t("details_sub")}</p>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("pay_title")}</h2>
+      <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
 
       {recents.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: 12 }}>
           <Label>{t("send_again")}</Label>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, margin: "0 -2px" }}>
             {recents.map((r) => (
@@ -150,7 +150,7 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: "none" }}>
-              <select value={s.country} aria-label={t("mm_number")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
+              <select value={s.country} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
                 style={{ appearance: "none", cursor: "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%" }}>
                 {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.code}</option>)}
               </select>
@@ -167,11 +167,11 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
           </div>
           {contactNote && <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{contactNote}</div>}
 
-          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
             {c.providers.map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={s.provider === pid} onClick={() => set({ provider: pid })} />)}
           </div>
 
-          <div style={{ marginTop: 14 }} aria-live="polite">
+          <div style={{ marginTop: 12 }} aria-live="polite">
             {resolving ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
                 <Spinner size={15} /> <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{t("checking_name")}</span>
@@ -198,34 +198,34 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
           </div>
 
       {numLooksOff && (
-        <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn)", lineHeight: 1.4 }}>{t("num_check")}</div>
+        <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.4 }}>{t("num_check")}</div>
       )}
 
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 14 }}>
         <Label>{t("amount_q")}</Label>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "16px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
           <input className="num" value={fmt(s.xaf)} aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
-            style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 34, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
-          <span style={{ fontWeight: 600, fontSize: 17, color: "var(--ink-3)" }}>XAF</span>
+            style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 27, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
+          <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-3)" }}>XAF</span>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           {[10000, 25000, 50000, 100000].map((v) => (
-            <button key={v} onClick={() => set({ xaf: v })}
-              style={{ flex: 1, cursor: "pointer", padding: "9px 0", borderRadius: 9, fontWeight: 600, fontSize: 12.5, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: "var(--ink-2)" }}>
+            <button key={v} onClick={() => set({ xaf: v })} aria-pressed={s.xaf === v}
+              style={{ flex: 1, cursor: "pointer", padding: "10px 0", minHeight: 44, borderRadius: 9, fontWeight: 600, fontSize: 13, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: s.xaf === v ? "var(--ink)" : "var(--ink-2)" }}>
               {fmt(v / 1000)}k
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontSize: 13, color: "var(--ink-3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13, color: "var(--ink-3)" }}>
           <span>{t("fee")}</span>
           <span className="num" style={{ fontWeight: 600 }}>{fmt(fee)} XAF</span>
         </div>
         {s.xaf > 0 && s.xaf < MIN_XAF && (
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>{t("min_amount")}</div>
+          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)" }}>{t("min_amount")}</div>
         )}
       </div>
 
-      <button className="btn btn-primary" disabled={!valid} onClick={next} style={{ width: "100%", marginTop: 24, padding: "16px" }}>{t("continue")}</button>
+      <button className="btn btn-primary btn-block" disabled={!valid} onClick={next} style={{ marginTop: 16 }}>{t("continue")}</button>
     </FlowCard>
   );
 }
@@ -236,7 +236,7 @@ export function MethodStep({ s, set, back, next, busy }: { s: Draft; set: (p: Pa
   return (
     <FlowCard>
       <Stepper i={1} />
-      <h2 style={{ fontSize: 24, marginTop: 16 }}>{t("method_title")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("method_title")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 22px", lineHeight: 1.5 }}>{t("method_sub")}</p>
 
       {s.xaf >= 200000 && (
@@ -288,7 +288,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
   return (
     <FlowCard>
       <Stepper i={2} />
-      <h2 style={{ fontSize: 24, marginTop: 16 }}>{t("review_title")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("review_title")}</h2>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0 4px", paddingBottom: 14, borderBottom: "1px solid var(--line-2)" }}>
         <Flag country={s.country} size={26} />
@@ -386,7 +386,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   return (
     <FlowCard>
       <Stepper i={3} />
-      <h2 style={{ fontSize: 22, marginTop: 16 }}>{ml(method, "payTitle")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{ml(method, "payTitle")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 14px", lineHeight: 1.5 }}>{ml(method, "payDesc")}</p>
 
       {/* The linked Mobile Money recipient — so the payer always sees exactly
@@ -630,7 +630,7 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
       </div>
       <div style={{ marginTop: 16 }}><Label>{t("refund_input")}</Label></div>
       <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="lnbc…" rows={3}
-        style={{ width: "100%", marginTop: 6, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", font: "inherit", fontSize: 13, resize: "vertical", boxSizing: "border-box" }} />
+        style={{ width: "100%", marginTop: 6, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", font: "inherit", fontSize: 16, resize: "vertical", boxSizing: "border-box" }} />
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.45 }}>{t("refund_input_hint")}</div>
       {err && <div role="alert" style={{ marginTop: 12, padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>{err}</div>}
       <button className="btn btn-primary" onClick={submit} disabled={busy || !bolt11.trim()} style={{ width: "100%", marginTop: 18, padding: "16px" }}>

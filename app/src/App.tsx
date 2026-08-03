@@ -29,7 +29,9 @@ export function App() {
       <Route path="/send" element={<SendApp />} />
       <Route path="/claim" element={<Claim />} />
       <Route path="/admin" element={<AdminGate><Suspense fallback={<ChunkFallback />}><AdminConsole /></Suspense></AdminGate>} />
-      <Route path="/ops" element={<Suspense fallback={<ChunkFallback />}><OpsDashboard /></Suspense>} />
+      {/* Ops exposes the live tx feed, treasury float and rail health — operator-only,
+          so it sits behind the same session gate as /admin (was previously ungated). */}
+      <Route path="/ops" element={<AdminGate><Suspense fallback={<ChunkFallback />}><OpsDashboard /></Suspense></AdminGate>} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/contact" element={<Contact />} />

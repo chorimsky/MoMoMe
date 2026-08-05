@@ -940,9 +940,9 @@ api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), a
   const m = merchantByOwner(owner);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
   if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number before accepting payments." });
-  const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind };
+  const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind; clientName?: string; dueDate?: string };
   const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.min(Math.round(b.amountXaf), MAX_XAF) : undefined;
-  res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind }) });
+  res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind, clientName: b.clientName, dueDate: b.dueDate }) });
 });
 api.delete("/merchant/links/:code", async (req, res) => {
   const owner = await ownerOf(req);
@@ -959,7 +959,7 @@ api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000),
   const m = merchantById(link.merchantId);
   if (!m || m.status !== "active") return res.status(404).json({ error: "not_found", message: "This merchant isn't active." });
   const pub: MerchantLinkPublic = {
-    code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind,
+    code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind, clientName: link.clientName, dueDate: link.dueDate,
     merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
   };
   res.json(pub);

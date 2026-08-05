@@ -409,8 +409,10 @@ export interface MerchantLink {
   code: string;               // short public code → /pay/<code>
   merchantId: string;
   amountXaf?: number;         // fixed amount, or omitted = customer enters (open)
-  label?: string;             // "Table 4", "Invoice #20260045"
+  label?: string;             // "Table 4", or the invoice reference
   kind: MerchantLinkKind;
+  clientName?: string;        // invoice: who it's billed to
+  dueDate?: string;           // invoice: ISO date (YYYY-MM-DD)
   createdAt: string;
   disabledAt?: string;
 }
@@ -421,6 +423,8 @@ export interface MerchantLinkPublic {
   amountXaf?: number;
   label?: string;
   kind: MerchantLinkKind;
+  clientName?: string;
+  dueDate?: string;
   merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean };
 }
 

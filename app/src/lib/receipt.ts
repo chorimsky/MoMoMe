@@ -55,6 +55,9 @@ export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true)
     `${s.reference}: ${p.ref}`,
     `${s.date}: ${whenStr(p, s.locale)}`,
     `${s.status}: ${s.completed}`,
+    ``,
+    // Viral tail: every shared receipt is a growth vector back to the product.
+    `Paid with MoMo›Me — crypto & Mobile Money, delivered instantly. momome.xyz`,
   ].join("\n");
 }
 

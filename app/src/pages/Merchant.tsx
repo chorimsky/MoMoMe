@@ -239,8 +239,11 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
 
 /* ---------- payment tools (links + QR) ---------- */
 function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
+  const [kind, setKind] = useState<"link" | "invoice">("link");
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
+  const [clientName, setClientName] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [showQr, setShowQr] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -251,22 +254,42 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
     setBusy(true);
     try {
       const xaf = Number(amount.replace(/\D/g, "")) || 0;
-      const { link } = await api.createMerchantLink({ amountXaf: xaf > 0 ? xaf : undefined, label: label.trim() || undefined, kind: "link" });
-      setAmount(""); setLabel(""); onChange(); setShowQr(link.code);
+      const { link } = await api.createMerchantLink({
+        amountXaf: xaf > 0 ? xaf : undefined, label: label.trim() || undefined, kind,
+        clientName: kind === "invoice" ? clientName.trim() || undefined : undefined,
+        dueDate: kind === "invoice" && dueDate ? dueDate : undefined,
+      });
+      setAmount(""); setLabel(""); setClientName(""); setDueDate(""); onChange(); setShowQr(link.code);
     } finally { setBusy(false); }
   }
   const copy = (code: string) => { void navigator.clipboard?.writeText(urlFor(code)).then(() => { setCopied(code); setTimeout(() => setCopied(null), 1500); }); };
 
   const active = links.filter((l) => !l.disabledAt);
+  const invoice = kind === "invoice";
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Payment tools — links & QR</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div style={{ flex: "1 1 130px" }}><label style={labelStyle}>Amount (optional)</label>
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Open amount" inputMode="numeric" style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} /></div>
-        <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>Label (optional)</label>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Table 4 / Invoice #123" maxLength={60} style={inputStyle} /></div>
-        <button className="btn btn-primary" disabled={busy} onClick={create} style={{ flex: "0 0 auto" }}>{busy ? "…" : "Create link"}</button>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Payment tools — links, QR & invoices</div>
+      <div className="seg" style={{ marginBottom: 12 }}>
+        {(["link", "invoice"] as const).map((k) => (
+          <button key={k} type="button" className="seg-item" aria-selected={kind === k} onClick={() => setKind(k)}>{k === "link" ? "Payment link" : "Invoice"}</button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {invoice && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>Bill to (client)</label>
+              <input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="ABC Company" maxLength={60} style={inputStyle} /></div>
+            <div style={{ flex: "1 1 140px" }}><label style={labelStyle}>Due date</label>
+              <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} type="date" style={inputStyle} /></div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: "1 1 130px" }}><label style={labelStyle}>Amount{invoice ? "" : " (optional)"}</label>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={invoice ? "250 000" : "Open amount"} inputMode="numeric" style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} /></div>
+          <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>{invoice ? "Invoice ref (optional)" : "Label (optional)"}</label>
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={invoice ? "INV-20260045" : "Table 4"} maxLength={60} style={inputStyle} /></div>
+          <button className="btn btn-primary" disabled={busy} onClick={create} style={{ flex: "0 0 auto" }}>{busy ? "…" : invoice ? "Create invoice" : "Create link"}</button>
+        </div>
       </div>
 
       {active.length > 0 && (
@@ -275,7 +298,13 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
             <div key={l.code} style={{ border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "10px 12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 650 }}>{l.amountXaf ? `${fmt(l.amountXaf)} XAF` : "Open amount"}{l.label ? ` · ${l.label}` : ""}</div>
+                  <div style={{ fontSize: 13, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>INVOICE</span>}
+                    {l.amountXaf ? `${fmt(l.amountXaf)} XAF` : "Open amount"}{l.label ? ` · ${l.label}` : ""}
+                  </div>
+                  {l.kind === "invoice" && (l.clientName || l.dueDate) && (
+                    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{l.clientName ? `To ${l.clientName}` : ""}{l.clientName && l.dueDate ? " · " : ""}{l.dueDate ? `due ${l.dueDate}` : ""}</div>
+                  )}
                   <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", wordBreak: "break-all" }}>{urlFor(l.code)}</div>
                 </div>
                 <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? "Copied ✓" : "Copy"}</button>

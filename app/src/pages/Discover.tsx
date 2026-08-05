@@ -71,7 +71,12 @@ export function Discover() {
                 <div key={m.code} style={{ ...cardStyle, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
                   <span style={{ width: 44, height: 44, borderRadius: 12, flex: "none", background: "var(--brand-wash)", color: "var(--brand-ink)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 15 }}>{initials(m.businessName)}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.businessName}</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{m.businessName}</span>
+                      {m.verifiedPhone && (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="var(--recv)" aria-label="Verified" style={{ flex: "none" }}><path d="M12 2 14.9 4.9 19 4.6 18.7 8.7 21.6 11.6 18.7 14.5 19 18.6 14.9 18.3 12 21.2 9.1 18.3 5 18.6 5.3 14.5 2.4 11.6 5.3 8.7 5 4.6 9.1 4.9z" /><path d="M10.6 14.6 8 12l-1.1 1.1 3.7 3.7 6-6L15.5 9.7z" fill="#fff" /></svg>
+                      )}
+                    </div>
                     <div style={{ fontSize: 12.5, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.category}{m.location?.label ? ` · ${m.location.label}` : ""}</div>
                   </div>
                   <Link to={`/m/${m.code}`} className="btn btn-primary btn-sm" style={{ flex: "none", textDecoration: "none" }}>Pay</Link>

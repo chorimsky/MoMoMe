@@ -46,6 +46,10 @@ export interface MerchantContext {
   country: CountryCode;
   amountXaf?: number;
   label?: string;
+  kind?: "link" | "qr" | "invoice";
+  clientName?: string;        // invoice: billed-to
+  dueDate?: string;           // invoice: ISO date
+  verified?: boolean;         // settlement number confirmed → show a Verified badge
 }
 
 export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
@@ -184,9 +188,21 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
         {merchant && (
           <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--brand-wash)", border: "1px solid color-mix(in oklab, var(--brand) 30%, var(--line))" }}>
-            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{t("mrc_paying")}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{merchant.kind === "invoice" ? t("mrc_invoice") : t("mrc_paying")}</span>
+              {merchant.verified && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 800, color: "var(--recv)" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>{t("mrc_verified")}
+                </span>
+              )}
+            </div>
             <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>{merchant.businessName}</div>
-            {merchant.label && <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{merchant.label}</div>}
+            {merchant.kind === "invoice" && (merchant.clientName || merchant.dueDate || merchant.label) && (
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>
+                {merchant.label ? `${merchant.label}` : ""}{merchant.label && merchant.clientName ? " · " : ""}{merchant.clientName ? `To ${merchant.clientName}` : ""}{merchant.dueDate ? ` · due ${merchant.dueDate}` : ""}
+              </div>
+            )}
+            {merchant.kind !== "invoice" && merchant.label && <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{merchant.label}</div>}
             {merchant.amountXaf ? (
               <div className="num" style={{ fontSize: 24, fontWeight: 750, color: "var(--ink)", marginTop: 8 }}>{new Intl.NumberFormat("fr-FR").format(merchant.amountXaf)} <span style={{ fontSize: 14, color: "var(--ink-3)" }}>XAF</span></div>
             ) : (
@@ -223,7 +239,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           </div>
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
-            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} />}
+            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} lockRecipient={!!merchant} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} />}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
             {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}

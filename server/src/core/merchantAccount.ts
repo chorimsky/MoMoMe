@@ -107,13 +107,15 @@ export function directory(opts: { country?: string; category?: string; q?: strin
 }
 
 /* ---------- payment links / QR ---------- */
-export function createLink(merchantId: string, input: { amountXaf?: number; label?: string; kind?: MerchantLinkKind }): MerchantLink {
+export function createLink(merchantId: string, input: { amountXaf?: number; label?: string; kind?: MerchantLinkKind; clientName?: string; dueDate?: string }): MerchantLink {
   const code = crypto.randomBytes(6).toString("base64url").slice(0, 8);
   const link: MerchantLink = {
     code, merchantId,
     amountXaf: input.amountXaf && input.amountXaf > 0 ? Math.round(input.amountXaf) : undefined,
     label: input.label?.slice(0, 60) || undefined,
     kind: input.kind ?? "link",
+    clientName: input.clientName?.slice(0, 60) || undefined,
+    dueDate: /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate ?? "") ? input.dueDate : undefined,
     createdAt: new Date().toISOString(),
   };
   links.set(code, link);

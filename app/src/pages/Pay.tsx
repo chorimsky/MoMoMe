@@ -52,6 +52,8 @@ export function Pay({ mode = "link" }: { mode?: "link" | "merchant" }) {
     businessName: link.merchant.businessName, category: link.merchant.category,
     settlementPhone: link.merchant.settlementPhone, provider: link.merchant.provider, country: link.merchant.country,
     amountXaf: link.amountXaf, label: link.label,
+    kind: link.kind, clientName: link.clientName, dueDate: link.dueDate,
+    verified: link.merchant.verifiedPhone,
   };
   return <SendApp merchant={merchant} />;
 }

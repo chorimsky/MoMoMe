@@ -44,7 +44,7 @@ function pickBestContactNumber(tels: string[] | undefined, fallback: CC): { coun
 }
 
 /* ============================================================ 1 — DETAILS */
-export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number }) {
+export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; lockRecipient?: boolean }) {
   const { t } = useI18n();
   const c = COUNTRIES[s.country];
   // Live admin fee (from /config) so the preview tracks Rates & Pricing; fall
@@ -133,7 +133,7 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
       <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("pay_title")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
 
-      {recents.length > 0 && (
+      {!lockRecipient && recents.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <Label>{t("send_again")}</Label>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, margin: "0 -2px" }}>
@@ -155,20 +155,20 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: "none" }}>
-              <select value={s.country} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
-                style={{ appearance: "none", cursor: "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%" }}>
+              <select value={s.country} disabled={lockRecipient} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
+                style={{ appearance: "none", cursor: lockRecipient ? "default" : "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%", opacity: lockRecipient ? 0.75 : 1 }}>
                 {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.code}</option>)}
               </select>
               <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
             </div>
-            <input ref={phoneRef} value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
+            <input ref={phoneRef} value={s.phone} readOnly={lockRecipient} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
               type="tel" inputMode="tel" autoComplete="tel" name="mm-number"
-              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
-            <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
+              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: lockRecipient ? "var(--surface-2)" : "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
+            {!lockRecipient && <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
               style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", cursor: "pointer", font: "inherit", fontWeight: 650, fontSize: 13, color: "var(--ink-2)" }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.8" /><path d="M5.5 19.5c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
               <span className="cta-rest">{t("from_contacts")}</span>
-            </button>
+            </button>}
           </div>
           {contactNote && <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{contactNote}</div>}
 

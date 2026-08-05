@@ -253,7 +253,7 @@ export const api = {
   merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
   merchantSummary: () => req<MerchantSummary>("/merchant/me/summary"),
   merchantLinks: () => req<{ links: MerchantLink[] }>("/merchant/links"),
-  createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"] }) =>
+  createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"]; clientName?: string; dueDate?: string }) =>
     req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
   disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
   resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${code}`),

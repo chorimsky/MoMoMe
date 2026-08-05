@@ -14,6 +14,7 @@ import { Developers } from "./pages/Developers.js";
 import { Merchant } from "./pages/Merchant.js";
 import { Ambassador } from "./pages/Ambassador.js";
 import { Discover } from "./pages/Discover.js";
+import { Diaspora } from "./pages/Diaspora.js";
 import { Pay } from "./pages/Pay.js";
 
 /** Capture a referral once: a device arriving via ?ref=<code> is attributed to
@@ -58,6 +59,7 @@ export function App() {
       <Route path="/merchant" element={<Merchant />} />
       <Route path="/ambassador" element={<Ambassador />} />
       <Route path="/discover" element={<Discover />} />
+      <Route path="/diaspora" element={<Diaspora />} />
       <Route path="/pay/:code" element={<Pay />} />
       <Route path="/m/:code" element={<Pay mode="merchant" />} />
       <Route path="/terms" element={<Terms />} />

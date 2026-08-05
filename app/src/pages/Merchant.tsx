@@ -8,7 +8,7 @@ import { Link } from "react-router-dom";
 import type { MerchantAccount, MerchantLink, MerchantSummary, CountryCode } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { SiteHeader } from "../components/nav.js";
-import { Spinner, QR } from "../components/atoms.js";
+import { Spinner, QR, Logo } from "../components/atoms.js";
 import { fmt } from "../lib/format.js";
 import { api, ApiError } from "../api/client.js";
 
@@ -39,7 +39,8 @@ export function Merchant() {
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px clamp(16px,4vw,24px) 56px" }}>
         <SiteHeader />
         {phase === "loading" && <div style={{ display: "grid", placeItems: "center", minHeight: "50vh" }}><Spinner size={24} /></div>}
-        {phase === "onboard" && <Onboard onDone={(m) => { setMerchant(m); setPhase("verify"); }} initial={merchant} />}
+        {/* If the server auto-activated (no SMS yet), skip straight to the dashboard. */}
+        {phase === "onboard" && <Onboard onDone={(m) => { setMerchant(m); setPhase(m.verifiedPhone ? "dashboard" : "verify"); }} initial={merchant} />}
         {phase === "verify" && merchant && <Verify merchant={merchant} onVerified={(m) => { setMerchant(m); setPhase("dashboard"); }} onEdit={() => setPhase("onboard")} />}
         {phase === "dashboard" && merchant && <Dashboard merchant={merchant} />}
       </div>
@@ -336,7 +337,7 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
 function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () => void }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const url = `${origin}/m/${merchant.code}`;
-  const INK = "#1c1813", INK2 = "#56504a", BRAND = "#FFC92E", ACCENT = "#f2660d", GREEN = "#1f9e5a";
+  const INK = "#1c1813", INK2 = "#56504a", BRAND = "#FFC92E", ACCENT = "#f2660d";
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,12,10,0.6)", overflow: "auto", display: "grid", placeItems: "start center", padding: "16px 12px 40px" }}>
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", gap: 8, width: "100%", maxWidth: 560, padding: "6px 0 12px", justifyContent: "flex-end" }}>
@@ -344,9 +345,9 @@ function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () 
         <button className="btn btn-primary" onClick={() => window.print()} style={{ gap: 8 }}>Print / Save PDF</button>
       </div>
       <div className="print-poster" style={{ width: "100%", maxWidth: 560, background: "#fff", color: INK, borderRadius: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.4)", padding: "40px 36px 32px", textAlign: "center" }}>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, letterSpacing: "-0.02em" }}>
-          <span style={{ color: BRAND, WebkitTextStroke: `0.5px ${INK}` }}>MoMo</span><span style={{ color: GREEN }}>⚡</span><span style={{ color: ACCENT }}>Me</span>
-        </div>
+        {/* The canonical brand logo (uploaded logo, or the Bagel Fat One wordmark) —
+            same component used everywhere, so the poster is never off-brand. */}
+        <div style={{ display: "flex", justifyContent: "center" }}><Logo size={34} /></div>
         <div style={{ marginTop: 22, fontSize: 13, fontWeight: 800, letterSpacing: "0.14em", color: ACCENT, textTransform: "uppercase" }}>Pay here · Payez ici</div>
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1, marginTop: 8 }}>{merchant.businessName}</div>
 

@@ -267,6 +267,14 @@ export const STRINGS: Dict = {
   dia_uc3_t: ["Family & friends", "Famille & amis"],
   dia_uc3_d: ["They receive on their normal MTN or Orange Money — nothing to install.", "Ils reçoivent sur leur MTN ou Orange Money habituel — rien à installer."],
   dia_trust: ["Instant · euro-pegged XAF · delivered on MTN & Orange Money", "Instantané · XAF indexé à l'euro · livré sur MTN & Orange Money"],
+  scan_title: ["Scan to pay", "Scanner pour payer"],
+  scan_cta: ["Scan to pay", "Scanner pour payer"],
+  scan_hint: ["Point at a MoMo›Me QR code", "Visez un QR code MoMo›Me"],
+  scan_unsupported: ["Your browser can't scan in-app. Use your phone's camera to scan the QR, or enter the merchant code below.", "Votre navigateur ne peut pas scanner dans l'app. Utilisez l'appareil photo de votre téléphone, ou entrez le code marchand ci-dessous."],
+  scan_cam_denied: ["Camera access is needed to scan. Allow it, or enter the merchant code below.", "L'accès à la caméra est nécessaire. Autorisez-le, ou entrez le code marchand ci-dessous."],
+  scan_not_momome: ["That QR isn't a MoMo›Me code — try again.", "Ce QR n'est pas un code MoMo›Me — réessayez."],
+  scan_enter_code: ["Enter merchant code (e.g. MOM-CM-004522)", "Entrez le code marchand (ex. MOM-CM-004522)"],
+  scan_go: ["Pay", "Payer"],
   lp_switch_lang: ["Passer en français", "Switch to English"],
 };
 

@@ -47,8 +47,13 @@ export function Discover() {
           </p>
         </div>
 
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search businesses, category or area…" aria-label="Search"
-          style={{ width: "100%", padding: "13px 15px", borderRadius: "var(--r-pill)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search businesses, category or area…" aria-label="Search"
+            style={{ flex: 1, minWidth: 0, padding: "13px 15px", borderRadius: "var(--r-pill)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
+          <Link to="/scan" aria-label="Scan to pay" title="Scan to pay" className="btn btn-primary" style={{ flex: "none", padding: "0 16px", textDecoration: "none" }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
+          </Link>
+        </div>
 
         <div className="scroll-x" style={{ display: "flex", gap: 8, marginTop: 12, paddingBottom: 4 }}>
           <button type="button" className="chip" aria-pressed={!cat} style={chipBase} onClick={() => setCat(null)}>All</button>

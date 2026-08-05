@@ -868,12 +868,16 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   const provider = detectProvider(settlementPhone, country);
   if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
   const tier = b.tier === "business" ? "business" : "individual";
-  const m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: b.location });
+  let m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: b.location });
+  // No SMS provider yet → we can't deliver an OTP in production, so skip phone
+  // verification and take the merchant live immediately. Re-enable OTP by setting
+  // SMS_ENABLED=true once an SMS service is integrated.
+  if (!config.smsEnabled) m = activateMerchant(m.id) ?? m;
   // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
   // (once — recordReferral is a no-op if already attributed or self-referral).
   const ref = typeof (req.body as { ref?: string }).ref === "string" ? (req.body as { ref?: string }).ref! : "";
   if (ref) recordReferral(owner, ref);
-  res.status(201).json({ merchant: publicMerchant(m) });
+  res.status(201).json({ merchant: publicMerchant(m), smsEnabled: config.smsEnabled });
 });
 
 /** Send an OTP to the settlement number to prove ownership. */

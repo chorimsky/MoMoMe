@@ -23,6 +23,11 @@ export const config = {
   /** Public base URL the providers can reach for webhook callbacks. */
   publicUrl: env("PUBLIC_URL", "http://localhost:4000"),
   railsMode: (env("RAILS_MODE", "sandbox") as RailsMode),
+  /** Whether a real SMS provider is wired up. Until it is (SMS_ENABLED=true),
+   *  phone-number OTP verification can't actually reach the user in production, so
+   *  the merchant onboarding auto-activates instead of asking for a code. Flip this
+   *  to true once an SMS service is integrated to re-enable OTP verification. */
+  smsEnabled: env("SMS_ENABLED", "").trim().toLowerCase() === "true",
 
   /** IBEX Hub (poweredbyibex.io) — crypto inbound for Lightning + on-chain BTC.
    *  OAuth2 client-credentials (M2M). USDT/stablecoin receive is gated per

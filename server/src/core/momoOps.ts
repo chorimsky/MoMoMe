@@ -66,6 +66,13 @@ export async function reconcilePendingCashins(): Promise<void> {
       } else if (o.status === "completed") {
         await fireCollectLeg(o); // idempotent backstop: ensure leg 2 exists
       }
+    } else if (o.kind === "cashout" && o.status === "accepted") {
+      // Terminalize a pending admin cash-out so the operator sees it resolve
+      // (completed/failed) instead of a stuck "accepted" that tempts a resubmit
+      // (which — past the dedup window — would be a second real disbursement).
+      const s = await peexit.queryStatus(o.id).catch(() => null);
+      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); }
+      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); touch("momoops"); }
     }
   }
 }
@@ -124,7 +131,11 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
   return withMomoLock(async () => {
-  const dup = recentDuplicate("cashout", phone, amount, by);
+  // Wider dedup window for cash-outs (5 min vs the default 90s): the rail key is a
+  // fresh id per call, so this app-level guard is the main defense against an
+  // operator resubmitting a payout they believe stalled. Cash-out reconcile
+  // (above) terminalizes pending rows so a resubmit is rarely needed.
+  const dup = recentDuplicate("cashout", phone, amount, by, 5 * 60_000);
   if (dup) return { ok: false, error: "duplicate", op: dup };
   const rail = railFor(provider);
   // Rail must be live + funded ≥ amount (mirrors the send-flow pre-flight gate).
@@ -200,19 +211,30 @@ export async function cashin(phone: string, country: CountryCode, amount: number
    ============================================================ */
 
 /** Fire the collect leg (transfer_in) of a completed rebalance. Idempotent: no-ops
- *  if a transfer_in for this transferId already exists (fired or attempted). */
+ *  if a NON-FAILED transfer_in for this transferId already exists. A previously
+ *  FAILED collect must be retriable (else leg-1's funds strand on the treasury
+ *  phone forever), so it does NOT count as "already fired". The rail idempotency
+ *  key is derived from transferId (not a fresh id) so a retry after a
+ *  throw-that-actually-collected can't double-pull. */
 async function fireCollectLeg(outOp: MomoOp): Promise<void> {
   if (!outOp.transferId) return;
-  if (ops.some((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId)) return;
-  const inId = id("mmo");
-  const inOp: MomoOp = { id: inId, at: new Date().toISOString(), kind: "transfer_in", provider: outOp.provider, rail: "peexit", phone: outOp.phone, amount: outOp.amount, by: outOp.by, status: "accepted", transferId: outOp.transferId };
+  // The id IS the rail idempotency key (reconcile re-queries status by o.id), so it
+  // must be deterministic per transferId: a retry reuses the same key and the rail
+  // dedups instead of double-pulling. A prior FAILED attempt is retried IN PLACE
+  // (reuse the row) so there's never a duplicate id, and a non-failed row means
+  // "already fired" → no-op.
+  const inId = `collect_${outOp.transferId}`;
+  const existing = ops.find((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId);
+  if (existing && existing.status !== "failed") return;
+  const inOp: MomoOp = existing ?? { id: inId, at: new Date().toISOString(), kind: "transfer_in", provider: outOp.provider, rail: "peexit", phone: outOp.phone, amount: outOp.amount, by: outOp.by, status: "accepted", transferId: outOp.transferId };
+  inOp.at = new Date().toISOString(); inOp.status = "accepted"; inOp.error = undefined; // reset for a retry
   try {
     const res = await peexit.collect({ idempotencyKey: inId, provider: outOp.provider, country: "CM", phone: outOp.phone, xaf: outOp.amount, name: "MoMoMe Treasury" });
     inOp.providerRef = res.providerRef;
   } catch (e) {
     inOp.status = "failed"; inOp.error = e instanceof Error ? e.message : "collect_failed";
   }
-  record(inOp);
+  if (existing) touch("momoops"); else record(inOp);
   console.log(`[momo] rebalance leg 2/2 (collect) ${outOp.amount} XAF ← ${outOp.phone} (transfer ${outOp.transferId}, ${inOp.status})`);
 }
 

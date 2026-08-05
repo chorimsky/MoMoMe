@@ -9,8 +9,8 @@ import type { Identity } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Spinner } from "../components/atoms.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
-import { useI18n } from "../lib/i18n.js";
-import { api, ApiError } from "../api/client.js";
+import { useI18n, errMessage } from "../lib/i18n.js";
+import { api } from "../api/client.js";
 import { FlowCard, Label } from "./send/ui.js";
 
 type Step = "number" | "otp" | "done";
@@ -26,7 +26,7 @@ export function Claim() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const fail = (e: unknown) => setErr(e instanceof ApiError ? e.message : t("error_generic"));
+  const fail = (e: unknown) => setErr(errMessage(e, t));
 
   async function sendCode() {
     setBusy(true); setErr(null);

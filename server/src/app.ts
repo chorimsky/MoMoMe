@@ -14,7 +14,9 @@ import { seedAdminUsers } from "./core/adminUsers.js";
 const ALLOWED_ORIGIN: RegExp[] = [
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/,
+  // Only THIS project's Vercel deployments (momome, momome-<hash>, momome-git-<branch>-…),
+  // not the previous `*.vercel.app` which allowed ANY attacker-controlled vercel.app page.
+  /^https:\/\/momome[a-z0-9-]*\.vercel\.app$/,
   /^https:\/\/([a-z0-9-]+\.)*momome\.xyz$/,
 ];
 function corsOrigin(origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void): void {

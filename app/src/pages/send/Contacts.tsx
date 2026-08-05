@@ -38,6 +38,7 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
   async function persist(c: Contact) {
     setBusy(true);
     try { await saveContact(c); await reload(); if (mounted.current) setMode({ kind: "list" }); }
+    catch { if (mounted.current) window.alert(t("error_generic")); } // surface a save failure instead of an unhandled rejection
     finally { if (mounted.current) setBusy(false); }
   }
   async function toggleFav(c: Contact) {
@@ -65,7 +66,7 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
         <h2 style={{ fontSize: 20 }}>{t(mode.isNew ? "contacts_new" : "contacts_edit_title")}</h2>
         <div style={{ marginTop: 14 }}>
           <Label>{t("contacts_name_ph")}</Label>
-          <input value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder={t("contacts_name_ph")} autoFocus
+          <input value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder={t("contacts_name_ph")} autoFocus maxLength={80}
             style={inputStyle} />
         </div>
         <div style={{ marginTop: 12 }}>
@@ -87,7 +88,7 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
         </div>
         <div style={{ marginTop: 12 }}>
           <Label>{t("contacts_note_ph")}</Label>
-          <input value={d.note ?? ""} onChange={(e) => set({ note: e.target.value })} placeholder={t("contacts_note_ph")} style={inputStyle} />
+          <input value={d.note ?? ""} onChange={(e) => set({ note: e.target.value })} placeholder={t("contacts_note_ph")} maxLength={140} style={inputStyle} />
         </div>
         <label style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14, color: "var(--ink-2)" }}>
           <input type="checkbox" checked={d.favorite} onChange={(e) => set({ favorite: e.target.checked })} style={{ width: 18, height: 18 }} />

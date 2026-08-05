@@ -41,14 +41,19 @@ const SENDER_KEY = "mm_sender_id";
 function newId(): string {
   return crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
+// True when senderId was minted THIS load (no prior localStorage value) — such an
+// id was never enrolled server-side, so early unsigned requests are safely accepted
+// and enrolment needn't block them. A PERSISTED id might already be enrolled.
+let bornFresh = false;
 function ensureSenderId(): string {
   try {
     let v = localStorage.getItem(SENDER_KEY);
-    if (!v) { v = newId(); localStorage.setItem(SENDER_KEY, v); }
+    if (!v) { v = newId(); localStorage.setItem(SENDER_KEY, v); bornFresh = true; }
     return v;
   } catch {
     // Storage blocked (private mode): use a fresh PER-SESSION id, never a shared
     // global bucket — otherwise private-mode users would share one another's data.
+    bornFresh = true;
     return `eph_${newId()}`;
   }
 }
@@ -80,28 +85,42 @@ async function enrollDevice(id: string, authPub: JsonWebKey, wrapPub: JsonWebKey
   } catch { return "error"; }
 }
 
-/** Enrol + activate signing. Runs once at startup; every req() awaits it. */
+/** Enrol + activate signing. Runs once at startup. req() awaits this only when it
+ *  MUST (a persisted id that could already be enrolled → rotate before requests
+ *  fire); a brand-new id enrols in the background so requests never wait on it. */
 const deviceReady: Promise<void> = (async () => {
   try {
     const enrolledId = await idbGet<string>(ENROLLED_IDB);
-    if (enrolledId === senderId) { signingActive = true; return; }
-    const { authPubJwk, wrapPubJwk } = await devicePublicKeys();
-    let result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
-    if (result === "conflict") {
-      // Our keys don't own this id (e.g. IndexedDB was cleared but the id persisted).
-      // Rotate to a fresh id and enrol there — the old id's data is unrecoverable
-      // (the accepted end-to-end tradeoff), but the app keeps working.
-      senderId = newId();
-      try { localStorage.setItem(SENDER_KEY, senderId); } catch { /* ignore */ }
-      result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
-    }
-    if (result === "ok") { await idbSet(ENROLLED_IDB, senderId); signingActive = true; }
-    // "error" (offline): stay unsigned and retry next load; server still accepts the id.
+    if (enrolledId === senderId) { signingActive = true; return; } // returning enrolled device — instant
+
+    // Enrol (and, on conflict, rotate) in the background; flip signing on when done.
+    const enrollP = (async () => {
+      const { authPubJwk, wrapPubJwk } = await devicePublicKeys();
+      let result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+      if (result === "conflict") {
+        // Our keys don't own this id (e.g. IndexedDB was cleared but the id persisted).
+        // Rotate to a fresh id and enrol there — the old id's data is unrecoverable
+        // (the accepted end-to-end tradeoff), but the app keeps working.
+        senderId = newId();
+        try { localStorage.setItem(SENDER_KEY, senderId); } catch { /* ignore */ }
+        result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+      }
+      if (result === "ok") { await idbSet(ENROLLED_IDB, senderId); signingActive = true; }
+      // "error" (offline): stay unsigned and retry next load; server still accepts the id.
+    })();
+
+    // A brand-new id is NOT enrolled server-side, so early unsigned requests are
+    // safely accepted — don't block them on the enrol round-trip (was an up-to-8s
+    // stall on first load over 2G). A PERSISTED-but-unenrolled id might already own a
+    // server key (IDB eviction) → await enrol/rotation first so a request can't fire
+    // with an enrolled id but no signature (which would 401).
+    if (!bornFresh) await enrollP;
   } catch { /* never block the app on enrolment */ }
 })();
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  await deviceReady; // keys loaded + (best-effort) enrolled before we sign
+  await deviceReady; // returning/persisted devices settle here; brand-new ones resolve instantly
+
   let res: Response;
   // Timeout so a STALLED (half-open) connection — the dominant failure mode on 2G/
   // metered data in the target market — fails cleanly instead of hanging the spinner

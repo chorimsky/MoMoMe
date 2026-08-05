@@ -89,7 +89,9 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
   // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
     const d = s.phone.replace(/\D/g, "");
-    if (d.length < 8) { set({ recipientName: "", nameSource: "idle" }); return; }
+    // Reset resolving on the early return too — otherwise deleting digits back under
+    // 8 while a resolve is in flight leaves the spinner stuck and Continue disabled.
+    if (d.length < 8) { setResolving(false); set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     let active = true;
     const id = setTimeout(async () => {
@@ -103,7 +105,10 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
           // the device contact picker or a recent recipient. Keep it; only clear
           // when there's no user-provided name to fall back on (typed numbers).
           const keepName = (s.recipientName || "").trim().length >= 2 && (s.nameSource === "manual" || s.nameSource === "internal");
-          if (keepName) set({ nameSource: "manual", ...prov });
+          // Keep an already-trusted "internal" contact (paid before) trusted — don't
+          // downgrade it to "manual", which would force the "I've checked this number"
+          // re-acknowledgment on Review for someone they've already paid.
+          if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
           else set({ recipientName: "", nameSource: "unknown", ...prov });
         } else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
       } catch {

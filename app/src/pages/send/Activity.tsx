@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Payment, DisplayStatus } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { fmt, initials } from "../../lib/format.js";
@@ -30,12 +30,13 @@ export function Activity() {
   const [receipt, setReceipt] = useState<Payment | null>(null);
   const [refunding, setRefunding] = useState<Payment | null>(null);
 
-  const reload = () => api.listPayments().then(setRows).catch(() => setRows([]));
-  useEffect(() => {
-    let active = true;
-    api.listPayments().then((p) => { if (active) setRows(p); }).catch(() => { if (active) setRows([]); });
-    return () => { active = false; };
-  }, []);
+  // A mounted ref guards BOTH the initial load and reload() (called from the refund
+  // reset) so neither setState fires after the tab unmounts mid-request.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const reload = () => api.listPayments().then((p) => { if (mounted.current) setRows(p); }).catch(() => { if (mounted.current) setRows([]); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload(); }, []);
 
   // A stranded refund takes over the view (same as the processing screen does) so the
   // sender always has a path to reclaim their crypto — never a dead "Pending" row.

@@ -70,6 +70,17 @@ const server = app.listen(config.port, () => {
   console.log(`MoMo›Me settlement engine → http://localhost:${config.port}  [payout: ${config.railsMode}, crypto: ${crypto}]`);
 });
 
+// Safety net: an unhandled promise rejection in an async route (Express 4 does not
+// forward it to the error middleware) would otherwise, under Node's default policy,
+// crash the whole settlement engine → full outage. Log and keep serving instead;
+// the offending request still fails, but every other in-flight payment survives.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason instanceof Error ? reason.stack : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err instanceof Error ? err.stack : err);
+});
+
 // Flush any pending state to SQLite on graceful shutdown.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {

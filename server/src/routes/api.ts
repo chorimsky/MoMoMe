@@ -25,7 +25,7 @@ import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
 import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
 import { getDevice, enrollDevice } from "../core/deviceAccount.js";
-import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery } from "../core/account.js";
+import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
@@ -522,6 +522,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
   const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
   if (!ready.ok) return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
+  // Attribute the payment to the authenticated device. Refuse if auth failed (an
+  // enrolled id sending no/invalid signature → ownerOf undefined): creating a
+  // senderId-less payment would make it world-readable via mayViewPayment's
+  // ownerless bypass. Legit clients (new or signed) always resolve to a real id.
+  const owner = await ownerOf(req);
+  if (owner === undefined) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+
   // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
   const ref = nextRef();
@@ -549,7 +556,7 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     displayStatus: "Pending",
     method: quote.method,
     recipient,
-    senderId: await ownerOf(req), // authenticated device id — attributes the payment to its sender
+    senderId: owner, // authenticated device id — attributes the payment to its sender
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
@@ -585,6 +592,11 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
 api.post("/payments/:id/confirm", async (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // Only the payment's own sender may drive its confirmation (BOLA guard, matching
+  // /payments/:id and /refund-destination). Fund theft is already impossible
+  // downstream — a fake inbound on a live rail forces MANUAL_REVIEW — but this stops
+  // a stranger poking another sender's sandbox payment through settle().
+  if (!(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   if (p.state === "AWAITING_INBOUND") {
     const inst = p.payInstruction;
     if (inst.provider === "ibex" && inst.providerRef) {
@@ -726,7 +738,8 @@ api.post("/me/devices", rateLimitMiddleware("device_enroll", 20, 60_000), (req, 
    access; only the recovery code (held by the user) can unwrap the key. */
 function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number; iv: string; ct: string } {
   const o = b as { salt?: unknown; iterations?: unknown; iv?: unknown; ct?: unknown };
-  return !!o && typeof o.salt === "string" && o.salt.length <= 128 && typeof o.iterations === "number"
+  return !!o && typeof o.salt === "string" && o.salt.length <= 128
+    && typeof o.iterations === "number" && Number.isInteger(o.iterations) && o.iterations >= 100_000 && o.iterations <= 1_000_000
     && typeof o.iv === "string" && o.iv.length <= 128 && typeof o.ct === "string" && o.ct.length <= 4096;
 }
 
@@ -743,7 +756,18 @@ api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), 
   const { phone, code, recovery } = (req.body ?? {}) as { phone?: string; code?: string; recovery?: unknown };
   const v = verifyAnchorCode(String(phone ?? ""), String(code ?? ""));
   if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
-  const accountId = linkDevice(dev, String(phone));
+  const accountId = accountIdForPhone(String(phone));
+  // GUARD: if this number already has an established account (records escrowed under
+  // ANOTHER device's vault key) and this device isn't already part of it, backing up
+  // here would (a) overwrite the recovery escrow with a key that can't decrypt the
+  // real contacts and (b) mix this device's key into the account — silently orphaning
+  // and un-recovering everything. Such a device must RESTORE (adopt the account key),
+  // not back up. Same-device re-backup (already linked) is fine — same key.
+  const alreadyMine = accountOf(dev) === accountId;
+  if (!alreadyMine && (!!getRecovery(accountId) || listVault(accountId).length > 0)) {
+    return res.status(409).json({ error: "restore_first", message: "This number already has a backup on another device. Restore it here first." });
+  }
+  linkDevice(dev, String(phone));
   reassignVault(dev, accountId); // move this device's existing contacts into the shared account
   if (recovery !== undefined) {
     if (!validRecoveryBlob(recovery)) return res.status(400).json({ error: "bad_recovery", message: "Invalid recovery data." });

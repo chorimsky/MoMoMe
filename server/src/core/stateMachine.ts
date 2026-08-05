@@ -347,6 +347,14 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
 
+  // Retry is an override of the LATE holds (approval threshold, transient float,
+  // low-trust) — all of which happen AFTER FX-lock. It must NEVER resurrect a
+  // payment held BEFORE FX-lock, i.e. one whose inbound was never confirmed
+  // (on-chain "unverified"/"underpaid"): those have no ledger posting and no float
+  // reservation, so paying out would disburse real XAF for crypto that never (fully)
+  // arrived. Such a hold must be re-verified via confirmInbound, not blind-retried.
+  if (!p.events.some((e) => e.state === "FX_LOCKED")) return false;
+
   // Re-apply the money-safety guards that confirmInbound enforces (retry is a manual
   // operator OVERRIDE of the approval-threshold hold, but it must NOT be able to
   // breach the corridor cap or over-draw the treasury float — those aren't approvals).

@@ -11,7 +11,8 @@ import { COUNTRIES } from "@shared/domain.js";
 import { Spinner } from "../../components/atoms.js";
 import { useI18n } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
-import { exportVaultForRecovery, adoptVaultFromRecovery, generateRecoveryCode } from "../../lib/vault.js";
+import type { Contact } from "@shared/types.js";
+import { exportVaultForRecovery, adoptVaultFromRecovery, generateRecoveryCode, loadContacts, saveContact } from "../../lib/vault.js";
 import { FlowCard, Label } from "./ui.js";
 
 const inputStyle: React.CSSProperties = {
@@ -21,8 +22,11 @@ const inputStyle: React.CSSProperties = {
 
 type Step = "phone" | "code" | "showCode" | "restoreCode" | "done";
 
-export function AccountBackup({ mode, onClose, onRestored }: { mode: "backup" | "restore"; onClose: () => void; onRestored: () => void }) {
+export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode: "backup" | "restore"; onClose: () => void; onRestored: () => void }) {
   const { t } = useI18n();
+  // mode is internal state so a second-device "backup" that the server rejects with
+  // restore_first can switch this dialog straight into the restore flow.
+  const [mode, setMode] = useState<"backup" | "restore">(initialMode);
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -30,6 +34,7 @@ export function AccountBackup({ mode, onClose, onRestored }: { mode: "backup" | 
   const [recoveryCode, setRecoveryCode] = useState("");
   const [restoreCode, setRestoreCode] = useState("");
   const [pendingBlob, setPendingBlob] = useState<{ salt: string; iterations: number; iv: string; ct: string } | null>(null);
+  const [localBefore, setLocalBefore] = useState<Contact[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -55,15 +60,27 @@ export function AccountBackup({ mode, onClose, onRestored }: { mode: "backup" | 
       await api.anchorVerify(phone, code, blob);
       setRecoveryCode(rc);
       setStep("showCode");
-    } catch (e) { fail(e); } finally { setBusy(false); }
+    } catch (e) {
+      // This number is already backed up on another device — backing up here would
+      // clobber that escrow. Switch this dialog into Restore instead of failing.
+      if (e instanceof ApiError && e.code === "restore_first") {
+        setMode("restore"); setStep("phone"); setCode(""); setDevCode(null);
+        setErr(e.message);
+      } else fail(e);
+    } finally { setBusy(false); }
   }
 
   // Restore: verify OTP, fetch the escrow blob, then ask for the recovery code.
   async function doRestore() {
     setBusy(true); setErr(null);
     try {
+      // Capture this device's own contacts BEFORE the restore links it to the account
+      // — after linking, the vault scope flips to the account and these device-scoped
+      // records become unreachable, so we re-merge them post-adopt (see finishRestore).
+      const mine = await loadContacts().catch(() => [] as Contact[]);
       const r = await api.anchorRestore(phone, code);
       if (!r.recovery) { setErr(t("bk_restore_none")); setBusy(false); return; }
+      setLocalBefore(mine);
       setPendingBlob(r.recovery);
       setStep("restoreCode");
     } catch (e) { fail(e); } finally { setBusy(false); }
@@ -74,6 +91,16 @@ export function AccountBackup({ mode, onClose, onRestored }: { mode: "backup" | 
     setBusy(true); setErr(null);
     try {
       await adoptVaultFromRecovery(pendingBlob, restoreCode);
+      // Merge this device's pre-restore contacts into the account under the adopted
+      // key (dedup by number vs what was restored) so they aren't silently lost.
+      if (localBefore.length) {
+        const restored = await loadContacts().catch(() => [] as Contact[]);
+        const seen = new Set(restored.map((c) => c.phone.replace(/\D/g, "")));
+        for (const c of localBefore) {
+          const k = c.phone.replace(/\D/g, "");
+          if (k && !seen.has(k)) { seen.add(k); await saveContact(c).catch(() => {}); }
+        }
+      }
       setStep("done");
       onRestored(); // reload contacts with the recovered key
     } catch { setErr(t("bk_bad_code")); } finally { setBusy(false); }

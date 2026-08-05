@@ -35,11 +35,15 @@ async function loadOrGen(idbKey: string, algo: EcKeyGenParams, usages: KeyUsage[
 let keysP: Promise<DeviceKeys> | null = null;
 function keys(): Promise<DeviceKeys> {
   if (!keysP) {
-    keysP = (async () => {
+    const p = (async () => {
       const auth = await loadOrGen(AUTH_IDB, { name: "ECDSA", namedCurve: "P-256" }, ["sign", "verify"]);
       const wrap = await loadOrGen(WRAP_IDB, { name: "ECDH", namedCurve: "P-256" }, ["deriveBits"]);
       return { authPriv: auth.priv, authPubJwk: auth.pubJwk, wrapPubJwk: wrap.pubJwk };
     })();
+    // Don't cache a REJECTED promise for the whole session — a transient IDB failure
+    // would otherwise permanently disable signing. Clear it so the next call retries.
+    p.catch(() => { if (keysP === p) keysP = null; });
+    keysP = p;
   }
   return keysP;
 }

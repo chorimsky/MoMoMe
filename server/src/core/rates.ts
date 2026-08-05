@@ -15,12 +15,18 @@ let cache: { btcUsd: number; usdtUsd: number; usdcUsd: number; eurUsd: number; a
 
 /** Merge a fresh pull from IBEX into the cache (keep last-known for any null). */
 export function setRates(r: { btcUsd?: number | null; usdtUsd?: number | null; usdcUsd?: number | null; eurUsd?: number | null }): void {
+  // Only a pull that returned at least one REAL number counts as "fresh". A
+  // degraded feed (IBEX 5xx/429 → rate() returns null for every leg) must NOT
+  // re-stamp `at`, otherwise ratesFresh() would stay true forever while the price
+  // is frozen and live quotes would price real crypto on a stale/fallback rate.
+  const hasReal = r.btcUsd != null || r.usdtUsd != null || r.usdcUsd != null || r.eurUsd != null;
+  if (!hasReal && !cache) return; // dead feed on cold boot → stay unpriced (ratesFresh() = false → quoting refuses)
   cache = {
     btcUsd: r.btcUsd ?? cache?.btcUsd ?? FALLBACK.btcUsd,
     usdtUsd: r.usdtUsd ?? cache?.usdtUsd ?? FALLBACK.usdtUsd,
     usdcUsd: r.usdcUsd ?? cache?.usdcUsd ?? FALLBACK.usdcUsd,
     eurUsd: r.eurUsd ?? cache?.eurUsd ?? FALLBACK.eurUsd,
-    at: Date.now(),
+    at: hasReal ? Date.now() : (cache?.at ?? 0), // degraded pull keeps the last real timestamp so it ages out
   };
 }
 

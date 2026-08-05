@@ -173,6 +173,7 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
   const [sum, setSum] = useState<MerchantSummary | null>(null);
   const [links, setLinks] = useState<MerchantLink[]>([]);
   const [listed, setListed] = useState(!!merchant.listed);
+  const [poster, setPoster] = useState(false);
 
   const reloadSummary = () => api.merchantSummary().then(setSum).catch(() => {});
   const reloadLinks = () => api.merchantLinks().then((r) => setLinks(r.links)).catch(() => {});
@@ -211,7 +212,13 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
         </button>
       </div>
 
+      <button className="btn btn-ghost" onClick={() => setPoster(true)} style={{ justifyContent: "center", gap: 9 }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="6" rx="1" /><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="7" rx="1" /></svg>
+        Get your counter QR poster
+      </button>
+
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />
+      {poster && <Poster merchant={merchant} onClose={() => setPoster(false)} />}
 
       <div style={{ ...cardStyle, padding: 0 }}>
         <div style={{ padding: "16px 18px 8px", fontSize: 13, fontWeight: 700 }}>Recent transactions</div>
@@ -289,6 +296,48 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
       <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 14, flexWrap: "wrap" }}>
         <span>Building a platform? <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>Use the API →</Link></span>
         <span>Bring other shops? <Link to="/ambassador" style={{ color: "var(--accent)", fontWeight: 600 }}>Become an ambassador →</Link></span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- printable "Pay here" counter poster ----------
+   Always ink-on-white (prints cleanly in any theme). The QR opens the merchant's
+   open-amount checkout so a customer scans → enters amount → pays. */
+function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () => void }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const url = `${origin}/m/${merchant.code}`;
+  const INK = "#1c1813", INK2 = "#56504a", BRAND = "#FFC92E", ACCENT = "#f2660d", GREEN = "#1f9e5a";
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,12,10,0.6)", overflow: "auto", display: "grid", placeItems: "start center", padding: "16px 12px 40px" }}>
+      <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", gap: 8, width: "100%", maxWidth: 560, padding: "6px 0 12px", justifyContent: "flex-end" }}>
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        <button className="btn btn-primary" onClick={() => window.print()} style={{ gap: 8 }}>Print / Save PDF</button>
+      </div>
+      <div className="print-poster" style={{ width: "100%", maxWidth: 560, background: "#fff", color: INK, borderRadius: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.4)", padding: "40px 36px 32px", textAlign: "center" }}>
+        <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, letterSpacing: "-0.02em" }}>
+          <span style={{ color: BRAND, WebkitTextStroke: `0.5px ${INK}` }}>MoMo</span><span style={{ color: GREEN }}>⚡</span><span style={{ color: ACCENT }}>Me</span>
+        </div>
+        <div style={{ marginTop: 22, fontSize: 13, fontWeight: 800, letterSpacing: "0.14em", color: ACCENT, textTransform: "uppercase" }}>Pay here · Payez ici</div>
+        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1, marginTop: 8 }}>{merchant.businessName}</div>
+
+        <div style={{ margin: "26px auto 0", width: "fit-content", background: "#fff", border: `3px solid ${INK}`, borderRadius: 22, padding: 18 }}>
+          <QR value={url} size={230} />
+        </div>
+
+        <div style={{ marginTop: 22, display: "grid", gap: 8, textAlign: "left", maxWidth: 320, marginInline: "auto" }}>
+          {[["1", "Open your camera or MoMo›Me and scan"], ["2", "Enter the amount"], ["3", "Pay with crypto or Mobile Money"]].map(([n, txt]) => (
+            <div key={n} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ flex: "none", width: 26, height: 26, borderRadius: "50%", background: BRAND, color: INK, fontWeight: 800, display: "grid", placeItems: "center", fontSize: 14 }}>{n}</span>
+              <span style={{ fontSize: 15, color: INK, fontWeight: 600 }}>{txt}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #ece6da", fontSize: 12.5, color: INK2 }}>
+          Instant Mobile Money settlement · No account or crypto needed to pay
+          <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 12 }}>momome.xyz · {merchant.code}</div>
+        </div>
       </div>
     </div>
   );

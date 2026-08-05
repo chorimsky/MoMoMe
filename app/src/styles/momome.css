@@ -353,3 +353,14 @@ button, input, select, textarea { color: inherit; }
 @media (max-width: 640px) {
   .btn { min-height: var(--tap-min); }
 }
+
+/* ---- printable merchant QR poster ----
+   The poster is always light (ink on white) so it prints cleanly regardless of the
+   app theme; when printing we hide all app chrome and show only the poster. */
+@media print {
+  body { background: #fff !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  .print-poster { position: static !important; box-shadow: none !important; margin: 0 auto !important; }
+  @page { margin: 12mm; }
+}

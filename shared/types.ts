@@ -420,6 +420,25 @@ export interface MerchantSummary {
   recent: Payment[];
 }
 
+/* ---------- Referrals / ambassadors (Growth Engine) ---------- */
+export type AmbassadorTier = "rep" | "city_lead" | "regional_lead";
+
+export interface ReferredMerchant {
+  businessName: string;
+  code: string;                 // MOM-CC-######
+  status: MerchantAccountStatus;
+  firstPayment: boolean;        // has at least one completed sale
+}
+
+/** Ambassador dashboard read-model — a referrer's code and who they've brought. */
+export interface AmbassadorSummary {
+  code: string;                 // this owner's referral code
+  referredCount: number;        // total devices/accounts referred
+  merchants: ReferredMerchant[];// referred accounts that became merchants
+  activeMerchants: number;      // referred merchants that are active AND took a payment
+  tier: AmbassadorTier;
+}
+
 /* ---------- route-selection engine ---------- */
 export interface AggregatorHealth {
   name: Aggregator;

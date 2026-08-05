@@ -62,7 +62,8 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
   async function submit() {
     setBusy(true); setErr(null);
     try {
-      const { merchant } = await api.createMerchant({ businessName: businessName.trim(), category, country, settlementPhone: phone, tier, location: locationLabel ? { label: locationLabel } : undefined });
+      const ref = (() => { try { return localStorage.getItem("mm_ref") || undefined; } catch { return undefined; } })();
+      const { merchant } = await api.createMerchant({ businessName: businessName.trim(), category, country, settlementPhone: phone, tier, location: locationLabel ? { label: locationLabel } : undefined, ref });
       onDone(merchant);
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Couldn't save your profile."); }
     finally { setBusy(false); }
@@ -272,7 +273,10 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
         </div>
       )}
       {active.length === 0 && <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 12 }}>Create a link to accept your first payment. Print the QR for your counter, or share the link on WhatsApp.</p>}
-      <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-3)" }}>Building a platform? <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>Use the API →</Link></div>
+      <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <span>Building a platform? <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>Use the API →</Link></span>
+        <span>Bring other shops? <Link to="/ambassador" style={{ color: "var(--accent)", fontWeight: 600 }}>Become an ambassador →</Link></span>
+      </div>
     </div>
   );
 }

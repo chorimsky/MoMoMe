@@ -9,7 +9,7 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
-  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary,
+  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, AmbassadorSummary,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -247,7 +247,7 @@ export const api = {
 
   // ---- Merchant ecosystem ----
   merchantMe: () => req<{ merchant: MerchantAccount }>("/merchant/me"),
-  createMerchant: (body: { businessName: string; category: string; country: CountryCode; settlementPhone: string; tier: "individual" | "business"; location?: MerchantAccount["location"] }) =>
+  createMerchant: (body: { businessName: string; category: string; country: CountryCode; settlementPhone: string; tier: "individual" | "business"; location?: MerchantAccount["location"]; ref?: string }) =>
     req<{ merchant: MerchantAccount }>("/merchant", { method: "POST", body: JSON.stringify(body) }),
   merchantVerifyRequest: () => req<{ sent: boolean; devCode?: string }>("/merchant/verify/request", { method: "POST", body: "{}" }),
   merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
@@ -257,6 +257,10 @@ export const api = {
     req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
   disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
   resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${code}`),
+
+  // ---- Referrals / ambassadors ----
+  getReferral: () => req<AmbassadorSummary>("/me/referral"),
+  claimReferral: (ref: string) => req<{ ok: boolean }>("/me/referral/claim", { method: "POST", body: JSON.stringify({ ref }) }),
 
   // Encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts).
   vaultList: (since?: string) => req<VaultRecord[]>(`/me/vault${since ? `?since=${encodeURIComponent(since)}` : ""}`),

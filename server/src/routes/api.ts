@@ -2,7 +2,7 @@ import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
-  MerchantAccount, MerchantLinkKind, MerchantLinkPublic,
+  MerchantAccount, MerchantLinkKind, MerchantLinkPublic, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
@@ -30,6 +30,7 @@ import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, ge
 import { resolveLocation } from "../core/geoip.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, merchantById, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
@@ -868,6 +869,10 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
   const tier = b.tier === "business" ? "business" : "individual";
   const m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: b.location });
+  // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
+  // (once — recordReferral is a no-op if already attributed or self-referral).
+  const ref = typeof (req.body as { ref?: string }).ref === "string" ? (req.body as { ref?: string }).ref! : "";
+  if (ref) recordReferral(owner, ref);
   res.status(201).json({ merchant: publicMerchant(m) });
 });
 
@@ -958,6 +963,43 @@ api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000),
     merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
   };
   res.json(pub);
+});
+
+/* ============================================================
+   Referrals / ambassadors — the viral loop. Every device gets a shareable code;
+   a device that arrived via ?ref is attributed once. The ambassador view is that
+   attribution joined with the merchant layer. See docs/growth-engine.md.
+   ============================================================ */
+function ambassadorTier(activeMerchants: number): AmbassadorTier {
+  return activeMerchants >= 10 ? "regional_lead" : activeMerchants >= 3 ? "city_lead" : "rep";
+}
+
+/** Attribute THIS device to a referrer (once). Called on first arrival via ?ref. */
+api.post("/me/referral/claim", rateLimitMiddleware("ref_claim", 20, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const ref = String((req.body ?? {}).ref ?? "");
+  res.json({ ok: ref ? recordReferral(owner, ref) : false });
+});
+
+/** My referral code + who I've brought (the ambassador dashboard feed). */
+api.get("/me/referral", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const referred = referralsOf(owner);
+  const merchants: ReferredMerchant[] = [];
+  for (const o of referred) {
+    const m = merchantByOwner(o);
+    if (!m) continue;
+    const firstPayment = salesFor(m).some((p) => p.displayStatus === "Completed");
+    merchants.push({ businessName: m.businessName, code: m.code, status: m.status, firstPayment });
+  }
+  const activeMerchants = merchants.filter((m) => m.status === "active" && m.firstPayment).length;
+  const summary: AmbassadorSummary = {
+    code: refCodeFor(owner), referredCount: referred.length, merchants,
+    activeMerchants, tier: ambassadorTier(activeMerchants),
+  };
+  res.json(summary);
 });
 
 /* ---------- admin ---------- */

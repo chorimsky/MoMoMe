@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useRouteSeo } from "./lib/seo.js";
+import { api } from "./api/client.js";
 import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
@@ -11,7 +12,23 @@ import { Contact } from "./pages/legal/Contact.js";
 import { NotFound } from "./pages/legal/NotFound.js";
 import { Developers } from "./pages/Developers.js";
 import { Merchant } from "./pages/Merchant.js";
+import { Ambassador } from "./pages/Ambassador.js";
 import { Pay } from "./pages/Pay.js";
+
+/** Capture a referral once: a device arriving via ?ref=<code> is attributed to
+ *  the ambassador who sent it (server enforces once-only, no self-referral). The
+ *  code is also kept so merchant onboarding can re-assert it. */
+function useReferralCapture() {
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get("ref");
+    if (!ref) return;
+    try {
+      localStorage.setItem("mm_ref", ref);
+      if (localStorage.getItem("mm_ref_claimed") === ref) return;
+      void api.claimReferral(ref).then(() => { try { localStorage.setItem("mm_ref_claimed", ref); } catch { /* ignore */ } }).catch(() => {});
+    } catch { /* storage blocked — skip */ }
+  }, []);
+}
 
 // Admin console + ops dashboard are operator-only and heavy — code-split them out
 // of the main bundle so the customer-facing landing/send flow stays light on the
@@ -26,6 +43,7 @@ function ChunkFallback() {
 
 export function App() {
   useRouteSeo(); // per-route canonical + robots (index public pages, noindex admin/ops/404)
+  useReferralCapture();
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
@@ -37,6 +55,7 @@ export function App() {
       <Route path="/ops" element={<AdminGate><Suspense fallback={<ChunkFallback />}><OpsDashboard /></Suspense></AdminGate>} />
       <Route path="/developers" element={<Developers />} />
       <Route path="/merchant" element={<Merchant />} />
+      <Route path="/ambassador" element={<Ambassador />} />
       <Route path="/pay/:code" element={<Pay />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />

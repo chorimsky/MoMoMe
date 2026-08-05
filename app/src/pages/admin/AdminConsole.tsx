@@ -27,6 +27,7 @@ import { AdministrationView } from "./views/Administration.js";
 import { PeexView } from "./views/Peex.js";
 import { NotificationsView } from "./views/Notifications.js";
 import { SettingsView } from "./views/Settings.js";
+import { ApiKeysView } from "./views/ApiKeys.js";
 import "./admin.css";
 
 /* ---------- icons ---------- */
@@ -58,7 +59,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
-  | "notifications" | "health" | "settings" | "administration";
+  | "notifications" | "health" | "settings" | "administration" | "developers";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: null, items: [["overview", "Overview"]] },
@@ -68,7 +69,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
   { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"]] },
-  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["administration", "Administration"]] },
+  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"]] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items)) as Record<Key, string>;
 const VIEWS: Record<Key, ComponentType> = {
@@ -88,6 +89,7 @@ const VIEWS: Record<Key, ComponentType> = {
   notifications: NotificationsView,
   health: HealthView,
   settings: SettingsView,
+  developers: ApiKeysView,
   administration: AdministrationView,
 };
 
@@ -96,7 +98,9 @@ const VIEWS: Record<Key, ComponentType> = {
 // Administration (user management) is Super-Admin only, even for Read Only's
 // "view everything" — it mirrors the server's Super-Admin gate on /admin/users.
 const canAccess = (role: AdminRole, key: Key) =>
-  roleCanAccess(role, key as Section) && (key !== "administration" || isSuperAdmin(role));
+  // "developers" (API keys) isn't a shared RBAC Section — it's Super-Admin-only,
+  // mirroring the server's explicit /admin/apikeys gate.
+  (key === "developers" ? isSuperAdmin(role) : roleCanAccess(role, key as Section)) && (key !== "administration" || isSuperAdmin(role));
 
 function loadSection(): Key {
   try {

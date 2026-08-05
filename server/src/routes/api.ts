@@ -26,6 +26,9 @@ import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim
 import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
 import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
+import { resolveLocation } from "../core/geoip.js";
+import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
+import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
@@ -128,6 +131,11 @@ api.use("/admin", (req, res, next) => {
 
   // User administration is Super-Admin only.
   if (sub === "/users" || sub.startsWith("/users/")) {
+    if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+    return next();
+  }
+  // Developer API keys authorize real partner payments → Super-Admin only.
+  if (sub === "/apikeys" || sub.startsWith("/apikeys/")) {
     if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
     return next();
   }
@@ -276,7 +284,19 @@ async function verifyDeviceSig(req: ReqLike, authPub: JsonWebKey): Promise<boole
  *  • enrolled id → the id ONLY if the request carries a valid signature, else
  *    undefined (a stolen id without the private key can no longer act).
  */
+/** A valid developer API key → its partner owner id ("key:<id>"), else undefined.
+ *  Accepts `Authorization: Bearer mk_…` or `X-API-Key: mk_…`. Admin session tokens
+ *  (a different format, never "mk_"-prefixed) are ignored here. */
+function partnerOf(req: ReqLike): string | undefined {
+  const auth = hdr(req, "authorization");
+  const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7).trim() : undefined;
+  return verifyApiKey(bearer ?? hdr(req, "x-api-key")) ?? undefined;
+}
+
 async function ownerOf(req: ReqLike): Promise<string | undefined> {
+  // Developer/partner requests authenticate with an API key, not a device signature.
+  const partner = partnerOf(req);
+  if (partner) return partner;
   const id = senderOf(req);
   if (!id) return undefined;
   const dev = getDevice(id);
@@ -382,6 +402,26 @@ api.get("/config", (_req, res) => {
       ? "Demo mode — payouts run on sandbox rails. For a successful payout use an MTN number ending in 789 (e.g. 677000789). Orange routes to a sandbox with no success number yet."
       : "",
   });
+});
+
+/* ---------- developer API: machine-readable spec (public) ---------- */
+api.get("/openapi.json", (_req, res) => {
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.json(openApiSpec(config.publicUrl));
+});
+
+/* ---------- developer API keys (Super-Admin; gated in the /admin middleware) ---------- */
+api.get("/admin/apikeys", (_req, res) => res.json({ keys: listApiKeys() }));
+api.post("/admin/apikeys", (req, res) => {
+  const label = String((req.body ?? {}).label ?? "").slice(0, 80);
+  const { key, secret } = createApiKey(label);
+  // `secret` is returned exactly ONCE — the client shows it and it's never recoverable.
+  res.status(201).json({ key, secret });
+});
+api.delete("/admin/apikeys/:id", (req, res) => {
+  return revokeApiKey(String(req.params.id))
+    ? res.json({ ok: true })
+    : res.status(404).json({ error: "not_found", message: "Key not found or already revoked." });
 });
 
 /* ---------- recipient name resolution ---------- */
@@ -578,6 +618,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   // becomes an account once it has actually received money (see stateMachine).
   // Optional intelligence layer — fire-and-forget, NEVER blocks the payment.
   void peex.enrich(payment);
+  // Coarse geo-origin (IP → country/city) for operator fraud/AML review —
+  // fire-and-forget, never blocks or slows creation; backfilled when it resolves.
+  void resolveLocation(req).then((loc) => {
+    if (!loc) return;
+    const p = store.getPayment(payment.id);
+    if (p) { p.senderLocation = loc; store.putPayment(p); }
+  }).catch(() => {});
   res.json(payment);
 });
 

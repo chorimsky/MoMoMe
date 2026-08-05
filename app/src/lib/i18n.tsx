@@ -245,6 +245,7 @@ export const STRINGS: Dict = {
   lp_foot_terms: ["Terms", "Conditions"],
   lp_foot_privacy: ["Privacy", "Confidentialité"],
   lp_foot_partners: ["For partners →", "Pour les partenaires →"],
+  foot_developers: ["Developers", "Développeurs"],
   lp_switch_lang: ["Passer en français", "Switch to English"],
 };
 

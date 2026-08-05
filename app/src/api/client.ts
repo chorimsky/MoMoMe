@@ -9,7 +9,7 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
-  VaultRecord,
+  VaultRecord, ApiKey,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -21,6 +21,8 @@ export interface AdminSessionUser { id: string; username: string; role: AdminRol
 // Set VITE_API_BASE to point at a separately-hosted backend (e.g. a persistent
 // Node host) without code changes.
 const BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
+/** The API base URL (e.g. "https://…/api"), for the developer docs to display. */
+export const API_BASE = BASE;
 
 /* ---------- admin session token ---------- */
 const TOKEN_KEY = "mm_admin_token";
@@ -264,6 +266,11 @@ export const api = {
   adminOverview: () => req<AdminOverview>("/admin/overview"),
   adminCustomers: () => req<AdminCustomer[]>("/admin/customers"),
   adminPayments: () => req<Payment[]>("/admin/payments"),
+
+  // Developer API keys (Super-Admin). Create returns the plaintext `secret` ONCE.
+  adminApiKeys: () => req<{ keys: ApiKey[] }>("/admin/apikeys"),
+  adminCreateApiKey: (label: string) => req<{ key: ApiKey; secret: string }>("/admin/apikeys", { method: "POST", body: JSON.stringify({ label }) }),
+  adminRevokeApiKey: (id: string) => req<{ ok: boolean }>(`/admin/apikeys/${id}`, { method: "DELETE" }),
 
   adminSettings: () => req<AdminSettings>("/admin/settings"),
   saveSettings: (patch: Partial<AdminSettings>) =>

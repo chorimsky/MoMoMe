@@ -112,6 +112,17 @@ export interface Contact {
   updatedAt: string;        // ISO
 }
 
+/** A developer/partner API key — public view (the secret is never returned after
+ *  creation). See server/src/core/apiKeys.ts and the /developers docs. */
+export interface ApiKey {
+  id: string;
+  label: string;
+  prefix: string;        // e.g. "mk_1a2b3c4" — identifies the key without revealing it
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+}
+
 /** What the server stores/returns for the vault — opaque ciphertext only. */
 export interface VaultRecord {
   recordId: string;
@@ -128,6 +139,19 @@ export interface PaymentEvent {
   note?: string;
 }
 
+/** Coarse geo-origin of the payment, resolved best-effort from the request IP at
+ *  creation time — for operator fraud / AML visibility (never shown to the sender).
+ *  City/region are approximate; a null field means it couldn't be determined. */
+export interface SenderLocation {
+  ip?: string;          // origin IP (masked in list views; full in the detail drawer)
+  country?: string;     // "Cameroon"
+  countryCode?: string; // ISO-3166 alpha-2, e.g. "CM"
+  region?: string;      // "Littoral"
+  city?: string;        // "Douala"
+  source: "header" | "lookup"; // proxy geo-header vs IP-lookup service
+  at: string;           // ISO — when resolved
+}
+
 export interface Payment {
   id: string;
   ref: string; // human anchor, e.g. MMM-2026-418842
@@ -138,6 +162,9 @@ export interface Payment {
   recipient: Recipient;
   /** Anonymous device id of the sender who created this payment (no login). */
   senderId?: string;
+  /** Coarse geo-origin (IP → country/city), resolved best-effort at creation for
+   *  operator fraud/AML review. Absent for lnurl/webhook-created payments. */
+  senderLocation?: SenderLocation;
   /** How the payment was initiated: the in-app send flow ("app", default) or an
    *  external Lightning wallet paying the recipient's Lightning Address ("lnurl"). */
   source?: "app" | "lnurl";

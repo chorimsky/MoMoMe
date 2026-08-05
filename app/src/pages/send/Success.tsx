@@ -75,14 +75,17 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     ...(side === "left" ? { left: -9 } : { right: -9 }),
   });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "grid", placeItems: "center", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
-      <div ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-modal="true" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease", outline: "none" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
+      {/* margin:auto centers the ticket when it fits; when it's taller than the
+          viewport (crypto rows shown) the scrim scrolls and the top logo + bottom
+          Close button stay reachable instead of being clipped by grid-centering. */}
+      <div ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-modal="true" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, margin: "auto", padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease", outline: "none" }}>
         {/* header — branded band + success badge + the delivered amount */}
         <div style={{ background: "var(--brand-wash)", padding: "20px 24px 22px", textAlign: "center" }}>
           <Logo size={28} />
           <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", margin: "16px auto 0", fontSize: 25, fontWeight: 800, boxShadow: "0 8px 22px oklch(0.6 0.1 158 / 0.35)" }}>✓</div>
           <div style={{ marginTop: 12, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16.5 }}>{t("receipt_success")}</div>
-          <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
+          <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
           <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>{t("delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></div>
         </div>
 
@@ -96,8 +99,8 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
         <div style={{ padding: "12px 24px 6px", background: "var(--surface)" }}>
           {rows.map(([k, v], i) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
-              <span style={{ fontSize: 12.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{k}</span>
-              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", whiteSpace: "nowrap", color: "var(--ink)" }}>{v}</span>
+              <span style={{ fontSize: 12.5, color: "var(--ink-3)", whiteSpace: "nowrap", flex: "none" }}>{k}</span>
+              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", color: "var(--ink)", minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
             </div>
           ))}
           {/* status as a friendly green pill */}
@@ -156,7 +159,7 @@ export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payme
           <Momo size={108} mood="wow" className="momo-celebrate" />
         </div>
         <h2 style={{ fontSize: 25 }}>{t("success_title")}</h2>
-        <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>
+        <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{fmt(payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>
         <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 0" }}>{t("delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></p>
       </div>
 

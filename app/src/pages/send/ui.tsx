@@ -40,10 +40,12 @@ export function Stepper({ i }: { i: number }) {
 export function Row({ k, v, sub, strong, tone }: { k: string; v: string; sub?: string; strong?: boolean; tone?: "recv" }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, padding: "10px 0" }}>
-      <span style={{ fontSize: 14, color: "var(--ink-2)", fontWeight: strong ? 700 : 500, whiteSpace: "nowrap" }}>{k}</span>
-      <span style={{ textAlign: "right", minWidth: 0 }}>
-        <span className="num" style={{ fontSize: strong ? 17 : 14, fontWeight: strong ? 750 : 600, color: tone === "recv" ? "var(--recv)" : "var(--ink)", whiteSpace: "nowrap" }}>{v}</span>
-        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{sub}</span>}
+      <span style={{ fontSize: 14, color: "var(--ink-2)", fontWeight: strong ? 700 : 500, whiteSpace: "nowrap", flex: "none" }}>{k}</span>
+      {/* min-width:0 + overflow lets a long value (e.g. a 60-char recipient name)
+          ellipsize instead of overflowing off the card; short amounts never truncate. */}
+      <span style={{ textAlign: "right", minWidth: 0, flex: 1, overflow: "hidden" }}>
+        <span className="num" style={{ display: "block", fontSize: strong ? 17 : 14, fontWeight: strong ? 750 : 600, color: tone === "recv" ? "var(--recv)" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
+        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>}
       </span>
     </div>
   );

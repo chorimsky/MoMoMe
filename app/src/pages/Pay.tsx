@@ -12,7 +12,7 @@ import { SendApp, type MerchantContext } from "./send/SendApp.js";
 import { Logo, Spinner } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
 
-export function Pay() {
+export function Pay({ mode = "link" }: { mode?: "link" | "merchant" }) {
   const { code } = useParams<{ code: string }>();
   const { t } = useI18n();
   const [link, setLink] = useState<MerchantLinkPublic | null>(null);
@@ -21,11 +21,13 @@ export function Pay() {
   useEffect(() => {
     if (!code) { setState("error"); return; }
     let alive = true;
-    api.resolvePayLink(code)
-      .then((l) => { if (alive) { setLink(l); setState("ok"); } })
+    // /pay/:code resolves a payment LINK (fixed/open amount); /m/:code resolves a
+    // merchant by its public directory code (always open amount, no link tag).
+    const p = mode === "merchant" ? api.resolveMerchantByCode(code) : api.resolvePayLink(code);
+    p.then((l) => { if (alive) { setLink(l); setState("ok"); } })
       .catch(() => { if (alive) setState("error"); });
     return () => { alive = false; };
-  }, [code]);
+  }, [code, mode]);
 
   if (state === "loading") {
     return <div className="app-bg" style={{ background: "var(--paper)", minHeight: "100dvh", display: "grid", placeItems: "center" }}><Spinner size={24} /></div>;
@@ -44,7 +46,10 @@ export function Pay() {
   }
 
   const merchant: MerchantContext = {
-    linkCode: link.code, businessName: link.merchant.businessName, category: link.merchant.category,
+    // Only a real payment LINK carries a tag; a directory (by-code) pay attributes
+    // via settlement-number match instead.
+    linkCode: mode === "link" ? link.code : undefined,
+    businessName: link.merchant.businessName, category: link.merchant.category,
     settlementPhone: link.merchant.settlementPhone, provider: link.merchant.provider, country: link.merchant.country,
     amountXaf: link.amountXaf, label: link.label,
   };

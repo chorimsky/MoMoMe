@@ -60,6 +60,7 @@ const FOOT_LINKS: Array<[to: string, key: string, current: FootKey]> = [
   ["/send", "lp_cta_pay", "send"],
   ["/claim", "lp_foot_claim", "claim"],
   ["/contact", "lp_foot_help", "contact"],
+  ["/discover", "foot_discover", null],
   ["/merchant", "foot_merchant", null],
   ["/developers", "foot_developers", null],
   ["/terms", "lp_foot_terms", "terms"],

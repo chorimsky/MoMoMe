@@ -38,7 +38,7 @@ function TabIcon({ name, active }: { name: "pay" | "activity" | "contacts" | "he
 /** When the send flow is opened from a merchant payment link (/pay/:code), the
  *  recipient is the merchant's settlement number and the payment is tagged to them. */
 export interface MerchantContext {
-  linkCode: string;
+  linkCode?: string;          // present for a payment LINK; absent for a directory (by-code) pay
   businessName: string;
   category?: string;
   settlementPhone: string;

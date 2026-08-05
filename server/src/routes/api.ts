@@ -2,7 +2,7 @@ import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
-  MerchantAccount, MerchantLinkKind, MerchantLinkPublic, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
+  MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
@@ -29,7 +29,7 @@ import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
-import { createMerchant, merchantByOwner, activateMerchant, merchantById, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
@@ -960,6 +960,40 @@ api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000),
   if (!m || m.status !== "active") return res.status(404).json({ error: "not_found", message: "This merchant isn't active." });
   const pub: MerchantLinkPublic = {
     code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind,
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+  };
+  res.json(pub);
+});
+
+/* ---- discovery directory ("Pay with MoMo›Me") ---- */
+/** Opt my merchant in/out of the public directory. */
+api.post("/merchant/listing", rateLimitMiddleware("merchant_write", 30, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number first." });
+  res.json({ merchant: publicMerchant(setListed(m.id, (req.body ?? {}).listed !== false)!) });
+});
+
+/** PUBLIC — browse accepting merchants (no settlement numbers exposed). */
+api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), (req, res) => {
+  const country = typeof req.query.country === "string" ? req.query.country : undefined;
+  const category = typeof req.query.category === "string" ? req.query.category : undefined;
+  const q = typeof req.query.q === "string" ? req.query.q.slice(0, 60) : undefined;
+  const entries: MerchantDirectoryEntry[] = directory({ country, category, q }).slice(0, 200).map((m) => ({
+    code: m.code, businessName: m.businessName, category: m.category, country: m.country,
+    location: m.location?.label ? { label: m.location.label } : undefined, verifiedPhone: m.verifiedPhone,
+  }));
+  res.json({ merchants: entries });
+});
+
+/** PUBLIC — resolve a merchant by its public code for an open-amount checkout (/m/:code). */
+api.get("/merchant/by-code/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), (req, res) => {
+  const m = merchantByCode(String(req.params.code));
+  if (!m || m.status !== "active" || !m.verifiedPhone) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
+  const pub: MerchantLinkPublic = {
+    code: m.code, kind: "link",
     merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
   };
   res.json(pub);

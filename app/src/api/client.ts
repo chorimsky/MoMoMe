@@ -9,7 +9,7 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
-  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, AmbassadorSummary,
+  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, MerchantDirectoryEntry, AmbassadorSummary,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -257,6 +257,12 @@ export const api = {
     req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
   disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
   resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${code}`),
+  resolveMerchantByCode: (code: string) => req<MerchantLinkPublic>(`/merchant/by-code/${code}`),
+  setMerchantListing: (listed: boolean) => req<{ merchant: MerchantAccount }>("/merchant/listing", { method: "POST", body: JSON.stringify({ listed }) }),
+  discover: (opts: { country?: string; category?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as [string, string][]).toString();
+    return req<{ merchants: MerchantDirectoryEntry[] }>(`/discover${qs ? `?${qs}` : ""}`);
+  },
 
   // ---- Referrals / ambassadors ----
   getReferral: () => req<AmbassadorSummary>("/me/referral"),

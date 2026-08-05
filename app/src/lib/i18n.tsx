@@ -247,6 +247,7 @@ export const STRINGS: Dict = {
   lp_foot_partners: ["For partners →", "Pour les partenaires →"],
   foot_developers: ["Developers", "Développeurs"],
   foot_merchant: ["For business", "Pour les entreprises"],
+  foot_discover: ["Find businesses", "Trouver des commerces"],
   mrc_paying: ["You're paying", "Vous payez"],
   mrc_enter_amount: ["Enter the amount to pay below.", "Entrez le montant à payer ci-dessous."],
   mrc_link_invalid_t: ["Payment link not available", "Lien de paiement indisponible"],

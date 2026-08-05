@@ -172,10 +172,12 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 function Dashboard({ merchant }: { merchant: MerchantAccount }) {
   const [sum, setSum] = useState<MerchantSummary | null>(null);
   const [links, setLinks] = useState<MerchantLink[]>([]);
+  const [listed, setListed] = useState(!!merchant.listed);
 
   const reloadSummary = () => api.merchantSummary().then(setSum).catch(() => {});
   const reloadLinks = () => api.merchantLinks().then((r) => setLinks(r.links)).catch(() => {});
   useEffect(() => { void reloadSummary(); void reloadLinks(); }, []);
+  const toggleListed = async () => { const next = !listed; setListed(next); try { await api.setMerchantListing(next); } catch { setListed(!next); } };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -196,6 +198,17 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
         <Stat label="Today's sales" value={`${fmt(sum?.today.salesXaf ?? 0)} XAF`} sub={`${sum?.today.count ?? 0} payment${(sum?.today.count ?? 0) === 1 ? "" : "s"}`} />
         <Stat label="Avg payment" value={`${fmt(sum?.today.avgXaf ?? 0)} XAF`} sub="today" />
         <Stat label="All-time" value={`${fmt(sum?.all.salesXaf ?? 0)} XAF`} sub={`${sum?.all.count ?? 0} completed`} />
+      </div>
+
+      <div style={{ ...cardStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>List on “Pay with MoMo›Me”</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>Get discovered by nearby customers. Your number stays private — only your name, category and area show. <Link to="/discover" style={{ color: "var(--accent)", fontWeight: 600 }}>See the directory →</Link></div>
+        </div>
+        <button type="button" role="switch" aria-checked={listed} onClick={toggleListed} aria-label="List my business"
+          style={{ flex: "none", width: 46, height: 28, borderRadius: 999, border: "none", cursor: "pointer", background: listed ? "var(--recv)" : "var(--line)", position: "relative", transition: "background .15s" }}>
+          <span style={{ position: "absolute", top: 3, left: listed ? 21 : 3, width: 22, height: 22, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }} />
+        </button>
       </div>
 
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />

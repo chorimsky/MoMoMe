@@ -387,8 +387,20 @@ export interface MerchantAccount {
   tier: MerchantTier;
   status: MerchantAccountStatus;
   verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
+  listed?: boolean;           // opted into the public "Pay with MoMo›Me" directory
   createdAt: string;
   updatedAt: string;
+}
+
+/** Privacy-safe public directory entry — NO settlement number (revealed only at
+ *  the pay step). Powers the "Pay with MoMo›Me" discovery page. */
+export interface MerchantDirectoryEntry {
+  code: string;               // MOM-CC-######
+  businessName: string;
+  category: string;
+  country: CountryCode;
+  location?: { label?: string };
+  verifiedPhone: boolean;
 }
 
 export type MerchantLinkKind = "link" | "qr" | "invoice";

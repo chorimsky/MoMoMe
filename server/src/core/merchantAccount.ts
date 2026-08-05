@@ -83,6 +83,29 @@ export function activateMerchant(id: string): StoredMerchant | undefined {
   return m;
 }
 
+/** Opt a merchant into (or out of) the public "Pay with MoMo›Me" directory. */
+export function setListed(id: string, listed: boolean): StoredMerchant | undefined {
+  const m = merchants.get(id);
+  if (!m) return undefined;
+  m.listed = listed;
+  m.updatedAt = new Date().toISOString();
+  touch("merchants2");
+  return m;
+}
+
+/** Public directory: active, verified, opted-in merchants, filtered + newest first.
+ *  Never exposes the settlement number (that's revealed only at the pay step). */
+export function directory(opts: { country?: string; category?: string; q?: string } = {}): MerchantAccount[] {
+  const q = (opts.q ?? "").trim().toLowerCase();
+  return [...merchants.values()]
+    .filter((m) => m.listed && m.status === "active" && m.verifiedPhone)
+    .filter((m) => (!opts.country || m.country === opts.country))
+    .filter((m) => (!opts.category || m.category === opts.category))
+    .filter((m) => (!q || m.businessName.toLowerCase().includes(q) || m.category.toLowerCase().includes(q) || (m.location?.label ?? "").toLowerCase().includes(q)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(publicMerchant);
+}
+
 /* ---------- payment links / QR ---------- */
 export function createLink(merchantId: string, input: { amountXaf?: number; label?: string; kind?: MerchantLinkKind }): MerchantLink {
   const code = crypto.randomBytes(6).toString("base64url").slice(0, 8);

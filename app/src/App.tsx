@@ -10,6 +10,8 @@ import { Privacy } from "./pages/legal/Privacy.js";
 import { Contact } from "./pages/legal/Contact.js";
 import { NotFound } from "./pages/legal/NotFound.js";
 import { Developers } from "./pages/Developers.js";
+import { Merchant } from "./pages/Merchant.js";
+import { Pay } from "./pages/Pay.js";
 
 // Admin console + ops dashboard are operator-only and heavy — code-split them out
 // of the main bundle so the customer-facing landing/send flow stays light on the
@@ -34,6 +36,8 @@ export function App() {
           so it sits behind the same session gate as /admin (was previously ungated). */}
       <Route path="/ops" element={<AdminGate><Suspense fallback={<ChunkFallback />}><OpsDashboard /></Suspense></AdminGate>} />
       <Route path="/developers" element={<Developers />} />
+      <Route path="/merchant" element={<Merchant />} />
+      <Route path="/pay/:code" element={<Pay />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/contact" element={<Contact />} />

@@ -14,7 +14,7 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
 /** Public routes that should be indexed (kept in sync with the sitemap). */
-const INDEXABLE = new Set(["/", "/send", "/claim", "/contact", "/developers", "/terms", "/privacy"]);
+const INDEXABLE = new Set(["/", "/send", "/claim", "/contact", "/developers", "/merchant", "/terms", "/privacy"]);
 
 function upsertMeta(name: string, content: string): void {
   let el = document.head.querySelector(`meta[name="${name}"]`);

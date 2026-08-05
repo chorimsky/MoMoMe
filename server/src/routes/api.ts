@@ -2,6 +2,7 @@ import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
+  MerchantAccount, MerchantLinkKind, MerchantLinkPublic,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
@@ -28,6 +29,7 @@ import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
+import { createMerchant, merchantByOwner, activateMerchant, merchantById, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
@@ -610,6 +612,18 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     createdAt: now,
     updatedAt: now,
   };
+  // Merchant attribution: if this came from a merchant payment link, tag it — but
+  // ONLY when the recipient actually matches that merchant's settlement number, so
+  // a caller can't falsely credit a merchant's sales.
+  const linkCode = typeof (req.body ?? {}).merchantLinkCode === "string" ? String((req.body as { merchantLinkCode?: string }).merchantLinkCode) : "";
+  if (linkCode) {
+    const link = getLink(linkCode);
+    const m = link && !link.disabledAt ? merchantById(link.merchantId) : undefined;
+    if (m && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+      payment.merchantId = m.id;
+      payment.merchantLinkCode = link!.code;
+    }
+  }
   store.putPayment(payment);
   // (the quote was already atomically claimed above — a locked rate is used once)
   if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
@@ -831,6 +845,119 @@ api.post("/me/anchor/restore", rateLimitMiddleware("anchor_verify", 20, 60_000),
   if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
   const accountId = linkDevice(dev, String(phone)); // join the account on this device
   res.json({ accountId, records: listVault(accountId), recovery: getRecovery(accountId) ?? null });
+});
+
+/* ============================================================
+   Merchant ecosystem — self-onboarded businesses that accept payments.
+   Device-owned (ownerOf); settlement-phone ownership proven with the anchor OTP.
+   See docs/merchant-ecosystem.md.
+   ============================================================ */
+function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+
+/** Create / update my merchant profile (starts pending until the phone is verified). */
+api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const b = (req.body ?? {}) as { businessName?: string; category?: string; country?: string; settlementPhone?: string; tier?: string; location?: MerchantAccount["location"] };
+  const businessName = String(b.businessName ?? "").trim();
+  const country = (COUNTRIES[b.country as CountryCode] ? b.country : "CM") as CountryCode;
+  const settlementPhone = String(b.settlementPhone ?? "").replace(/\D/g, "");
+  if (businessName.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your business name." });
+  if (settlementPhone.length < 8) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
+  const provider = detectProvider(settlementPhone, country);
+  if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
+  const tier = b.tier === "business" ? "business" : "individual";
+  const m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: b.location });
+  res.status(201).json({ merchant: publicMerchant(m) });
+});
+
+/** Send an OTP to the settlement number to prove ownership. */
+api.post("/merchant/verify/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
+  const r = requestAnchor(m.settlementPhone);
+  if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
+  res.json({ sent: true, devCode: isLive() ? undefined : r.code });
+});
+
+/** Verify the OTP → the merchant account goes live. */
+api.post("/merchant/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
+  const v = verifyAnchorCode(m.settlementPhone, String((req.body ?? {}).code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  res.json({ merchant: publicMerchant(activateMerchant(m.id)!) });
+});
+
+/** My merchant account (or 404 if not onboarded). */
+api.get("/merchant/me", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  res.json({ merchant: publicMerchant(m) });
+});
+
+/** Dashboard read-model: today's + all-time sales and recent transactions. */
+api.get("/merchant/me/summary", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  const sales = salesFor(m).filter((p) => p.displayStatus === "Completed");
+  const today = todayISO();
+  const todays = sales.filter((p) => p.createdAt.slice(0, 10) === today);
+  const sum = (ps: typeof sales) => ps.reduce((s, p) => s + p.xaf, 0);
+  const allXaf = sum(sales), todayXaf = sum(todays);
+  res.json({
+    merchant: publicMerchant(m),
+    today: { salesXaf: todayXaf, count: todays.length, avgXaf: todays.length ? Math.round(todayXaf / todays.length) : 0 },
+    all: { salesXaf: allXaf, count: sales.length },
+    recent: salesFor(m).slice(0, 30),
+  });
+});
+
+/* ---- payment links / QR ---- */
+api.get("/merchant/links", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  res.json({ links: linksForMerchant(m.id) });
+});
+api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number before accepting payments." });
+  const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind };
+  const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.min(Math.round(b.amountXaf), MAX_XAF) : undefined;
+  res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind }) });
+});
+api.delete("/merchant/links/:code", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  return disableLink(String(req.params.code), m.id) ? res.json({ ok: true }) : res.status(404).json({ error: "not_found", message: "Link not found." });
+});
+
+/** PUBLIC — resolve a payment link for the /pay/:code page (enough to run the send flow). */
+api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), (req, res) => {
+  const link = getLink(String(req.params.code));
+  if (!link || link.disabledAt) return res.status(404).json({ error: "not_found", message: "This payment link isn't active." });
+  const m = merchantById(link.merchantId);
+  if (!m || m.status !== "active") return res.status(404).json({ error: "not_found", message: "This merchant isn't active." });
+  const pub: MerchantLinkPublic = {
+    code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind,
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+  };
+  res.json(pub);
 });
 
 /* ---------- admin ---------- */

@@ -246,6 +246,11 @@ export const STRINGS: Dict = {
   lp_foot_privacy: ["Privacy", "Confidentialité"],
   lp_foot_partners: ["For partners →", "Pour les partenaires →"],
   foot_developers: ["Developers", "Développeurs"],
+  foot_merchant: ["For business", "Pour les entreprises"],
+  mrc_paying: ["You're paying", "Vous payez"],
+  mrc_enter_amount: ["Enter the amount to pay below.", "Entrez le montant à payer ci-dessous."],
+  mrc_link_invalid_t: ["Payment link not available", "Lien de paiement indisponible"],
+  mrc_link_invalid_d: ["This payment link is inactive or doesn't exist. Ask the merchant for a new one.", "Ce lien de paiement est inactif ou n'existe pas. Demandez-en un nouveau au commerçant."],
   lp_switch_lang: ["Passer en français", "Switch to English"],
 };
 

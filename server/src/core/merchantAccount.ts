@@ -1,0 +1,120 @@
+/* ============================================================
+   Merchant accounts — self-onboarded businesses that ACCEPT payments.
+
+   A merchant is owned by a device/partner id (the same `ownerOf` identity used
+   everywhere else — zero separate login). Its sales are ordinary payments whose
+   recipient is the merchant's settlement Mobile Money number, tagged with the
+   merchant id when paid through a link/QR. See docs/merchant-ecosystem.md.
+   ============================================================ */
+import crypto from "node:crypto";
+import type {
+  CountryCode, ProviderId, MerchantAccount, MerchantTier, MerchantLink, MerchantLinkKind, Payment,
+} from "../../../shared/types.js";
+import { register, touch } from "./persist.js";
+import { listPayments } from "./store.js";
+
+/** Stored shape = public account + the owning id (never returned to clients). */
+interface StoredMerchant extends MerchantAccount { owner: string }
+
+const merchants = new Map<string, StoredMerchant>();  // id -> account
+const ownerIndex = new Map<string, string>();         // owner -> merchant id
+const codeIndex = new Map<string, string>();          // public code -> merchant id
+const links = new Map<string, MerchantLink>();        // link code -> link
+let seq = 4520;                                        // public code counter (starts pretty)
+
+register(
+  "merchants2",
+  () => ({ merchants: [...merchants.values()], links: [...links.values()], seq }),
+  (d: { merchants: StoredMerchant[]; links: MerchantLink[]; seq: number }) => {
+    for (const m of d.merchants ?? []) { merchants.set(m.id, m); ownerIndex.set(m.owner, m.id); codeIndex.set(m.code, m.id); }
+    for (const l of d.links ?? []) links.set(l.code, l);
+    if (typeof d.seq === "number") seq = d.seq;
+  },
+);
+
+const digits = (s: string) => s.replace(/\D/g, "");
+/** Public projection — strip the internal `owner`. */
+export function publicMerchant({ owner: _o, ...m }: StoredMerchant): MerchantAccount { return m; }
+
+/** Create (or, if the owner already has one, update) a merchant account. */
+export function createMerchant(owner: string, input: {
+  businessName: string; category: string; country: CountryCode; settlementPhone: string;
+  provider: ProviderId; tier: MerchantTier; location?: MerchantAccount["location"];
+}): StoredMerchant {
+  const fields = {
+    businessName: input.businessName.slice(0, 80), category: input.category.slice(0, 40),
+    country: input.country, settlementPhone: digits(input.settlementPhone), provider: input.provider,
+    tier: input.tier, location: input.location, updatedAt: new Date().toISOString(),
+  };
+  const existingId = ownerIndex.get(owner);
+  if (existingId) {
+    const m = merchants.get(existingId)!;
+    Object.assign(m, fields);
+    touch("merchants2");
+    return m;
+  }
+  const id = `mrc_${crypto.randomBytes(8).toString("hex")}`;
+  const code = `MOM-${input.country}-${String(++seq).padStart(6, "0")}`;
+  const now = new Date().toISOString();
+  const m: StoredMerchant = { id, code, owner, status: "pending", verifiedPhone: false, createdAt: now, ...fields };
+  merchants.set(id, m); ownerIndex.set(owner, id); codeIndex.set(code, id);
+  touch("merchants2");
+  return m;
+}
+
+export function merchantByOwner(owner: string): StoredMerchant | undefined {
+  const id = ownerIndex.get(owner);
+  return id ? merchants.get(id) : undefined;
+}
+export function merchantById(id: string): StoredMerchant | undefined { return merchants.get(id); }
+export function merchantByCode(code: string): StoredMerchant | undefined {
+  const id = codeIndex.get(code);
+  return id ? merchants.get(id) : undefined;
+}
+
+/** Mark the settlement phone verified → the account goes live. */
+export function activateMerchant(id: string): StoredMerchant | undefined {
+  const m = merchants.get(id);
+  if (!m) return undefined;
+  m.verifiedPhone = true;
+  if (m.status === "pending") m.status = "active";
+  m.updatedAt = new Date().toISOString();
+  touch("merchants2");
+  return m;
+}
+
+/* ---------- payment links / QR ---------- */
+export function createLink(merchantId: string, input: { amountXaf?: number; label?: string; kind?: MerchantLinkKind }): MerchantLink {
+  const code = crypto.randomBytes(6).toString("base64url").slice(0, 8);
+  const link: MerchantLink = {
+    code, merchantId,
+    amountXaf: input.amountXaf && input.amountXaf > 0 ? Math.round(input.amountXaf) : undefined,
+    label: input.label?.slice(0, 60) || undefined,
+    kind: input.kind ?? "link",
+    createdAt: new Date().toISOString(),
+  };
+  links.set(code, link);
+  touch("merchants2");
+  return link;
+}
+export function getLink(code: string): MerchantLink | undefined { return links.get(code); }
+export function linksForMerchant(merchantId: string): MerchantLink[] {
+  return [...links.values()].filter((l) => l.merchantId === merchantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+export function disableLink(code: string, merchantId: string): boolean {
+  const l = links.get(code);
+  if (!l || l.merchantId !== merchantId || l.disabledAt) return false;
+  l.disabledAt = new Date().toISOString();
+  touch("merchants2");
+  return true;
+}
+
+/* ---------- sales (a merchant's incoming payments) ---------- */
+/** Payments that settle to this merchant: tagged by merchantId, or (fallback)
+ *  addressed to its settlement number. Newest first. */
+export function salesFor(m: MerchantAccount): Payment[] {
+  const phone = digits(m.settlementPhone);
+  return listPayments()
+    .filter((p) => p.merchantId === m.id || (!!phone && digits(p.recipient.phone) === phone))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}

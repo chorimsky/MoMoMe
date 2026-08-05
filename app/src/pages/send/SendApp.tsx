@@ -35,7 +35,20 @@ function TabIcon({ name, active }: { name: "pay" | "activity" | "contacts" | "he
   return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.4-1 .8-1 1.6" /><circle cx="12" cy="16.6" r="0.7" fill={c} stroke="none" /></svg>;
 }
 
-export function SendApp() {
+/** When the send flow is opened from a merchant payment link (/pay/:code), the
+ *  recipient is the merchant's settlement number and the payment is tagged to them. */
+export interface MerchantContext {
+  linkCode: string;
+  businessName: string;
+  category?: string;
+  settlementPhone: string;
+  provider: ProviderId;
+  country: CountryCode;
+  amountXaf?: number;
+  label?: string;
+}
+
+export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const { t } = useI18n();
   // Deep-link support: /send?tab=help (from the Contact page) or ?tab=activity
   // opens directly on that tab instead of the pay flow.
@@ -46,9 +59,9 @@ export function SendApp() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [s, setS] = useState<Draft>({
-    country: "CM", phone: "", provider: "MTN", xaf: 50000, method: "LIGHTNING", recipientName: "", nameSource: "idle",
-  });
+  const [s, setS] = useState<Draft>(() => merchant
+    ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 5000, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
+    : { country: "CM", phone: "", provider: "MTN", xaf: 50000, method: "LIGHTNING", recipientName: "", nameSource: "idle" });
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -107,7 +120,7 @@ export function SendApp() {
     if (payment && payment.quoteId === quote.id && payment.state === "AWAITING_INBOUND") { go("pay"); return; }
     setBusy(true); setErr(null);
     try {
-      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient() }));
+      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode }));
       go("pay");
     } catch (e) {
       if (isExpiry(e)) {
@@ -132,7 +145,7 @@ export function SendApp() {
       }
       const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
       setQuote(q);
-      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient() }));
+      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode }));
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
@@ -162,11 +175,25 @@ export function SendApp() {
 
   // Bottom tab bar shows on the home/details, activity and help screens; it hides
   // during the focused payment steps (method→success) for a native, task-modal feel.
-  const showTabs = tab !== "pay" || step === "details";
+  // A merchant checkout (/pay/:code) is always focused — no consumer-app tabs.
+  const showTabs = !merchant && (tab !== "pay" || step === "details");
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: `12px clamp(16px,4vw,24px) ${showTabs ? "calc(84px + env(safe-area-inset-bottom))" : "calc(40px + env(safe-area-inset-bottom))"}` }}>
         <SiteHeader cta={false} />
+
+        {merchant && (
+          <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--brand-wash)", border: "1px solid color-mix(in oklab, var(--brand) 30%, var(--line))" }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{t("mrc_paying")}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>{merchant.businessName}</div>
+            {merchant.label && <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{merchant.label}</div>}
+            {merchant.amountXaf ? (
+              <div className="num" style={{ fontSize: 24, fontWeight: 750, color: "var(--ink)", marginTop: 8 }}>{new Intl.NumberFormat("fr-FR").format(merchant.amountXaf)} <span style={{ fontSize: 14, color: "var(--ink-3)" }}>XAF</span></div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6 }}>{t("mrc_enter_amount")}</div>
+            )}
+          </div>
+        )}
 
         {demo?.demoMode && tab === "pay" && step === "details" && (
           <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>

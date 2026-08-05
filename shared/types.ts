@@ -165,6 +165,11 @@ export interface Payment {
   /** Coarse geo-origin (IP → country/city), resolved best-effort at creation for
    *  operator fraud/AML review. Absent for lnurl/webhook-created payments. */
   senderLocation?: SenderLocation;
+  /** Set when the payment was made through a merchant payment link/QR — the exact
+   *  merchant it settles to (attribution beyond settlement-phone matching). */
+  merchantId?: string;
+  /** The merchant payment-link code this payment came from, when applicable. */
+  merchantLinkCode?: string;
   /** How the payment was initiated: the in-app send flow ("app", default) or an
    *  external Lightning wallet paying the recipient's Lightning Address ("lnurl"). */
   source?: "app" | "lnurl";
@@ -361,6 +366,58 @@ export interface MerchantGraph {
   stats: { total: number; active: number; pending: number; flagged: number; withCode: number };
   routing: Array<{ provider: ProviderId; aggregator: Aggregator }>;
   resolutionLog: ResolutionLogEntry[];
+}
+
+/* ---------- Merchant Ecosystem (self-onboarded acceptance accounts) ----------
+   Distinct from the resolution-graph `Merchant` above (auto-discovered payee intel):
+   a MerchantAccount is a business that signed up to ACCEPT payments. See
+   docs/merchant-ecosystem.md. */
+export type MerchantTier = "individual" | "business";
+export type MerchantAccountStatus = "pending" | "active" | "suspended";
+
+export interface MerchantAccount {
+  id: string;                 // internal id
+  code: string;               // public identity, e.g. "MOM-CM-004523"
+  businessName: string;
+  category: string;           // "Restaurant", "Freelancer", "Hotel", …
+  country: CountryCode;
+  settlementPhone: string;    // Mobile Money number that receives the payouts
+  provider: ProviderId;       // detected from the settlement number
+  location?: { label?: string; lat?: number; lng?: number };
+  tier: MerchantTier;
+  status: MerchantAccountStatus;
+  verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MerchantLinkKind = "link" | "qr" | "invoice";
+
+export interface MerchantLink {
+  code: string;               // short public code → /pay/<code>
+  merchantId: string;
+  amountXaf?: number;         // fixed amount, or omitted = customer enters (open)
+  label?: string;             // "Table 4", "Invoice #20260045"
+  kind: MerchantLinkKind;
+  createdAt: string;
+  disabledAt?: string;
+}
+
+/** Public projection of a payment link for the /pay/:code page (safe to expose). */
+export interface MerchantLinkPublic {
+  code: string;
+  amountXaf?: number;
+  label?: string;
+  kind: MerchantLinkKind;
+  merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean };
+}
+
+/** Merchant dashboard read-model. */
+export interface MerchantSummary {
+  merchant: MerchantAccount;
+  today: { salesXaf: number; count: number; avgXaf: number };
+  all: { salesXaf: number; count: number };
+  recent: Payment[];
 }
 
 /* ---------- route-selection engine ---------- */

@@ -9,7 +9,7 @@ import type {
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
-  VaultRecord, ApiKey,
+  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -223,7 +223,7 @@ export const api = {
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),
 
-  createPayment: (body: CreatePaymentRequest) =>
+  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string }) =>
     req<Payment>("/payments", { method: "POST", body: JSON.stringify(body) }),
 
   confirmPayment: (id: string) =>
@@ -244,6 +244,19 @@ export const api = {
 
   // The sender's distinct recent recipients (anonymous, no login) — "send again".
   recentRecipients: () => req<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>("/me/recipients"),
+
+  // ---- Merchant ecosystem ----
+  merchantMe: () => req<{ merchant: MerchantAccount }>("/merchant/me"),
+  createMerchant: (body: { businessName: string; category: string; country: CountryCode; settlementPhone: string; tier: "individual" | "business"; location?: MerchantAccount["location"] }) =>
+    req<{ merchant: MerchantAccount }>("/merchant", { method: "POST", body: JSON.stringify(body) }),
+  merchantVerifyRequest: () => req<{ sent: boolean; devCode?: string }>("/merchant/verify/request", { method: "POST", body: "{}" }),
+  merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
+  merchantSummary: () => req<MerchantSummary>("/merchant/me/summary"),
+  merchantLinks: () => req<{ links: MerchantLink[] }>("/merchant/links"),
+  createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"] }) =>
+    req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
+  disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
+  resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${code}`),
 
   // Encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts).
   vaultList: (since?: string) => req<VaultRecord[]>(`/me/vault${since ? `?since=${encodeURIComponent(since)}` : ""}`),

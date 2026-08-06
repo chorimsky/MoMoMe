@@ -8,6 +8,48 @@ import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { API_BASE } from "../api/client.js";
 import "./Developers.css";
 
+/** Live, keyless quote playground — POSTs to the real /quotes endpoint so
+ *  developers see an actual response before writing a line of code. */
+function TryIt({ base }: { base: string }) {
+  const [xaf, setXaf] = useState(50000);
+  const [method, setMethod] = useState("LIGHTNING");
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+
+  const run = async () => {
+    setBusy(true); setOut(null);
+    try {
+      const r = await fetch(`${API_BASE}/quotes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xaf: Number(xaf) || 0, method, country: "CM" }),
+      });
+      const body = await r.json().catch(() => ({}));
+      setOut({ ok: r.ok, status: r.status, body: JSON.stringify(body, null, 2) });
+    } catch {
+      setOut({ ok: false, status: 0, body: '{\n  "error": "network_error",\n  "message": "Could not reach the API."\n}' });
+    } finally { setBusy(false); }
+  };
+
+  const field: React.CSSProperties = { padding: "10px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 14, color: "var(--ink)", outline: "none" };
+  return (
+    <div className="tryit">
+      <div className="tryit-form">
+        <label>xaf<input type="number" min={500} step={500} value={xaf} onChange={(e) => setXaf(Number(e.target.value))} style={{ ...field, fontFamily: "var(--font-mono)" }} /></label>
+        <label>method<select value={method} onChange={(e) => setMethod(e.target.value)} style={field}><option>LIGHTNING</option><option>ONCHAIN</option><option>USDT</option></select></label>
+        <label>country<input value="CM" readOnly style={{ ...field, opacity: 0.7 }} /></label>
+        <button type="button" className="btn btn-primary" onClick={run} disabled={busy} style={{ alignSelf: "end", whiteSpace: "nowrap" }}>{busy ? "Running…" : "Run request →"}</button>
+      </div>
+      {out && (
+        <div className="code" style={{ marginTop: 12 }}>
+          <div className="bar"><span className="lbl">POST /quotes → <span style={{ color: out.ok ? "var(--recv)" : "var(--bad)" }}>{out.status || "—"} {out.ok ? "OK" : "Error"}</span></span></div>
+          <pre><code>{out.body}</code></pre>
+        </div>
+      )}
+      <p className="tryit-note">Calls the live <code>{base}/quotes</code> — no API key needed for quotes. Rate-limited to 60/min.</p>
+    </div>
+  );
+}
+
 const absBase = API_BASE.startsWith("http") ? API_BASE : `${typeof window !== "undefined" ? window.location.origin : ""}${API_BASE}`;
 
 function Code({ label, children }: { label: string; children: string }) {
@@ -44,7 +86,7 @@ function Params({ rows }: { rows: Array<[string, string, string]> }) {
 }
 
 const NAV: Array<{ grp: string; items: Array<[string, string]> }> = [
-  { grp: "Getting started", items: [["intro", "Introduction"], ["auth", "Authentication"], ["quickstart", "Quickstart"]] },
+  { grp: "Getting started", items: [["intro", "Introduction"], ["auth", "Authentication"], ["quickstart", "Quickstart"], ["playground", "Try it"]] },
   { grp: "Endpoints", items: [["quote", "Create a quote"], ["payment", "Create a payment"], ["get", "Get a payment"], ["resolve", "Resolve a number"]] },
   { grp: "Reference", items: [["lifecycle", "Payment lifecycle"], ["errors", "Errors"], ["limits", "Rate limits"], ["spec", "OpenAPI spec"]] },
 ];
@@ -157,6 +199,12 @@ export function Developers() {
               <Code label="cURL">{curlPayment}</Code>
               <h3>3 — Track it to delivery</h3>
               <Code label="cURL">{curlGet}</Code>
+            </section>
+
+            <section id="playground" className="dev-sec">
+              <h2>Try it</h2>
+              <p>Run a real quote against the live API right now — pick an amount and a rail, and see the exact JSON your integration will receive.</p>
+              <TryIt base={base} />
             </section>
 
             <section id="quote" className="dev-sec">

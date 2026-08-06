@@ -160,16 +160,6 @@ function Verify({ merchant, onVerified, onEdit }: { merchant: MerchantAccount; o
 }
 
 /* ---------- dashboard ---------- */
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: "16px 18px" }}>
-      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{label}</div>
-      <div className="num" style={{ fontSize: 24, fontWeight: 750, color: "var(--ink)", marginTop: 6 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
 function Dashboard({ merchant }: { merchant: MerchantAccount }) {
   const { t, lang } = useI18n();
   const [sum, setSum] = useState<MerchantSummary | null>(null);
@@ -197,30 +187,24 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
         </span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat label={t("mrc_d_today")} value={`${fmt(sum?.today.salesXaf ?? 0)} XAF`} sub={`${sum?.today.count ?? 0} ${(sum?.today.count ?? 0) === 1 ? t("mrc_d_payment_one") : t("mrc_d_payment_many")}`} />
-        <Stat label={t("mrc_d_avg")} value={`${fmt(sum?.today.avgXaf ?? 0)} XAF`} sub={t("mrc_d_today_lc")} />
-        <Stat label={t("mrc_d_alltime")} value={`${fmt(sum?.all.salesXaf ?? 0)} XAF`} sub={`${sum?.all.count ?? 0} ${t("mrc_d_completed")}`} />
-      </div>
-
-      <div style={{ ...cardStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      {/* One compact summary line instead of three separate stat cards. */}
+      <div style={{ ...cardStyle, padding: "16px 18px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>{t("mrc_d_list_title")}</div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>{t("mrc_d_list_desc")} <Link to="/discover" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_d_see_dir")}</Link></div>
+          <div className="overline">{t("mrc_d_today")}</div>
+          <div className="num" style={{ fontSize: 28, fontWeight: 750, marginTop: 4, letterSpacing: "-0.02em" }}>{fmt(sum?.today.salesXaf ?? 0)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
         </div>
-        <button type="button" role="switch" aria-checked={listed} onClick={toggleListed} aria-label={t("mrc_d_list_title")}
-          style={{ flex: "none", width: 46, height: 28, borderRadius: 999, border: "none", cursor: "pointer", background: listed ? "var(--recv)" : "var(--line)", position: "relative", transition: "background .15s" }}>
-          <span style={{ position: "absolute", top: 3, left: listed ? 21 : 3, width: 22, height: 22, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }} />
-        </button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 20, flexWrap: "wrap" }}>
+          {([[String(sum?.today.count ?? 0), t("mrc_d_payment_many")], [fmt(sum?.today.avgXaf ?? 0), t("mrc_d_avg")], [fmt(sum?.all.salesXaf ?? 0), t("mrc_d_alltime")]] as const).map(([v, l]) => (
+            <div key={l} style={{ textAlign: "right" }}>
+              <div className="num" style={{ fontSize: 15, fontWeight: 700 }}>{v}</div>
+              <div style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "lowercase" }}>{l}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <button className="btn btn-ghost" onClick={() => setPoster(true)} style={{ justifyContent: "center", gap: 9 }}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="6" rx="1" /><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="7" rx="1" /></svg>
-        {t("mrc_d_poster")}
-      </button>
-
+      {/* Core action — accept a payment. */}
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />
-      {poster && <Poster merchant={merchant} onClose={() => setPoster(false)} />}
 
       <div style={{ ...cardStyle, padding: 0 }}>
         <div style={{ padding: "16px 18px 8px", fontSize: 13, fontWeight: 700 }}>{t("mrc_d_recent")}</div>
@@ -235,6 +219,26 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
           </div>
         ))}
       </div>
+
+      {/* Grow — de-emphasized setup actions (poster + directory listing). */}
+      <div style={{ ...cardStyle, padding: 0 }}>
+        <button onClick={() => setPoster(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "transparent", border: "none", cursor: "pointer", font: "inherit", color: "var(--ink)", textAlign: "left" }}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}><rect x="6" y="3" width="12" height="6" rx="1" /><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="7" rx="1" /></svg>
+          <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{t("mrc_d_poster")}</span>
+          <span style={{ color: "var(--ink-3)" }}>›</span>
+        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 18px", borderTop: "1px solid var(--line-2)" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t("mrc_d_list_title")}</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.4 }}>{t("mrc_d_list_desc")} <Link to="/discover" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_d_see_dir")}</Link></div>
+          </div>
+          <button type="button" role="switch" aria-checked={listed} onClick={toggleListed} aria-label={t("mrc_d_list_title")}
+            style={{ flex: "none", width: 46, height: 28, borderRadius: 999, border: "none", cursor: "pointer", background: listed ? "var(--recv)" : "var(--line)", position: "relative", transition: "background .15s" }}>
+            <span style={{ position: "absolute", top: 3, left: listed ? 21 : 3, width: 22, height: 22, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }} />
+          </button>
+        </div>
+      </div>
+      {poster && <Poster merchant={merchant} onClose={() => setPoster(false)} />}
     </div>
   );
 }

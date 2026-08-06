@@ -52,8 +52,25 @@ export interface MerchantContext {
   verified?: boolean;         // settlement number confirmed → show a Verified badge
 }
 
+/** Compact "Label  value" row for the invoice banner. */
+function InvRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", gap: 10, fontSize: 12.5 }}>
+      <span style={{ color: "var(--ink-3)", minWidth: 62 }}>{label}</span>
+      <span style={{ color: "var(--ink)", fontWeight: 600 }}>{value}</span>
+    </div>
+  );
+}
+
+/** Format an ISO due date to a readable form; fall back to the raw string. */
+function fmtDue(iso: string, lang: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   // Deep-link support: /send?tab=help (from the Contact page) or ?tab=activity
   // opens directly on that tab instead of the pay flow.
   const [params] = useSearchParams();
@@ -198,8 +215,10 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
             </div>
             <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>{merchant.businessName}</div>
             {merchant.kind === "invoice" && (merchant.clientName || merchant.dueDate || merchant.label) && (
-              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>
-                {merchant.label ? `${merchant.label}` : ""}{merchant.label && merchant.clientName ? " · " : ""}{merchant.clientName ? `To ${merchant.clientName}` : ""}{merchant.dueDate ? ` · due ${merchant.dueDate}` : ""}
+              <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+                {merchant.label && <InvRow label={t("mrc_inv_ref")} value={merchant.label} />}
+                {merchant.clientName && <InvRow label={t("mrc_inv_to")} value={merchant.clientName} />}
+                {merchant.dueDate && <InvRow label={t("mrc_inv_due")} value={fmtDue(merchant.dueDate, lang)} />}
               </div>
             )}
             {merchant.kind !== "invoice" && merchant.label && <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{merchant.label}</div>}

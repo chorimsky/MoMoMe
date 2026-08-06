@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
@@ -130,8 +131,19 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
   return (
     <FlowCard>
       <Stepper i={0} />
-      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("pay_title")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginTop: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ fontSize: 20 }}>{t("pay_title")}</h2>
+          <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
+        </div>
+        {!lockRecipient && (
+          <Link to="/scan" aria-label={t("scan_cta")} title={t("scan_cta")}
+            style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", textDecoration: "none", fontSize: 12.5, fontWeight: 650 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M7 12h10" /></svg>
+            {t("scan_cta")}
+          </Link>
+        )}
+      </div>
 
       {!lockRecipient && recents.length > 0 && (
         <div style={{ marginBottom: 12 }}>

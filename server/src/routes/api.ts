@@ -30,6 +30,7 @@ import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, ge
 import { resolveLocation } from "../core/geoip.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
@@ -995,10 +996,14 @@ api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), (req, res) =>
   const country = typeof req.query.country === "string" ? req.query.country : undefined;
   const category = typeof req.query.category === "string" ? req.query.category : undefined;
   const q = typeof req.query.q === "string" ? req.query.q.slice(0, 60) : undefined;
-  const entries: MerchantDirectoryEntry[] = directory({ country, category, q }).slice(0, 200).map((m) => ({
-    code: m.code, businessName: m.businessName, category: m.category, country: m.country,
-    location: m.location?.label ? { label: m.location.label } : undefined, verifiedPhone: m.verifiedPhone,
-  }));
+  const entries: MerchantDirectoryEntry[] = directory({ country, category, q }).slice(0, 200).map((m) => {
+    const pt = geocodeLabel([m.location?.label, m.businessName], m.code);
+    return {
+      code: m.code, businessName: m.businessName, category: m.category, country: m.country,
+      location: (m.location?.label || pt) ? { ...(m.location?.label ? { label: m.location.label } : {}), ...(pt ?? {}) } : undefined,
+      verifiedPhone: m.verifiedPhone,
+    };
+  });
   res.json({ merchants: entries });
 });
 

@@ -402,7 +402,9 @@ export interface MerchantDirectoryEntry {
   businessName: string;
   category: string;
   country: CountryCode;
-  location?: { label?: string };
+  // Coarse map coordinates (city-level, resolved from the location label) so the
+  // directory can plot the business — never a precise address or settlement number.
+  location?: { label?: string; lat?: number; lng?: number };
   verifiedPhone: boolean;
 }
 

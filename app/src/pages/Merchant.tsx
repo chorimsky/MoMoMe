@@ -227,17 +227,17 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
         </span>
       </div>
 
-      {/* One compact summary line instead of three separate stat cards. */}
-      <div style={{ ...cardStyle, padding: "16px 18px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      {/* One compact summary card: hero today's-sales, then a spread row of secondary stats. */}
+      <div style={{ ...cardStyle, padding: "16px 18px" }}>
         <div style={{ minWidth: 0 }}>
           <div className="overline">{t("mrc_d_today")}</div>
           <div className="num" style={{ fontSize: 28, fontWeight: 750, marginTop: 4, letterSpacing: "-0.02em" }}>{fmt(sum?.today.salesXaf ?? 0)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-2)", display: "flex", gap: 12, justifyContent: "space-between" }}>
           {([[String(sum?.today.count ?? 0), t("mrc_d_payment_many")], [fmt(sum?.today.avgXaf ?? 0), t("mrc_d_avg")], [fmt(sum?.all.salesXaf ?? 0), t("mrc_d_alltime")]] as const).map(([v, l]) => (
-            <div key={l} style={{ textAlign: "right" }}>
+            <div key={l} style={{ minWidth: 0 }}>
               <div className="num" style={{ fontSize: 15, fontWeight: 700 }}>{v}</div>
-              <div style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "lowercase" }}>{l}</div>
+              <div style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "lowercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l}</div>
             </div>
           ))}
         </div>
@@ -345,22 +345,24 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
       {active.length > 0 && (
         <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
           {active.map((l) => (
-            <div key={l.code} style={{ border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "10px 12px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_inv_badge")}</span>}
-                    {l.paid && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--recv)", background: "color-mix(in oklab, var(--recv) 16%, transparent)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_paid")}{l.paid.count > 1 ? ` ×${l.paid.count}` : ""}</span>}
-                    {l.amountXaf ? `${fmt(l.amountXaf)} XAF` : t("mrc_lt_open")}{l.label ? ` · ${l.label}` : ""}
-                  </div>
-                  {l.kind === "invoice" && (l.clientName || l.dueDate) && (
-                    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{l.clientName ? `${t("mrc_lt_to")} ${l.clientName}` : ""}{l.clientName && l.dueDate ? " · " : ""}{l.dueDate ? `${t("mrc_lt_due_lc")} ${l.dueDate}` : ""}</div>
-                  )}
-                  <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", wordBreak: "break-all" }}>{urlFor(l.code)}</div>
+            <div key={l.code} style={{ border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
+              {/* Details stack — full width so nothing gets crushed; the URL truncates. */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_inv_badge")}</span>}
+                  {l.paid && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--recv)", background: "color-mix(in oklab, var(--recv) 16%, transparent)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_paid")}{l.paid.count > 1 ? ` ×${l.paid.count}` : ""}</span>}
+                  <span>{l.amountXaf ? `${fmt(l.amountXaf)} XAF` : t("mrc_lt_open")}{l.label ? ` · ${l.label}` : ""}</span>
                 </div>
+                {l.kind === "invoice" && (l.clientName || l.dueDate) && (
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{l.clientName ? `${t("mrc_lt_to")} ${l.clientName}` : ""}{l.clientName && l.dueDate ? " · " : ""}{l.dueDate ? `${t("mrc_lt_due_lc")} ${l.dueDate}` : ""}</div>
+                )}
+                <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 3 }}>{urlFor(l.code)}</div>
+              </div>
+              {/* Actions row — wraps under the details; Disable is separated to the right. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? t("amb_copied") : t("mrc_lt_copy")}</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setShowQr(showQr === l.code ? null : l.code)}>{showQr === l.code ? t("amb_hide_qr") : t("mrc_lt_qr")}</button>
-                <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
+                <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)", marginLeft: "auto" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
               </div>
               {showQr === l.code && (
                 <div data-qr-dl style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>

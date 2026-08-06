@@ -49,7 +49,13 @@ export function createMerchant(owner: string, input: {
   const existingId = ownerIndex.get(owner);
   if (existingId) {
     const m = merchants.get(existingId)!;
+    // Changing the settlement number invalidates phone verification: the new
+    // number's ownership hasn't been proven, so drop the Verified state and the
+    // directory listing until it's (re-)verified. (Re-activates immediately when
+    // SMS OTP is bypassed — the caller re-runs activateMerchant.)
+    const phoneChanged = fields.settlementPhone !== m.settlementPhone;
     Object.assign(m, fields);
+    if (phoneChanged && m.verifiedPhone) { m.verifiedPhone = false; m.status = "pending"; m.listed = false; }
     touch("merchants2");
     return m;
   }

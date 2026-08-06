@@ -253,6 +253,7 @@ export const STRINGS: Dict = {
   lp_foot_terms: ["Terms", "Conditions"],
   lp_foot_privacy: ["Privacy", "Confidentialité"],
   lp_foot_partners: ["For partners →", "Pour les partenaires →"],
+  lp_foot_contact: ["Contact", "Contact"],
   foot_developers: ["Developers", "Développeurs"],
   foot_merchant: ["For business", "Pour les entreprises"],
   foot_discover: ["Find businesses", "Trouver des commerces"],
@@ -286,6 +287,7 @@ export const STRINGS: Dict = {
   scan_not_momome: ["That QR isn't a MoMo›Me code — try again.", "Ce QR n'est pas un code MoMo›Me — réessayez."],
   scan_enter_code: ["Enter merchant code (e.g. MOM-CM-004522)", "Entrez le code marchand (ex. MOM-CM-004522)"],
   scan_go: ["Pay", "Payer"],
+  scan_retry: ["Enable camera", "Activer la caméra"],
   // ---- Ambassador ----
   amb_title: ["Ambassador program", "Programme ambassadeur"],
   amb_sub: ["Bring shops and services onto MoMo›Me. You climb from Rep → City Lead → Regional Lead as the merchants you sign up start taking real payments.", "Faites venir des commerces et services sur MoMo›Me. Vous montez de Rep → Responsable Ville → Responsable Régional à mesure que les commerçants que vous inscrivez encaissent de vrais paiements."],
@@ -332,6 +334,11 @@ export const STRINGS: Dict = {
   mrc_o_settlement: ["Settlement Mobile Money number", "Numéro Mobile Money de règlement"],
   mrc_o_settlement_hint: ["This is where your money lands — the number that receives your payouts.", "C'est là que votre argent arrive — le numéro qui reçoit vos paiements."],
   mrc_o_location: ["Location (optional)", "Emplacement (optionnel)"],
+  mrc_o_use_loc: ["Use my location", "Ma position"],
+  mrc_o_locating: ["Locating…", "Localisation…"],
+  mrc_o_pinned: ["Pinned", "Enregistré"],
+  mrc_o_pinned_hint: ["Exact location saved — your shop will show precisely on the map.", "Position exacte enregistrée — votre commerce apparaîtra précisément sur la carte."],
+  mrc_o_loc_denied: ["Couldn't get your location — you can still type your area above.", "Impossible d'obtenir votre position — vous pouvez saisir votre zone ci-dessus."],
   mrc_o_acct_type: ["Account type", "Type de compte"],
   mrc_o_individual: ["Individual", "Particulier"],
   mrc_o_business: ["Registered business", "Entreprise enregistrée"],
@@ -375,6 +382,7 @@ export const STRINGS: Dict = {
   mrc_lt_create_link: ["Create link", "Créer le lien"],
   mrc_lt_open: ["Open amount", "Montant libre"],
   mrc_lt_inv_badge: ["INVOICE", "FACTURE"],
+  mrc_lt_paid: ["PAID", "PAYÉ"],
   mrc_lt_to: ["To", "À"],
   mrc_lt_due_lc: ["due", "échéance"],
   mrc_lt_copy: ["Copy", "Copier"],
@@ -392,6 +400,7 @@ export const STRINGS: Dict = {
   mrc_ps_2: ["Enter the amount", "Entrez le montant"],
   mrc_ps_3: ["Pay with crypto (Bitcoin, Lightning, USDT)", "Payez en crypto (Bitcoin, Lightning, USDT)"],
   mrc_ps_footer: ["Instant Mobile Money settlement · No account or crypto needed to pay", "Règlement Mobile Money instantané · Aucun compte ni crypto requis pour payer"],
+  mrc_ps_accept: ["Crypto accepted here", "Crypto accepté ici"],
   lp_switch_lang: ["Passer en français", "Switch to English"],
 };
 

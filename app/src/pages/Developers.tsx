@@ -4,6 +4,7 @@
    GET /api/openapi.json (served by the backend), so the docs never drift.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { API_BASE } from "../api/client.js";
 import "./Developers.css";
@@ -333,7 +334,7 @@ export function Developers() {
               <Code label="Fetch the spec">{`curl ${base}/openapi.json`}</Code>
               <div className="row" style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                 <a className="btn btn-primary" href={`${API_BASE}/openapi.json`} target="_blank" rel="noreferrer">Open the spec ↗</a>
-                <a className="btn btn-ghost" href="/contact">Talk to us about keys</a>
+                <Link className="btn btn-ghost" to="/contact">Talk to us about keys</Link>
               </div>
             </section>
           </main>

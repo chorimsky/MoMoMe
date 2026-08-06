@@ -11,6 +11,8 @@ import { Link } from "react-router-dom";
 import { Logo, ThemeToggle } from "./atoms.js";
 import { useI18n } from "../lib/i18n.js";
 import { useNarrow } from "../lib/useNarrow.js";
+import { useFeatures } from "../lib/features.js";
+import type { AppFeatures } from "@shared/types.js";
 
 /** Compact FR/EN pill — the single shared language switch. */
 export function LangToggle() {
@@ -55,14 +57,14 @@ export function SiteHeader({ cta = true }: { cta?: boolean }) {
 
 type FootKey = "send" | "claim" | "contact" | "terms" | "privacy" | null;
 
-const FOOT_LINKS: Array<[to: string, key: string, current: FootKey]> = [
+const FOOT_LINKS: Array<[to: string, key: string, current: FootKey, feature?: keyof AppFeatures]> = [
   ["/", "nav_home", null],
   ["/send", "lp_cta_pay", "send"],
   ["/claim", "lp_foot_claim", "claim"],
   ["/contact", "lp_foot_help", "contact"],
-  ["/discover", "foot_discover", null],
+  ["/discover", "foot_discover", null, "directory"],
   ["/merchant", "foot_merchant", null],
-  ["/developers", "foot_developers", null],
+  ["/developers", "foot_developers", null, "developerApi"],
   ["/terms", "lp_foot_terms", "terms"],
   ["/privacy", "lp_foot_privacy", "privacy"],
 ];
@@ -74,10 +76,11 @@ const FOOT_LINKS: Array<[to: string, key: string, current: FootKey]> = [
  */
 export function SiteFooter({ current = null }: { current?: FootKey }) {
   const { t } = useI18n();
+  const features = useFeatures();
   return (
     <footer className="site-foot">
       <nav className="site-foot-links" aria-label={t("nav_home")}>
-        {FOOT_LINKS.map(([to, key, cur]) => (
+        {FOOT_LINKS.filter(([, , , feat]) => !feat || features[feat]).map(([to, key, cur]) => (
           <Link key={to} to={to} aria-current={cur !== null && cur === current ? "page" : undefined}>
             {t(key)}
           </Link>

@@ -49,6 +49,7 @@ export function Pay({ mode = "link" }: { mode?: "link" | "merchant" }) {
     // Only a real payment LINK carries a tag; a directory (by-code) pay attributes
     // via settlement-number match instead.
     linkCode: mode === "link" ? link.code : undefined,
+    code: link.merchant.code,
     businessName: link.merchant.businessName, category: link.merchant.category,
     settlementPhone: link.merchant.settlementPhone, provider: link.merchant.provider, country: link.merchant.country,
     amountXaf: link.amountXaf, label: link.label,

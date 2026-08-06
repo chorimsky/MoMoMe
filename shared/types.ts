@@ -420,7 +420,13 @@ export interface MerchantLink {
   dueDate?: string;           // invoice: ISO date (YYYY-MM-DD)
   createdAt: string;
   disabledAt?: string;
+  /** Derived (read-model only, not stored): completed payments that carry this
+   *  link code — lets an invoice show Paid / partially-paid. */
+  paid?: { count: number; xaf: number; at: string };
 }
+
+/** The product-surface feature switches, surfaced to the client via /config. */
+export type AppFeatures = AdminSettings["features"];
 
 /** Public projection of a payment link for the /pay/:code page (safe to expose). */
 export interface MerchantLinkPublic {
@@ -508,6 +514,17 @@ export interface AdminSettings {
    *  from the customer flow and refused by /quotes, so users never see or pick a
    *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */
   methods: { LIGHTNING: boolean; ONCHAIN: boolean; USDT: boolean; USDC: boolean };
+  /** Product-surface switches — a super-admin can turn any of these features on or
+   *  off platform-wide. A disabled feature is hidden in the client (via /config)
+   *  and refused server-side, so users never reach a surface that's been turned off. */
+  features: {
+    directory: boolean;    // the public "Pay with MoMo›Me" discovery directory + map
+    scanToPay: boolean;    // scan-a-QR / pay-by-merchant-code checkout
+    referrals: boolean;    // referral codes + ambassador program
+    invoices: boolean;     // merchant invoices (vs plain payment links)
+    developerApi: boolean; // partner API keys + developer portal
+    diaspora: boolean;     // the diaspora remittance corridor page
+  };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the
    *  CEMAC standard. */

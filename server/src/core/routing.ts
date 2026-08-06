@@ -79,8 +79,10 @@ export function selectAggregator(provider: ProviderId): AggregatorAdapter {
   const preferred = PREFERRED[provider];
   if (pool.includes(preferred)) return AGGREGATORS[preferred];
   // Failover: choose the healthiest alternative (success rate, then latency).
+  // Default to peexit — the only live rail (pawapay's account isn't activated), so
+  // an empty pool never resolves to a rail that can't settle anything.
   const sorted = [...pool].sort((a, b) => successRate(b) - successRate(a) || avgLatency(a) - avgLatency(b));
-  return AGGREGATORS[sorted[0] ?? "pawapay"];
+  return AGGREGATORS[sorted[0] ?? "peexit"];
 }
 
 export function aggregatorByName(name: Aggregator): AggregatorAdapter {

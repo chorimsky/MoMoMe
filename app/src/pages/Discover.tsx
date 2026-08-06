@@ -10,6 +10,7 @@ import type { MerchantDirectoryEntry } from "@shared/types.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { Spinner } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
+import { useFeatures } from "../lib/features.js";
 import { CATEGORIES, catLabel } from "../lib/categories.js";
 import { api } from "../api/client.js";
 
@@ -27,6 +28,7 @@ function initials(name: string): string {
 
 export function Discover() {
   const { t, lang } = useI18n();
+  const features = useFeatures();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | null>(null);
   const [list, setList] = useState<MerchantDirectoryEntry[] | null>(null);
@@ -61,9 +63,11 @@ export function Discover() {
         <div style={{ display: "flex", gap: 8 }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("disc_search")} aria-label={t("disc_search")}
             style={{ flex: 1, minWidth: 0, padding: "13px 15px", borderRadius: "var(--r-pill)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
-          <Link to="/scan" aria-label={t("scan_cta")} title={t("scan_cta")} className="btn btn-primary" style={{ flex: "none", padding: "0 16px", textDecoration: "none" }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
-          </Link>
+          {features.scanToPay && (
+            <Link to="/scan" aria-label={t("scan_cta")} title={t("scan_cta")} className="btn btn-primary" style={{ flex: "none", padding: "0 16px", textDecoration: "none" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
+            </Link>
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>

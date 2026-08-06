@@ -404,6 +404,8 @@ api.get("/config", (_req, res) => {
     feePct: getSettings().pricing.feePct,
     // Which crypto pay-in methods are enabled — the customer flow only shows these.
     methods: getSettings().methods,
+    // Which product surfaces are enabled — the client hides anything turned off.
+    features: getSettings().features,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
     // Public support contact (admin-managed in Settings → Company) so the Help
@@ -427,6 +429,7 @@ api.get("/openapi.json", (_req, res) => {
 /* ---------- developer API keys (Super-Admin; gated in the /admin middleware) ---------- */
 api.get("/admin/apikeys", (_req, res) => res.json({ keys: listApiKeys() }));
 api.post("/admin/apikeys", (req, res) => {
+  if (!getSettings().features.developerApi) return res.status(403).json({ error: "feature_off", message: "The developer API is disabled." });
   const label = String((req.body ?? {}).label ?? "").slice(0, 80);
   const { key, secret } = createApiKey(label);
   // `secret` is returned exactly ONCE — the client shows it and it's never recoverable.
@@ -627,13 +630,23 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   // Merchant attribution: if this came from a merchant payment link, tag it — but
   // ONLY when the recipient actually matches that merchant's settlement number, so
   // a caller can't falsely credit a merchant's sales.
-  const linkCode = typeof (req.body ?? {}).merchantLinkCode === "string" ? String((req.body as { merchantLinkCode?: string }).merchantLinkCode) : "";
+  const body = (req.body ?? {}) as { merchantLinkCode?: string; merchantCode?: string };
+  const linkCode = typeof body.merchantLinkCode === "string" ? body.merchantLinkCode : "";
+  const merchantCode = typeof body.merchantCode === "string" ? body.merchantCode : "";
   if (linkCode) {
     const link = getLink(linkCode);
     const m = link && !link.disabledAt ? merchantById(link.merchantId) : undefined;
     if (m && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
       payment.merchantId = m.id;
       payment.merchantLinkCode = link!.code;
+    }
+  } else if (merchantCode) {
+    // Directory / scan-to-pay (by public code): tag the sale to the merchant when
+    // the recipient matches its settlement number — so counter-poster scans are
+    // attributed by merchantId, not just the loose phone fallback.
+    const m = merchantByCode(merchantCode);
+    if (m && m.status === "active" && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+      payment.merchantId = m.id;
     }
   }
   store.putPayment(payment);
@@ -937,7 +950,7 @@ api.get("/merchant/me/summary", async (req, res) => {
     merchant: publicMerchant(m),
     today: { salesXaf: todayXaf, count: todays.length, avgXaf: todays.length ? Math.round(todayXaf / todays.length) : 0 },
     all: { salesXaf: allXaf, count: sales.length },
-    recent: salesFor(m).slice(0, 30),
+    recent: sales.slice(0, 30),
   });
 });
 
@@ -947,7 +960,17 @@ api.get("/merchant/links", async (req, res) => {
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
-  res.json({ links: linksForMerchant(m.id) });
+  // Derive per-link "paid" state from completed payments that carry the link code,
+  // so invoices can show Paid / partially paid instead of staying open forever.
+  const paidByLink = new Map<string, { count: number; xaf: number; at: string }>();
+  for (const p of salesFor(m)) {
+    if (p.displayStatus !== "Completed" || !p.merchantLinkCode) continue;
+    const cur = paidByLink.get(p.merchantLinkCode) ?? { count: 0, xaf: 0, at: "" };
+    cur.count += 1; cur.xaf += p.xaf; if (p.createdAt > cur.at) cur.at = p.createdAt;
+    paidByLink.set(p.merchantLinkCode, cur);
+  }
+  const links = linksForMerchant(m.id).map((l) => ({ ...l, paid: paidByLink.get(l.code) }));
+  res.json({ links });
 });
 api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), async (req, res) => {
   const owner = await ownerOf(req);
@@ -956,6 +979,7 @@ api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), a
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
   if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number before accepting payments." });
   const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind; clientName?: string; dueDate?: string };
+  if (b.kind === "invoice" && !getSettings().features.invoices) return res.status(403).json({ error: "feature_off", message: "Invoices aren't available right now." });
   const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.min(Math.round(b.amountXaf), MAX_XAF) : undefined;
   res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind, clientName: b.clientName, dueDate: b.dueDate }) });
 });
@@ -993,11 +1017,17 @@ api.post("/merchant/listing", rateLimitMiddleware("merchant_write", 30, 60_000),
 
 /** PUBLIC — browse accepting merchants (no settlement numbers exposed). */
 api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), (req, res) => {
+  if (!getSettings().features.directory) return res.json({ merchants: [] });
   const country = typeof req.query.country === "string" ? req.query.country : undefined;
   const category = typeof req.query.category === "string" ? req.query.category : undefined;
   const q = typeof req.query.q === "string" ? req.query.q.slice(0, 60) : undefined;
   const entries: MerchantDirectoryEntry[] = directory({ country, category, q }).slice(0, 200).map((m) => {
-    const pt = geocodeLabel([m.location?.label, m.businessName], m.code);
+    // Prefer the merchant's own precise coordinates (captured at onboarding) —
+    // an exact storefront pin. Fall back to the coarse city gazetteer (jittered)
+    // only for legacy label-only merchants that never captured a location.
+    const stored = typeof m.location?.lat === "number" && typeof m.location?.lng === "number"
+      ? { lat: m.location.lat, lng: m.location.lng } : undefined;
+    const pt = stored ?? geocodeLabel([m.location?.label, m.businessName], m.code);
     return {
       code: m.code, businessName: m.businessName, category: m.category, country: m.country,
       location: (m.location?.label || pt) ? { ...(m.location?.label ? { label: m.location.label } : {}), ...(pt ?? {}) } : undefined,
@@ -1009,6 +1039,7 @@ api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), (req, res) =>
 
 /** PUBLIC — resolve a merchant by its public code for an open-amount checkout (/m/:code). */
 api.get("/merchant/by-code/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), (req, res) => {
+  if (!getSettings().features.scanToPay) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
   const m = merchantByCode(String(req.params.code));
   if (!m || m.status !== "active" || !m.verifiedPhone) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
   const pub: MerchantLinkPublic = {
@@ -1029,6 +1060,7 @@ function ambassadorTier(activeMerchants: number): AmbassadorTier {
 
 /** Attribute THIS device to a referrer (once). Called on first arrival via ?ref. */
 api.post("/me/referral/claim", rateLimitMiddleware("ref_claim", 20, 60_000), async (req, res) => {
+  if (!getSettings().features.referrals) return res.json({ ok: false });
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const ref = String((req.body ?? {}).ref ?? "");
@@ -1142,7 +1174,7 @@ api.put("/admin/settings", (req, res) => {
   // Ops guardrails (kill-switch, payout-approval threshold) and AML/compliance controls
   // are Super-Admin-only risk settings; drop them from lesser roles so their legitimate
   // company/pricing/channel saves still succeed.
-  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; }
+  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; delete patch.features; }
   const pr = patch.pricing;
   if (pr) {
     const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;

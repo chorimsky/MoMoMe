@@ -11,6 +11,7 @@ import { SiteHeader } from "../components/nav.js";
 import { Spinner, QR, Logo } from "../components/atoms.js";
 import { fmt } from "../lib/format.js";
 import { useI18n } from "../lib/i18n.js";
+import { useFeatures } from "../lib/features.js";
 import { CATEGORIES, catLabel } from "../lib/categories.js";
 import { api, ApiError } from "../api/client.js";
 
@@ -57,15 +58,32 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
   const [phone, setPhone] = useState(initial?.settlementPhone ?? "");
   const [tier, setTier] = useState<"individual" | "business">(initial?.tier ?? "individual");
   const [locationLabel, setLocationLabel] = useState(initial?.location?.label ?? "");
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    typeof initial?.location?.lat === "number" && typeof initial?.location?.lng === "number"
+      ? { lat: initial.location.lat, lng: initial.location.lng } : null);
+  const [geoState, setGeoState] = useState<"idle" | "locating" | "denied">("idle");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const valid = businessName.trim().length >= 2 && phone.replace(/\D/g, "").length >= 8;
+
+  function useMyLocation() {
+    if (!navigator.geolocation) { setGeoState("denied"); return; }
+    setGeoState("locating");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setCoords({ lat: +pos.coords.latitude.toFixed(6), lng: +pos.coords.longitude.toFixed(6) }); setGeoState("idle"); },
+      () => setGeoState("denied"),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  }
 
   async function submit() {
     setBusy(true); setErr(null);
     try {
       const ref = (() => { try { return localStorage.getItem("mm_ref") || undefined; } catch { return undefined; } })();
-      const { merchant } = await api.createMerchant({ businessName: businessName.trim(), category, country, settlementPhone: phone, tier, location: locationLabel ? { label: locationLabel } : undefined, ref });
+      const location = (locationLabel || coords)
+        ? { ...(locationLabel ? { label: locationLabel } : {}), ...(coords ?? {}) }
+        : undefined;
+      const { merchant } = await api.createMerchant({ businessName: businessName.trim(), category, country, settlementPhone: phone, tier, location, ref });
       onDone(merchant);
     } catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_o_err")); }
     finally { setBusy(false); }
@@ -95,7 +113,16 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
             <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{t("mrc_o_settlement_hint")}</p>
           </div>
           <div><label style={labelStyle}>{t("mrc_o_location")}</label>
-            <input value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} placeholder="Akwa, Douala" maxLength={60} style={inputStyle} /></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} placeholder="Akwa, Douala" maxLength={60} style={{ ...inputStyle, flex: 1 }} />
+              <button type="button" onClick={useMyLocation} disabled={geoState === "locating"} className="chip" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", ...(coords ? { borderColor: "var(--recv)", color: "var(--recv)" } : {}) }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="10" r="3" /><path d="M12 21s-7-6.3-7-11a7 7 0 0 1 14 0c0 4.7-7 11-7 11Z" /></svg>
+                {coords ? t("mrc_o_pinned") : geoState === "locating" ? t("mrc_o_locating") : t("mrc_o_use_loc")}
+              </button>
+            </div>
+            {geoState === "denied" && <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{t("mrc_o_loc_denied")}</p>}
+            {coords && <p style={{ fontSize: 12, color: "var(--recv)", marginTop: 6 }}>{t("mrc_o_pinned_hint")}</p>}
+          </div>
           <div><label style={labelStyle}>{t("mrc_o_acct_type")}</label>
             <div style={{ display: "flex", gap: 8 }}>
               {(["individual", "business"] as const).map((tv) => (
@@ -246,6 +273,7 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
 /* ---------- payment tools (links + QR) ---------- */
 function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
   const { t } = useI18n();
+  const features = useFeatures();
   const [kind, setKind] = useState<"link" | "invoice">("link");
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
@@ -276,11 +304,13 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
   return (
     <div style={cardStyle}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{t("mrc_lt_title")}</div>
-      <div className="seg" style={{ marginBottom: 12 }}>
-        {(["link", "invoice"] as const).map((k) => (
-          <button key={k} type="button" className="seg-item" aria-selected={kind === k} onClick={() => setKind(k)}>{k === "link" ? t("mrc_lt_link") : t("mrc_lt_invoice")}</button>
-        ))}
-      </div>
+      {features.invoices && (
+        <div className="seg" style={{ marginBottom: 12 }}>
+          {(["link", "invoice"] as const).map((k) => (
+            <button key={k} type="button" className="seg-item" aria-selected={kind === k} onClick={() => setKind(k)}>{k === "link" ? t("mrc_lt_link") : t("mrc_lt_invoice")}</button>
+          ))}
+        </div>
+      )}
       <div style={{ display: "grid", gap: 8 }}>
         {invoice && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -307,6 +337,7 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_inv_badge")}</span>}
+                    {l.paid && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--recv)", background: "color-mix(in oklab, var(--recv) 16%, transparent)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_paid")}{l.paid.count > 1 ? ` ×${l.paid.count}` : ""}</span>}
                     {l.amountXaf ? `${fmt(l.amountXaf)} XAF` : t("mrc_lt_open")}{l.label ? ` · ${l.label}` : ""}
                   </div>
                   {l.kind === "invoice" && (l.clientName || l.dueDate) && (
@@ -360,6 +391,19 @@ function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () 
 
         <div style={{ margin: "26px auto 0", width: "fit-content", background: "#fff", border: `3px solid ${INK}`, borderRadius: 22, padding: 18 }}>
           <QR value={url} size={230} />
+        </div>
+
+        {/* Accepted crypto — subtle brand marks so a customer knows what they can pay with. */}
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: INK2, textTransform: "uppercase" }}>{t("mrc_ps_accept")}</div>
+          <div style={{ marginTop: 10, display: "flex", justifyContent: "center", gap: 22 }}>
+            {[["₿", "Bitcoin", "#f7931a"], ["⚡", "Lightning", "#7b61ff"], ["₮", "USDT", "#26a17b"]].map(([g, label, col]) => (
+              <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 34, height: 34, borderRadius: "50%", background: col, color: "#fff", display: "grid", placeItems: "center", fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{g}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: INK2 }}>{label}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div style={{ marginTop: 22, display: "grid", gap: 8, textAlign: "left", maxWidth: 320, marginInline: "auto" }}>

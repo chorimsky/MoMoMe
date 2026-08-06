@@ -39,6 +39,7 @@ export function SettingsView() {
   const [channels, setChannels] = useState<AdminSettings["channels"] | null>(null);
   const [ops, setOps] = useState<AdminSettings["ops"] | null>(null);
   const [methods, setMethods] = useState<AdminSettings["methods"] | null>(null);
+  const [features, setFeatures] = useState<AdminSettings["features"] | null>(null);
   const [compliance, setCompliance] = useState<AdminSettings["compliance"] | null>(null);
   const [watchlistText, setWatchlistText] = useState("");
   const [saved, setSaved] = useState(false);
@@ -65,7 +66,7 @@ export function SettingsView() {
     api.adminSettings()
       .then(async (s) => {
         if (!alive) return;
-        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setCompliance(s.compliance);
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setFeatures(s.features); setCompliance(s.compliance);
         setWatchlistText((s.compliance.sanctionsList ?? []).join("\n"));
         setLogoRaw(s.company.logo ?? null);
         // A logo on a solid background shows as a box in dark mode; a logo with
@@ -96,7 +97,7 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops || !methods || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
+  if (!company || !channels || !ops || !methods || !features || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
 
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
 
@@ -151,8 +152,8 @@ export function SettingsView() {
     try {
       // Newline/comma-separated watchlist → deduped array of trimmed entries.
       const sanctionsList = Array.from(new Set(watchlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))).slice(0, 500);
-      const next = await api.saveSettings({ company, channels, ops, methods, compliance: { ...compliance, sanctionsList } });
-      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setCompliance(next.compliance);
+      const next = await api.saveSettings({ company, channels, ops, methods, features, compliance: { ...compliance, sanctionsList } });
+      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setMethods(next.methods); setFeatures(next.features); setCompliance(next.compliance);
       setWatchlistText((next.compliance.sanctionsList ?? []).join("\n"));
       setDirty(false); setSaved(true);
       // Let the console shell refresh its brand logo without a reload.
@@ -265,15 +266,40 @@ export function SettingsView() {
         </Card>
 
         <Card title="Crypto pay-in methods" sub="Turn a rail off to hide it from customers — they only see and can pay with what's enabled.">
-          {([["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "TRC-20"]] as const).map(([k, name, desc], i) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < 2 ? "1px solid var(--line-2)" : "none" }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{desc}</div>
+          {(() => {
+            const rows = [["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "TRC-20"], ["USDC", "USDC (stablecoin)", "Not live yet — keep off until IBEX enables receive"]] as const;
+            return rows.map(([k, name, desc], i) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{desc}</div>
+                </div>
+                <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
               </div>
-              <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
-            </div>
-          ))}
+            ));
+          })()}
+        </Card>
+
+        <Card title="Product features" sub="Turn any product surface on or off platform-wide. Disabled features are hidden from users and refused by the API.">
+          {(() => {
+            const rows = [
+              ["directory", "Discovery directory & map", "The public “Pay with MoMo›Me” business directory and map"],
+              ["scanToPay", "Scan-to-pay", "Pay a merchant by scanning their QR / entering their code"],
+              ["invoices", "Invoices", "Merchants can issue invoices (vs. plain payment links)"],
+              ["referrals", "Referrals & ambassadors", "Shareable referral codes and the ambassador dashboard"],
+              ["developerApi", "Developer API", "Partner API keys and the developer portal"],
+              ["diaspora", "Diaspora corridor", "The diaspora remittance landing page"],
+            ] as const;
+            return rows.map(([k, name, desc], i) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{desc}</div>
+                </div>
+                <Toggle on={features[k]} onChange={(v) => { setFeatures((f) => ({ ...f!, [k]: v })); setDirty(true); }} />
+              </div>
+            ));
+          })()}
         </Card>
 
         <Card title="Compliance (AML/CFT)" sub="CEMAC / ANIF controls — thresholds, officer and sanctions watchlist.">

@@ -212,20 +212,56 @@ export function Momo({ size = 96, mood = "happy", className, interactive = true 
   );
 }
 
-/* ---------- real QR ---------- */
-export function QR({ value, size = 188 }: { value: string; size?: number }) {
+/* ---------- real QR ----------
+   Branded, scannable QR. Short payloads (pay links, merchant/referral codes,
+   on-chain addresses) render at error-correction level H so we can drop the
+   MoMo›Me mark in the centre (H recovers ~30%, the mark covers ~20% — always
+   scannable). Long payloads (a `lightning:` BOLT11 invoice) stay at level L
+   and unbranded so the dense code remains comfortably scannable on screen. */
+let _qrMark: HTMLImageElement | null = null;
+function qrMark(): HTMLImageElement {
+  if (_qrMark) return _qrMark;
+  const img = new Image();
+  img.src = "/favicon.svg";
+  _qrMark = img;
+  return img;
+}
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  if (typeof ctx.roundRect === "function") { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+export function QR({ value, size = 188, brand = true }: { value: string; size?: number; brand?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!ref.current || !value) return;
-    QRCode.toCanvas(ref.current, value, {
+    const withMark = brand && value.length <= 120;
+    const cv = ref.current;
+    QRCode.toCanvas(cv, value, {
       width: size,
       margin: 1,
       color: { dark: "#1a1714", light: "#ffffff" },
-      // Long payloads (a `lightning:` BOLT11 invoice) make a dense QR — drop to
-      // level L so it stays comfortably scannable on screen; short addresses keep M.
-      errorCorrectionLevel: value.length > 120 ? "L" : "M",
+      errorCorrectionLevel: withMark ? "H" : "L",
+    }).then(() => {
+      if (!withMark) return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const draw = () => {
+        const px = cv.width;
+        const c = px / 2;
+        const pad = Math.round(px * 0.26);
+        const lg = Math.round(px * 0.2);
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        roundRectPath(ctx, c - pad / 2, c - pad / 2, pad, pad, pad * 0.28);
+        ctx.fill();
+        try { ctx.drawImage(qrMark(), c - lg / 2, c - lg / 2, lg, lg); } catch { /* mark not ready */ }
+        ctx.restore();
+      };
+      const mark = qrMark();
+      if (mark.complete && mark.naturalWidth) draw();
+      else mark.addEventListener("load", draw, { once: true });
     }).catch(() => {});
-  }, [value, size]);
+  }, [value, size, brand]);
   return <canvas ref={ref} width={size} height={size} style={{ width: size, height: size, borderRadius: 10, display: "block" }} aria-label="Payment QR code" role="img" />;
 }
 

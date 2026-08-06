@@ -21,6 +21,8 @@ const DEFAULTS: AdminSettings = {
   // Crypto pay-in methods offered to customers. USDC is not live yet (IBEX receive
   // combo not enabled) → default off; the rest on.
   methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
+  // Product surfaces — all on by default; a super-admin can disable any of them.
+  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
@@ -50,6 +52,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
     methods: { ...DEFAULTS.methods, ...(d.methods ?? {}) },
+    features: { ...DEFAULTS.features, ...(d.features ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}) },
   };
@@ -72,6 +75,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
     methods: { ...settings.methods, ...(patch.methods ?? {}) },
+    features: { ...settings.features, ...(patch.features ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}) },
   };

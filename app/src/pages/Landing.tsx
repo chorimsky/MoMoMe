@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import { useNarrow } from "../lib/useNarrow.js";
 import { useI18n } from "../lib/i18n.js";
+import { useFeatures } from "../lib/features.js";
 import "./Landing.css";
 
 /* Simple line glyphs (rounded, friendly) for benefit + step tiles. */
@@ -105,6 +106,7 @@ const STEPS = [
 export function Landing() {
   const sm = useNarrow();
   const { t, lang, setLang } = useI18n();
+  const features = useFeatures();
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="lp">
@@ -128,10 +130,12 @@ export function Landing() {
             <p className="lede">{t("lp_lede")}</p>
             <div className="cta-row">
               <Link className="btn btn-primary btn-lg" to="/send">{t("lp_cta_send")}</Link>
-              <Link className="btn btn-ghost btn-lg" to="/scan" style={{ gap: 8 }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
-                {t("scan_cta")}
-              </Link>
+              {features.scanToPay && (
+                <Link className="btn btn-ghost btn-lg" to="/scan" style={{ gap: 8 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
+                  {t("scan_cta")}
+                </Link>
+              )}
             </div>
             <div className="trust">
               <span><span className="tdot" /> {t("lp_trust_1")}</span>

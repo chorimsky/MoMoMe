@@ -15,7 +15,6 @@ import { Merchant } from "./pages/Merchant.js";
 import { Ambassador } from "./pages/Ambassador.js";
 import { Discover } from "./pages/Discover.js";
 import { Diaspora } from "./pages/Diaspora.js";
-import { Scan } from "./pages/Scan.js";
 import { Pay } from "./pages/Pay.js";
 
 /** Capture a referral once: a device arriving via ?ref=<code> is attributed to
@@ -36,6 +35,9 @@ function useReferralCapture() {
 // Admin console + ops dashboard are operator-only and heavy — code-split them out
 // of the main bundle so the customer-facing landing/send flow stays light on the
 // poor, metered mobile networks our senders are on.
+// Scan pulls in the jsQR software decoder (~130 KB) — only load it when the user
+// actually opens the scanner, keeping it out of the initial bundle.
+const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan })));
 const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m) => ({ default: m.AdminConsole })));
 const OpsDashboard = lazy(() => import("./pages/ops/OpsDashboard.js").then((m) => ({ default: m.OpsDashboard })));
 
@@ -61,7 +63,7 @@ export function App() {
       <Route path="/ambassador" element={<Ambassador />} />
       <Route path="/discover" element={<Discover />} />
       <Route path="/diaspora" element={<Diaspora />} />
-      <Route path="/scan" element={<Scan />} />
+      <Route path="/scan" element={<Suspense fallback={<ChunkFallback />}><Scan /></Suspense>} />
       <Route path="/pay/:code" element={<Pay />} />
       <Route path="/m/:code" element={<Pay mode="merchant" />} />
       <Route path="/terms" element={<Terms />} />

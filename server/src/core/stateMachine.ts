@@ -237,7 +237,7 @@ async function pollPayout(ref: string): Promise<void> {
     const p = findPaymentByRef(ref);
     if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved
     try {
-      const status = await aggregatorByName(p.aggregator ?? "pawapay").queryStatus(ref);
+      const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(ref);
       if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(ref, status, p.payoutRef); return; }
     } catch (e) { console.error("poll payout", ref, e); }
   }
@@ -256,7 +256,7 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
   if (status === "COMPLETED" || status === "FAILED") {
     const reqAt = [...p.events].reverse().find((e) => e.state === "PAYOUT_REQUESTED")?.at;
     recordExecution({
-      at: new Date().toISOString(), aggregator: p.aggregator ?? "pawapay", ref: p.ref,
+      at: new Date().toISOString(), aggregator: p.aggregator ?? "peexit", ref: p.ref,
       provider: p.recipient.provider, status, latencyMs: reqAt ? Math.max(0, Date.now() - Date.parse(reqAt)) : 0,
     });
   }
@@ -290,7 +290,7 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of listPayments()) {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
-    const status = await aggregatorByName(p.aggregator ?? "pawapay").queryStatus(p.ref);
+    const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(p.ref);
     if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
   }
 }

@@ -10,6 +10,7 @@ import type {
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
   VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, MerchantDirectoryEntry, AmbassadorSummary,
+  Method, AppFeatures,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -189,7 +190,7 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string } }>("/config"),
+  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
   // Admin auth. login stores the session token; session checks the current one.
   adminLogin: async (username: string, password: string) => {
@@ -223,7 +224,7 @@ export const api = {
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),
 
-  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string }) =>
+  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string }) =>
     req<Payment>("/payments", { method: "POST", body: JSON.stringify(body) }),
 
   confirmPayment: (id: string) =>

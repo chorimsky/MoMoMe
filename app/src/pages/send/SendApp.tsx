@@ -39,6 +39,7 @@ function TabIcon({ name, active }: { name: "pay" | "activity" | "contacts" | "he
  *  recipient is the merchant's settlement number and the payment is tagged to them. */
 export interface MerchantContext {
   linkCode?: string;          // present for a payment LINK; absent for a directory (by-code) pay
+  code?: string;              // merchant public code (MOM-CC-######) — tags by-code / scan sales
   businessName: string;
   category?: string;
   settlementPhone: string;
@@ -141,7 +142,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     if (payment && payment.quoteId === quote.id && payment.state === "AWAITING_INBOUND") { go("pay"); return; }
     setBusy(true); setErr(null);
     try {
-      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode }));
+      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code }));
       go("pay");
     } catch (e) {
       if (isExpiry(e)) {
@@ -166,7 +167,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
       }
       const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
       setQuote(q);
-      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode }));
+      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code }));
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 

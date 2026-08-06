@@ -2,12 +2,14 @@
    /scan — in-app "scan to pay". Opens the camera and reads a MoMo›Me QR
    (a /pay/:code or /m/:code link, or a MOM-CC-###### merchant code), then goes
    straight to the checkout. Uses the native BarcodeDetector where available
-   (Android/Chrome — the primary market); everywhere else it falls back to a
-   manual merchant-code entry (and the phone's own camera app still opens the
-   QR link directly). See docs/merchant-ecosystem.md.
+   (Android/Chrome); on iOS/Safari and anywhere it's missing it falls back to a
+   jsQR software decoder over the same camera feed, so in-app scanning works on
+   every device. Manual merchant-code entry is always available too.
+   See docs/merchant-ecosystem.md.
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
 
@@ -31,36 +33,55 @@ export function Scan() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const supported = typeof window !== "undefined" && "BarcodeDetector" in window;
-  const [status, setStatus] = useState<"scanning" | "denied" | "unsupported" | "bad">(supported ? "scanning" : "unsupported");
+  // Only a browser with no camera API at all is truly unsupported — otherwise we
+  // scan natively (BarcodeDetector) or via the jsQR software fallback (iOS/Safari).
+  const hasCamera = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  const [status, setStatus] = useState<"scanning" | "denied" | "unsupported" | "bad">(hasCamera ? "scanning" : "unsupported");
   const [code, setCode] = useState("");
+  const [attempt, setAttempt] = useState(0); // bump to re-request the camera after a denial
 
   useEffect(() => {
-    if (!supported) return;
+    if (!hasCamera || status === "unsupported") return;
     let stream: MediaStream | null = null;
     let raf = 0;
     let stopped = false;
-    const Ctor = (window as unknown as { BarcodeDetector: new (o: { formats: string[] }) => BD }).BarcodeDetector;
-    const detector = new Ctor({ formats: ["qr_code"] });
+    const nativeBD = "BarcodeDetector" in window;
+    const detector = nativeBD
+      ? new (window as unknown as { BarcodeDetector: new (o: { formats: string[] }) => BD }).BarcodeDetector({ formats: ["qr_code"] })
+      : null;
+    // jsQR needs a 2D canvas to read pixels from each video frame.
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
     const go = (raw: string) => {
       const path = payPathFromScan(raw);
       if (path) { stopped = true; stream?.getTracks().forEach((tk) => tk.stop()); navigate(path); }
-      else setStatus("bad");
+      else setStatus("bad"); // keep scanning — a stray non-MoMo QR shouldn't halt the loop
+    };
+
+    const readNative = async (v: HTMLVideoElement): Promise<string | null> => {
+      try { const codes = await detector!.detect(v); return codes.length ? codes[0].rawValue : null; } catch { return null; }
+    };
+    const readJs = (v: HTMLVideoElement): string | null => {
+      if (!ctx || !v.videoWidth) return null;
+      canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const r = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+      return r?.data ?? null;
     };
 
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         if (stopped || !videoRef.current) { stream.getTracks().forEach((tk) => tk.stop()); return; }
+        setStatus("scanning");
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         const tick = async () => {
           if (stopped || !videoRef.current) return;
-          try {
-            const codes = await detector.detect(videoRef.current);
-            if (codes.length && codes[0].rawValue) { go(codes[0].rawValue); return; }
-          } catch { /* transient frame error — keep going */ }
+          const raw = nativeBD ? await readNative(videoRef.current) : readJs(videoRef.current);
+          if (raw) { go(raw); if (stopped) return; }
           raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
@@ -68,7 +89,7 @@ export function Scan() {
     })();
 
     return () => { stopped = true; cancelAnimationFrame(raf); stream?.getTracks().forEach((tk) => tk.stop()); };
-  }, [supported, navigate]);
+  }, [hasCamera, navigate, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitCode = () => { const p = payPathFromScan(code); if (p) navigate(p); else setStatus("bad"); };
   const showCamera = status === "scanning" || status === "bad";
@@ -89,7 +110,12 @@ export function Scan() {
         )}
 
         {status === "bad" && <div role="alert" style={{ marginTop: 10, fontSize: 13, fontWeight: 600, color: "var(--bad)" }}>{t("scan_not_momome")}</div>}
-        {status === "denied" && <p style={{ marginTop: 14, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.55 }}>{t("scan_cam_denied")}</p>}
+        {status === "denied" && (
+          <div style={{ marginTop: 14 }}>
+            <p style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.55 }}>{t("scan_cam_denied")}</p>
+            <button className="btn btn-ghost" onClick={() => { setStatus("scanning"); setAttempt((a) => a + 1); }} style={{ marginTop: 10 }}>{t("scan_retry")}</button>
+          </div>
+        )}
         {status === "unsupported" && <p style={{ marginTop: 14, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.55 }}>{t("scan_unsupported")}</p>}
 
         {/* Manual merchant-code entry — always available, and the fallback path. */}

@@ -22,15 +22,18 @@ function LangToggle() {
   );
 }
 
+// [href, i18n key, current] — labels routed through t() so the legal pages
+// translate like the rest of the app (previously hardcoded English).
 const FOOT_LINKS: Array<[string, string, Current]> = [
-  ["/", "Home", null],
-  ["/terms", "Terms", "terms"],
-  ["/privacy", "Privacy", "privacy"],
-  ["/contact", "Contact", "contact"],
-  ["/admin", "For partners", null],
+  ["/", "nav_home", null],
+  ["/terms", "lp_foot_terms", "terms"],
+  ["/privacy", "lp_foot_privacy", "privacy"],
+  ["/contact", "lp_foot_contact", "contact"],
+  ["/admin", "lp_foot_partners", null],
 ];
 
 export function PageTop({ langToggle = false }: { langToggle?: boolean }) {
+  const { t } = useI18n();
   const sm = useNarrow();
   const xs = useNarrow(400);
   return (
@@ -39,10 +42,10 @@ export function PageTop({ langToggle = false }: { langToggle?: boolean }) {
         <Logo size={xs ? 22 : sm ? 26 : 34} />
       </Link>
       <div className="pg-actions">
-        <Link className="pg-link" to="/contact">Help</Link>
+        <Link className="pg-link" to="/contact">{t("lp_foot_help")}</Link>
         {langToggle && <LangToggle />}
         <ThemeToggle size={xs ? 32 : 38} />
-        <Link className="btn btn-primary cta-sm" to="/send">Pay<span className="cta-rest"> Mobile Money</span></Link>
+        <Link className="btn btn-primary cta-sm" to="/send">{t("lp_cta_pay")}<span className="cta-rest"> Mobile Money</span></Link>
       </div>
     </header>
   );
@@ -65,13 +68,13 @@ export function PageFoot({ current }: { current: Current }) {
       <span className="c">© 2026 MoMo›Me · Secure Mobile Money payments</span>
       <span className="c" style={{ flexBasis: "100%", maxWidth: "64ch", lineHeight: 1.5, order: 3 }}>{t("disclosure_legal")}</span>
       <nav className="pg-foot-links" aria-label="Footer">
-        {FOOT_LINKS.map(([href, label, key]) => (
+        {FOOT_LINKS.map(([href, labelKey, key]) => (
           <Link
             key={href}
             to={href}
             aria-current={key !== null && key === current ? "page" : undefined}
           >
-            {label}
+            {t(labelKey)}
           </Link>
         ))}
       </nav>

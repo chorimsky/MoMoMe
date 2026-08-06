@@ -1,8 +1,9 @@
 /* ============================================================
    MerchantMap — the "locate a business" map for /discover. A Leaflet + OSM
-   slippy map plotting opted-in merchants at their coarse city coordinates.
-   Tapping a pin lifts the selection up to Discover, which shows a pay card.
-   No settlement numbers or precise addresses are ever plotted here.
+   slippy map plotting opted-in merchants — at their own captured pin when they
+   chose "use my location", otherwise a coarse city centroid. Tapping a pin lifts
+   the selection up to Discover, which shows a pay card. Settlement numbers are
+   never plotted or exposed here.
    ============================================================ */
 import { useEffect, useRef } from "react";
 import L from "leaflet";

@@ -75,7 +75,7 @@ export function Ambassador() {
               <div style={{ ...cardStyle, padding: "16px 18px" }}>
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{t("amb_status")}</div>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 15, fontWeight: 750, color: "var(--accent)", background: "var(--accent-wash)", padding: "5px 12px", borderRadius: 999 }}>★ {t(tier.labelKey)}</div>
-                {tier.next && <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{Math.max(0, tier.at - sum.activeMerchants)} {t("amb_more_active")} {t(TIER_META[tier.next].labelKey)}</div>}
+                {tier.next && (() => { const remain = Math.max(0, tier.at - sum.activeMerchants); return <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{remain} {remain === 1 ? t("amb_more_active_one") : t("amb_more_active")} {t(TIER_META[tier.next].labelKey)}</div>; })()}
               </div>
               <div style={{ ...cardStyle, padding: "16px 18px" }}>
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{t("amb_brought")}</div>

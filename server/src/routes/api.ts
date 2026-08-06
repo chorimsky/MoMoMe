@@ -896,19 +896,37 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   const country = (COUNTRIES[b.country as CountryCode] ? b.country : "CM") as CountryCode;
   const settlementPhone = String(b.settlementPhone ?? "").replace(/\D/g, "");
   if (businessName.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your business name." });
+  // Don't onboard into a corridor that can never pay out (mirrors /quotes) — else the
+  // merchant would list on the map but every checkout to them would 400 country_inactive.
+  if (!COUNTRIES[country]?.active) return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
   if (settlementPhone.length < 8) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
   const provider = detectProvider(settlementPhone, country);
   if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
   const tier = b.tier === "business" ? "business" : "individual";
-  let m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: b.location });
+  // Sanitize the client-supplied location: cap the label, and only keep coordinates
+  // that are finite and in range — never trust the raw body (this is echoed publicly
+  // on /discover).
+  const rawLoc = b.location;
+  const cleanLoc = ((): MerchantAccount["location"] | undefined => {
+    if (!rawLoc || typeof rawLoc !== "object") return undefined;
+    const out: NonNullable<MerchantAccount["location"]> = {};
+    if (typeof rawLoc.label === "string" && rawLoc.label.trim()) out.label = rawLoc.label.trim().slice(0, 60);
+    if (typeof rawLoc.lat === "number" && Number.isFinite(rawLoc.lat) && Math.abs(rawLoc.lat) <= 90 &&
+        typeof rawLoc.lng === "number" && Number.isFinite(rawLoc.lng) && Math.abs(rawLoc.lng) <= 180) {
+      out.lat = rawLoc.lat; out.lng = rawLoc.lng;
+    }
+    return Object.keys(out).length ? out : undefined;
+  })();
+  let m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: cleanLoc });
   // No SMS provider yet → we can't deliver an OTP in production, so skip phone
   // verification and take the merchant live immediately. Re-enable OTP by setting
   // SMS_ENABLED=true once an SMS service is integrated.
   if (!config.smsEnabled) m = activateMerchant(m.id) ?? m;
   // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
-  // (once — recordReferral is a no-op if already attributed or self-referral).
+  // (once — recordReferral is a no-op if already attributed or self-referral). Skipped
+  // when the referrals feature is switched off.
   const ref = typeof (req.body as { ref?: string }).ref === "string" ? (req.body as { ref?: string }).ref! : "";
-  if (ref) recordReferral(owner, ref);
+  if (ref && getSettings().features.referrals) recordReferral(owner, ref);
   res.status(201).json({ merchant: publicMerchant(m), smsEnabled: config.smsEnabled });
 });
 

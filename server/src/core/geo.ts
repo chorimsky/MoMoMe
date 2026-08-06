@@ -1,9 +1,10 @@
 /* ============================================================
-   Coarse geocoding for the public directory map. We never store precise
-   storefront addresses — merchants give a free-text label like "Akwa, Douala".
-   We resolve that to a CITY centroid (public knowledge) and apply a small,
-   deterministic jitter keyed off the merchant code so multiple businesses in
-   the same city spread out on the map instead of stacking on one pin.
+   Coarse geocoding FALLBACK for the public directory map. Used only for merchants
+   who gave a free-text label (e.g. "Akwa, Douala") but did NOT capture a precise
+   pin at onboarding — a merchant who taps "use my location" stores exact coords and
+   /discover prefers those. Here we resolve the label to a CITY centroid (public
+   knowledge) and apply a small deterministic jitter keyed off the merchant code so
+   same-city businesses spread out instead of stacking on one pin.
    ============================================================ */
 /** City centroids [lat, lng]. Keys are lowercased, accent-stripped city names. */
 const CITIES: Record<string, [number, number]> = {

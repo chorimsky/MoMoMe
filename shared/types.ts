@@ -403,8 +403,9 @@ export interface MerchantDirectoryEntry {
   businessName: string;
   category: string;
   country: CountryCode;
-  // Coarse map coordinates (city-level, resolved from the location label) so the
-  // directory can plot the business — never a precise address or settlement number.
+  // Map coordinates so the directory can plot the business. These are the merchant's
+  // OWN captured pin when they opted into "use my location" (precise), otherwise a
+  // coarse city-centroid resolved from the free-text label. Never a settlement number.
   location?: { label?: string; lat?: number; lng?: number };
   verifiedPhone: boolean;
 }
@@ -516,8 +517,9 @@ export interface AdminSettings {
    *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */
   methods: { LIGHTNING: boolean; ONCHAIN: boolean; USDT: boolean; USDC: boolean };
   /** Product-surface switches — a super-admin can turn any of these features on or
-   *  off platform-wide. A disabled feature is hidden in the client (via /config)
-   *  and refused server-side, so users never reach a surface that's been turned off. */
+   *  off platform-wide. A disabled feature is hidden in the client (via /config); the
+   *  primary endpoints also refuse it server-side (directory, scan-to-pay resolve,
+   *  invoice creation, referral claim/attribution, developer key issuance). */
   features: {
     directory: boolean;    // the public "Pay with MoMo›Me" discovery directory + map
     scanToPay: boolean;    // scan-a-QR / pay-by-merchant-code checkout

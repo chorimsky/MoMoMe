@@ -86,6 +86,7 @@ export function Scan() {
         const tick = async () => {
           if (stopped || !videoRef.current) return;
           const raw = nativeBD ? await readNative(videoRef.current) : readJs(videoRef.current);
+          if (stopped) return; // the async detect() may resolve after unmount — don't navigate
           if (raw) { go(raw); if (stopped) return; }
           raf = requestAnimationFrame(tick);
         };

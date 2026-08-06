@@ -572,13 +572,21 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   // 2) Corridor payout ceiling for this Mobile Money provider.
   if (quote.xaf > PROVIDER_PAYOUT_MAX[recipient.provider]) return block(400, "amount_too_high", `The maximum payout to ${recipient.provider} Mobile Money is ${PROVIDER_PAYOUT_MAX[recipient.provider].toLocaleString()} XAF.`);
   // 3) Internal XAF treasury float must cover this payout.
-  if (availableFloatXaf() < quote.xaf) return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
+  if (availableFloatXaf() < quote.xaf) {
+    console.warn(`[payout-gate] BLOCKED float: treasury ${availableFloatXaf()} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country})`);
+    return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
+  }
   // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
   //    inbound will be real crypto (IBEX + trusted); a simulated inbound may use a
   //    simulated rail. This is the "service functional + has balance" check.
   const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
   const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
-  if (!ready.ok) return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
+  if (!ready.ok) {
+    // Surface WHY so a "payouts unavailable" incident is diagnosable from the logs
+    // (rails_down vs no_live_rail vs insufficient_rail_balance) without needing admin.
+    console.warn(`[payout-gate] BLOCKED rail: ${recipient.provider}/${recipient.country} ${quote.xaf} XAF reason=${ready.reason} willBeReal=${willBeReal}`);
+    return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
+  }
   // Attribute the payment to the authenticated device. Refuse if auth failed (an
   // enrolled id sending no/invalid signature → ownerOf undefined): creating a
   // senderId-less payment would make it world-readable via mayViewPayment's

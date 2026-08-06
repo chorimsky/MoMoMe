@@ -84,6 +84,7 @@ export function SiteFooter({ current = null }: { current?: FootKey }) {
         ))}
       </nav>
       <span className="c">{t("lp_foot_copy")}</span>
+      <span className="c" style={{ maxWidth: "62ch", lineHeight: 1.5 }}>{t("disclosure_legal")}</span>
       <Link to="/admin" className="site-foot-partners">{t("lp_foot_partners")}</Link>
     </footer>
   );

@@ -215,6 +215,7 @@ export function Landing() {
           <a href="/fr/" lang="fr">Français</a>
         </nav>
         <footer className="lp-foot">
+          <span className="c" style={{ maxWidth: "64ch", lineHeight: 1.5, order: 3, flexBasis: "100%" }}>{t("disclosure_legal")}</span>
           <span className="c">{t("lp_foot_copy")}</span>
           <nav className="lp-foot-links" aria-label="Footer">
             <Link to="/claim">{t("lp_foot_claim")}</Link>

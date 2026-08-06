@@ -48,10 +48,22 @@ export function PageTop({ langToggle = false }: { langToggle?: boolean }) {
   );
 }
 
+/** Corporate/software provider disclosure — shown on every legal/content page. */
+export function DisclosureNote() {
+  const { t } = useI18n();
+  return (
+    <div style={{ marginTop: 32, padding: "16px 18px", borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>
+      {t("disclosure_short")}
+    </div>
+  );
+}
+
 export function PageFoot({ current }: { current: Current }) {
+  const { t } = useI18n();
   return (
     <footer className="pg-foot">
       <span className="c">© 2026 MoMo›Me · Secure Mobile Money payments</span>
+      <span className="c" style={{ flexBasis: "100%", maxWidth: "64ch", lineHeight: 1.5, order: 3 }}>{t("disclosure_legal")}</span>
       <nav className="pg-foot-links" aria-label="Footer">
         {FOOT_LINKS.map(([href, label, key]) => (
           <Link
@@ -99,6 +111,7 @@ export function DocShell({
           )}
         </header>
         <div className="prose">{children}</div>
+        <DisclosureNote />
       </article>
       <PageFoot current={current} />
     </div>

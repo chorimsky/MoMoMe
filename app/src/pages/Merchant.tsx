@@ -10,9 +10,9 @@ import { COUNTRIES } from "@shared/domain.js";
 import { SiteHeader } from "../components/nav.js";
 import { Spinner, QR, Logo } from "../components/atoms.js";
 import { fmt } from "../lib/format.js";
+import { useI18n } from "../lib/i18n.js";
+import { CATEGORIES, catLabel } from "../lib/categories.js";
 import { api, ApiError } from "../api/client.js";
-
-const CATEGORIES = ["Restaurant", "Café / Bar", "Shop / Retail", "Hotel", "Freelancer", "Consultant", "Taxi / Transport", "Clinic", "Training centre", "Event / NGO", "Other"];
 
 const cardStyle: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: "clamp(16px, 3.6vw, 20px)" };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" };
@@ -50,8 +50,9 @@ export function Merchant() {
 
 /* ---------- onboarding ---------- */
 function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; initial: MerchantAccount | null }) {
+  const { t, lang } = useI18n();
   const [businessName, setBusinessName] = useState(initial?.businessName ?? "");
-  const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0]);
+  const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0].value);
   const [country, setCountry] = useState<CountryCode>(initial?.country ?? "CM");
   const [phone, setPhone] = useState(initial?.settlementPhone ?? "");
   const [tier, setTier] = useState<"individual" | "business">(initial?.tier ?? "individual");
@@ -66,48 +67,46 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
       const ref = (() => { try { return localStorage.getItem("mm_ref") || undefined; } catch { return undefined; } })();
       const { merchant } = await api.createMerchant({ businessName: businessName.trim(), category, country, settlementPhone: phone, tier, location: locationLabel ? { label: locationLabel } : undefined, ref });
       onDone(merchant);
-    } catch (e) { setErr(e instanceof ApiError ? e.message : "Couldn't save your profile."); }
+    } catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_o_err")); }
     finally { setBusy(false); }
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h1 style={{ fontSize: "clamp(26px,5vw,34px)", letterSpacing: "-0.02em" }}>Accept payments with MoMo›Me</h1>
-        <p style={{ color: "var(--ink-2)", fontSize: 15, marginTop: 8, lineHeight: 1.6, maxWidth: "52ch" }}>
-          Your customers pay in crypto or Mobile Money; you receive Mobile Money instantly. Set up your business in a minute — no bank, no card machine.
-        </p>
+        <h1 style={{ fontSize: "clamp(26px,5vw,34px)", letterSpacing: "-0.02em" }}>{t("mrc_o_title")}</h1>
+        <p style={{ color: "var(--ink-2)", fontSize: 15, marginTop: 8, lineHeight: 1.6, maxWidth: "52ch" }}>{t("mrc_o_sub")}</p>
       </div>
       <div style={cardStyle}>
         <div style={{ display: "grid", gap: 14 }}>
-          <div><label style={labelStyle}>Business name</label>
+          <div><label style={labelStyle}>{t("mrc_o_name")}</label>
             <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Chez Alain Restaurant" maxLength={80} style={inputStyle} autoFocus /></div>
-          <div><label style={labelStyle}>Category</label>
+          <div><label style={labelStyle}>{t("mrc_o_category")}</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c[lang]}</option>)}
             </select></div>
-          <div><label style={labelStyle}>Settlement Mobile Money number</label>
+          <div><label style={labelStyle}>{t("mrc_o_settlement")}</label>
             <div style={{ display: "flex", gap: 8 }}>
               <select value={country} onChange={(e) => setCountry(e.target.value as CountryCode)} style={{ ...inputStyle, width: "auto", fontWeight: 700, cursor: "pointer" }}>
                 {Object.values(COUNTRIES).map((c) => <option key={c.code} value={c.code}>{c.dial} {c.code}</option>)}
               </select>
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="670 000 000" type="tel" inputMode="tel" style={{ ...inputStyle, flex: 1, fontFamily: "var(--font-mono)" }} />
             </div>
-            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>This is where your money lands. We'll verify you own it with a one-time code.</p>
+            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>{t("mrc_o_settlement_hint")}</p>
           </div>
-          <div><label style={labelStyle}>Location (optional)</label>
+          <div><label style={labelStyle}>{t("mrc_o_location")}</label>
             <input value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} placeholder="Akwa, Douala" maxLength={60} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Account type</label>
+          <div><label style={labelStyle}>{t("mrc_o_acct_type")}</label>
             <div style={{ display: "flex", gap: 8 }}>
               {(["individual", "business"] as const).map((tv) => (
                 <button key={tv} type="button" onClick={() => setTier(tv)} className="chip" style={{ flex: 1, ...(tier === tv ? { borderColor: "var(--accent)", background: "var(--accent-wash)", color: "var(--ink)" } : {}) }}>
-                  {tv === "individual" ? "Individual" : "Registered business"}
+                  {tv === "individual" ? t("mrc_o_individual") : t("mrc_o_business")}
                 </button>
               ))}
             </div>
           </div>
           {err && <div role="alert" style={{ fontSize: 13, fontWeight: 600, color: "var(--bad)" }}>{err}</div>}
-          <button className="btn btn-primary btn-block" disabled={!valid || busy} onClick={submit}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : "Continue"}</button>
+          <button className="btn btn-primary btn-block" disabled={!valid || busy} onClick={submit}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("continue")}</button>
         </div>
       </div>
     </div>
@@ -116,6 +115,7 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
 
 /* ---------- verify settlement number ---------- */
 function Verify({ merchant, onVerified, onEdit }: { merchant: MerchantAccount; onVerified: (m: MerchantAccount) => void; onEdit: () => void }) {
+  const { t } = useI18n();
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -125,35 +125,35 @@ function Verify({ merchant, onVerified, onEdit }: { merchant: MerchantAccount; o
   async function request() {
     setBusy(true); setErr(null);
     try { const r = await api.merchantVerifyRequest(); setDevCode(r.devCode ?? null); setSent(true); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : "Couldn't send the code."); } finally { setBusy(false); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_v_err_send")); } finally { setBusy(false); }
   }
   async function verify() {
     setBusy(true); setErr(null);
     try { const { merchant: m } = await api.merchantVerify(code); onVerified(m); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : "Verification failed."); } finally { setBusy(false); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_v_err")); } finally { setBusy(false); }
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 440 }}>
       <div>
-        <h1 style={{ fontSize: 26, letterSpacing: "-0.02em" }}>Verify your number</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-0.02em" }}>{t("mrc_v_title")}</h1>
         <p style={{ color: "var(--ink-2)", fontSize: 14.5, marginTop: 8, lineHeight: 1.55 }}>
-          Confirm you own <b className="num">{COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</b> — the number that receives your payouts.
+          {t("mrc_v_sub_a")} <b className="num">{COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</b> {t("mrc_v_sub_b")}
         </p>
       </div>
       <div style={cardStyle}>
         {!sent ? (
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={request}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : "Send code by SMS"}</button>
+          <button className="btn btn-primary btn-block" disabled={busy} onClick={request}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_send")}</button>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {devCode && <div style={{ padding: "9px 12px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>Demo code: <span className="num" style={{ fontWeight: 700, color: "var(--accent)" }}>{devCode}</span></div>}
-            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" inputMode="numeric" autoFocus
+            {devCode && <div style={{ padding: "9px 12px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>{t("bk_demo_code")}: <span className="num" style={{ fontWeight: 700, color: "var(--accent)" }}>{devCode}</span></div>}
+            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder={t("bk_code_ph")} inputMode="numeric" autoFocus
               style={{ ...inputStyle, fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 24, letterSpacing: "0.3em", textAlign: "center" }} />
-            <button className="btn btn-primary btn-block" disabled={code.length !== 6 || busy} onClick={verify}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : "Verify & go live"}</button>
+            <button className="btn btn-primary btn-block" disabled={code.length !== 6 || busy} onClick={verify}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_verify")}</button>
           </div>
         )}
         {err && <div role="alert" style={{ fontSize: 13, fontWeight: 600, color: "var(--bad)", marginTop: 10 }}>{err}</div>}
-        <button className="btn btn-quiet" style={{ marginTop: 8, fontSize: 13 }} onClick={onEdit}>← Edit business details</button>
+        <button className="btn btn-quiet" style={{ marginTop: 8, fontSize: 13 }} onClick={onEdit}>{t("mrc_v_edit")}</button>
       </div>
     </div>
   );
@@ -171,6 +171,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 function Dashboard({ merchant }: { merchant: MerchantAccount }) {
+  const { t, lang } = useI18n();
   const [sum, setSum] = useState<MerchantSummary | null>(null);
   const [links, setLinks] = useState<MerchantLink[]>([]);
   const [listed, setListed] = useState(!!merchant.listed);
@@ -188,26 +189,26 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
           <h1 style={{ fontSize: "clamp(22px,4vw,28px)", letterSpacing: "-0.02em" }}>{merchant.businessName}</h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
             <span className="num" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)", background: "var(--surface-2)", border: "1px solid var(--line)", padding: "3px 9px", borderRadius: 999 }}>{merchant.code}</span>
-            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{merchant.category} · settles to {COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</span>
+            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{catLabel(merchant.category, lang)} · {t("mrc_d_settles_to")} {COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</span>
           </div>
         </div>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--recv)", background: "var(--recv-wash)", padding: "5px 12px", borderRadius: 999 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />Active · instant settlement
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_active")}
         </span>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat label="Today's sales" value={`${fmt(sum?.today.salesXaf ?? 0)} XAF`} sub={`${sum?.today.count ?? 0} payment${(sum?.today.count ?? 0) === 1 ? "" : "s"}`} />
-        <Stat label="Avg payment" value={`${fmt(sum?.today.avgXaf ?? 0)} XAF`} sub="today" />
-        <Stat label="All-time" value={`${fmt(sum?.all.salesXaf ?? 0)} XAF`} sub={`${sum?.all.count ?? 0} completed`} />
+        <Stat label={t("mrc_d_today")} value={`${fmt(sum?.today.salesXaf ?? 0)} XAF`} sub={`${sum?.today.count ?? 0} ${(sum?.today.count ?? 0) === 1 ? t("mrc_d_payment_one") : t("mrc_d_payment_many")}`} />
+        <Stat label={t("mrc_d_avg")} value={`${fmt(sum?.today.avgXaf ?? 0)} XAF`} sub={t("mrc_d_today_lc")} />
+        <Stat label={t("mrc_d_alltime")} value={`${fmt(sum?.all.salesXaf ?? 0)} XAF`} sub={`${sum?.all.count ?? 0} ${t("mrc_d_completed")}`} />
       </div>
 
       <div style={{ ...cardStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>List on “Pay with MoMo›Me”</div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>Get discovered by nearby customers. Your number stays private — only your name, category and area show. <Link to="/discover" style={{ color: "var(--accent)", fontWeight: 600 }}>See the directory →</Link></div>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>{t("mrc_d_list_title")}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>{t("mrc_d_list_desc")} <Link to="/discover" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_d_see_dir")}</Link></div>
         </div>
-        <button type="button" role="switch" aria-checked={listed} onClick={toggleListed} aria-label="List my business"
+        <button type="button" role="switch" aria-checked={listed} onClick={toggleListed} aria-label={t("mrc_d_list_title")}
           style={{ flex: "none", width: 46, height: 28, borderRadius: 999, border: "none", cursor: "pointer", background: listed ? "var(--recv)" : "var(--line)", position: "relative", transition: "background .15s" }}>
           <span style={{ position: "absolute", top: 3, left: listed ? 21 : 3, width: 22, height: 22, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }} />
         </button>
@@ -215,22 +216,22 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
 
       <button className="btn btn-ghost" onClick={() => setPoster(true)} style={{ justifyContent: "center", gap: 9 }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="6" rx="1" /><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="7" rx="1" /></svg>
-        Get your counter QR poster
+        {t("mrc_d_poster")}
       </button>
 
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />
       {poster && <Poster merchant={merchant} onClose={() => setPoster(false)} />}
 
       <div style={{ ...cardStyle, padding: 0 }}>
-        <div style={{ padding: "16px 18px 8px", fontSize: 13, fontWeight: 700 }}>Recent transactions</div>
-        {(sum?.recent.length ?? 0) === 0 && <div style={{ padding: "8px 18px 18px", fontSize: 13, color: "var(--ink-3)" }}>No payments yet — share a payment link or QR to get your first sale.</div>}
+        <div style={{ padding: "16px 18px 8px", fontSize: 13, fontWeight: 700 }}>{t("mrc_d_recent")}</div>
+        {(sum?.recent.length ?? 0) === 0 && <div style={{ padding: "8px 18px 18px", fontSize: 13, color: "var(--ink-3)" }}>{t("mrc_d_no_payments")}</div>}
         {sum?.recent.map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderTop: "1px solid var(--line-2)" }}>
             <div style={{ minWidth: 0 }}>
               <div className="num" style={{ fontSize: 13.5, fontWeight: 700 }}>{fmt(p.xaf)} XAF</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{p.method === "LIGHTNING" ? "Lightning" : p.method === "ONCHAIN" ? "Bitcoin" : "USDT"} · {new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{p.method === "LIGHTNING" ? "Lightning" : p.method === "ONCHAIN" ? "Bitcoin" : "USDT"} · {new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
             </div>
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--warn-ink)" }}>{p.displayStatus}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--warn-ink)" }}>{p.displayStatus === "Completed" ? t("completed") : p.displayStatus === "Failed" ? t("failed") : t("pending")}</span>
           </div>
         ))}
       </div>
@@ -240,6 +241,7 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
 
 /* ---------- payment tools (links + QR) ---------- */
 function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
+  const { t } = useI18n();
   const [kind, setKind] = useState<"link" | "invoice">("link");
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
@@ -269,27 +271,27 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
   const invoice = kind === "invoice";
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Payment tools — links, QR & invoices</div>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{t("mrc_lt_title")}</div>
       <div className="seg" style={{ marginBottom: 12 }}>
         {(["link", "invoice"] as const).map((k) => (
-          <button key={k} type="button" className="seg-item" aria-selected={kind === k} onClick={() => setKind(k)}>{k === "link" ? "Payment link" : "Invoice"}</button>
+          <button key={k} type="button" className="seg-item" aria-selected={kind === k} onClick={() => setKind(k)}>{k === "link" ? t("mrc_lt_link") : t("mrc_lt_invoice")}</button>
         ))}
       </div>
       <div style={{ display: "grid", gap: 8 }}>
         {invoice && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>Bill to (client)</label>
+            <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>{t("mrc_lt_client")}</label>
               <input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="ABC Company" maxLength={60} style={inputStyle} /></div>
-            <div style={{ flex: "1 1 140px" }}><label style={labelStyle}>Due date</label>
+            <div style={{ flex: "1 1 140px" }}><label style={labelStyle}>{t("mrc_lt_due")}</label>
               <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} type="date" style={inputStyle} /></div>
           </div>
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: "1 1 130px" }}><label style={labelStyle}>Amount{invoice ? "" : " (optional)"}</label>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={invoice ? "250 000" : "Open amount"} inputMode="numeric" style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} /></div>
-          <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>{invoice ? "Invoice ref (optional)" : "Label (optional)"}</label>
+          <div style={{ flex: "1 1 130px" }}><label style={labelStyle}>{invoice ? t("mrc_lt_amount") : t("mrc_lt_amount_opt")}</label>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={invoice ? "250 000" : t("mrc_lt_open")} inputMode="numeric" style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} /></div>
+          <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>{invoice ? t("mrc_lt_ref_opt") : t("mrc_lt_label_opt")}</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={invoice ? "INV-20260045" : "Table 4"} maxLength={60} style={inputStyle} /></div>
-          <button className="btn btn-primary" disabled={busy} onClick={create} style={{ flex: "0 0 auto" }}>{busy ? "…" : invoice ? "Create invoice" : "Create link"}</button>
+          <button className="btn btn-primary" disabled={busy} onClick={create} style={{ flex: "0 0 auto" }}>{busy ? "…" : invoice ? t("mrc_lt_create_inv") : t("mrc_lt_create_link")}</button>
         </div>
       </div>
 
@@ -300,32 +302,32 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>INVOICE</span>}
-                    {l.amountXaf ? `${fmt(l.amountXaf)} XAF` : "Open amount"}{l.label ? ` · ${l.label}` : ""}
+                    {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_inv_badge")}</span>}
+                    {l.amountXaf ? `${fmt(l.amountXaf)} XAF` : t("mrc_lt_open")}{l.label ? ` · ${l.label}` : ""}
                   </div>
                   {l.kind === "invoice" && (l.clientName || l.dueDate) && (
-                    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{l.clientName ? `To ${l.clientName}` : ""}{l.clientName && l.dueDate ? " · " : ""}{l.dueDate ? `due ${l.dueDate}` : ""}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{l.clientName ? `${t("mrc_lt_to")} ${l.clientName}` : ""}{l.clientName && l.dueDate ? " · " : ""}{l.dueDate ? `${t("mrc_lt_due_lc")} ${l.dueDate}` : ""}</div>
                   )}
                   <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", wordBreak: "break-all" }}>{urlFor(l.code)}</div>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? "Copied ✓" : "Copy"}</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setShowQr(showQr === l.code ? null : l.code)}>{showQr === l.code ? "Hide QR" : "QR"}</button>
-                <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>Disable</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? t("amb_copied") : t("mrc_lt_copy")}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowQr(showQr === l.code ? null : l.code)}>{showQr === l.code ? t("amb_hide_qr") : t("mrc_lt_qr")}</button>
+                <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
               </div>
               {showQr === l.code && (
                 <div style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>
                   <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={urlFor(l.code)} size={180} /></div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>Customers scan to pay {_m.businessName}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{t("mrc_lt_scan_pay")} {_m.businessName}</div>
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
-      {active.length === 0 && <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 12 }}>Create a link to accept your first payment. Print the QR for your counter, or share the link on WhatsApp.</p>}
+      {active.length === 0 && <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 12 }}>{t("mrc_lt_empty")}</p>}
       <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <span>Building a platform? <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>Use the API →</Link></span>
-        <span>Bring other shops? <Link to="/ambassador" style={{ color: "var(--accent)", fontWeight: 600 }}>Become an ambassador →</Link></span>
+        <span>{t("mrc_lt_platform")} <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_lt_use_api")}</Link></span>
+        <span>{t("mrc_lt_bring")} <Link to="/ambassador" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_lt_become_amb")}</Link></span>
       </div>
     </div>
   );
@@ -335,14 +337,15 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
    Always ink-on-white (prints cleanly in any theme). The QR opens the merchant's
    open-amount checkout so a customer scans → enters amount → pays. */
 function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () => void }) {
+  const { t } = useI18n();
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const url = `${origin}/m/${merchant.code}`;
   const INK = "#1c1813", INK2 = "#56504a", BRAND = "#FFC92E", ACCENT = "#f2660d";
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,12,10,0.6)", overflow: "auto", display: "grid", placeItems: "start center", padding: "16px 12px 40px" }}>
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", gap: 8, width: "100%", maxWidth: 560, padding: "6px 0 12px", justifyContent: "flex-end" }}>
-        <button className="btn btn-ghost" onClick={onClose}>Close</button>
-        <button className="btn btn-primary" onClick={() => window.print()} style={{ gap: 8 }}>Print / Save PDF</button>
+        <button className="btn btn-ghost" onClick={onClose}>{t("close")}</button>
+        <button className="btn btn-primary" onClick={() => window.print()} style={{ gap: 8 }}>{t("mrc_ps_print")}</button>
       </div>
       <div className="print-poster" style={{ width: "100%", maxWidth: 560, background: "#fff", color: INK, borderRadius: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.4)", padding: "40px 36px 32px", textAlign: "center" }}>
         {/* The canonical brand logo (uploaded logo, or the Bagel Fat One wordmark) —
@@ -356,7 +359,7 @@ function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () 
         </div>
 
         <div style={{ marginTop: 22, display: "grid", gap: 8, textAlign: "left", maxWidth: 320, marginInline: "auto" }}>
-          {[["1", "Open your camera or MoMo›Me and scan"], ["2", "Enter the amount"], ["3", "Pay with crypto or Mobile Money"]].map(([n, txt]) => (
+          {[["1", t("mrc_ps_1")], ["2", t("mrc_ps_2")], ["3", t("mrc_ps_3")]].map(([n, txt]) => (
             <div key={n} style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ flex: "none", width: 26, height: 26, borderRadius: "50%", background: BRAND, color: INK, fontWeight: 800, display: "grid", placeItems: "center", fontSize: 14 }}>{n}</span>
               <span style={{ fontSize: 15, color: INK, fontWeight: 600 }}>{txt}</span>
@@ -365,7 +368,7 @@ function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () 
         </div>
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #ece6da", fontSize: 12.5, color: INK2 }}>
-          Instant Mobile Money settlement · No account or crypto needed to pay
+          {t("mrc_ps_footer")}
           <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 12 }}>momome.xyz · {merchant.code}</div>
         </div>
       </div>

@@ -143,11 +143,14 @@ export function disableLink(code: string, merchantId: string): boolean {
 }
 
 /* ---------- sales (a merchant's incoming payments) ---------- */
-/** Payments that settle to this merchant: tagged by merchantId, or (fallback)
- *  addressed to its settlement number. Newest first. */
+/** Payments that settle to this merchant — STRICTLY those explicitly tagged with
+ *  this merchant's id (set only when a payment went through the merchant's own
+ *  link / QR / by-code AND the recipient matched their settlement number). We do
+ *  NOT fall back to "any payment addressed to the settlement number": that let
+ *  anyone create a merchant pointing at a victim's public MoMo number and read
+ *  every payment (and payer PII) sent to it. Newest first. */
 export function salesFor(m: MerchantAccount): Payment[] {
-  const phone = digits(m.settlementPhone);
   return listPayments()
-    .filter((p) => p.merchantId === m.id || (!!phone && digits(p.recipient.phone) === phone))
+    .filter((p) => p.merchantId === m.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

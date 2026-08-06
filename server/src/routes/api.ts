@@ -143,8 +143,9 @@ api.use("/admin", (req, res, next) => {
     if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
     return next();
   }
-  // Read Only can never mutate.
-  if (isReadOnly(role) && req.method !== "GET") {
+  // Read Only can never mutate — except changing their OWN password (self-service,
+  // handled below), which must not be blocked by the read-only method check.
+  if (isReadOnly(role) && req.method !== "GET" && sub !== "/password") {
     return res.status(403).json({ error: "forbidden", message: "Read-only access." });
   }
   // Section gate — fail CLOSED: every admin route must map to a section the role
@@ -507,7 +508,7 @@ api.post("/identities/claim/request", rateLimitMiddleware("claim_req", 6, 60_000
     return res.status(409).json({ error: "already_claimed", message: "This account is already claimed." });
   }
   // devCode is sandbox-only; in production the code is sent by SMS.
-  res.json({ sent: true, devCode: isLive() ? undefined : r.code });
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
 });
 
 api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_000), (req, res) => {
@@ -841,7 +842,7 @@ api.post("/me/anchor/request", rateLimitMiddleware("anchor_req", 6, 60_000), asy
   if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const r = requestAnchor(String((req.body ?? {}).phone ?? ""));
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
-  res.json({ sent: true, devCode: isLive() ? undefined : r.code }); // devCode sandbox-only
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
 });
 
 api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
@@ -938,7 +939,7 @@ api.post("/merchant/verify/request", rateLimitMiddleware("anchor_req", 6, 60_000
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
   const r = requestAnchor(m.settlementPhone);
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
-  res.json({ sent: true, devCode: isLive() ? undefined : r.code });
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
 });
 
 /** Verify the OTP → the merchant account goes live. */
@@ -1773,7 +1774,11 @@ api.post("/admin/peex/test", async (_req, res) => {
 
 /* ---------- ops ---------- */
 const FLOW: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED"];
-api.get("/ops/snapshot", (_req, res) => {
+api.get("/ops/snapshot", (req, res) => {
+  // This lives outside the `/admin` mount, so guard it explicitly — it exposes the
+  // live transaction feed + treasury float and was previously world-readable.
+  const session = verifyToken(tokenFromHeaders(req.headers));
+  if (!session || !getUser(session.uid)) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
   const all = store.listPayments();
   const live = all.filter((p) => !["DELIVERED", "FAILED", "REFUNDED"].includes(p.state));
   const rows: OpsTx[] = all.slice(0, 22).map((p) => ({

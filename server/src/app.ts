@@ -4,7 +4,7 @@ import { api } from "./routes/api.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
 import { seed } from "./seed.js";
-import { config } from "./config.js";
+import { config, liveMoney } from "./config.js";
 import { listPayments } from "./core/store.js";
 import { seedAdminUsers } from "./core/adminUsers.js";
 
@@ -14,9 +14,11 @@ import { seedAdminUsers } from "./core/adminUsers.js";
 const ALLOWED_ORIGIN: RegExp[] = [
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  // Only THIS project's Vercel deployments (momome, momome-<hash>, momome-git-<branch>-…),
-  // not the previous `*.vercel.app` which allowed ANY attacker-controlled vercel.app page.
-  /^https:\/\/momome[a-z0-9-]*\.vercel\.app$/,
+  // Only THIS project's Vercel deployments. The project is `mo-mo-me-app`; its own
+  // preview URLs are `mo-mo-me-app-<hash>-<team>.vercel.app` (namespace owned by the
+  // project). The earlier `momome[a-z0-9-]*` matched attacker-registrable names like
+  // `momome-evil.vercel.app`, so it's replaced with the exact project prefix.
+  /^https:\/\/mo-mo-me-app(-[a-z0-9-]+)?\.vercel\.app$/,
   /^https:\/\/([a-z0-9-]+\.)*momome\.xyz$/,
 ];
 function corsOrigin(origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void): void {
@@ -72,8 +74,9 @@ export function createApp() {
     res.status(500).json({ error: "server_error", message: "Something went wrong. Please try again." });
   });
 
-  // Seed only a fresh database — on restart, state is restored from SQLite.
-  if (listPayments().length === 0) seed();
+  // Seed demo data only on a fresh SANDBOX database — NEVER when a real-money rail is
+  // live (fabricated names/numbers/payments must not enter a regulated, live deployment).
+  if (!liveMoney() && listPayments().length === 0) seed();
   // Ensure at least the initial Super Admin account exists (idempotent).
   seedAdminUsers();
   return app;

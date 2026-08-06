@@ -257,8 +257,8 @@ export const api = {
   createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"]; clientName?: string; dueDate?: string }) =>
     req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
   disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
-  resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${code}`),
-  resolveMerchantByCode: (code: string) => req<MerchantLinkPublic>(`/merchant/by-code/${code}`),
+  resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${encodeURIComponent(code)}`),
+  resolveMerchantByCode: (code: string) => req<MerchantLinkPublic>(`/merchant/by-code/${encodeURIComponent(code)}`),
   setMerchantListing: (listed: boolean) => req<{ merchant: MerchantAccount }>("/merchant/listing", { method: "POST", body: JSON.stringify({ listed }) }),
   discover: (opts: { country?: string; category?: string; q?: string } = {}) => {
     const qs = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as [string, string][]).toString();

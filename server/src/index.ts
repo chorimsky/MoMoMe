@@ -1,6 +1,6 @@
 import { createApp } from "./app.js";
 import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
-import { flushAll } from "./core/persist.js";
+import { flushAll, persistDurable } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
@@ -11,6 +11,12 @@ import { setRates, CCY } from "./core/rates.js";
 assertLiveConfig();
 assertIbexConfig();
 assertAdminSecurity(); // fail closed on a default admin password in production
+// Fail closed: never run a real-money rail on a non-durable store (node:sqlite missing
+// or DB_PATH not writable) — payments, ledger and the 10-year compliance chain would be
+// silently lost on every restart. Sandbox may run in-memory.
+if (liveMoney() && !persistDurable()) {
+  throw new Error("Real-money rail is live but the database is NOT durable (node:sqlite unavailable or DB_PATH not writable) — refusing to start. Fix DB_PATH / the mounted volume, or run fully in sandbox.");
+}
 // Warn about the default admin password only on a real/reachable deployment
 // (https public URL or a live-money rail) — it's a production reminder, not
 // noise for local dev where the default password is fine.

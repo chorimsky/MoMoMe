@@ -90,6 +90,15 @@ async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Paym
  *  refund" state. (Ledger is NOT reversed here — we still hold the inbound asset; it's
  *  unwound when the refund is actually paid out — the refund-claim flow.) */
 function beginRefund(p: Payment, note: string): void {
+  // Only Lightning has an automated refund-claim path (the sender supplies a bolt11
+  // and we pay it). On-chain BTC / ERC-20 stablecoin inbounds have NO auto path —
+  // completeRefund rejects them (refund_lightning_only), so they used to strand
+  // permanently in REFUND_PENDING. Route them to MANUAL_REVIEW so an operator returns
+  // the crypto out-of-band and then adminRefund reverses the ledger.
+  if (p.payInstruction.method !== "LIGHTNING") {
+    transition(p, "MANUAL_REVIEW", `${note} — ${p.payInstruction.method} inbound needs a manual crypto refund`);
+    return;
+  }
   p.refundNeedsDestination = true;
   transition(p, "REFUND_PENDING", note);
 }
@@ -335,6 +344,7 @@ export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
     try {
       const s = await transactionStatus(p.refundTxId);
       if (s?.settled) finalizeRefund(p);
+      else if (s?.failed) reopenRefund(p); // failed outbound → reopen for a new invoice
     } catch (e) { console.error("reconcile refund", p.id, e); }
   }
 }
@@ -346,6 +356,11 @@ export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
 export async function adminRetry(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
+  // Never re-disburse a payout that is already in flight (PAYOUT_REQUESTED). It looks
+  // "stuck/Pending" but the async confirmation (callback/poll/reconcile) is still
+  // running; a second disburse would double-pay if the adapter's in-memory idempotency
+  // map is cold (e.g. after a restart before the snapshot flush).
+  if (p.state === "PAYOUT_REQUESTED") return false;
 
   // Retry is an override of the LATE holds (approval threshold, transient float,
   // low-trust) — all of which happen AFTER FX-lock. It must NEVER resurrect a
@@ -377,6 +392,13 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   try {
     res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
   } catch {
+    return false;
+  }
+  // The adapter already had this ref in flight — do NOT re-enter PAYOUT_REQUESTED (that
+  // would blindly overwrite payoutRef and re-arm confirmation on an existing payout).
+  // Mirror confirmInbound: hold for review so an operator confirms the original.
+  if (res.status === "duplicate") {
+    transition(p, "MANUAL_REVIEW", "duplicate payout key on retry");
     return false;
   }
   p.payoutRef = res.providerRef;
@@ -432,9 +454,13 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
     else void pollRefund(p.ref);
     return { ok: true };
   } catch (e) {
-    p.refundNeedsDestination = true; // payout never left — let the sender try another invoice
-    putPayment(p);
-    return { ok: false, error: e instanceof Error ? e.message : "refund_failed" };
+    // AMBIGUOUS failure. The invoice already passed local validation, so a throw here
+    // means we asked IBEX to pay and CANNOT be sure the sats didn't leave (a read
+    // timeout can throw AFTER the payment began). Reopening would let the sender submit
+    // a SECOND invoice → double refund / real loss. Hold for an operator to verify
+    // whether the outbound actually went out (refundNeedsDestination stays false).
+    transition(p, "MANUAL_REVIEW", `refund payout ambiguous — verify before retry: ${e instanceof Error ? e.message : "error"}`);
+    return { ok: false, error: "refund_needs_review" };
   }
 }
 
@@ -446,6 +472,16 @@ function finalizeRefund(p: Payment): void {
   transition(p, "REFUNDED", "crypto refunded to sender");
 }
 
+/** The outbound refund Lightning payment DEFINITIVELY failed (no route / expired) —
+ *  the sats did NOT leave, so we still hold the inbound. Reopen the claim so the
+ *  sender can supply a fresh invoice. Safe (no double-pay: the prior attempt failed). */
+function reopenRefund(p: Payment): void {
+  if (p.state !== "REFUND_PENDING") return;
+  p.refundNeedsDestination = true;
+  p.refundTxId = undefined; // void the failed attempt — a new invoice starts clean
+  transition(p, "REFUND_PENDING", "refund payout failed — awaiting a new invoice");
+}
+
 /** Poll the outbound refund payment to settlement (Lightning settles in seconds). */
 async function pollRefund(ref: string): Promise<void> {
   for (const delay of [3000, 5000, 8000, 15000, 30000]) {
@@ -454,6 +490,7 @@ async function pollRefund(ref: string): Promise<void> {
     if (!p || p.state !== "REFUND_PENDING" || !p.refundTxId) return; // resolved / unknown
     const s = await transactionStatus(p.refundTxId).catch(() => null);
     if (s?.settled) { finalizeRefund(p); return; }
+    if (s?.failed) { reopenRefund(p); return; } // failed → let the sender retry (was: stranded)
   }
 }
 

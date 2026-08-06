@@ -18,7 +18,7 @@ import crypto from "node:crypto";
 import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
-import { config } from "../config.js";
+import { config, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
 const btcToMsat = (btc: number) => Math.round(btc * 1e11); // 1 BTC = 1e11 msat
@@ -295,9 +295,12 @@ export const ibexAdapter: RailAdapter = {
   verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined> = {}): boolean {
     // 1) Sender IP allowlist (the documented IBEX webhook IPs), when determinable.
     if (!ipAllowed(headers)) return false;
-    // 2) Shared secret echoed in the body. Without a configured secret we accept
-    //    only outside production (assertIbexConfig requires it in production).
-    if (!config.ibex.webhookSecret) return config.ibex.env !== "production";
+    // 2) Shared secret echoed in the body. Without a configured secret, accept ONLY
+    //    when no real payout can result from an IBEX inbound (pure sandbox testing).
+    //    If a payout CAN result (production, or IBEX_ALLOW_SANDBOX_PAYOUT), an unsigned
+    //    webhook could settle real money → fail closed. assertIbexConfig enforces that
+    //    the secret is set in exactly those cases, so this branch is sandbox-only.
+    if (!config.ibex.webhookSecret) return !ibexInboundTrusted();
     let provided = "";
     try { provided = (JSON.parse(rawBody) as { secret?: string }).secret ?? ""; } catch { return false; }
     const a = Buffer.from(provided);

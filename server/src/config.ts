@@ -156,11 +156,15 @@ export function assertIbexConfig(): void {
   if (parts.some(Boolean) && !parts.every(Boolean)) {
     throw new Error("Partial IBEX config: set IBEX_CLIENT_ID, IBEX_CLIENT_SECRET and IBEX_ACCOUNT_ID together (or none).");
   }
-  if (ibexConfigured() && config.ibex.env === "production") {
+  // Require the webhook secret + a reachable https callback whenever a real payout can
+  // result from an IBEX inbound — i.e. production OR sandbox-with-IBEX_ALLOW_SANDBOX_PAYOUT.
+  // Otherwise an unsigned (forged) webhook could settle real money (verifyWebhook fails
+  // closed in exactly these cases, so the secret must exist).
+  if (ibexConfigured() && ibexInboundTrusted()) {
     const missing: string[] = [];
     if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
     if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
-    if (missing.length) throw new Error(`IBEX production requires: ${missing.join(", ")}.`);
+    if (missing.length) throw new Error(`IBEX inbound can authorize a real payout — set: ${missing.join(", ")} (or disable IBEX_ALLOW_SANDBOX_PAYOUT).`);
   }
 }
 

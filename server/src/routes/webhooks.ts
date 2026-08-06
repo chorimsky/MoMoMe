@@ -17,10 +17,12 @@ export const webhooks = Router();
 
 // Peexit payout callback — the second aggregator's async confirmation/failure.
 // Authenticated with HTTP Basic Auth (credentials we gave Peexit). The body is an
-// ARRAY of transactions. We ack fast, then for each one confirm the AUTHORITATIVE
-// status via GET /disbursement/all_requests (so a spoofed body can't settle an
-// unpaid payout); if the re-query is inconclusive we fall back to the
-// Basic-Auth-authenticated body status.
+// ARRAY of transactions. We ack fast, then for each one settle ONLY on the
+// AUTHORITATIVE re-query via GET /disbursement/all_requests. We do NOT trust the
+// POSTed body status: Peexit 404s fresh transactions for ~3 days, so the re-query
+// is routinely inconclusive right when a callback fires — trusting the body there
+// let a spoofed `failed` refund an already-paid payout (double-spend). When the
+// re-query is inconclusive we HOLD; reconcileStuckPayouts re-queries later.
 webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   const auth = req.headers["authorization"];
@@ -32,8 +34,8 @@ webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
     if (!peexit.statusByKey(ev.ref)) continue; // not one of ours
     void (async () => {
       const q = await peexit.queryStatus(ev.ref);
-      const status = q === "COMPLETED" || q === "FAILED" ? q : ev.status;
-      if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status);
+      if (q === "COMPLETED" || q === "FAILED") await onPayoutResult(ev.ref, q);
+      // else: inconclusive re-query → leave it; the reconcile backstop settles it.
     })().catch((e) => console.error("peexit payout result", ev.ref, e));
   }
 });

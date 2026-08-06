@@ -200,15 +200,16 @@ export interface Payment {
 
 export interface PayInstruction {
   method: Method;
-  /** BOLT11 invoice for Lightning, on-chain address for BTC, TRC20 address for USDT. */
+  /** BOLT11 invoice for Lightning, on-chain BTC address, or Ethereum ERC-20 address for USDT/USDC. */
   code: string;
-  /** What goes in the QR. For Lightning this is the invoice; for chains a URI. */
+  /** What goes in the QR. Lightning: `lightning:` invoice; BTC: `bitcoin:` BIP-21
+   *  URI with amount; USDT/USDC: the bare ERC-20 address (widest wallet support). */
   qr: string;
   asset: InboundAsset;
   amount: number;
   amountLabel: string;
   expiresAt: string;
-  /** Provider's settlement key (LN payment hash / on-chain or TRC20 address) used
+  /** Provider's settlement key (LN payment hash / on-chain BTC or ERC-20 address) used
    *  to match an inbound webhook back to this payment. */
   providerRef?: string;
   /** Which rail provider issued this instruction. */

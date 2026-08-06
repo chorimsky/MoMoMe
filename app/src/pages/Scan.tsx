@@ -13,7 +13,9 @@ import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
 
-/** Extract a MoMo›Me checkout path from a scanned/typed value, or null. */
+/** Extract a MoMo›Me app path from a scanned/typed value, or null. Handles the
+ *  pay/merchant checkout codes AND a referral link (?ref=…) so scanning any
+ *  MoMo›Me QR does something sensible instead of "not a code". */
 export function payPathFromScan(raw: string): string | null {
   const s = (raw || "").trim();
   const rel = (p: string) => (/^\/(pay|m)\/[A-Za-z0-9_-]+$/.test(p) ? p : null);
@@ -21,6 +23,9 @@ export function payPathFromScan(raw: string): string | null {
     const u = new URL(s);
     const hit = rel(u.pathname);
     if (hit) return hit;
+    // Referral link — join with the ambassador's code (browser/app onboarding).
+    const ref = u.searchParams.get("ref");
+    if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) return `/?ref=${ref.toUpperCase()}`;
   } catch { /* not a URL */ }
   if (rel(s)) return s;
   if (/^MOM-[A-Za-z]{2}-\d{4,}$/i.test(s)) return `/m/${s.toUpperCase()}`;

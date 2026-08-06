@@ -234,18 +234,29 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!ref.current || !value) return;
+    let cancelled = false;
     const withMark = brand && value.length <= 120;
     const cv = ref.current;
+    // Render the backing store at 2–3× the CSS size so the code stays crisp on
+    // hi-DPI screens and — critically — when the poster is printed. CSS keeps it
+    // at `size`; all overlay math derives from cv.width so it scales cleanly.
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const scale = Math.min(Math.max(Math.round(dpr), 2), 3);
     QRCode.toCanvas(cv, value, {
-      width: size,
+      width: size * scale,
       margin: 1,
       color: { dark: "#1a1714", light: "#ffffff" },
       errorCorrectionLevel: withMark ? "H" : "L",
     }).then(() => {
+      if (cancelled) return;
+      // qrcode's toCanvas writes an inline style at the backing-store size — pin it
+      // back to the intended CSS size for BOTH branded and long/unbranded codes.
+      cv.style.width = `${size}px`; cv.style.height = `${size}px`;
       if (!withMark) return;
       const ctx = cv.getContext("2d");
       if (!ctx) return;
       const draw = () => {
+        if (cancelled) return;
         const px = cv.width;
         const c = px / 2;
         const pad = Math.round(px * 0.26);
@@ -261,6 +272,7 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
       if (mark.complete && mark.naturalWidth) draw();
       else mark.addEventListener("load", draw, { once: true });
     }).catch(() => {});
+    return () => { cancelled = true; };
   }, [value, size, brand]);
   return <canvas ref={ref} width={size} height={size} style={{ width: size, height: size, borderRadius: 10, display: "block" }} aria-label="Payment QR code" role="img" />;
 }

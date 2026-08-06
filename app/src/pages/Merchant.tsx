@@ -16,6 +16,19 @@ import { CATEGORIES, catLabel } from "../lib/categories.js";
 import { api, ApiError } from "../api/client.js";
 
 const cardStyle: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: "clamp(16px, 3.6vw, 20px)" };
+
+/** Export the (high-res, branded) QR canvas inside `container` as a PNG download. */
+function downloadQrPng(container: Element | null, filename: string) {
+  const cv = container?.querySelector("canvas");
+  if (!(cv instanceof HTMLCanvasElement)) return;
+  cv.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+}
 const inputStyle: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" };
 const labelStyle: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)", marginBottom: 6, display: "block" };
 
@@ -350,9 +363,10 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
                 <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
               </div>
               {showQr === l.code && (
-                <div style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>
+                <div data-qr-dl style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>
                   <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={urlFor(l.code)} size={180} /></div>
                   <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{t("mrc_lt_scan_pay")} {_m.businessName}</div>
+                  <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={(e) => downloadQrPng(e.currentTarget.closest("[data-qr-dl]"), `momome-${_m.code}-${l.code}.png`)}>{t("mrc_lt_save_qr")}</button>
                 </div>
               )}
             </div>

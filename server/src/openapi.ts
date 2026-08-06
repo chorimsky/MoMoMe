@@ -42,7 +42,7 @@ export function openApiSpec(publicUrl: string) {
       "/payments": {
         post: {
           tags: ["Payments"], summary: "Create a payment", operationId: "createPayment",
-          description: "Creates a payment from a quote and returns the `payInstruction` — the Lightning invoice / on-chain or TRC-20 address to pay. Once the inbound is confirmed the Mobile Money payout is delivered automatically.",
+          description: "Creates a payment from a quote and returns the `payInstruction` — the Lightning invoice, or an on-chain Bitcoin / Ethereum ERC-20 (USDT) address to pay. Once the inbound is confirmed the Mobile Money payout is delivered automatically.",
           requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CreatePaymentRequest" }, examples: { basic: { value: { quoteId: "qt_…", recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "NANA JEAN" } } } } } } },
           responses: {
             "200": { description: "Payment created", content: { "application/json": { schema: { $ref: "#/components/schemas/Payment" } } } },
@@ -107,7 +107,7 @@ export function openApiSpec(publicUrl: string) {
           type: "object",
           properties: {
             method: { $ref: "#/components/schemas/Method" },
-            code: { type: "string", description: "BOLT11 invoice (Lightning) or on-chain / TRC-20 address." },
+            code: { type: "string", description: "BOLT11 invoice (Lightning), or an on-chain Bitcoin / Ethereum ERC-20 (USDT) address." },
             qr: { type: "string", description: "String to encode in a QR." },
             asset: { type: "string", enum: ["BTC", "USDT", "USDC"] }, amount: { type: "number" }, amountLabel: { type: "string" },
             expiresAt: { type: "string", format: "date-time" },

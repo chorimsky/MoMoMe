@@ -9,7 +9,6 @@ import { formatAmount } from "../core/fx.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
 const B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function rand(alphabet: string, len: number): string {
   let s = "";
@@ -39,7 +38,9 @@ export const sandboxAdapter: RailAdapter = {
       qr = `bitcoin:${addr}?amount=${amount.toFixed(8)}`;
       providerRef = addr;
     } else {
-      const addr = `T${rand(B58, 33)}`;
+      // Stablecoin (USDT/USDC) on Ethereum ERC-20 — an 0x… address, matching the
+      // real IBEX rail so the sandbox never teaches a wrong (e.g. TRON) network.
+      const addr = `0x${rand("0123456789abcdef", 40)}`;
       code = addr;
       qr = addr;
       providerRef = addr;

@@ -172,7 +172,7 @@ export function Developers() {
                 Money. Every payment follows the same four steps:
               </p>
               <div className="step"><span className="n">1</span><span className="t"><b>Create a quote</b> — lock an exchange rate for the payout amount (XAF) and crypto rail.</span></div>
-              <div className="step"><span className="n">2</span><span className="t"><b>Create a payment</b> from that quote with the recipient's Mobile Money number. You get back a <code>payInstruction</code> — a Lightning invoice or on-chain / TRC-20 address.</span></div>
+              <div className="step"><span className="n">2</span><span className="t"><b>Create a payment</b> from that quote with the recipient's Mobile Money number. You get back a <code>payInstruction</code> — a Lightning invoice, or an on-chain Bitcoin / Ethereum ERC-20 (USDT) address.</span></div>
               <div className="step"><span className="n">3</span><span className="t"><b>Pay the instruction</b> in crypto (your wallet, your customer, or your own rails).</span></div>
               <div className="step"><span className="n">4</span><span className="t"><b>Poll the payment</b> (or receive a webhook) until <code>state</code> is <code>DELIVERED</code>. The payout lands on the recipient's phone in seconds.</span></div>
               <div className="callout"><b>Base URL.</b> All endpoints live under <code>{base}</code>. Requests and responses are JSON. Amounts in XAF are integers.</div>

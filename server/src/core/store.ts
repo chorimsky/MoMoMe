@@ -8,7 +8,7 @@ import { register, touch } from "./persist.js";
 export const quotes = new Map<string, Quote>();
 export const payments = new Map<string, Payment>();
 
-/** providerRef (LN payment hash / on-chain or TRC20 address) → payment id. */
+/** providerRef (LN payment hash / on-chain BTC or ERC-20 address) → payment id. */
 const byProviderRef = new Map<string, string>();
 
 register(

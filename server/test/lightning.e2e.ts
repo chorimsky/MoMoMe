@@ -127,6 +127,12 @@ async function main() {
     const recents = await J("/api/me/recipients");
     ok("recent recipients lists the sender's recipient(s)", Array.isArray(recents.body) && recents.body.length >= 1 && !!recents.body[0].phone);
 
+    // D7: recipient resolution requires an identified device — not an anonymous name oracle.
+    const resolveDev = await J("/api/recipients/resolve?phone=677000789&country=CM");
+    ok("resolve with a device → 200", resolveDev.status === 200 && !!resolveDev.body.provider);
+    const resolveAnon = await fetch(base + "/api/recipients/resolve?phone=677000789&country=CM").then((r) => r.status);
+    ok("resolve without a device → 401 (no anonymous name oracle)", resolveAnon === 401);
+
     // 7. admin login guard + operational settings (HTTP, live server)
     const auth = (tok: string, init?: RequestInit): RequestInit => ({ ...init, headers: { "content-type": "application/json", authorization: `Bearer ${tok}`, ...(init?.headers ?? {}) } });
     const noTok = await J("/api/admin/overview");

@@ -2,7 +2,7 @@ import { createApp } from "./app.js";
 import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll, persistDurable } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
@@ -40,6 +40,7 @@ setInterval(() => {
     void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
     void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   }
+  void reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   // AML/CFT detection — open compliance cases for reportable activity (CTR/CDD,
   // structuring, sanctions, high-risk). Read-only over payments; never blocks money.
   try { scanCompliance(); } catch (e) { console.error("compliance scan", e); }

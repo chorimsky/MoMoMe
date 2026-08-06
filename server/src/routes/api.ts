@@ -443,7 +443,11 @@ api.delete("/admin/apikeys/:id", (req, res) => {
 });
 
 /* ---------- recipient name resolution ---------- */
-api.get("/recipients/resolve", rateLimitMiddleware("resolve", 120, 60_000), async (req, res) => {
+api.get("/recipients/resolve", rateLimitMiddleware("resolve", 60, 60_000), async (req, res) => {
+  // Tie resolution to an identified device — it discloses names (the internal identity
+  // graph aggregates other users' confirmations), so it must not be a fully-anonymous
+  // enumeration oracle. The send flow always carries a device id, so no UX impact.
+  if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const phone = String(req.query.phone ?? "").slice(0, 24); // bound input → bounded cache key / work
   const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
   try {

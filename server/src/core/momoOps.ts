@@ -16,9 +16,13 @@ import * as peexit from "../adapters/peexit.js";
 import type { DisburseRequest, PayoutStatus } from "../adapters/pawapay.js";
 
 const ops: MomoOp[] = [];
-register("momoops", () => ops.slice(0, 200), (d: MomoOp[]) => { ops.push(...d); });
-export function history(): MomoOp[] { return ops.slice(0, 50); }
-function record(o: MomoOp): void { ops.unshift(o); if (ops.length > 200) ops.pop(); touch("momoops"); }
+// Retain a large window of admin money ops so AML screening + audit don't drop real
+// movements (was 200 — beyond that, large disbursements escaped CTR/sanctions checks).
+const OP_CAP = 5000;
+register("momoops", () => ops.slice(0, OP_CAP), (d: MomoOp[]) => { ops.push(...d); });
+export function history(): MomoOp[] { return ops.slice(0, 50); }        // recent, for the admin UI
+export function forCompliance(): MomoOp[] { return ops; }               // ALL retained ops, for screening
+function record(o: MomoOp): void { ops.unshift(o); if (ops.length > OP_CAP) ops.pop(); touch("momoops"); }
 
 /* ---- concurrency + idempotency guards for manual money ops ----
    Node is single-threaded but async, so two requests can interleave at an `await`.

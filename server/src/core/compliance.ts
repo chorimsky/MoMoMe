@@ -77,8 +77,37 @@ function setAnchor(seq: number, hash: string): void {
   anchor = { seq, hash, mac: macAnchor(seq, hash) };
   touch("compliance_anchor");
 }
-// Trust-on-first-use bootstrap for chains persisted before anchoring existed.
-if (!anchor && events.length) setAnchor(events.length, events[events.length - 1].hash);
+/** Internal hash-chain consistency (WITHOUT the anchor check). The chain is
+ *  HMAC-hash-linked, so nobody without the key can forge or extend it. */
+function chainValid(): boolean {
+  let prev = GENESIS;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (e.seq !== i + 1 || e.prevHash !== prev) return false;
+    const { hash, ...rest } = e;
+    if (hashEvent(rest) !== hash) return false;
+    prev = hash;
+  }
+  return true;
+}
+// Bootstrap / crash re-heal at load. Events are write-ahead-persisted before the
+// anchor advances (see appendEvent), so a crash can only leave the anchor BEHIND a
+// valid chain — never a truncation. Re-heal that; a shorter chain than the anchor
+// (real truncation) is left to fail verifyIntegrity.
+if (events.length) {
+  const head = events[events.length - 1].hash;
+  const a = anchor as { seq: number; hash: string; mac: string } | null; // register()'s restore may have set it; TS can't see that
+  if (!a) {
+    setAnchor(events.length, head); // TOFU: chain persisted before anchoring existed
+  } else if (
+    events.length > a.seq &&
+    a.mac === macAnchor(a.seq, a.hash) &&
+    a.seq >= 1 && events[a.seq - 1]?.hash === a.hash &&
+    chainValid()
+  ) {
+    setAnchor(events.length, head);
+  }
+}
 
 /** Append a signed event to the chain and advance the anchor. `at` defaults to now
  *  for convenience; callers may pass an explicit ISO timestamp. */
@@ -90,20 +119,15 @@ function appendEvent(at: string, actor: string, action: string, extra?: { caseId
   };
   const ev: ComplianceEvent = { ...base, hash: hashEvent(base) };
   events.push(ev);
-  setAnchor(ev.seq, ev.hash);
+  touch("compliance");        // write-ahead: persist the event BEFORE the anchor, so a
+  setAnchor(ev.seq, ev.hash); // crash leaves the anchor one-behind a valid chain (re-healed
+                              // at boot), never a false "truncation" tamper verdict.
   return ev;
 }
 /** Recompute the whole chain AND check it against the signed anchor — true only
  *  when nothing was altered, re-ordered, or truncated. */
 export function verifyIntegrity(): boolean {
-  let prev = GENESIS;
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    if (e.seq !== i + 1 || e.prevHash !== prev) return false;
-    const { hash, ...rest } = e;
-    if (hashEvent(rest) !== hash) return false;
-    prev = hash;
-  }
+  if (!chainValid()) return false;
   if (anchor) {
     if (anchor.mac !== macAnchor(anchor.seq, anchor.hash)) return false;   // anchor forged/corrupted
     const head = events.length ? events[events.length - 1].hash : GENESIS;
@@ -186,8 +210,9 @@ export function scanCompliance(now: string = new Date().toISOString()): void {
     }
   }
 
-  // Admin cash-in/out are transactions too — screen + threshold them.
-  for (const o of momoOps.history()) {
+  // Admin cash-in/out are transactions too — screen + threshold ALL retained ops
+  // (not just the 50 most recent, which let large older disbursements escape screening).
+  for (const o of momoOps.forCompliance()) {
     const hit = sanctionsHit(o.phone, undefined, s.sanctionsList);
     if (hit) openCase(keys, now, "sanctions", o.phone, o.amount, `Cash ${o.kind} counterparty matches watchlist "${hit}"`, { ref: o.id });
     if (o.amount >= s.ctrThresholdXaf) openCase(keys, now, "ctr_threshold", o.phone, o.amount, `Admin ${o.kind} ≥ reporting threshold`, { ref: o.id });
@@ -208,6 +233,22 @@ export function scanCompliance(now: string = new Date().toISOString()): void {
   for (const [phone, g] of byPhone) {
     if (g.sum >= s.structuringXaf && g.n >= 3 && g.maxSingle < s.ctrThresholdXaf) {
       openCase(keys, now, "structuring", phone, g.sum, `${g.n} sub-threshold transactions totalling ${g.sum.toLocaleString()} XAF in ${s.structuringWindowH}h`, { subjectName: g.name });
+    }
+  }
+
+  // Sender-side structuring: ONE originator fanning many sub-threshold payments to
+  // DIFFERENT recipients — invisible to the recipient-keyed pass above. Keyed on senderId.
+  const bySender = new Map<string, { sum: number; n: number; maxSingle: number }>();
+  for (const p of pays) {
+    const t = Date.parse(p.createdAt);
+    if (!p.senderId || !occurred(p) || Number.isNaN(t) || t < cutoff) continue;
+    const g = bySender.get(p.senderId) ?? { sum: 0, n: 0, maxSingle: 0 };
+    g.sum += p.xaf; g.n += 1; g.maxSingle = Math.max(g.maxSingle, p.xaf);
+    bySender.set(p.senderId, g);
+  }
+  for (const [sender, g] of bySender) {
+    if (g.sum >= s.structuringXaf && g.n >= 3 && g.maxSingle < s.ctrThresholdXaf) {
+      openCase(keys, now, "structuring", sender, g.sum, `Sender fanned ${g.n} sub-threshold payments totalling ${g.sum.toLocaleString()} XAF in ${s.structuringWindowH}h`, { ref: `sender:${sender}` });
     }
   }
 

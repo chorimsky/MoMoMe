@@ -349,6 +349,23 @@ export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
   }
 }
 
+/** Re-verify a payout that was marked FAILED (→ refund) BEFORE the sender has claimed
+ *  the refund. A transient/incorrect FAILED that actually settled would otherwise pay
+ *  MoMo AND refund the crypto (double-loss). If the rail now authoritatively reports
+ *  COMPLETED, hold for an operator instead of refunding. Only touches un-claimed
+ *  Lightning refunds (refundNeedsDestination still true → no refund has gone out). */
+export async function reconcileFailedPayouts(maxAgeMs = 120_000): Promise<void> {
+  const cutoff = Date.now() - maxAgeMs;
+  for (const p of listPayments()) {
+    if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination || !p.aggregator) continue;
+    if (Date.parse(p.updatedAt) > cutoff) continue;
+    try {
+      const status = await aggregatorByName(p.aggregator).queryStatus(p.ref);
+      if (status === "COMPLETED") transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED after a FAILED verdict — do NOT refund");
+    } catch (e) { console.error("reconcile failed-payout", p.id, e); }
+  }
+}
+
 /** Admin: re-attempt delivery of a stuck payment. Exactly-once: reuses the
  *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay).
  *  Honours the same real-money safety as the settle path and only marks DELIVERED

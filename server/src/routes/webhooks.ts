@@ -10,6 +10,7 @@ import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
+import { pawapayConfigured } from "../config.js";
 import { transactionStatus } from "../adapters/ibex.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 
@@ -45,6 +46,10 @@ webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
 // re-querying GET /payouts/{payoutId} (so we don't depend on verifying their
 // RFC-9421 callback signature). Acks fast, then settles/refunds in background.
 webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => {
+  // PawaPay is not an active rail — reject when unconfigured so this stays a closed,
+  // non-amplifiable endpoint. (When re-enabled, add RFC-9421 signature verification
+  // with PAWAPAY_WEBHOOK_SECRET; the authoritative re-query remains the backstop.)
+  if (!pawapayConfigured()) return res.status(404).json({ error: "not_found" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   let payoutId: string | undefined;
   try { payoutId = (JSON.parse(raw) as { payoutId?: string }).payoutId; } catch { return res.status(400).json({ error: "bad_json" }); }

@@ -3,9 +3,12 @@
 # Flip the Railway backend to REAL crypto-in (IBEX production) in one command,
 # then redeploy and verify IBEX actually came up in production.
 #
-# What it changes on Railway (service momome-api):
+# What it changes on Railway (service momome-api) — a full flip to live from ANY
+# state (including the demo/sandbox state):
+#   RAILS_MODE=live
+#   PEEXIT_ENV=production                     (real Mobile Money payout rail)
 #   IBEX_ENV=production
-#   IBEX_ALLOW_SANDBOX_PAYOUT=false          (no more real-XAF-for-sandbox-crypto)
+#   IBEX_ALLOW_SANDBOX_PAYOUT=false           (no more real-XAF-for-sandbox-crypto)
 #   IBEX_CLIENT_ID / IBEX_CLIENT_SECRET / IBEX_ACCOUNT_ID  (your PRODUCTION values)
 #
 # It does NOT touch Peexit — that rail is already production; you still have to
@@ -54,6 +57,8 @@ sleep 5
 
 echo "→ setting production variables (triggers a redeploy)…"
 railway variables --service "$SVC" \
+  --set "RAILS_MODE=live" \
+  --set "PEEXIT_ENV=production" \
   --set "IBEX_ENV=production" \
   --set "IBEX_ALLOW_SANDBOX_PAYOUT=false" \
   --set "IBEX_CLIENT_ID=$IBEX_CLIENT_ID" \

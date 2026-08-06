@@ -157,7 +157,7 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
             <div style={{ position: "relative", flex: "none" }}>
               <select value={s.country} disabled={lockRecipient} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
                 style={{ appearance: "none", cursor: lockRecipient ? "default" : "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%", opacity: lockRecipient ? 0.75 : 1 }}>
-                {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.code}</option>)}
+                {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code} disabled={!co.active}>{co.dial} {co.code}{co.active ? "" : " — soon"}</option>)}
               </select>
               <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
             </div>
@@ -236,8 +236,15 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
 }
 
 /* ============================================================ 2 — METHOD */
-export function MethodStep({ s, set, back, next, busy }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean }) {
+export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean; methods?: Partial<Record<Method, boolean>> }) {
   const { t, ml } = useI18n();
+  // Only show crypto rails the operator has enabled; if the current pick was
+  // disabled, fall back to the first available one.
+  const available = methods ? METHODS.filter((k) => methods[k]) : METHODS;
+  useEffect(() => {
+    if (available.length && !available.includes(s.method)) set({ method: available[0] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available.join(",")]);
   return (
     <FlowCard>
       <Stepper i={1} />
@@ -252,7 +259,7 @@ export function MethodStep({ s, set, back, next, busy }: { s: Draft; set: (p: Pa
       )}
 
       <div style={{ display: "grid", gap: 11 }}>
-        {METHODS.map((k) => {
+        {available.map((k) => {
           const on = s.method === k;
           return (
             <button key={k} onClick={() => set({ method: k })} aria-pressed={on}

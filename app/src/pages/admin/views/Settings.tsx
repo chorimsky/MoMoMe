@@ -38,6 +38,7 @@ export function SettingsView() {
   const [company, setCompany] = useState<AdminSettings["company"] | null>(null);
   const [channels, setChannels] = useState<AdminSettings["channels"] | null>(null);
   const [ops, setOps] = useState<AdminSettings["ops"] | null>(null);
+  const [methods, setMethods] = useState<AdminSettings["methods"] | null>(null);
   const [compliance, setCompliance] = useState<AdminSettings["compliance"] | null>(null);
   const [watchlistText, setWatchlistText] = useState("");
   const [saved, setSaved] = useState(false);
@@ -64,7 +65,7 @@ export function SettingsView() {
     api.adminSettings()
       .then(async (s) => {
         if (!alive) return;
-        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setCompliance(s.compliance);
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setCompliance(s.compliance);
         setWatchlistText((s.compliance.sanctionsList ?? []).join("\n"));
         setLogoRaw(s.company.logo ?? null);
         // A logo on a solid background shows as a box in dark mode; a logo with
@@ -95,7 +96,7 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
+  if (!company || !channels || !ops || !methods || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
 
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
 
@@ -150,7 +151,7 @@ export function SettingsView() {
     try {
       // Newline/comma-separated watchlist → deduped array of trimmed entries.
       const sanctionsList = Array.from(new Set(watchlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))).slice(0, 500);
-      const next = await api.saveSettings({ company, channels, ops, compliance: { ...compliance, sanctionsList } });
+      const next = await api.saveSettings({ company, channels, ops, methods, compliance: { ...compliance, sanctionsList } });
       setCompany(next.company); setChannels(next.channels); setOps(next.ops); setCompliance(next.compliance);
       setWatchlistText((next.compliance.sanctionsList ?? []).join("\n"));
       setDirty(false); setSaved(true);
@@ -261,6 +262,18 @@ export function SettingsView() {
               Payouts at or above this amount hold for manual review before disbursing. Set it low when moving real money.
             </p>
           </div>
+        </Card>
+
+        <Card title="Crypto pay-in methods" sub="Turn a rail off to hide it from customers — they only see and can pay with what's enabled.">
+          {([["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "TRC-20"]] as const).map(([k, name, desc], i) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < 2 ? "1px solid var(--line-2)" : "none" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{name}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{desc}</div>
+              </div>
+              <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
+            </div>
+          ))}
         </Card>
 
         <Card title="Compliance (AML/CFT)" sub="CEMAC / ANIF controls — thresholds, officer and sanctions watchlist.">

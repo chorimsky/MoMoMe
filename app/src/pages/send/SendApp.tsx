@@ -70,7 +70,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
-  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; support: { email: string; phone: string } } | null>(null);
+  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>> } | null>(null);
   useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
   // A11y: when the pay step changes, move focus to the flow region so keyboard
@@ -240,7 +240,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} lockRecipient={!!merchant} />}
-            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} />}
+            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} />}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
             {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}
             {step === "processing" && payment && <ProcessingStep paymentId={payment.id} method={s.method} onDone={() => { go("success"); void rememberPaidContact({ name: s.recipientName || s.phone, phone: s.phone, country: s.country, provider: s.provider }); }} reset={reset} onViewActivity={() => { setTab("history"); }} />}

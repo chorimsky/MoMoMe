@@ -18,6 +18,9 @@ const DEFAULTS: AdminSettings = {
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
+  // Crypto pay-in methods offered to customers. USDC is not live yet (IBEX receive
+  // combo not enabled) → default off; the rest on.
+  methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
@@ -46,6 +49,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
+    methods: { ...DEFAULTS.methods, ...(d.methods ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}) },
   };
@@ -67,6 +71,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
+    methods: { ...settings.methods, ...(patch.methods ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}) },
   };

@@ -88,7 +88,7 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
           <div><label style={labelStyle}>{t("mrc_o_settlement")}</label>
             <div style={{ display: "flex", gap: 8 }}>
               <select value={country} onChange={(e) => setCountry(e.target.value as CountryCode)} style={{ ...inputStyle, width: "auto", fontWeight: 700, cursor: "pointer" }}>
-                {Object.values(COUNTRIES).map((c) => <option key={c.code} value={c.code}>{c.dial} {c.code}</option>)}
+                {Object.values(COUNTRIES).map((c) => <option key={c.code} value={c.code} disabled={!c.active}>{c.dial} {c.code}{c.active ? "" : " — soon"}</option>)}
               </select>
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="670 000 000" type="tel" inputMode="tel" style={{ ...inputStyle, flex: 1, fontFamily: "var(--font-mono)" }} />
             </div>

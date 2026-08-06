@@ -68,7 +68,7 @@ export function Claim() {
                 <div style={{ position: "relative" }}>
                   <select value={country} aria-label={t("mm_number")} onChange={(e) => setCountry(e.target.value as keyof typeof COUNTRIES)}
                     style={{ appearance: "none", cursor: "pointer", padding: "14px 30px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 600, fontSize: 14, color: "var(--ink)", height: "100%" }}>
-                    {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.name}</option>)}
+                    {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code} disabled={!co.active}>{co.dial} {co.name}{co.active ? "" : " — soon"}</option>)}
                   </select>
                   <span style={{ position: "absolute", right: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
                 </div>

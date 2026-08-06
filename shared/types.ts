@@ -15,6 +15,9 @@ export interface Country {
   dial: string;
   ccy: "XAF";
   providers: ProviderId[];
+  /** Whether the corridor is live. Inactive countries are shown as "coming soon"
+   *  in pickers (so users see the roadmap) but can't be selected. Only CM today. */
+  active: boolean;
 }
 
 export interface Provider {
@@ -499,6 +502,10 @@ export interface AdminSettings {
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
   };
+  /** Which crypto pay-in methods customers can use. A disabled method is hidden
+   *  from the customer flow and refused by /quotes, so users never see or pick a
+   *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */
+  methods: { LIGHTNING: boolean; ONCHAIN: boolean; USDT: boolean; USDC: boolean };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the
    *  CEMAC standard. */

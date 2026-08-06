@@ -343,8 +343,16 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
     return res.status(400).json({ error: "bad_method", message: "Unknown payment method." });
   }
+  // Refuse a method the operator has disabled (the customer flow already hides it,
+  // but guard the API so a stale client / direct call can't quote a dead rail).
+  if (!getSettings().methods[method as keyof AdminSettings["methods"]]) {
+    return res.status(400).json({ error: "method_unavailable", message: "This payment method isn't available right now." });
+  }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {
     return res.status(400).json({ error: "bad_country", message: "Unsupported country." });
+  }
+  if (!COUNTRIES[country as keyof typeof COUNTRIES]?.active) {
+    return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
   }
   // PRICING SAFETY: never quote real money on a stale/fallback FX rate. The feed
   // refreshes every 30s; if it's dead (or never populated on a cold boot during an
@@ -393,6 +401,8 @@ api.get("/config", (_req, res) => {
     // Live platform fee (fraction) so the customer's pre-quote fee preview tracks
     // the admin's Rates & Pricing setting instead of a hardcoded constant.
     feePct: getSettings().pricing.feePct,
+    // Which crypto pay-in methods are enabled — the customer flow only shows these.
+    methods: getSettings().methods,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
     // Public support contact (admin-managed in Settings → Company) so the Help
@@ -1127,7 +1137,7 @@ api.put("/admin/settings", (req, res) => {
   // Ops guardrails (kill-switch, payout-approval threshold) and AML/compliance controls
   // are Super-Admin-only risk settings; drop them from lesser roles so their legitimate
   // company/pricing/channel saves still succeed.
-  if (!superAdmin) { delete patch.ops; delete patch.compliance; }
+  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; }
   const pr = patch.pricing;
   if (pr) {
     const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;

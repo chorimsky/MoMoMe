@@ -56,14 +56,21 @@ echo "production IBEX credentials, then Railway will redeploy. Ctrl-C within 5s 
 sleep 5
 
 echo "→ setting production variables (triggers a redeploy)…"
-railway variables --service "$SVC" \
-  --set "RAILS_MODE=live" \
-  --set "PEEXIT_ENV=production" \
-  --set "IBEX_ENV=production" \
-  --set "IBEX_ALLOW_SANDBOX_PAYOUT=false" \
-  --set "IBEX_CLIENT_ID=$IBEX_CLIENT_ID" \
-  --set "IBEX_CLIENT_SECRET=$IBEX_CLIENT_SECRET" \
-  --set "IBEX_ACCOUNT_ID=$IBEX_ACCOUNT_ID" \
+SETS=(
+  --set "RAILS_MODE=live"
+  --set "PEEXIT_ENV=production"
+  --set "IBEX_ENV=production"
+  --set "IBEX_ALLOW_SANDBOX_PAYOUT=false"
+  --set "IBEX_CLIENT_ID=$IBEX_CLIENT_ID"
+  --set "IBEX_CLIENT_SECRET=$IBEX_CLIENT_SECRET"
+  --set "IBEX_ACCOUNT_ID=$IBEX_ACCOUNT_ID"
+)
+# Optionally swap in the PRODUCTION Peexit credentials too — include these exports only
+# if the Peexit key currently in Railway is still a sandbox key.
+[[ -n "${PEEXIT_API_KEY:-}" ]]       && SETS+=(--set "PEEXIT_API_KEY=$PEEXIT_API_KEY")
+[[ -n "${PEEXIT_CALLBACK_USER:-}" ]] && SETS+=(--set "PEEXIT_CALLBACK_USER=$PEEXIT_CALLBACK_USER")
+[[ -n "${PEEXIT_CALLBACK_PASS:-}" ]] && SETS+=(--set "PEEXIT_CALLBACK_PASS=$PEEXIT_CALLBACK_PASS")
+railway variables --service "$SVC" "${SETS[@]}" \
   >/dev/null 2>&1 && echo "   variables applied." || { echo "❌ failed to set variables (is the CLI linked / token valid?)" >&2; exit 1; }
 
 latest_dep() {

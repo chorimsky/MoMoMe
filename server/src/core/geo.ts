@@ -30,6 +30,21 @@ const CITIES: Record<string, [number, number]> = {
   tiko: [4.0752, 9.36],
 };
 
+/** Common neighbourhood → parent-city aliases, so labels like "Akwa" or
+ *  "Bastos" resolve to their city centroid (jitter then separates the pins). */
+const ALIASES: Record<string, string> = {
+  // Douala
+  akwa: "douala", bonanjo: "douala", bonapriso: "douala", deido: "douala",
+  bali: "douala", makepe: "douala", bonamoussadi: "douala", bepanda: "douala",
+  ndokoti: "douala", logbessou: "douala", "new bell": "douala",
+  // Yaoundé
+  bastos: "yaounde", mvan: "yaounde", "mvog-mbi": "yaounde", "mvog mbi": "yaounde",
+  "biyem-assi": "yaounde", "biyem assi": "yaounde", essos: "yaounde",
+  nlongkak: "yaounde", mvolye: "yaounde", nsam: "yaounde", ekounou: "yaounde",
+  // Buea
+  molyko: "buea", "great soppo": "buea", bokwango: "buea",
+};
+
 function norm(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
@@ -53,8 +68,12 @@ export function geocodeLabel(candidates: Array<string | undefined>, seed: string
   outer: for (const c of candidates) {
     if (!c) continue;
     const n = norm(c);
+    // Direct city match wins; otherwise fall back to a neighbourhood alias.
     for (const [city, coords] of Object.entries(CITIES)) {
       if (n.includes(city)) { base = coords; break outer; }
+    }
+    for (const [hood, city] of Object.entries(ALIASES)) {
+      if (n.includes(hood)) { base = CITIES[city]; break outer; }
     }
   }
   if (!base) return undefined;

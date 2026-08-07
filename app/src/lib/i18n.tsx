@@ -157,6 +157,7 @@ export const STRINGS: Dict = {
   refund_settling_title: ["Refund submitted", "Remboursement lancé"],
   refund_settling_sub: ["It's being sent back to your wallet — this can take a moment. You'll see it confirmed in Activity.", "Il repart vers votre portefeuille — cela peut prendre un instant. La confirmation apparaîtra dans Activité."],
   nav_home: ["Home", "Accueil"],
+  nav_wallet: ["Wallet", "Portefeuille"],
   demo_label: ["Demo", "Démo"],
   sandbox_title: ["Sandbox demo", "Démo (bac à sable)"],
   sandbox_desc: ["This is not a real invoice — don't pay it with a wallet. Tap “I've paid” below to simulate the payment.", "Ceci n'est pas une vraie facture — ne la payez pas avec un portefeuille. Appuyez sur « J'ai payé » ci-dessous pour simuler."],

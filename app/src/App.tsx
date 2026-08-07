@@ -38,6 +38,9 @@ function useReferralCapture() {
 // Scan pulls in the jsQR software decoder (~130 KB) — only load it when the user
 // actually opens the scanner, keeping it out of the initial bundle.
 const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan })));
+// The Wavelength Lightning wallet pulls in a large wasm runtime — only loaded on /wallet,
+// which is a cross-origin-isolated island entered via a full page load (see Wallet.tsx).
+const Wallet = lazy(() => import("./pages/Wallet.js").then((m) => ({ default: m.Wallet })));
 const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m) => ({ default: m.AdminConsole })));
 const OpsDashboard = lazy(() => import("./pages/ops/OpsDashboard.js").then((m) => ({ default: m.OpsDashboard })));
 
@@ -64,6 +67,7 @@ export function App() {
       <Route path="/discover" element={<Discover />} />
       <Route path="/diaspora" element={<Diaspora />} />
       <Route path="/scan" element={<Suspense fallback={<ChunkFallback />}><Scan /></Suspense>} />
+      <Route path="/wallet" element={<Suspense fallback={<ChunkFallback />}><Wallet /></Suspense>} />
       <Route path="/pay/:code" element={<Pay />} />
       <Route path="/m/:code" element={<Pay mode="merchant" />} />
       <Route path="/terms" element={<Terms />} />

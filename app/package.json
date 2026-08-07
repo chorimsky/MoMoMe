@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lightninglabs/wavelength-react": "^0.1.1",
+    "@lightninglabs/wavelength-web": "^0.1.1",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",

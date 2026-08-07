@@ -17,7 +17,7 @@ import { createWebWalletEngine, defaultConfig } from "@lightninglabs/wavelength-
 import type { Balance } from "@lightninglabs/wavelength-core";
 import {
   WavelengthProvider, useWallet, useWalletBalance, useWalletReceive,
-  useWalletSend, useWalletCreate, useWalletUnlock, useWalletActivity,
+  useWalletSend, useWalletCreate, useWalletUnlock, useWalletRestore, useWalletActivity,
 } from "@lightninglabs/wavelength-react";
 import { api } from "../api/client.js";
 import type { Quote, Payment, ProviderId, NameSource, PaymentState } from "@shared/types.js";
@@ -32,6 +32,28 @@ const RUNTIME_BASE =
     ? "/wavewalletdk/v0.1.1/"
     : new URL("/wavewalletdk/v0.1.1/", window.location.origin).href;
 
+// The Bitcoin network the wallet runs against. Signet (test) is Phase 1. Going
+// mainnet is gated on TWO things outside this file:
+//   1. Lightning Labs publishing mainnet gateway URLs + granting mainnet access
+//      (the SDK rejects a mainnet config unless allowMainnet is true — and there is
+//      no public mainnet deployment to point at yet), and
+//   2. the user completing a seed backup (enforced in-app before real funds).
+// Flip via VITE_WALLET_NETWORK=mainnet once (1) lands and walletConfig() below is
+// filled in; until then only signet is functional.
+const WALLET_NETWORK: "signet" | "mainnet" =
+  (import.meta.env.VITE_WALLET_NETWORK as string | undefined) === "mainnet" ? "mainnet" : "signet";
+// Set true once mainnet gateway URLs exist and walletConfig()'s mainnet branch is filled.
+const MAINNET_AVAILABLE = false;
+
+/** Runtime config for the active network. `defaultConfig` only accepts preset
+ *  networks (signet/testnet); mainnet must be hand-built with allowMainnet + the
+ *  operator gateway URLs — plug them in here when Lightning Labs publishes them. */
+function walletConfig() {
+  // if (WALLET_NETWORK === "mainnet")
+  //   return { network: "mainnet", allowMainnet: true, /* ...mainnet gateway URLs */ };
+  return defaultConfig("signet");
+}
+
 /** Create the wasm wallet engine once (this whole module is lazy-loaded, so it only
  *  boots when /wallet is actually opened). */
 let _engine: ReturnType<typeof createWebWalletEngine> | null = null;
@@ -44,12 +66,19 @@ function walletEngine() {
       // HTML (Vite can't emit a worker from inside an optimized dep). The standalone
       // classic worker is copied next to the runtime by fetch-wavelength-runtime.sh.
       workerURL: RUNTIME_BASE + "wavewalletdk-worker.js",
-      config: defaultConfig("signet"),
+      config: walletConfig(),
       autoStart: true,
     });
   }
   return _engine;
 }
+
+/** Persisted "seed has been backed up" flag. The mnemonic can ONLY be shown at
+ *  creation (the SDK exposes no reveal-seed call), so this records that the user
+ *  either saved a freshly-created phrase or restored from one they already hold. */
+const BACKED_UP_KEY = "mm_wallet_backed_up";
+function markBackedUp() { try { localStorage.setItem(BACKED_UP_KEY, "1"); } catch { /* storage blocked */ } }
+function hasBackedUp(): boolean { try { return localStorage.getItem(BACKED_UP_KEY) === "1"; } catch { return false; } }
 
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: 18 };
 const input: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontSize: 15, color: "var(--ink)", outline: "none" };
@@ -62,7 +91,7 @@ export function Wallet() {
         {/* Full-nav header (plain <a>) so this stays an isolated island. */}
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 16px" }}>
           <a href="/" aria-label="MoMo›Me — home" style={{ textDecoration: "none", display: "inline-flex" }}><Logo size={30} /></a>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ signet · beta</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ {WALLET_NETWORK} · beta</span>
         </header>
 
         <h1 style={{ fontSize: "clamp(24px,5vw,30px)", letterSpacing: "-0.02em" }}>Lightning wallet</h1>
@@ -70,12 +99,26 @@ export function Wallet() {
           A self-custodial Lightning wallet that runs in your browser — an alternative rail alongside the settlement engine. No node or channels to manage.
         </p>
 
-        {!isolated ? <IsolationHelp /> : (
+        {WALLET_NETWORK === "mainnet" && !MAINNET_AVAILABLE ? <MainnetPending /> :
+          !isolated ? <IsolationHelp /> : (
           <WavelengthProvider engine={walletEngine()}>
             <WalletInner />
           </WavelengthProvider>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Shown when the build is pointed at mainnet but mainnet isn't wired up yet
+ *  (no published gateway + access pending). Keeps the flip explicit and honest. */
+function MainnetPending() {
+  return (
+    <div style={{ ...card }}>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Mainnet isn't live yet</div>
+      <p style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.55 }}>
+        The embedded wallet runs on signet (test coins) for now. Mainnet needs Lightning Labs to publish their mainnet gateway and grant access — once that lands and the seed-backup step is complete, this page moves to real bitcoin. For now, switch back to signet to try it.
+      </p>
     </div>
   );
 }
@@ -97,6 +140,10 @@ function IsolationHelp() {
 function WalletInner() {
   const { phase, error } = useWallet();
   const balance = useWalletBalance();
+  // The one-time recovery phrase to back up, captured from a fresh create(). The SDK
+  // can never show it again, so while it's set we block the wallet behind BackupSeed.
+  const [pendingBackup, setPendingBackup] = useState<string[] | null>(null);
+  const [backedUp, setBackedUp] = useState<boolean>(hasBackedUp);
 
   // Wallet lifecycle (see RuntimePhase): 'ready'/'syncing' → unlocked & usable;
   // 'needsWallet' → first run (create); 'locked' → wallet exists (unlock); the
@@ -118,50 +165,175 @@ function WalletInner() {
         </div>
       </div>
 
-      {/* Balance */}
-      {open && (
-        <div style={{ ...card }}>
-          <div className="overline">Balance</div>
-          <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
-            {balance ? fmtSats(spendableSats(balance)) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
-          </div>
-          {balance && balance.pendingInSat > 0
-            ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} sats incoming</div>
-            : null}
-        </div>
-      )}
-
-      {needsWallet && <CreateWallet />}
+      {needsWallet && <CreateOrRestore onCreated={setPendingBackup} onRestored={() => { markBackedUp(); setBackedUp(true); }} />}
       {locked && <UnlockWallet />}
 
-      {open && <MobileMoneyPayout />}
-      {open && <Receive />}
-      {open && <Send />}
+      {/* A freshly-created wallet MUST back up its phrase before anything else — it
+          can't be shown again, and on mainnet it's the only way to recover funds. */}
+      {open && pendingBackup && (
+        <BackupSeed mnemonic={pendingBackup} onConfirmed={() => { markBackedUp(); setBackedUp(true); setPendingBackup(null); }} />
+      )}
+
+      {open && !pendingBackup && (
+        <>
+          {/* Balance */}
+          <div style={{ ...card }}>
+            <div className="overline">Balance</div>
+            <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
+              {balance ? fmtSats(spendableSats(balance)) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
+            </div>
+            {balance && balance.pendingInSat > 0
+              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} sats incoming</div>
+              : null}
+          </div>
+
+          {!backedUp && <BackupWarning />}
+          <MobileMoneyPayout />
+          <Receive />
+          <Send />
+        </>
+      )}
     </div>
   );
 }
 
-/** First run: create a fresh self-custodial wallet, encrypted with a password
- *  that never leaves the device. */
-function CreateWallet() {
+/** Non-blocking reminder when a wallet is open but we have no record it was ever
+ *  backed up (e.g. created before this step existed, or a reload dropped the one-time
+ *  phrase). Honest about the hard constraint: the phrase can't be reshown. */
+function BackupWarning() {
+  return (
+    <div style={{ ...card, borderColor: "var(--warn)", background: "var(--send-wash)" }}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--warn-ink)" }}>⚠ Recovery phrase not backed up</div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
+        The recovery phrase can only be shown when a wallet is created and can't be retrieved later. If you didn't save it, don't add real funds — create a fresh wallet and back up its phrase first.
+      </p>
+    </div>
+  );
+}
+
+/** First run: either create a fresh wallet or restore one from a recovery phrase. */
+function CreateOrRestore({ onCreated, onRestored }: { onCreated: (mnemonic: string[]) => void; onRestored: () => void }) {
+  const [mode, setMode] = useState<"create" | "restore">("create");
+  return (
+    <div style={{ ...card }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--surface-2)", borderRadius: "var(--r)", padding: 4 }}>
+        {(["create", "restore"] as const).map((m) => (
+          <button key={m} type="button" onClick={() => setMode(m)}
+            style={{ flex: 1, padding: "8px 0", borderRadius: "calc(var(--r) - 3px)", border: "none", background: mode === m ? "var(--surface)" : "transparent", boxShadow: mode === m ? "var(--shadow-sm)" : "none", color: mode === m ? "var(--ink)" : "var(--ink-3)", fontWeight: 650, fontSize: 13.5, cursor: "pointer" }}>
+            {m === "create" ? "Create" : "Restore"}
+          </button>
+        ))}
+      </div>
+      {mode === "create" ? <CreateForm onCreated={onCreated} /> : <RestoreForm onRestored={onRestored} />}
+    </div>
+  );
+}
+
+/** Create a fresh self-custodial wallet, encrypted with a password that never leaves
+ *  the device. On success the SDK returns the recovery phrase ONCE — handed straight
+ *  to the mandatory backup step. */
+function CreateForm({ onCreated }: { onCreated: (mnemonic: string[]) => void }) {
   const { create, createPending, createError } = useWalletCreate();
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const mismatch = pw2.length > 0 && pw !== pw2;
   const canCreate = pw.length >= 8 && pw === pw2 && !createPending;
+  const submit = async () => {
+    const res = await create({ password: pw });
+    if (res?.mnemonic?.length) onCreated(res.mnemonic);
+  };
   return (
-    <div style={{ ...card }}>
+    <div>
       <div style={{ fontSize: 15, fontWeight: 700 }}>Create your wallet</div>
-      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>A new self-custodial wallet on signet. Your keys stay on this device — the password encrypts them and is never sent anywhere.</p>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>A new self-custodial wallet on {WALLET_NETWORK}. Your keys stay on this device — the password encrypts them and is never sent anywhere. You'll back up a recovery phrase next.</p>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
         <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password (min 8 characters)" autoComplete="new-password" style={input} />
         <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Confirm password" autoComplete="new-password" style={input} />
       </div>
       {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>Passwords don't match.</div> : null}
-      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canCreate} onClick={() => { void create({ password: pw }); }}>
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canCreate} onClick={() => { void submit(); }}>
         {createPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Create wallet"}
       </button>
       {createError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(createError.message ?? createError).slice(0, 120)}</div> : null}
+    </div>
+  );
+}
+
+/** Restore an existing wallet on a new device from its recovery phrase. `recoverState`
+ *  makes the daemon rebuild balances/history from the seed via the operator indexer. */
+function RestoreForm({ onRestored }: { onRestored: () => void }) {
+  const { restore, restorePending, restoreError } = useWalletRestore();
+  const [phrase, setPhrase] = useState("");
+  const [pw, setPw] = useState("");
+  const words = phrase.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const validLen = words.length === 12 || words.length === 24;
+  const canRestore = validLen && pw.length >= 8 && !restorePending;
+  const submit = async () => {
+    await restore({ mnemonic: words, password: pw, recoverState: true });
+    onRestored();
+  };
+  return (
+    <div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Restore your wallet</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>Enter your 12- or 24-word recovery phrase and set a password to encrypt it on this device.</p>
+      <textarea value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="Recovery phrase (words separated by spaces)" rows={3}
+        autoComplete="off" autoCapitalize="none" spellCheck={false}
+        style={{ ...input, marginTop: 12, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 13.5 }} />
+      {phrase.trim() && !validLen ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{words.length} words — a phrase is 12 or 24 words.</div> : null}
+      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password (min 8 characters)" autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canRestore} onClick={() => { void submit(); }}>
+        {restorePending ? <Spinner size={15} color="var(--accent-ink)" /> : "Restore wallet"}
+      </button>
+      {restoreError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(restoreError.message ?? restoreError).slice(0, 120)}</div> : null}
+    </div>
+  );
+}
+
+/** Mandatory seed backup, shown once right after creation. Displays the recovery
+ *  phrase, then verifies the user actually saved it (re-enter two random words)
+ *  before the wallet can be used — the phrase can never be shown again. */
+function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed: () => void }) {
+  const [step, setStep] = useState<"show" | "verify">("show");
+  // Two distinct 1-based positions to quiz — derived from the phrase so no RNG.
+  const q1 = (mnemonic.length >> 1) % mnemonic.length;
+  const q2 = (q1 + 7) % mnemonic.length;
+  const [a1, setA1] = useState("");
+  const [a2, setA2] = useState("");
+  const ok = a1.trim().toLowerCase() === mnemonic[q1] && a2.trim().toLowerCase() === mnemonic[q2];
+
+  if (step === "show") {
+    return (
+      <div style={{ ...card, borderColor: "var(--warn)" }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Back up your recovery phrase</div>
+        <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
+          Write these {mnemonic.length} words down in order and keep them offline. They're the <b>only</b> way to recover this wallet — we can't show them again and can't reset them.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, margin: "12px 0" }}>
+          {mnemonic.map((w, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", padding: "7px 10px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--r)" }}>
+              <span className="num" style={{ fontSize: 10.5, color: "var(--ink-3)", width: 16, textAlign: "right" }}>{i + 1}</span>
+              <span className="num" style={{ fontSize: 13.5, fontWeight: 650 }}>{w}</span>
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setStep("verify")}>I've written them down</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...card, borderColor: "var(--warn)" }}>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Confirm your backup</div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>Enter the words at these positions to confirm you saved the phrase.</p>
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Word #{q1 + 1}
+          <input value={a1} onChange={(e) => setA1(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} style={{ ...input, marginTop: 4, fontFamily: "var(--font-mono)" }} /></label>
+        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Word #{q2 + 1}
+          <input value={a2} onChange={(e) => setA2(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} style={{ ...input, marginTop: 4, fontFamily: "var(--font-mono)" }} /></label>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => setStep("show")}>Show phrase</button>
+        <button className="btn btn-primary" style={{ flex: 1 }} disabled={!ok} onClick={onConfirmed}>Confirm &amp; open wallet</button>
+      </div>
     </div>
   );
 }

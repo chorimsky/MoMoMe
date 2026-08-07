@@ -14,7 +14,7 @@
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
 import { createWebWalletEngine, defaultConfig } from "@lightninglabs/wavelength-web";
-import type { Balance } from "@lightninglabs/wavelength-core";
+import type { Balance, RuntimeConfig, Entry } from "@lightninglabs/wavelength-core";
 import {
   WavelengthProvider, useWallet, useWalletBalance, useWalletReceive,
   useWalletSend, useWalletCreate, useWalletUnlock, useWalletRestore, useWalletActivity,
@@ -42,15 +42,30 @@ const RUNTIME_BASE =
 // filled in; until then only signet is functional.
 const WALLET_NETWORK: "signet" | "mainnet" =
   (import.meta.env.VITE_WALLET_NETWORK as string | undefined) === "mainnet" ? "mainnet" : "signet";
-// Set true once mainnet gateway URLs exist and walletConfig()'s mainnet branch is filled.
-const MAINNET_AVAILABLE = false;
+
+// Mainnet endpoints. `defaultConfig` has no mainnet preset, so mainnet is hand-built
+// from the operator gateway URLs Lightning Labs publishes (Ark server + Esplora, and
+// optionally the Lightning-swap server). They're env-driven so going mainnet is a
+// pure config flip — no code change: set VITE_WALLET_NETWORK=mainnet plus these.
+const MAINNET_ARK = import.meta.env.VITE_WALLET_MAINNET_ARK_URL as string | undefined;
+const MAINNET_ESPLORA = import.meta.env.VITE_WALLET_MAINNET_ESPLORA_URL as string | undefined;
+const MAINNET_SWAP = import.meta.env.VITE_WALLET_MAINNET_SWAP_URL as string | undefined;
+// Mainnet is usable only once the required endpoints are supplied.
+const MAINNET_AVAILABLE = !!(MAINNET_ARK && MAINNET_ESPLORA);
 
 /** Runtime config for the active network. `defaultConfig` only accepts preset
- *  networks (signet/testnet); mainnet must be hand-built with allowMainnet + the
- *  operator gateway URLs — plug them in here when Lightning Labs publishes them. */
-function walletConfig() {
-  // if (WALLET_NETWORK === "mainnet")
-  //   return { network: "mainnet", allowMainnet: true, /* ...mainnet gateway URLs */ };
+ *  networks (signet/testnet); mainnet is assembled from the env-supplied operator
+ *  endpoints + allowMainnet (the SDK rejects a mainnet config without it). */
+function walletConfig(): RuntimeConfig {
+  if (WALLET_NETWORK === "mainnet") {
+    return {
+      network: "mainnet",
+      allowMainnet: true,
+      arkServerAddress: MAINNET_ARK,
+      walletEsploraUrl: MAINNET_ESPLORA,
+      ...(MAINNET_SWAP ? { swapServerAddress: MAINNET_SWAP } : { disableSwaps: true }),
+    };
+  }
   return defaultConfig("signet");
 }
 
@@ -151,19 +166,14 @@ function WalletInner() {
   const open = phase === "ready" || phase === "syncing";
   const needsWallet = phase === "needsWallet";
   const locked = phase === "locked";
+  const errored = phase === "error";
+  const booting = !open && !needsWallet && !locked && !errored;
+  const sats = balance ? spendableSats(balance) : null;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      {/* Status */}
-      <div style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
-        {open
-          ? <span style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--recv)", flex: "none" }} />
-          : <Spinner size={16} color="var(--accent)" />}
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 650 }}>{statusLabel(phase)}</div>
-          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>phase: {phase}{error ? ` · ${String(error.message ?? error).slice(0, 60)}` : ""}</div>
-        </div>
-      </div>
+      {errored && <ErrorCard error={error} />}
+      {booting && <BootingCard phase={phase} />}
 
       {needsWallet && <CreateOrRestore onCreated={setPendingBackup} onRestored={() => { markBackedUp(); setBackedUp(true); }} />}
       {locked && <UnlockWallet />}
@@ -176,14 +186,22 @@ function WalletInner() {
 
       {open && !pendingBackup && (
         <>
-          {/* Balance */}
+          {/* Balance (hero) with an inline ready/syncing chip. */}
           <div style={{ ...card }}>
-            <div className="overline">Balance</div>
-            <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
-              {balance ? fmtSats(spendableSats(balance)) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="overline">Balance</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: phase === "syncing" ? "var(--warn)" : "var(--recv)", flex: "none" }} />
+                {phase === "syncing" ? "Syncing" : "Ready"}
+              </span>
+            </div>
+            <div className="num" style={{ fontSize: 32, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
+              {sats != null ? fmtSats(sats) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
             </div>
             {balance && balance.pendingInSat > 0
-              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} sats incoming</div>
+              ? <div style={{ fontSize: 12.5, color: "var(--recv)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} sats incoming</div>
+              : sats === 0
+              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>Empty wallet — use <b>Receive</b> below to add sats.</div>
               : null}
           </div>
 
@@ -191,8 +209,66 @@ function WalletInner() {
           <MobileMoneyPayout />
           <Receive />
           <Send />
+          <Activity />
         </>
       )}
+    </div>
+  );
+}
+
+/** The wasm runtime is booting (first load streams ~130 MB, so this can take a
+ *  moment). A warm, honest loading state beats a bare spinner. */
+function BootingCard({ phase }: { phase: string }) {
+  return (
+    <div style={{ ...card, display: "flex", alignItems: "center", gap: 12 }}>
+      <Spinner size={18} color="var(--accent)" />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 650 }}>{statusLabel(phase)}</div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>First load downloads the wallet software — this can take a moment.</div>
+      </div>
+    </div>
+  );
+}
+
+/** The runtime hit a terminal error (e.g. a stuck storage lock). Offer the fix that
+ *  actually works — a full reload — instead of stranding the user on a dead screen. */
+function ErrorCard({ error }: { error: Error | null }) {
+  return (
+    <div style={{ ...card, borderColor: "var(--bad)" }}>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Wallet couldn't start</div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
+        {error ? String(error.message ?? error).slice(0, 140) : "The in-browser wallet runtime stopped."} Reloading the page usually fixes it.
+      </p>
+      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 12, textDecoration: "none", display: "inline-flex" }}>Reload wallet</a>
+    </div>
+  );
+}
+
+/** Recent wallet activity (newest first) from the daemon's event log. */
+const KIND_GLYPH: Record<string, string> = { send: "↑", receive: "↓", deposit: "↓", exit: "⇄" };
+function Activity() {
+  const items = useWalletActivity().slice(0, 8);
+  if (!items.length) return null;
+  return (
+    <div style={{ ...card }}>
+      <div className="overline" style={{ marginBottom: 8 }}>Activity</div>
+      <div style={{ display: "grid" }}>
+        {items.map((e) => <ActivityRow key={e.id} e={e} />)}
+      </div>
+    </div>
+  );
+}
+function ActivityRow({ e }: { e: Entry }) {
+  const incoming = e.kind === "receive" || e.kind === "deposit";
+  const amtColor = e.status === "failed" ? "var(--bad)" : incoming ? "var(--recv)" : "var(--ink)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: "1px solid var(--line)" }}>
+      <span style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--surface-2)", display: "grid", placeItems: "center", fontSize: 13, flex: "none" }}>{KIND_GLYPH[e.kind] ?? "•"}</span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, textTransform: "capitalize", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.kind}{e.note ? ` · ${e.note}` : ""}</div>
+        <div style={{ fontSize: 11, color: e.status === "failed" ? "var(--bad)" : "var(--ink-3)" }}>{e.status}{e.status === "failed" && e.failureReason ? ` · ${e.failureReason.slice(0, 36)}` : ""}</div>
+      </div>
+      <div className="num" style={{ fontSize: 13, fontWeight: 650, color: amtColor, flex: "none" }}>{incoming ? "+" : "−"}{fmtSats(e.amountSat)}</div>
     </div>
   );
 }
@@ -571,43 +647,46 @@ function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
 function Receive() {
   const { receive, receivePending, receiveError } = useWalletReceive();
   const activity = useWalletActivity();
-  const [sats, setSats] = useState("10000");
+  const [sats, setSats] = useState("");
   const [memo, setMemo] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const amt = Number(sats.replace(/\D/g, "")) || 0;
 
   const gen = async () => {
-    const amt = Number(sats.replace(/\D/g, "")) || 0;
     if (amt <= 0) return;
     const r = await receive({ amountSat: amt, memo: memo.trim() || undefined });
-    setInvoice((r as { invoice?: string })?.invoice ?? null);
+    setInvoice(r.invoice || null); setCopied(false);
   };
-  const paid = invoice ? activity.some((e) => (e as { kind?: string; request?: { lightningInvoice?: string }; status?: string }).kind === "receive" && (e as { request?: { lightningInvoice?: string } }).request?.lightningInvoice === invoice && (e as { status?: string }).status === "settled") : false;
+  // The daemon marks the matching receive Entry 'complete' once the invoice settles.
+  const paid = invoice ? activity.some((e) => e.kind === "receive" && e.request?.lightningInvoice === invoice && e.status === "complete") : false;
+  const copy = () => { if (!invoice) return; void navigator.clipboard?.writeText(invoice); setCopied(true); setTimeout(() => setCopied(false), 1600); };
 
   return (
     <div style={{ ...card }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Receive</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder="Amount (sats)" style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
+        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder="Amount in sats" style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
         <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Note (optional)" maxLength={80} style={{ ...input, flex: "1 1 150px" }} />
       </div>
-      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={receivePending} onClick={() => { void gen(); }}>
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={receivePending || amt <= 0} onClick={() => { void gen(); }}>
         {receivePending ? <Spinner size={15} color="var(--accent-ink)" /> : "Generate invoice"}
       </button>
-      {receiveError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(receiveError).slice(0, 120)}</div> : null}
+      {receiveError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(receiveError.message ?? receiveError).slice(0, 120)}</div> : null}
       {invoice && (
         <div style={{ display: "grid", placeItems: "center", marginTop: 16, gap: 10 }}>
           <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={`lightning:${invoice}`} size={200} /></div>
           {paid
             ? <div style={{ fontSize: 14, fontWeight: 750, color: "var(--recv)" }}>✓ Paid</div>
             : <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Waiting for payment…</div>}
-          <button className="btn btn-ghost btn-sm" onClick={() => { void navigator.clipboard?.writeText(invoice); }}>Copy invoice</button>
+          <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? "Copied ✓" : "Copy invoice"}</button>
         </div>
       )}
     </div>
   );
 }
 
-/** Pay a BOLT11 invoice. */
+/** Pay a BOLT11 invoice from the wallet. */
 function Send() {
   const { send, sendPending, sendError, sendData } = useWalletSend();
   const [bolt11, setBolt11] = useState("");
@@ -616,15 +695,19 @@ function Send() {
     if (!inv) return;
     await send({ invoice: inv });
   };
+  const paste = async () => { try { const t = await navigator.clipboard?.readText(); if (t) setBolt11(t.trim()); } catch { /* clipboard blocked */ } };
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Send</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>Send</span>
+        <button className="btn btn-ghost btn-sm" onClick={() => { void paste(); }}>Paste</button>
+      </div>
       <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="Paste a Lightning invoice (lnbc…)" rows={3}
         style={{ ...input, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 12.5 }} />
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={sendPending || !bolt11.trim()} onClick={() => { void pay(); }}>
         {sendPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay invoice"}
       </button>
-      {sendError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(sendError).slice(0, 120)}</div> : null}
+      {sendError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(sendError.message ?? sendError).slice(0, 120)}</div> : null}
       {sendData ? <div style={{ fontSize: 13, color: "var(--recv)", fontWeight: 650, marginTop: 8 }}>✓ Payment sent</div> : null}
     </div>
   );

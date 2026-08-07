@@ -12,13 +12,16 @@
    Phase 1: signet (test network). Mainnet is gated by Lightning Labs approval +
    a key-backup UX (allowMainnet) — a later phase.
    ============================================================ */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createWebWalletEngine, defaultConfig } from "@lightninglabs/wavelength-web";
 import type { Balance } from "@lightninglabs/wavelength-core";
 import {
   WavelengthProvider, useWallet, useWalletBalance, useWalletReceive,
   useWalletSend, useWalletCreate, useWalletUnlock, useWalletActivity,
 } from "@lightninglabs/wavelength-react";
+import { api } from "../api/client.js";
+import type { Quote, Payment, ProviderId, NameSource, PaymentState } from "@shared/types.js";
+import { PROVIDERS, COUNTRIES, MIN_XAF, detectProvider } from "@shared/domain.js";
 import { Logo, QR, Spinner } from "../components/atoms.js";
 
 // The wasm worker resolves each runtime asset with `new URL(name, runtimeBaseUrl)`,
@@ -131,6 +134,7 @@ function WalletInner() {
       {needsWallet && <CreateWallet />}
       {locked && <UnlockWallet />}
 
+      {open && <MobileMoneyPayout />}
       {open && <Receive />}
       {open && <Send />}
     </div>
@@ -176,6 +180,217 @@ function UnlockWallet() {
         {unlockPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Unlock"}
       </button>
       {unlockError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(unlockError.message ?? unlockError).slice(0, 120)}</div> : null}
+    </div>
+  );
+}
+
+/* ============================================================
+   Send to Mobile Money — the multi-rail bridge. The embedded wallet pays the
+   PLATFORM's Lightning invoice; settlement + the XAF payout then run server-side
+   over the trusted IBEX→Peexit rail (the wallet is only the payer, never the
+   settlement rail — see the money-flow rationale in memory/wavelength-wallet.md).
+   Phase 1 is signet, so this can only settle for real once BOTH the wallet and the
+   platform's IBEX rail are on mainnet; until then it exercises quote→invoice→pay.
+   ============================================================ */
+const FAIL_STATES: PaymentState[] = ["FAILED", "MANUAL_REVIEW", "REFUND_PENDING", "REFUNDED"];
+const POLL_CAP_MS = 4 * 60_000;
+
+function MobileMoneyPayout() {
+  const balance = useWalletBalance();
+  const { send } = useWalletSend();
+  const [phone, setPhone] = useState("");
+  const [xaf, setXaf] = useState("");
+  const [provider, setProvider] = useState<ProviderId>("MTN");
+  const [name, setName] = useState("");
+  const [nameSource, setNameSource] = useState<NameSource>("idle");
+  const [resolving, setResolving] = useState(false);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const mounted = useRef(true);
+  // Set true on every mount (not just once) so StrictMode's mount→unmount→remount
+  // cycle can't leave the ref stuck false and freeze `busy` on after an async call.
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  const digits = phone.replace(/\D/g, "");
+  const amt = Number(xaf.replace(/\D/g, "")) || 0;
+  const spendable = balance ? Math.max(0, (balance.confirmedSat ?? 0) + (balance.creditAvailableSat ?? 0)) : 0;
+  const needSats = quote ? Math.round(quote.inboundAmount * 1e8) : 0;
+
+  // Resolve the recipient (operator + registered name) once the number is complete —
+  // same anonymous lookup the main send flow uses (CM only: the live Peexit corridor).
+  useEffect(() => {
+    let active = true;
+    if (digits.length < 8) { setName(""); setNameSource("idle"); return; }
+    const detected = detectProvider(digits, "CM");
+    if (detected) setProvider(detected);
+    setResolving(true);
+    const h = setTimeout(async () => {
+      try {
+        const r = await api.resolveRecipient(digits, "CM");
+        if (!active) return;
+        if (r.provider && COUNTRIES.CM.providers.includes(r.provider)) setProvider(r.provider);
+        setName(r.name ?? ""); setNameSource(r.status);
+      } catch { /* leave name for manual entry */ }
+      finally { if (active) setResolving(false); }
+    }, 450);
+    return () => { active = false; clearTimeout(h); };
+  }, [digits]);
+
+  const canQuote = amt >= MIN_XAF && digits.length >= 8 && name.trim().length >= 2 && !resolving && !busy;
+
+  const getQuote = async () => {
+    setErr(null); setBusy(true);
+    try { setQuote(await api.createQuote({ xaf: amt, method: "LIGHTNING", country: "CM" })); }
+    catch (e) { setErr(errMsg(e)); }
+    finally { if (mounted.current) setBusy(false); }
+  };
+
+  const pollDelivery = (id: string) => {
+    const started = Date.now();
+    const tick = async () => {
+      try {
+        const p = await api.getPayment(id);
+        if (!mounted.current) return;
+        setPayment(p);
+        if (p.state === "DELIVERED" || FAIL_STATES.includes(p.state)) { setBusy(false); return; }
+      } catch { /* transient — keep polling */ }
+      if (!mounted.current) return;
+      if (Date.now() - started > POLL_CAP_MS) { setBusy(false); return; }
+      setTimeout(tick, 2500);
+    };
+    void tick();
+  };
+
+  const payFromWallet = async () => {
+    if (!quote) return;
+    setErr(null); setBusy(true);
+    let created: Payment | null = null;
+    try {
+      created = await api.createPayment({ quoteId: quote.id, recipient: { phone: digits, country: "CM", provider, name: name.trim(), nameSource } });
+      if (mounted.current) setPayment(created);
+      // Pay the platform's Lightning invoice from the embedded wallet. Once it settles
+      // at IBEX, the server auto-fires the Peexit payout — we just poll for delivery.
+      await send({ invoice: created.payInstruction.code });
+      pollDelivery(created.id);
+    } catch (e) {
+      if (!mounted.current) return;
+      setErr(errMsg(e));
+      setBusy(false);
+      // createPayment succeeded but the wallet couldn't pay → keep the payment so the
+      // user can retry the pay step; if createPayment itself failed, drop back to quote.
+      if (!created) setPayment(null);
+    }
+  };
+
+  const reset = () => { setQuote(null); setPayment(null); setErr(null); setBusy(false); };
+
+  // ---- Result / in-flight ----
+  if (payment) {
+    const delivered = payment.state === "DELIVERED";
+    const failed = FAIL_STATES.includes(payment.state);
+    const rec = payment.recipient;
+    return (
+      <div style={{ ...card }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Send to Mobile Money</div>
+        <div style={{ display: "grid", placeItems: "center", gap: 8, padding: "8px 0" }}>
+          {delivered
+            ? <div style={{ fontSize: 30 }}>✅</div>
+            : failed ? <div style={{ fontSize: 30 }}>⚠️</div>
+            : <Spinner size={26} color="var(--accent)" />}
+          <div style={{ fontSize: 15, fontWeight: 750, textAlign: "center" }}>
+            {delivered ? "Delivered" : failed ? "Couldn't deliver" : err ? "Payment not sent" : "Settling…"}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "center" }}>
+            {fmtXaf(payment.xaf)} XAF → {rec.name || rec.phone} · {PROVIDERS[rec.provider]?.short ?? rec.provider} {COUNTRIES[rec.country]?.dial} {rec.phone}
+          </div>
+          <div className="num" style={{ fontSize: 11, color: "var(--ink-3)" }}>{payment.ref} · {payment.state.toLowerCase().replace(/_/g, " ")}</div>
+        </div>
+        {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 4, textAlign: "center" }}>{err}</div> : null}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          {err && !delivered && !failed && (
+            <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void payFromWallet(); }}>
+              {busy ? <Spinner size={14} color="var(--accent-ink)" /> : "Try payment again"}
+            </button>
+          )}
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={reset}>{delivered || failed ? "Done" : "Close"}</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Quote review ----
+  if (quote) {
+    const short = spendable < needSats;
+    return (
+      <div style={{ ...card }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Confirm transfer</div>
+        <Row k="Recipient" v={`${name || digits} · ${PROVIDERS[provider]?.short ?? provider}`} />
+        <Row k="They receive" v={`${fmtXaf(quote.xaf)} XAF`} strong />
+        <Row k="You pay" v={`${fmtSats(needSats)} sats`} />
+        <Row k="Fee" v={`${fmtXaf(quote.feeXaf)} XAF`} />
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 0 0", lineHeight: 1.5 }}>
+          Paid from your wallet over Lightning; delivery to Mobile Money settles on the platform rail (IBEX → Peexit). Signet beta — real delivery needs the wallet and platform on the same network.
+        </div>
+        {short ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>Wallet balance is {fmtSats(spendable)} sats — not enough to cover this transfer.</div> : null}
+        {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={reset} disabled={busy}>Back</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy || short} onClick={() => { void payFromWallet(); }}>
+            {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay from wallet"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Form ----
+  const verified = nameSource === "provider" || nameSource === "internal";
+  return (
+    <div style={{ ...card }}>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Send to Mobile Money</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "6px 0 12px", lineHeight: 1.5 }}>Pay an MTN or Orange Money number in Cameroon straight from this wallet.</p>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "0 11px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink-2)" }}>{COUNTRIES.CM.dial}</span>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="6 XX XX XX XX" style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
+        </div>
+        {digits.length >= 8 && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--ink-2)" }}>
+            {resolving ? <><Spinner size={12} color="var(--accent)" /> Checking…</>
+              : verified ? <span style={{ color: "var(--recv)" }}>✓ {name} · {PROVIDERS[provider]?.name}</span>
+              : <input value={name} onChange={(e) => { setName(e.target.value); setNameSource("manual"); }} placeholder="Recipient name" style={{ ...input, padding: "8px 11px", fontSize: 13 }} />}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6 }}>
+          {COUNTRIES.CM.providers.map((pid) => (
+            <button key={pid} type="button" onClick={() => setProvider(pid)}
+              style={{ flex: 1, padding: "9px 0", borderRadius: "var(--r)", border: `1px solid ${provider === pid ? "var(--accent)" : "var(--line)"}`, background: provider === pid ? "var(--send-wash)" : "var(--surface-2)", color: "var(--ink)", fontWeight: 650, fontSize: 13, cursor: "pointer" }}>
+              {PROVIDERS[pid].name}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <input value={xaf ? fmtXaf(amt) : ""} onChange={(e) => setXaf(e.target.value)} inputMode="numeric" placeholder="Amount" style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "0 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--ink-2)" }}>XAF</span>
+        </div>
+        {amt > 0 && amt < MIN_XAF ? <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Minimum {fmtXaf(MIN_XAF)} XAF.</div> : null}
+      </div>
+      {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canQuote} onClick={() => { void getQuote(); }}>
+        {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Get quote"}
+      </button>
+    </div>
+  );
+}
+
+/** A compact key/value row for the quote review. */
+function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid var(--line)" }}>
+      <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{k}</span>
+      <span className="num" style={{ fontSize: strong ? 16 : 13.5, fontWeight: strong ? 750 : 600, color: "var(--ink)" }}>{v}</span>
     </div>
   );
 }
@@ -260,3 +475,8 @@ function statusLabel(phase: string): string {
   }
 }
 function fmtSats(n: number): string { return new Intl.NumberFormat("en-US").format(n); }
+function fmtXaf(n: number): string { return new Intl.NumberFormat("fr-FR").format(Math.round(n)); }
+function errMsg(e: unknown): string {
+  const m = (e as { message?: string })?.message ?? String(e);
+  return m.replace(/^Error:\s*/, "").slice(0, 160);
+}

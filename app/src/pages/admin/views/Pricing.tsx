@@ -16,7 +16,7 @@ import { Failed, Loading } from "./Overview.js";
 type Spreads = PricingInfo["spreadBps"];
 type Costs = PricingInfo["costs"];
 const SPREAD_KEYS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
-const RAIL_LABEL: Record<Method, string> = { LIGHTNING: "Lightning", ONCHAIN: "On-chain BTC", USDT: "USDT" };
+const RAIL_LABEL: Record<Method, string> = { LIGHTNING: "Lightning", ONCHAIN: "On-chain BTC", USDT: "USDT", USDC: "USDC" };
 
 /** Compact XAF money (M / k / full). */
 function money(n: number): string {

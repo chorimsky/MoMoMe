@@ -1,14 +1,18 @@
 /* ============================================================
    Peexit (Peex) payout adapter — the SECOND Mobile Money aggregator.
-   Real disbursement via the Peex Platform API (peexit.com): SECRETKEY-header
-   auth, POST /disbursement/request_payment. The operator (MTN/Orange) is
-   auto-detected from the recipient phone — no correspondent code. The request
-   returns a status synchronously (new/pending/paid/failed/rejected); we map it
-   and let the state machine's poll/callback settle. Same contract as PawaPay so
-   the routing engine can pick either invisibly. Idempotent on the payment ref
-   (track_id). Activates when PEEXIT_API_KEY is set; otherwise simulated.
+   Real disbursement via the Peex Platform API (prod: server.peexit.com,
+   IP-allowlisted to our egress): SECRETKEY-header auth, POST
+   /disbursement/request_payment. The operator (MTN/Orange) is auto-detected from
+   the recipient phone — no correspondent code. The request returns a status
+   synchronously (new/pending/paid/failed/rejected); the final state then arrives
+   two ways: the notification callback (HTTP Basic Auth, an array of txns) AND an
+   authoritative re-query GET /disbursement/all_requests?track_id= (the reconcile
+   backstop). Same contract as PawaPay so the routing engine can pick either
+   invisibly. Idempotent on the payment ref (track_id). Activates when
+   PEEXIT_API_KEY is set; otherwise simulated.
    ============================================================ */
 import crypto from "node:crypto";
+import { fetchT } from "./http.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
 import { config, peexitLive } from "../config.js";
@@ -31,15 +35,23 @@ function splitName(name?: string): { first: string; last: string } {
   return { first: parts[0], last: parts.slice(1).join(" ") || parts[0] };
 }
 
+// Known-pending statuses — the payout is accepted but not yet settled.
+const PEEXIT_PENDING = new Set(["new", "pending", "processing", "accepted", "in_progress", "inprogress", "queued", "initiated"]);
 function mapStatus(s: string | undefined): PayoutStatus {
-  const x = (s ?? "").toLowerCase();
-  if (x === "paid") return "COMPLETED";
-  if (["failed", "rejected", "cancelled", "canceled"].includes(x)) return "FAILED";
-  return "PENDING"; // new / pending / processing
+  const x = (s ?? "").toLowerCase().trim();
+  // Only UNAMBIGUOUS money-delivered terms complete a payout — completing releases the
+  // held crypto, so we never guess a synonym that might merely mean "request accepted".
+  if (["paid", "success", "successful"].includes(x)) return "COMPLETED";
+  if (["failed", "rejected", "cancelled", "canceled", "declined", "reversed"].includes(x)) return "FAILED";
+  // Anything not in the known-pending set is a status we've never seen — surface it so a
+  // real (settled/failed) synonym is caught and added deliberately, rather than silently
+  // held as PENDING forever (crypto stranded).
+  if (x && !PEEXIT_PENDING.has(x)) console.warn(`[peexit] unrecognized status "${x}" → treating as PENDING (verify mapping)`);
+  return "PENDING";
 }
 
 async function peex(path: string, init: RequestInit): Promise<Response> {
-  return fetch(`${config.peexit.apiUrl}${path}`, {
+  return fetchT(`${config.peexit.apiUrl}${path}`, {
     ...init,
     headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey, ...(init.headers ?? {}) },
   });
@@ -80,64 +92,208 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
   if (!res.ok) throw new Error(`Peexit disbursement failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as { request?: { id?: number | string; status?: string } };
   const reqObj = data.request ?? (data as { id?: number | string; status?: string });
-  statusByRef.set(req.idempotencyKey, mapStatus(reqObj.status));
+  const mapped = mapStatus(reqObj.status);
+  // Positive-acceptance check (PawaPay asserts the same on its accept states): a genuine
+  // accept carries an id and/or a non-failure status. A 2xx that maps to FAILED, or one
+  // with NEITHER an id nor a status (soft error / unexpected shape), is NOT an accepted
+  // payout — throw so submitWithRetry → beginRefund handles it, instead of the payment
+  // stranding in PAYOUT_REQUESTED (crypto held, never delivered, never refunded).
+  if (mapped === "FAILED" || (reqObj.id == null && !reqObj.status)) {
+    throw new Error(`Peexit disbursement not accepted: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  statusByRef.set(req.idempotencyKey, mapped);
   return String(reqObj.id ?? req.idempotencyKey);
+}
+
+/* ---------- cash-in (COLLECTION — request payment FROM a number) ----------
+   Peex Collect API: POST /collection/request_payment (SAME SECRETKEY as disbursement;
+   the docs' /collection/me is a GET for account info, which is why POSTing it 401'd).
+   Required body (confirmed from Peexit's own 422 validation): track_id, phone, amount,
+   currency, country, customer_name — a DIFFERENT schema from disbursement (phone not
+   mobile_phone; a single customer_name not first/last). The payer approves on their
+   phone. */
+export async function collect(req: DisburseRequest): Promise<{ status: "accepted"; providerRef: string; simulated: boolean }> {
+  if (!peexitLive()) return { status: "accepted", providerRef: id("pxc"), simulated: true };
+  const res = await peex("/collection/request_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      track_id: req.idempotencyKey,
+      phone: localMsisdn(req.phone),   // the payer we collect FROM
+      amount: req.xaf,
+      currency: "XAF",
+      country: req.country,            // ISO Alpha-2 (e.g. CM)
+      customer_name: (req.name && req.name.trim()) || "Customer",
+    }),
+  });
+  if (!res.ok) throw new Error(`Peexit collection failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { request?: { id?: number | string; status?: string }; id?: number | string; status?: string };
+  const reqObj = data.request ?? (data as { id?: number | string; status?: string });
+  return { status: "accepted", providerRef: String(reqObj.id ?? req.idempotencyKey), simulated: false };
+}
+
+/** Authoritative COLLECTION status by track_id — GET /collection/all_requests?track_id=.
+ *  The row carries `paid_time` (set once the payer approves = COMPLETED) and, on some
+ *  responses, a `status`. 404 = outside the 3-day window / not found → null. Used to
+ *  settle a "pending" cash-in (a collection is async — the payer approves on their
+ *  phone). Returns null when not live. */
+export async function collectStatus(trackId: string): Promise<PayoutStatus | null> {
+  if (!peexitLive()) return null;
+  try {
+    const res = await peex(`/collection/all_requests?track_id=${encodeURIComponent(trackId)}`, { method: "GET" });
+    if (res.status === 404 || !res.ok) return null;
+    const d = (await res.json()) as { track_id?: string; paid_time?: string | null; status?: string; fees?: number } | Array<{ track_id?: string; paid_time?: string | null; status?: string; fees?: number }>;
+    // Exact track_id match on the array form (same 3-day sibling-row risk as the
+    // disbursement path) — a blind d[0] could settle a cash-in against another txn.
+    const row = Array.isArray(d) ? d.find((r) => r.track_id === trackId) : d;
+    if (!row) return null;
+    if (typeof row.fees === "number") feeByRef.set(trackId, row.fees); // Peexit reports the exact fee on the row
+    if (row.status) return mapStatus(row.status);
+    return row.paid_time ? "COMPLETED" : "PENDING";
+  } catch { return null; }
 }
 
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;
   if (local.simulated) return "COMPLETED";
-  // Peexit returns the status synchronously on submit; the async final state for
-  // a "pending" payout arrives via the notification webhook.
-  return statusByRef.get(idempotencyKey) ?? "PENDING";
+  const cached = statusByRef.get(idempotencyKey) ?? "PENDING";
+  if (!peexitLive()) return cached;
+  // AUTHORITATIVE re-query: GET /disbursement/all_requests?track_id= returns our
+  // requests from the last 3 days with their current status. This is what lets the
+  // reconcile backstop settle a payout even if the callback is lost, and lets the
+  // callback handler confirm the status rather than trust the posted body alone.
+  try {
+    const res = await peex(`/disbursement/all_requests?track_id=${encodeURIComponent(idempotencyKey)}`, { method: "GET" });
+    // 404 = "Transactions not found on your listing! (3 days)" → outside the
+    // window (too new or >3 days); keep the last known status.
+    if (res.status === 404 || !res.ok) return cached;
+    const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string; fees?: number }>;
+    // Require an EXACT track_id match — the endpoint "returns our requests from the
+    // last 3 days", so if Peexit's server-side track_id filter is ignored/loose, a
+    // blind arr[0] fallback would settle/fail THIS payout on an unrelated sibling
+    // transaction (release crypto for a payout that never landed, or spuriously
+    // refund a paid one). No match → keep the last known status, exactly like 404.
+    const row = Array.isArray(arr) ? arr.find((r) => r.track_id === idempotencyKey) : undefined;
+    if (row && typeof row.fees === "number") feeByRef.set(idempotencyKey, row.fees);
+    if (!row?.status) return cached;
+    const mapped = mapStatus(row.status);
+    statusByRef.set(idempotencyKey, mapped);
+    // Capture the rejection reason (e.g. INSUFFICIENT_FUND_TO_PAY_TX) so callers can
+    // explain WHY a payout failed instead of a bare "failed".
+    if (mapped === "FAILED") failReasonByRef.set(idempotencyKey, row.payment_proof || row.message || "rejected");
+    return mapped;
+  } catch { return cached; }
+}
+
+const failReasonByRef = new Map<string, string>();
+/** The last rejection reason for a payout ref (from queryStatus), if any. */
+export function failReason(idempotencyKey: string): string | undefined {
+  return failReasonByRef.get(idempotencyKey);
+}
+
+const feeByRef = new Map<string, number>();
+/** The actual fee (XAF) Peexit charged for an op ref, once its settled row was read
+ *  (disbursement or collection). undefined until known. */
+export function feeXafFor(idempotencyKey: string): number | undefined {
+  return feeByRef.get(idempotencyKey);
 }
 
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }
 
-/** Wallet balance (XAF) for the operator matching the provider — from
- *  GET /operators `solde`. null when not configured. */
-let balCache: { at: number; ops: Array<{ name?: string; solde?: number }> } | null = null;
-export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
+/** ACCURATE merchant balances from the ACCOUNT endpoints:
+ *  - GET /disbursement/me → `disbursement_solde` = the PAYOUT balance (shared across
+ *    operators; a payout debits this).
+ *  - GET /collection/me   → `collect_solde` = collected funds.
+ *  NOTE: `/operators` lists Peexit's OWN internal operator wallets (huge ±billions,
+ *  e.g. "MTN LLP Coorp"), NOT our balance — reading those wrongly made an empty payout
+ *  balance look funded. Cached briefly. null when not live/reachable. */
+type Acct = {
+  at: number;
+  disbursement: number | null; collect: number | null;
+  // fee schedule per operator, as the account reports it (orange_fees / mtn_fees)
+  disbMtn: number | null; disbOrange: number | null;
+  collMtn: number | null; collOrange: number | null;
+};
+let acctCache: Acct | null = null;
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+async function accountBalances(): Promise<Acct> {
+  if (acctCache && Date.now() - acctCache.at < 15_000) return acctCache;
+  const read = async (path: string): Promise<Record<string, unknown>> => {
+    try {
+      const r = await peex(path, { method: "GET" });
+      if (!r.ok) return {};
+      return (await r.json()) as Record<string, unknown>;
+    } catch { return {}; }
+  };
+  // /disbursement/me → { disbursement_solde, mtn_fees, orange_fees, ... }
+  // /collection/me   → { collect_solde, mtn_fees, orange_fees, ... }
+  const [d, c] = await Promise.all([read("/disbursement/me"), read("/collection/me")]);
+  acctCache = {
+    at: Date.now(),
+    disbursement: num(d.disbursement_solde), collect: num(c.collect_solde),
+    disbMtn: num(d.mtn_fees), disbOrange: num(d.orange_fees),
+    collMtn: num(c.mtn_fees), collOrange: num(c.orange_fees),
+  };
+  return acctCache;
+}
+
+/** The account's fee schedule (as Peexit reports it on /disbursement/me + /collection/me).
+ *  Values are the raw `mtn_fees` / `orange_fees` numbers; null when absent/not live.
+ *  Whether these are % or flat XAF is marked by the caller after inspection. */
+export async function feeSchedule(): Promise<{ disbMtn: number | null; disbOrange: number | null; collMtn: number | null; collOrange: number | null } | null> {
   if (!peexitLive()) return null;
-  try {
-    if (!balCache || Date.now() - balCache.at > 15_000) {
-      const res = await peex("/operators", { method: "GET" });
-      if (!res.ok) return null;
-      balCache = { at: Date.now(), ops: (await res.json()) as Array<{ name?: string; solde?: number }> };
-    }
-    const want = provider === "ORANGE" ? "orange" : provider === "AIRTEL" ? "airtel" : "mtn";
-    // Prefer the canonical country operator (e.g. "MTN-CM" / "Orange-cm"); else
-    // the best same-network wallet. This reflects the wallet the payout debits,
-    // so a negative MTN-CM means MTN won't route here while a funded Orange-cm will.
-    const exact = balCache.ops.find((o) => (o.name ?? "").toLowerCase() === `${want}-cm`);
-    if (exact) return Number(exact.solde ?? 0);
-    const soldes = balCache.ops.filter((o) => (o.name ?? "").toLowerCase().includes(want)).map((o) => Number(o.solde ?? 0));
-    return soldes.length ? Math.max(...soldes) : 0;
-  } catch { return null; }
+  const a = await accountBalances();
+  return { disbMtn: a.disbMtn, disbOrange: a.disbOrange, collMtn: a.collMtn, collOrange: a.collOrange };
 }
 
-/* ---------- notification webhook (async final status) ---------- */
-export function verifyWebhook(rawBody: string, signature: string | undefined): boolean {
-  const secret = config.peexit.webhookSecret;
-  // No secret configured → accept only OUTSIDE production (sandbox testing). In
-  // production a missing secret means the callback can't be authenticated, so
-  // fail closed (reject) rather than trust an unauthenticated body.
-  if (!secret) return !peexitLive();
-  if (typeof signature !== "string" || !signature) return false;
-  const expect = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expect);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+/** Available PAYOUT balance (XAF) — the account's `disbursement_solde` (shared across
+ *  operators). null when not live/reachable. */
+export async function availableBalanceXaf(_country: CountryCode, _provider?: ProviderId): Promise<number | null> {
+  if (!peexitLive()) return null;
+  return (await accountBalances()).disbursement;
 }
 
-export function parsePayoutEvent(body: unknown): { ref: string; status: PayoutStatus } | null {
-  // ---- CONFIRM notification shape against Peexit /notifications docs ----
-  const e = body as { track_id?: string; status?: string; request?: { track_id?: string; status?: string } };
-  const ref = e.track_id ?? e.request?.track_id;
-  const status = e.status ?? e.request?.status;
-  if (!ref || !status) return null;
-  return { ref, status: mapStatus(status) };
+/** Collected balance (XAF) — the account's `collect_solde` (what cash-in fills). */
+export async function collectBalanceXaf(): Promise<number | null> {
+  if (!peexitLive()) return null;
+  return (await accountBalances()).collect;
+}
+
+/* ---------- notification callback (async final status) ---------- */
+/** Constant-time string compare that doesn't leak length via early return. */
+function safeEq(a: string, b: string): boolean {
+  const ba = Buffer.from(a), bb = Buffer.from(b);
+  if (ba.length !== bb.length) { crypto.timingSafeEqual(ba, ba); return false; }
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+/** Peexit authenticates its callback with HTTP Basic Auth, using credentials we
+ *  define and hand to Peexit (per the /notifications docs — NOT an HMAC). We
+ *  validate the inbound `Authorization: Basic …` header against our configured
+ *  user/pass. No password configured → accept only OUTSIDE production (sandbox);
+ *  in production fail closed so an unauthenticated body can't settle a payout. */
+export function verifyCallbackAuth(authHeader: string | undefined): boolean {
+  const { callbackUser, callbackPass } = config.peexit;
+  if (!callbackPass) return !peexitLive();
+  if (typeof authHeader !== "string" || !authHeader.toLowerCase().startsWith("basic ")) return false;
+  let decoded: string;
+  try { decoded = Buffer.from(authHeader.slice(6).trim(), "base64").toString("utf8"); } catch { return false; }
+  const i = decoded.indexOf(":");
+  if (i < 0) return false;
+  return safeEq(decoded.slice(0, i), callbackUser) && safeEq(decoded.slice(i + 1), callbackPass);
+}
+
+/** The callback body is an ARRAY of transaction objects (Peexit posts all
+ *  non-transmitted transactions), each carrying track_id + status. Returns one
+ *  {ref,status} per recognizable entry. */
+export function parsePayoutEvents(body: unknown): { ref: string; status: PayoutStatus }[] {
+  const list = Array.isArray(body) ? body : [body];
+  const out: { ref: string; status: PayoutStatus }[] = [];
+  for (const item of list) {
+    const e = item as { track_id?: string; status?: string };
+    if (e?.track_id && e.status) out.push({ ref: e.track_id, status: mapStatus(e.status) });
+  }
+  return out;
 }

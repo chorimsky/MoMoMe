@@ -18,6 +18,22 @@ const DEFAULTS: AdminSettings = {
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
+  // Crypto pay-in methods offered to customers. USDC is not live yet (IBEX receive
+  // combo not enabled) → default off; the rest on.
+  methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
+  // Product surfaces — all on by default; a super-admin can disable any of them.
+  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true },
+  // Treasury sweep destinations — all unset until an operator configures them.
+  treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
+  // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
+  // CTR/large-transaction reporting at 5,000,000 XAF; CDD/identification at
+  // 1,000,000 XAF for occasional transactions; 10-year record retention.
+  compliance: {
+    officer: "", reportingEntity: "MoMo›Me",
+    ctrThresholdXaf: 5_000_000, cddThresholdXaf: 1_000_000,
+    structuringWindowH: 24, structuringXaf: 5_000_000,
+    sanctionsList: [], retentionYears: 10,
+  },
 };
 
 let settings: AdminSettings = DEFAULTS;
@@ -35,6 +51,10 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
+    methods: { ...DEFAULTS.methods, ...(d.methods ?? {}) },
+    features: { ...DEFAULTS.features, ...(d.features ?? {}) },
+    treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
+    compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}) },
   };
 });
 
@@ -54,6 +74,10 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
+    methods: { ...settings.methods, ...(patch.methods ?? {}) },
+    features: { ...settings.features, ...(patch.features ?? {}) },
+    treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
+    compliance: { ...settings.compliance, ...(patch.compliance ?? {}) },
   };
   touch("settings");
   return settings;

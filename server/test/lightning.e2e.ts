@@ -127,6 +127,12 @@ async function main() {
     const recents = await J("/api/me/recipients");
     ok("recent recipients lists the sender's recipient(s)", Array.isArray(recents.body) && recents.body.length >= 1 && !!recents.body[0].phone);
 
+    // D7: recipient resolution requires an identified device — not an anonymous name oracle.
+    const resolveDev = await J("/api/recipients/resolve?phone=677000789&country=CM");
+    ok("resolve with a device → 200", resolveDev.status === 200 && !!resolveDev.body.provider);
+    const resolveAnon = await fetch(base + "/api/recipients/resolve?phone=677000789&country=CM").then((r) => r.status);
+    ok("resolve without a device → 401 (no anonymous name oracle)", resolveAnon === 401);
+
     // 7. admin login guard + operational settings (HTTP, live server)
     const auth = (tok: string, init?: RequestInit): RequestInit => ({ ...init, headers: { "content-type": "application/json", authorization: `Bearer ${tok}`, ...(init?.headers ?? {}) } });
     const noTok = await J("/api/admin/overview");
@@ -306,10 +312,19 @@ async function main() {
       sentWebhookReg = JSON.parse(init.body);
       return new Response(null, { status: 204 });
     }
+    if (u.endsWith("/invoice/pay")) {
+      // OUTBOUND refund payment. Drive the branches by a marker in the bolt11:
+      // "throwme" → server error (payInvoice throws — ambiguous); "inflight" → accepted
+      // but not settled (settleDateUtc null → poll); else → settled synchronously.
+      const b = JSON.parse(init.body) as { bolt11: string };
+      if (b.bolt11.includes("throwme")) return new Response("boom", { status: 500 });
+      if (b.bolt11.includes("inflight")) return new Response(JSON.stringify({ transactionId: "tx_refund_fail", settleDateUtc: null }), { status: 200 });
+      return new Response(JSON.stringify({ transactionId: "tx_refund_ok", settleDateUtc: "2026-06-04T00:00:00Z" }), { status: 200 });
+    }
     if (u.includes("/v2/transaction/") && !u.endsWith("/details")) {
-      // GET /v2/transaction/{id} — the real status source. "expired" → CANCEL
-      // (unpaid), anything else → a paid invoice (receiveMsat > 0).
-      if (u.includes("tx_expired")) {
+      // GET /v2/transaction/{id} — the real status source. "expired"/"_fail" → CANCEL
+      // (unpaid/failed), anything else → a paid invoice (receiveMsat > 0).
+      if (u.includes("tx_expired") || u.includes("tx_refund_fail")) {
         return new Response(JSON.stringify({ status: "failed", settledAt: null, invoice: { settleDateUtc: null, receiveMsat: 0, state: { name: "CANCEL" } } }), { status: 200 });
       }
       return new Response(JSON.stringify({ settledAt: "2026-06-04T00:00:00Z", invoice: { settleDateUtc: "2026-06-04T00:00:00Z", receiveMsat: MSAT, state: { name: "SETTLED" } } }), { status: 200 });
@@ -428,17 +443,27 @@ async function main() {
 
     /* ---- Part C — admin retry / refund correctness (review fixes) ---- */
     console.log("\nPart C — refund & retry ledger correctness");
-    const { adminRetry, adminRefund, onPayoutResult } = await import("../src/core/stateMachine.js");
+    const { adminRetry, adminRefund, onPayoutResult, completeRefund, reconcileStuckRefunds } = await import("../src/core/stateMachine.js");
     const nets = (id: string) => { const m: Record<string, number> = {}; for (const e of entriesFor(id)) m[e.currency] = (m[e.currency] ?? 0) + (e.direction === "debit" ? e.amount : -e.amount); return m; };
 
-    // Refund a settled (but here treated as undelivered) payment → ledger nets to zero.
-    seedPayment("pay_refund", "h_refund", BTC_IN);
+    // Refund a settled ON-CHAIN payment (operator returns the crypto out-of-band, then
+    // adminRefund reverses the ledger) → ledger nets to zero.
+    seedPayment("pay_refund", "h_refund", BTC_IN, "ONCHAIN");
     await confirmInbound(storeMod.findByProviderRef("h_refund")!, BTC_IN);
     storeMod.getPayment("pay_refund")!.displayStatus = "Pending"; // make it refundable
-    adminRefund(storeMod.getPayment("pay_refund")!);
+    ok("adminRefund reverses an on-chain payment", adminRefund(storeMod.getPayment("pay_refund")!) === true);
     const rn = nets("pay_refund");
     ok("refund reverses ledger to zero (no float overstatement)", Math.abs(rn.BTC ?? 0) < 1e-9 && Math.abs(rn.XAF ?? 0) < 1e-9);
     ok("refunded payment is REFUNDED", storeMod.getPayment("pay_refund")!.state === "REFUNDED");
+
+    // A settled LIGHTNING inbound must NOT be adminRefund-reversible — it holds real sats
+    // with an automated return path (the sender-invoice claim flow); reversing its ledger
+    // without a send would convert held sats into sweepable treasury. adminRefund refuses it.
+    seedPayment("pay_ln_norefund", "h_ln_norefund", BTC_IN);
+    await confirmInbound(storeMod.findByProviderRef("h_ln_norefund")!, BTC_IN);
+    storeMod.getPayment("pay_ln_norefund")!.displayStatus = "Pending";
+    ok("adminRefund refuses a settled Lightning inbound (use the claim flow)",
+      adminRefund(storeMod.getPayment("pay_ln_norefund")!) === false && storeMod.getPayment("pay_ln_norefund")!.state !== "REFUNDED");
     // Idempotent: a second refund must be a no-op (never double-reverse the ledger).
     const secondRefund = adminRefund(storeMod.getPayment("pay_refund")!);
     const rn2 = nets("pay_refund");
@@ -450,34 +475,41 @@ async function main() {
     const ledgerMod2 = await import("../src/core/ledger.js");
     const domainMod = await import("../../shared/domain.js");
     const availFloat = domainMod.XAF_FLOAT_BASE + ledgerMod2.balance("external_recipient", "XAF") + ledgerMod2.balance("payout_float_XAF", "XAF");
-    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN);
+    // On-chain so the cleanup adminRefund below is legitimate (a Lightning inbound would
+    // — correctly — refuse adminRefund and use the claim flow instead).
+    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN, "ONCHAIN");
     overP.xaf = availFloat + 100_000; overP.totalXaf = overP.xaf + overP.feeXaf; storeMod.putPayment(overP);
     await confirmInbound(storeMod.findByProviderRef("h_float_over")!, BTC_IN);
     ok("over-committing payout is held for float (MANUAL_REVIEW)", storeMod.getPayment("pay_float_over")!.state === "MANUAL_REVIEW");
+    ok("adminRefund releases the held on-chain reservation", adminRefund(storeMod.getPayment("pay_float_over")!) === true); // release its ledger reservation so later tests have float
 
-    // Retry a MANUAL_REVIEW payment → delivered, ledger balanced, NO double-pay.
+    // Retry a MANUAL_REVIEW payment that had reached FX-lock (a LATE hold) → delivered,
+    // ledger balanced, NO double-pay. (adminRetry refuses a pre-FX-lock hold.)
     seedPayment("pay_retry", "h_retry", BTC_IN);
-    storeMod.getPayment("pay_retry")!.state = "MANUAL_REVIEW";
-    storeMod.getPayment("pay_retry")!.displayStatus = "Pending";
+    { const pr = storeMod.getPayment("pay_retry")!; pr.state = "MANUAL_REVIEW"; pr.displayStatus = "Pending"; pr.events.push({ at: new Date().toISOString(), state: "FX_LOCKED" }); storeMod.putPayment(pr); }
     await adminRetry(storeMod.getPayment("pay_retry")!);
     ok("retry delivers the payment", storeMod.getPayment("pay_retry")!.state === "DELIVERED");
     const yn = nets("pay_retry");
     ok("retry posts a balanced payout leg", Math.abs(yn.XAF ?? 0) < 1e-9);
-    const ppMod = await import("../src/adapters/pawapay.js");
-    const firstRef = ppMod.statusByKey("pay_retry")?.providerRef;
+    const peexMod = await import("../src/adapters/peexit.js"); // MTN now routes to Peexit
+    const firstRef = peexMod.statusByKey("pay_retry")?.providerRef;
     await adminRetry(storeMod.getPayment("pay_retry")!); // idempotent: Completed → returns false
-    ok("retry is exactly-once (no second disbursement)", ppMod.statusByKey("pay_retry")?.providerRef === firstRef);
+    ok("retry is exactly-once (no second disbursement)", peexMod.statusByKey("pay_retry")?.providerRef === firstRef);
 
     /* ---- Part D — Mobile Money rail: async payout, failure→refund, guards ---- */
     console.log("\nPart D — Mobile Money payout (callback, failure, limits)");
 
-    // Payout callback FAILED → auto-refund, ledger nets to zero.
+    // Payout callback FAILED (Lightning inbound) → enter the refund-claim flow: the
+    // sender must supply an invoice; the ledger is NOT reversed until the refund pays.
     seedPayment("pay_mmfail", "h_mmfail", BTC_IN);
     storeMod.getPayment("pay_mmfail")!.state = "PAYOUT_REQUESTED"; // awaiting the callback
     await onPayoutResult("pay_mmfail", "FAILED");
-    ok("failed payout → REFUNDED", storeMod.getPayment("pay_mmfail")!.state === "REFUNDED");
+    ok("failed payout → REFUND_PENDING (awaiting sender invoice)", storeMod.getPayment("pay_mmfail")!.state === "REFUND_PENDING" && storeMod.getPayment("pay_mmfail")!.refundNeedsDestination === true);
+    // Sender supplies a (amount-less) invoice → refund pays out → REFUNDED, ledger balances.
+    const claim = await completeRefund(storeMod.getPayment("pay_mmfail")!, "lnbc1refundok");
+    ok("refund claim pays out → REFUNDED", claim.ok === true && storeMod.getPayment("pay_mmfail")!.state === "REFUNDED");
     const fn = nets("pay_mmfail");
-    ok("failed payout refund balances ledger", Math.abs(fn.BTC ?? 0) < 1e-9 && Math.abs(fn.XAF ?? 0) < 1e-9);
+    ok("completed refund balances ledger", Math.abs(fn.BTC ?? 0) < 1e-9 && Math.abs(fn.XAF ?? 0) < 1e-9);
 
     // onPayoutResult is idempotent — a duplicate COMPLETED on a delivered payment is a no-op.
     const okEvents = storeMod.getPayment("pay_live_ok")!.events.length;
@@ -524,22 +556,24 @@ async function main() {
       && !learned.lightningAddresses.some((a) => a.startsWith("momo-bx@")));
     void before;
 
-    // Routing: invisible aggregator selection per provider (health being equal).
-    ok("Orange routes to Peexit (preferred)", routing.selectAggregator("ORANGE").name === "peexit");
-    ok("MTN routes to PawaPay", routing.selectAggregator("MTN").name === "pawapay");
+    // Routing: BOTH operators go to Peexit (PawaPay's account isn't activated, so it's
+    // out of rotation — SUPPORTS.pawapay = []). Peexit auto-detects MTN vs Orange.
+    ok("Orange routes to Peexit", routing.selectAggregator("ORANGE").name === "peexit");
+    ok("MTN routes to Peexit", routing.selectAggregator("MTN").name === "peexit");
 
-    // Health-aware failover: take Peexit down → Orange must route to PawaPay.
+    // Peexit is the only rail, so there is no failover: even marked down it stays the
+    // selection (pool falls back to all supporting rails when none are eligible).
     routing.setAggregatorUp("peexit", false);
-    ok("Orange fails over to PawaPay when Peexit is down", routing.selectAggregator("ORANGE").name === "pawapay");
+    ok("Orange has no alternate rail — still Peexit when down", routing.selectAggregator("ORANGE").name === "peexit");
     routing.setAggregatorUp("peexit", true);
-    ok("Orange returns to Peexit once healthy", routing.selectAggregator("ORANGE").name === "peexit");
+    ok("Orange stays on Peexit once healthy", routing.selectAggregator("ORANGE").name === "peexit");
 
-    // Balance-aware payout selection: the funded API picks up. With no real rail
-    // configured (test env), it routes by preference (simulated).
+    // Balance-aware payout selection: with no real rail configured (test env) it routes
+    // by preference (simulated) — Peexit for both operators.
     const fundedMtn = await routing.selectFundedAggregator("MTN", "CM", 100);
     const fundedOrange = await routing.selectFundedAggregator("ORANGE", "CM", 100);
     ok("balance-aware select (sandbox) → a usable aggregator", !!fundedMtn && !!fundedOrange);
-    ok("balance-aware select falls back to preference when no real rail", fundedMtn!.name === "pawapay" && fundedOrange!.name === "peexit");
+    ok("balance-aware select falls back to preference (Peexit) when no real rail", fundedMtn!.name === "peexit" && fundedOrange!.name === "peexit");
     // requireLive: real-money settlement must NEVER fall back to a simulated rail.
     const liveMtn = await routing.selectFundedAggregator("MTN", "CM", 100, true);
     const liveOrange = await routing.selectFundedAggregator("ORANGE", "CM", 100, true);
@@ -579,6 +613,60 @@ async function main() {
     const removedIds = idMod.pruneOrphanIdentities(new Set()); // no delivered numbers → all UNCLAIMED pruned
     ok("prune removes an unclaimed never-delivered identity", removedIds.includes(orphan.customerId) && idMod.getIdentityByPhone("699888777") === undefined);
     ok("prune keeps a claimed identity", idMod.getIdentityByPhone("699888666") !== undefined);
+
+    /* ---- Part F — refund-claim flow hardening (audit findings M1–M4) ---- */
+    console.log("\nPart F — refund-claim flow hardening");
+
+    // M3 — an ON-CHAIN payout failure has no automated refund path, so it must hold for
+    // MANUAL_REVIEW (operator returns the crypto), NOT strand in REFUND_PENDING (which
+    // completeRefund rejects as refund_lightning_only).
+    seedPayment("pay_oc_fail", "h_oc_fail", BTC_IN, "ONCHAIN");
+    storeMod.getPayment("pay_oc_fail")!.state = "PAYOUT_REQUESTED";
+    await onPayoutResult("pay_oc_fail", "FAILED");
+    ok("M3: on-chain payout failure → MANUAL_REVIEW (not a dead REFUND_PENDING)", storeMod.getPayment("pay_oc_fail")!.state === "MANUAL_REVIEW");
+
+    // M4 — adminRetry must refuse a payout that is already in flight (PAYOUT_REQUESTED),
+    // even with FX_LOCK present — a second disburse could double-pay if the adapter's
+    // in-memory idempotency map is cold.
+    seedPayment("pay_inflight", "h_inflight", BTC_IN);
+    { const pr = storeMod.getPayment("pay_inflight")!; pr.state = "PAYOUT_REQUESTED"; pr.displayStatus = "Pending"; pr.events.push({ at: new Date().toISOString(), state: "FX_LOCKED" }); storeMod.putPayment(pr); }
+    const inflightRetry = await adminRetry(storeMod.getPayment("pay_inflight")!);
+    ok("M4: adminRetry refuses an in-flight (PAYOUT_REQUESTED) payout", inflightRetry === false && storeMod.getPayment("pay_inflight")!.state === "PAYOUT_REQUESTED");
+
+    // M1 — an AMBIGUOUS refund payout (payInvoice throws AFTER possibly sending) must go
+    // to MANUAL_REVIEW, NOT reopen for a second invoice (which would double-refund).
+    seedPayment("pay_refamb", "h_refamb", BTC_IN);
+    { const pr = storeMod.getPayment("pay_refamb")!; pr.state = "REFUND_PENDING"; pr.displayStatus = "Pending"; pr.refundNeedsDestination = true; storeMod.putPayment(pr); }
+    const amb = await completeRefund(storeMod.getPayment("pay_refamb")!, "lnbc1throwme");
+    ok("M1: ambiguous refund payout → MANUAL_REVIEW, claim NOT reopened (no double-refund)",
+      amb.ok === false && storeMod.getPayment("pay_refamb")!.state === "MANUAL_REVIEW" && storeMod.getPayment("pay_refamb")!.refundNeedsDestination === false);
+
+    // M2 — a refund LN payment that is accepted then FAILS must REOPEN the claim (the sats
+    // never left), not strand forever (consumers used to only act on `settled`).
+    seedPayment("pay_reffail", "h_reffail", BTC_IN);
+    { const pr = storeMod.getPayment("pay_reffail")!; pr.state = "REFUND_PENDING"; pr.displayStatus = "Pending"; pr.refundNeedsDestination = true; storeMod.putPayment(pr); }
+    const infl = await completeRefund(storeMod.getPayment("pay_reffail")!, "lnbc1inflight");
+    ok("M2: refund accepted-but-in-flight holds with a txid", infl.ok === true && storeMod.getPayment("pay_reffail")!.refundTxId === "tx_refund_fail" && storeMod.getPayment("pay_reffail")!.refundNeedsDestination === false);
+    // Age it past the reconcile cutoff, then reconcile: the failed outbound reopens the claim.
+    { const pr = storeMod.getPayment("pay_reffail")!; pr.updatedAt = new Date(Date.now() - 5 * 60_000).toISOString(); storeMod.putPayment(pr); }
+    await reconcileStuckRefunds(60_000);
+    ok("M2: a failed refund payout REOPENS the claim (not stranded)",
+      storeMod.getPayment("pay_reffail")!.state === "REFUND_PENDING" && storeMod.getPayment("pay_reffail")!.refundNeedsDestination === true && !storeMod.getPayment("pay_reffail")!.refundTxId);
+
+    // M5: double-loss backstop AT CLAIM TIME. A payout marked FAILED (→ REFUND_PENDING)
+    // that actually settled must NOT be refunded — the sender could paste a bolt11 before
+    // the 120s reconcile timer fires. completeRefund re-queries the payout; a COMPLETED
+    // verdict diverts to MANUAL_REVIEW and pays NO refund.
+    const { aggregatorByName } = await import("../src/core/routing.js");
+    seedPayment("pay_recompleted", "h_recompleted", BTC_IN);
+    // A simulated (sandbox) disburse registers the ref so queryStatus() reports COMPLETED.
+    await aggregatorByName("peexit").disburse({ idempotencyKey: "pay_recompleted", provider: "MTN", country: "CM", phone: "677000000", xaf: 50000, name: "NANA JEAN PAUL" });
+    { const pr = storeMod.getPayment("pay_recompleted")!; pr.state = "REFUND_PENDING"; pr.displayStatus = "Pending"; pr.refundNeedsDestination = true; pr.aggregator = "peexit"; storeMod.putPayment(pr); }
+    const dl = await completeRefund(storeMod.getPayment("pay_recompleted")!, "lnbc1refundok");
+    ok("M5: refund-claim on a re-verified-COMPLETED payout → MANUAL_REVIEW, NO refund paid (no double-loss)",
+      dl.ok === false && dl.error === "payout_completed"
+      && storeMod.getPayment("pay_recompleted")!.state === "MANUAL_REVIEW"
+      && !storeMod.getPayment("pay_recompleted")!.refundTxId);
 
   } finally {
     globalThis.fetch = realFetch;

@@ -3,12 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/server/src/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:ln": "tsx test/lightning.e2e.ts"
+    "test:ln": "tsx test/lightning.e2e.ts",
+    "test:settle": "tsx test/settlement-idempotency.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

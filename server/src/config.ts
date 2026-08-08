@@ -11,11 +11,32 @@ function env(key: string, fallback = ""): string {
   return process.env[key] ?? fallback;
 }
 
+/** Read a SECRET (credential / token / key): trims surrounding whitespace and quotes.
+ *  These routinely sneak in when secrets are injected via echo/CI — a trailing newline
+ *  corrupted IBEX's OAuth body and produced an invalid `Bearer <key>\n` header for
+ *  PawaPay (undici rejects it), and a stray quote broke Peexit's exact-match auth — all
+ *  with no boot-time signal. Use this for every provider credential. */
+function secret(key: string, fallback = ""): string {
+  return (process.env[key] ?? fallback).trim().replace(/^["']+|["']+$/g, "");
+}
+
+/** True when an *_ENV flag names production — case- and whitespace-insensitive, so
+ *  PAWAPAY_ENV="Production" / " production " behave like "production" instead of
+ *  silently falling back to sandbox (a real footgun that hid a misconfig). */
+function isProdEnv(key: string): boolean {
+  return env(key, "sandbox").trim().toLowerCase() === "production";
+}
+
 export const config = {
   port: Number(env("PORT", "4000")),
   /** Public base URL the providers can reach for webhook callbacks. */
   publicUrl: env("PUBLIC_URL", "http://localhost:4000"),
   railsMode: (env("RAILS_MODE", "sandbox") as RailsMode),
+  /** Whether a real SMS provider is wired up. Until it is (SMS_ENABLED=true),
+   *  phone-number OTP verification can't actually reach the user in production, so
+   *  the merchant onboarding auto-activates instead of asking for a code. Flip this
+   *  to true once an SMS service is integrated to re-enable OTP verification. */
+  smsEnabled: env("SMS_ENABLED", "").trim().toLowerCase() === "true",
 
   /** IBEX Hub (poweredbyibex.io) — crypto inbound for Lightning + on-chain BTC.
    *  OAuth2 client-credentials (M2M). USDT/stablecoin receive is gated per
@@ -23,13 +44,18 @@ export const config = {
    *  from IBEX_ENV (sandbox|production) but each is individually overridable. */
   ibex: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
-    clientId: env("IBEX_CLIENT_ID"),
-    clientSecret: env("IBEX_CLIENT_SECRET"),
-    accountId: env("IBEX_ACCOUNT_ID"),
-    webhookSecret: env("IBEX_WEBHOOK_SECRET"),
+    clientId: secret("IBEX_CLIENT_ID"),
+    clientSecret: secret("IBEX_CLIENT_SECRET"),
+    accountId: secret("IBEX_ACCOUNT_ID"),
+    // Separate IBEX account per stablecoin (IBEX is account-per-currency, so they
+    // can't share the Bitcoin account): USDT = currencyId 29, USDC = currencyId 30,
+    // both on Ethereum/ERC-20.
+    usdtAccountId: secret("IBEX_USDT_ACCOUNT_ID"),
+    usdcAccountId: secret("IBEX_USDC_ACCOUNT_ID"),
+    webhookSecret: secret("IBEX_WEBHOOK_SECRET"),
     apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
     authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),
-    audience: env("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
+    audience: secret("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
     // Documented IBEX webhook sender IPs (sandbox vs prod) — used to allowlist
     // inbound webhooks alongside the shared secret. Override via IBEX_WEBHOOK_IPS.
     webhookIps: env("IBEX_WEBHOOK_IPS", sandbox ? "35.243.242.121,34.74.236.191" : "34.148.92.171,35.196.168.24")
@@ -38,7 +64,7 @@ export const config = {
     // genuinely-settled sandbox inbound is real money. This explicit opt-in lets
     // such an inbound authorize a REAL Mobile Money payout (off by default).
     allowSandboxPayout: env("IBEX_ALLOW_SANDBOX_PAYOUT") === "true",
-  }))(env("IBEX_ENV", "sandbox") !== "production"),
+  }))(!isProdEnv("IBEX_ENV")),
 
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
    *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
@@ -46,19 +72,29 @@ export const config = {
   pawapay: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
-    apiKey: env("PAWAPAY_API_KEY"),
-    webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
-  }))(env("PAWAPAY_ENV", "sandbox") !== "production"),
+    // Accept either name — PawaPay's dashboard/docs call it the "API token", so
+    // PAWAPAY_API_TOKEN is the intuitive var; PAWAPAY_API_KEY kept for back-compat.
+    apiKey: secret("PAWAPAY_API_KEY") || secret("PAWAPAY_API_TOKEN"),
+    webhookSecret: secret("PAWAPAY_WEBHOOK_SECRET"),
+  }))(!isProdEnv("PAWAPAY_ENV")),
 
   /** Peexit (Peex) — the SECOND Mobile Money payout aggregator. Real disbursement
    *  via SECRETKEY-header auth; activates when PEEXIT_API_KEY is set. Distinct
    *  from the Peex intelligence layer above. URL derives from PEEXIT_ENV. */
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
-    apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://peexit.com/api/v1"),
-    apiKey: env("PEEXIT_API_KEY"), // the Peexit SECRETKEY
-    webhookSecret: env("PEEXIT_WEBHOOK_SECRET"),
-  }))(env("PEEXIT_ENV", "sandbox") !== "production"),
+    apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
+    // the Peexit SECRETKEY — SAME key for disbursement AND collection. secret() strips
+    // stray surrounding quotes/whitespace: a trailing `"` passed /operators + disbursement
+    // (lenient) but the Collect service exact-matches → 401 "key does not exist".
+    apiKey: secret("PEEXIT_API_KEY"),
+    // Peexit's notification callback authenticates with HTTP Basic Auth using
+    // credentials WE define and hand to Peexit (NOT an HMAC signature). We
+    // validate the inbound Authorization header against these. Sandbox default
+    // per Peexit docs is peex/peex_callback; production creds are ours to set.
+    callbackUser: secret("PEEXIT_CALLBACK_USER", "peex"),
+    callbackPass: secret("PEEXIT_CALLBACK_PASS"),
+  }))(!isProdEnv("PEEXIT_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
    *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted
@@ -69,7 +105,9 @@ export const config = {
     // Master password-reset key (/admin/forgot). Defaults to ADMIN_PASSWORD for
     // back-compat; set a distinct long ADMIN_RECOVERY_KEY in production.
     recoveryKey: env("ADMIN_RECOVERY_KEY") || env("ADMIN_PASSWORD", "momome-admin"),
-    passwordIsDefault: !process.env.ADMIN_PASSWORD,
+    // Default when unset OR set to the publicly-known dev value — either way it's
+    // not a secret, so production must refuse it.
+    passwordIsDefault: !process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === "momome-admin",
   },
 
   /** Peex — OPTIONAL intelligence / verification / metadata layer.
@@ -126,11 +164,15 @@ export function assertIbexConfig(): void {
   if (parts.some(Boolean) && !parts.every(Boolean)) {
     throw new Error("Partial IBEX config: set IBEX_CLIENT_ID, IBEX_CLIENT_SECRET and IBEX_ACCOUNT_ID together (or none).");
   }
-  if (ibexConfigured() && config.ibex.env === "production") {
+  // Require the webhook secret + a reachable https callback whenever a real payout can
+  // result from an IBEX inbound — i.e. production OR sandbox-with-IBEX_ALLOW_SANDBOX_PAYOUT.
+  // Otherwise an unsigned (forged) webhook could settle real money (verifyWebhook fails
+  // closed in exactly these cases, so the secret must exist).
+  if (ibexConfigured() && ibexInboundTrusted()) {
     const missing: string[] = [];
     if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
     if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
-    if (missing.length) throw new Error(`IBEX production requires: ${missing.join(", ")}.`);
+    if (missing.length) throw new Error(`IBEX inbound can authorize a real payout — set: ${missing.join(", ")} (or disable IBEX_ALLOW_SANDBOX_PAYOUT).`);
   }
 }
 
@@ -154,14 +196,23 @@ export function assertAdminSecurity(): void {
 /** Fail fast if live (Mobile Money payout) mode is on but a payout provider
  *  isn't configured. IBEX is validated separately (assertIbexConfig). */
 export function assertLiveConfig(): void {
-  if (!isLive()) return;
-  const missing: string[] = [];
-  if (!config.pawapay.apiKey) missing.push("PAWAPAY_API_KEY");
-  if (!config.pawapay.webhookSecret) missing.push("PAWAPAY_WEBHOOK_SECRET");
-  if (!config.peexit.apiKey) missing.push("PEEXIT_API_KEY");
-  if (!config.peexit.webhookSecret) missing.push("PEEXIT_WEBHOOK_SECRET");
-  if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.push("PEEX_WEBHOOK_SECRET");
-  if (missing.length) {
-    throw new Error(`RAILS_MODE=live but missing: ${missing.join(", ")}. Set them or use RAILS_MODE=sandbox.`);
+  // Gate on liveMoney() — NOT just isLive() (RAILS_MODE) — so a deploy that turns a
+  // rail production (e.g. PEEXIT_ENV=production) while RAILS_MODE=sandbox still gets
+  // its callback secrets enforced. Real money can move the moment any rail is live.
+  if (!liveMoney() && !isLive()) return;
+  const missing = new Set<string>();
+  // Any LIVE payout rail must have its callback secret set (else its async
+  // confirmations can't be verified and settlement silently degrades).
+  if (peexitLive() && !config.peexit.callbackPass) missing.add("PEEXIT_CALLBACK_PASS");
+  if (pawapayLive() && !config.pawapay.webhookSecret) missing.add("PAWAPAY_WEBHOOK_SECRET");
+  if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.add("PEEX_WEBHOOK_SECRET");
+  // RAILS_MODE=live must have the primary payout rail (Peexit) fully configured —
+  // fail fast rather than boot a live deploy that can't pay out. PawaPay is optional.
+  if (isLive()) {
+    if (!config.peexit.apiKey) missing.add("PEEXIT_API_KEY");
+    if (!config.peexit.callbackPass) missing.add("PEEXIT_CALLBACK_PASS");
+  }
+  if (missing.size) {
+    throw new Error(`Live money is active but missing: ${[...missing].join(", ")}. Set them or run fully in sandbox.`);
   }
 }

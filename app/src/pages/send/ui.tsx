@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useI18n } from "../../lib/i18n.js";
 
 /** Live countdown to an ISO expiry. Ticks every second. */
 export function useExpiry(iso: string): { secondsLeft: number; expired: boolean; label: string } {
@@ -14,7 +15,7 @@ export function useExpiry(iso: string): { secondsLeft: number; expired: boolean;
 }
 
 export function FlowCard({ children }: { children: ReactNode }) {
-  return <div className="card" style={{ padding: "var(--pad)", boxShadow: "var(--shadow-sm)", animation: "riseIn .32s ease" }}>{children}</div>;
+  return <div className="card" style={{ padding: "clamp(15px, 3.6vw, 19px)", boxShadow: "var(--shadow-sm)", animation: "riseIn .32s ease" }}>{children}</div>;
 }
 
 export function Label({ children }: { children: ReactNode }) {
@@ -22,7 +23,8 @@ export function Label({ children }: { children: ReactNode }) {
 }
 
 export function Stepper({ i }: { i: number }) {
-  const steps = ["Details", "Method", "Review", "Pay"];
+  const { t } = useI18n();
+  const steps = [t("step_details"), t("step_method"), t("step_review"), t("step_pay")];
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
       {steps.map((s, n) => (
@@ -38,10 +40,12 @@ export function Stepper({ i }: { i: number }) {
 export function Row({ k, v, sub, strong, tone }: { k: string; v: string; sub?: string; strong?: boolean; tone?: "recv" }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, padding: "10px 0" }}>
-      <span style={{ fontSize: 14, color: "var(--ink-2)", fontWeight: strong ? 700 : 500, whiteSpace: "nowrap" }}>{k}</span>
-      <span style={{ textAlign: "right", minWidth: 0 }}>
-        <span className="num" style={{ fontSize: strong ? 17 : 14, fontWeight: strong ? 750 : 600, color: tone === "recv" ? "var(--recv)" : "var(--ink)", whiteSpace: "nowrap" }}>{v}</span>
-        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{sub}</span>}
+      <span style={{ fontSize: 14, color: "var(--ink-2)", fontWeight: strong ? 700 : 500, whiteSpace: "nowrap", flex: "none" }}>{k}</span>
+      {/* min-width:0 + overflow lets a long value (e.g. a 60-char recipient name)
+          ellipsize instead of overflowing off the card; short amounts never truncate. */}
+      <span style={{ textAlign: "right", minWidth: 0, flex: 1, overflow: "hidden" }}>
+        <span className="num" style={{ display: "block", fontSize: strong ? 17 : 14, fontWeight: strong ? 750 : 600, color: tone === "recv" ? "var(--recv)" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
+        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>}
       </span>
     </div>
   );

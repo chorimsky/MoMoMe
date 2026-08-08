@@ -1,26 +1,49 @@
 import { createApp } from "./app.js";
-import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney } from "./config.js";
-import { flushAll } from "./core/persist.js";
+import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
+import { flushAll, persistDurable } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
+import { reconcilePendingCashins } from "./core/momoOps.js";
+import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
 import { setRates, CCY } from "./core/rates.js";
 
 assertLiveConfig();
 assertIbexConfig();
 assertAdminSecurity(); // fail closed on a default admin password in production
+// Fail closed: never run a real-money rail on a non-durable store (node:sqlite missing
+// or DB_PATH not writable) — payments, ledger and the 10-year compliance chain would be
+// silently lost on every restart. Sandbox may run in-memory.
+if (liveMoney() && !persistDurable()) {
+  throw new Error("Real-money rail is live but the database is NOT durable (node:sqlite unavailable or DB_PATH not writable) — refusing to start. Fix DB_PATH / the mounted volume, or run fully in sandbox.");
+}
 // Warn about the default admin password only on a real/reachable deployment
 // (https public URL or a live-money rail) — it's a production reminder, not
 // noise for local dev where the default password is fine.
 if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
   console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
 }
+// Peexit's notification callback authenticates with HTTP Basic Auth using
+// credentials we hand to Peexit. Without PEEXIT_CALLBACK_PASS set, a live rail
+// rejects every callback (fail-closed) — the reconcile backstop still settles via
+// the authoritative /disbursement/all_requests re-query, but callbacks won't.
+if (peexitLive() && !config.peexit.callbackPass) {
+  console.warn("⚠️  PEEXIT is live but PEEXIT_CALLBACK_PASS is not set — payout callbacks will be REJECTED (settlement falls back to slower reconcile polling). Set PEEXIT_CALLBACK_USER/PEEXIT_CALLBACK_PASS and give them to Peexit with your callback URL.");
+}
 const app = createApp();
 
 // Backstop: re-query payouts AND inbounds stuck awaiting a (possibly lost) callback.
 setInterval(() => {
   void reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
-  if (ibexConfigured()) void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+  void reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
+  if (ibexConfigured()) {
+    void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+    void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
+  }
+  void reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
+  // AML/CFT detection — open compliance cases for reportable activity (CTR/CDD,
+  // structuring, sanctions, high-risk). Read-only over payments; never blocks money.
+  try { scanCompliance(); } catch (e) { console.error("compliance scan", e); }
 }, 30_000).unref();
 
 // Evict expired quotes so the in-memory quotes map can't grow without bound.
@@ -31,10 +54,10 @@ setInterval(() => { try { pruneExpiredQuotes(); } catch (e) { console.error("pru
 // quoting reads the cache synchronously and locks the rate at quote time.
 if (ibexConfigured()) {
   const refreshFxRates = async () => {
-    const [btc, usdt, eur] = await Promise.all([
-      ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
+    const [btc, usdt, usdc, eur] = await Promise.all([
+      ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
     ]);
-    setRates({ btcUsd: btc, usdtUsd: usdt, eurUsd: eur });
+    setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur });
   };
   void refreshFxRates().catch((e) => console.error("fx rates", e));
   setInterval(() => void refreshFxRates().catch((e) => console.error("fx rates", e)), 30_000).unref();
@@ -52,6 +75,17 @@ if (ibexConfigured() && config.publicUrl.startsWith("https://")) {
 const server = app.listen(config.port, () => {
   const crypto = ibexConfigured() ? `IBEX Hub (${config.ibex.env})` : "sandbox";
   console.log(`MoMo›Me settlement engine → http://localhost:${config.port}  [payout: ${config.railsMode}, crypto: ${crypto}]`);
+});
+
+// Safety net: an unhandled promise rejection in an async route (Express 4 does not
+// forward it to the error middleware) would otherwise, under Node's default policy,
+// crash the whole settlement engine → full outage. Log and keep serving instead;
+// the offending request still fails, but every other in-flight payment survives.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason instanceof Error ? reason.stack : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err instanceof Error ? err.stack : err);
 });
 
 // Flush any pending state to SQLite on graceful shutdown.

@@ -15,10 +15,11 @@
    echoes the shared secret in the body and sends from a fixed IP set.
    ============================================================ */
 import crypto from "node:crypto";
+import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
-import { config } from "../config.js";
+import { config, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
 const btcToMsat = (btc: number) => Math.round(btc * 1e11); // 1 BTC = 1e11 msat
@@ -39,7 +40,7 @@ async function getAccessToken(force = false): Promise<string> {
         client_secret: config.ibex.clientSecret,
         audience: config.ibex.audience,
       });
-      const res = await fetch(config.ibex.authUrl, {
+      const res = await fetchT(config.ibex.authUrl, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body,
@@ -57,7 +58,7 @@ async function getAccessToken(force = false): Promise<string> {
  *  IBEX Hub uses a RAW Authorization header (the token, no "Bearer "). */
 async function ibex(path: string, init: RequestInit): Promise<Response> {
   const call = async (token: string) =>
-    fetch(`${config.ibex.apiUrl}${path}`, {
+    fetchT(`${config.ibex.apiUrl}${path}`, {
       ...init,
       headers: { "content-type": "application/json", authorization: token, ...(init.headers ?? {}) },
     });
@@ -80,12 +81,22 @@ export async function rate(fromCurrencyId: number, toCurrencyId: number): Promis
  *  boot when IBEX is configured and PUBLIC_URL is publicly reachable. */
 export async function registerAccountWebhook(): Promise<void> {
   const url = `${config.publicUrl}/webhooks/ibex`;
-  const res = await ibex(`/accounts/${config.ibex.accountId}/webhooks`, {
-    method: "POST",
-    body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
-  });
-  if (!res.ok && res.status !== 409) {
-    throw new Error(`IBEX register account webhook failed: ${res.status} ${await res.text()}`);
+  // Register on every account we receive into — the Bitcoin account AND the USDT
+  // account (if configured) — so on-chain BTC and ERC-20 USDT deposits both notify.
+  const accounts = [config.ibex.accountId, config.ibex.usdtAccountId].filter(Boolean);
+  for (const acct of accounts) {
+    const res = await ibex(`/accounts/${acct}/webhooks`, {
+      method: "POST",
+      body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
+    });
+    // Already-registered is success, not failure (IBEX returns 409 or a 400
+    // "webhook already exists") — tolerate both so boot doesn't log a false error.
+    if (!res.ok && res.status !== 409) {
+      const body = await res.text();
+      if (!/already exists/i.test(body)) {
+        throw new Error(`IBEX register account webhook failed (${acct}): ${res.status} ${body}`);
+      }
+    }
   }
 }
 
@@ -103,13 +114,97 @@ export async function transactionStatus(transactionId: string): Promise<{ settle
     invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
   };
   const inv = d.invoice ?? {};
+  // Truth signals ONLY: sats actually received. Do NOT use `usdAmount > 0` — this
+  // file's own header documents it as `0` for paid AND unpaid invoices (and it may
+  // carry the invoice's REQUESTED usd value before payment), so it can false-settle
+  // an unpaid invoice → authorize a real Mobile-Money payout for crypto never received.
   const settled =
     !!d.settledAt || !!inv.settleDateUtc ||
-    (typeof inv.receiveMsat === "number" && inv.receiveMsat > 0) ||
-    (typeof d.usdAmount === "number" && d.usdAmount > 0);
+    (typeof inv.receiveMsat === "number" && inv.receiveMsat > 0);
   const state = (inv.state?.name ?? "").toUpperCase();
   const failed = !settled && ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"].includes(state);
   return { settled, failed };
+}
+
+export interface PayResult { transactionId: string; settled: boolean; feesMsat?: number; }
+
+/** Pay a BOLT11 invoice OUTBOUND from our account — used to REFUND a sender when a
+ *  payout couldn't land. `amountMsat` is required for amount-less invoices. Returns the
+ *  pay transactionId + whether it settled synchronously (else poll transactionStatus). */
+export async function payInvoice(bolt11: string, amountMsat?: number): Promise<PayResult> {
+  const res = await ibex("/invoice/pay", {
+    method: "POST",
+    body: JSON.stringify({ accountId: config.ibex.accountId, bolt11, ...(amountMsat ? { amountMSat: amountMsat } : {}) }),
+  });
+  if (!res.ok) throw new Error(`IBEX pay-invoice failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transactionId: string; settleDateUtc?: string | null; feesMsat?: string };
+  const settled = !!d.settleDateUtc && d.settleDateUtc !== "0";
+  return { transactionId: d.transactionId, settled, feesMsat: d.feesMsat ? Number(d.feesMsat) : undefined };
+}
+
+/* ---------- treasury withdrawal (OUTBOUND sweeps) ----------
+   The platform accumulates crypto in its IBEX accounts as customers pay in. These
+   let an admin sweep that inventory to a treasury wallet. All are real money — the
+   caller (core/treasury) enforces the withdrawable ceiling, gating and audit. */
+
+/** Real per-account balances from GET /v2/account, keyed by accountId →
+ *  {currencyId, balance}. `balance` is in the account's smallest unit (BTC accounts
+ *  in msat; stablecoin accounts in ERC-20 base units). Throws on lookup failure. */
+export async function accountBalances(): Promise<Record<string, { currencyId: number; balance: number }>> {
+  const res = await ibex("/v2/account", { method: "GET" });
+  if (!res.ok) throw new Error(`IBEX account list failed: ${res.status} ${await res.text()}`);
+  const rows = (await res.json()) as Array<{ id?: string; currencyId?: number; balance?: number }>;
+  const out: Record<string, { currencyId: number; balance: number }> = {};
+  for (const r of rows) if (r.id) out[r.id] = { currencyId: Number(r.currencyId ?? 0), balance: Number(r.balance ?? 0) };
+  return out;
+}
+
+/** Withdraw BTC ON-CHAIN to a Bitcoin address. `amountMsat` is the BTC account's
+ *  smallest unit (msat). Returns the pay transaction id + provider status. */
+export async function sendOnchain(address: string, amountMsat: number): Promise<{ txId: string; status: string }> {
+  const res = await ibex("/v2/onchain/send", {
+    method: "POST",
+    body: JSON.stringify({ accountId: config.ibex.accountId, address, amount: amountMsat }),
+  });
+  if (!res.ok) throw new Error(`IBEX onchain-send failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transactionHub?: { id?: string }; status?: string };
+  return { txId: String(d.transactionHub?.id ?? ""), status: d.status ?? "INITIATED" };
+}
+
+/** Withdraw BTC over Lightning to a Lightning ADDRESS (user@domain). Resolves the
+ *  address's LNURL-pay params (its .well-known endpoint), bounds-checks the amount,
+ *  then pays via IBEX /v2/lnurl/pay/send. `amountMsat` must be within min/maxSendable. */
+export async function payLightningAddress(lnAddress: string, amountMsat: number): Promise<PayResult> {
+  const [name, domain] = lnAddress.split("@");
+  if (!name || !domain) throw new Error("invalid lightning address");
+  const lnurl = await fetch(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`);
+  if (!lnurl.ok) throw new Error(`lightning-address resolve failed: ${lnurl.status}`);
+  const params = (await lnurl.json()) as { tag?: string; callback?: string; minSendable?: number; maxSendable?: number };
+  if (params.tag !== "payRequest" || !params.callback) throw new Error("not a valid LNURL-pay address");
+  if ((params.minSendable && amountMsat < params.minSendable) || (params.maxSendable && amountMsat > params.maxSendable)) {
+    throw new Error("amount outside the destination's min/max sendable");
+  }
+  const res = await ibex("/v2/lnurl/pay/send", {
+    method: "POST",
+    body: JSON.stringify({ params: JSON.stringify(params), amount: amountMsat, accountId: config.ibex.accountId }),
+  });
+  if (!res.ok) throw new Error(`IBEX lnurl-pay failed: ${res.status} ${await res.text()}`);
+  const d = (await res.json()) as { transaction?: { id?: string }; hash?: string; settleDateUtc?: number | string | null };
+  const settled = !!d.settleDateUtc && d.settleDateUtc !== "0" && d.settleDateUtc !== 0;
+  return { transactionId: String(d.transaction?.id ?? d.hash ?? ""), settled };
+}
+
+/** Amount encoded in a BOLT11 invoice's HRP, in msat: 0 = amount-less; null = unparseable.
+ *  Used to bound a refund so we can never over-pay a sender-supplied invoice. */
+export function bolt11AmountMsat(bolt11: string): number | null {
+  const s = bolt11.trim().toLowerCase();
+  const sep = s.lastIndexOf("1"); // bech32 separator (data part excludes '1')
+  if (sep <= 0) return null;
+  const m = /^ln(bc|tb|bcrt)(\d*)([munp]?)$/.exec(s.slice(0, sep));
+  if (!m) return null;
+  if (!m[2]) return 0; // amount-less invoice
+  const factor: Record<string, number> = { m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12 };
+  return Math.round(Number(m[2]) * (factor[m[3]] ?? 1) * 1e11); // BTC→msat
 }
 
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded
@@ -123,10 +218,20 @@ function ipAllowed(headers: Record<string, string | string[] | undefined>): bool
   return raw.split(",").map((s) => s.trim()).some((ip) => allow.includes(ip));
 }
 
+/** Per-stablecoin IBEX account (IBEX is account-per-currency). USDT = currencyId
+ *  29, USDC = currencyId 30, both Ethereum/ERC-20. "" when not configured → the
+ *  method isn't handled by IBEX and the sandbox adapter covers it. */
+function stablecoinAccountId(m: Method): string {
+  if (m === "USDT") return config.ibex.usdtAccountId;
+  if (m === "USDC") return config.ibex.usdcAccountId;
+  return "";
+}
+
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
-  // USDT intentionally excluded — gated per-org by IBEX; sandbox simulates it.
-  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN",
+  // Stablecoins (USDT/USDC on Ethereum) are handled only when their dedicated IBEX
+  // account is configured; otherwise the sandbox adapter covers them.
+  supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || !!stablecoinAccountId(m),
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
@@ -156,6 +261,26 @@ export const ibexAdapter: RailAdapter = {
       };
     }
 
+    const stableAcct = stablecoinAccountId(req.method);
+    if (stableAcct) {
+      // Stablecoin on Ethereum (ERC-20) — a fresh receive address on the per-currency
+      // account (USDT=29 / USDC=30). Settles via the account webhook, matched by 0x addr.
+      const asset = METHOD_ASSET[req.method]; // "USDT" | "USDC"
+      const res = await ibex(`/accounts/${stableAcct}/crypto/receive-infos`, {
+        method: "POST",
+        body: JSON.stringify({ name: req.ref.slice(0, 40), network: "ethereum" }),
+      });
+      if (!res.ok) throw new Error(`IBEX ${asset} receive-info failed: ${res.status} ${await res.text()}`);
+      const data = (await res.json()) as { id: string; type?: string; data?: { address?: string } };
+      const addr = data.data?.address;
+      if (!addr) throw new Error(`IBEX ${asset} receive-info returned no address`);
+      return {
+        method: req.method, code: addr, qr: addr, asset,
+        amount: req.amount, amountLabel: formatAmount(req.amount, asset), expiresAt,
+        providerRef: addr, provider: "ibex",
+      };
+    }
+
     // ONCHAIN — fresh on-chain BTC receive address (settles via the account webhook).
     const res = await ibex("/onchain/address", {
       method: "POST",
@@ -174,9 +299,12 @@ export const ibexAdapter: RailAdapter = {
   verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined> = {}): boolean {
     // 1) Sender IP allowlist (the documented IBEX webhook IPs), when determinable.
     if (!ipAllowed(headers)) return false;
-    // 2) Shared secret echoed in the body. Without a configured secret we accept
-    //    only outside production (assertIbexConfig requires it in production).
-    if (!config.ibex.webhookSecret) return config.ibex.env !== "production";
+    // 2) Shared secret echoed in the body. Without a configured secret, accept ONLY
+    //    when no real payout can result from an IBEX inbound (pure sandbox testing).
+    //    If a payout CAN result (production, or IBEX_ALLOW_SANDBOX_PAYOUT), an unsigned
+    //    webhook could settle real money → fail closed. assertIbexConfig enforces that
+    //    the secret is set in exactly those cases, so this branch is sandbox-only.
+    if (!config.ibex.webhookSecret) return !ibexInboundTrusted();
     let provided = "";
     try { provided = (JSON.parse(rawBody) as { secret?: string }).secret ?? ""; } catch { return false; }
     const a = Buffer.from(provided);
@@ -187,23 +315,21 @@ export const ibexAdapter: RailAdapter = {
   parseEvent(body: unknown): RailEvent | null {
     const t = (body as { transaction?: {
       id?: string; infoId?: string; amount?: number; status?: string; settledAt?: string | null;
-      transactionTypeId?: number; address?: string; metadata?: { address?: string };
+      transactionTypeId?: number; currencyId?: number; address?: string; metadata?: { address?: string };
       invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
     } }).transaction;
     if (!t) return null;
-    // Lightning (typeId 1) is matched by the transaction id (= the invoice's
-    // transactionId we stored). On-chain DEPOSITS (typeId 7) were stored with the
-    // address as providerRef — match the address IBEX echoes (address creation
-    // returns no id), falling back to id/infoId. CONFIRM the deposit payload.
     const addr = t.address ?? t.metadata?.address;
-    const providerRef = t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
+    // Stablecoin (Ethereum/ERC-20) deposits: USDT=currencyId 29, USDC=30, or an 0x… addr.
+    const isStable = t.currencyId === 29 || t.currencyId === 30 || (typeof addr === "string" && addr.toLowerCase().startsWith("0x"));
+    // Lightning (typeId 1) matches by the stored transaction id. DEPOSITS — on-chain
+    // BTC (typeId 7) and ERC-20 stablecoins — were stored with the address as providerRef,
+    // so match the address IBEX echoes; fall back to id/infoId.
+    const providerRef = (isStable && addr) || t.transactionTypeId === 7 ? (addr ?? t.infoId ?? t.id) : (t.id ?? t.infoId);
     if (!providerRef) return null;
     const status = (t.status ?? "").toLowerCase();
     const inv = t.invoice ?? {};
     const invState = (inv.state?.name ?? "").toUpperCase();
-    // Authoritative "paid" signal lives on the embedded invoice (receiveMsat /
-    // settleDateUtc) — check it alongside the top-level status so the webhook
-    // path agrees with transactionStatus(). The received msat is the real amount.
     const receivedMsat = typeof inv.receiveMsat === "number" && inv.receiveMsat > 0 ? inv.receiveMsat : undefined;
     if (status === "failed" || ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED"].includes(invState)) return null; // expired/failed — ignore
     const confirmed = !!t.settledAt || !!inv.settleDateUtc || receivedMsat !== undefined
@@ -211,12 +337,13 @@ export const ibexAdapter: RailAdapter = {
       || ["SETTLE", "SETTLED", "PAID", "ACCEPTED"].includes(invState);
     const detected = ["pending", "mempool", "unconfirmed", "processing", "detected"].includes(status);
     if (!confirmed && !detected) return null;
-    return {
-      providerRef,
-      kind: confirmed ? "confirmed" : "detected",
-      // IBEX reports msat on a BTC account → BTC for the underpayment guard.
-      // Prefer the invoice's actually-received msat; fall back to the tx amount.
-      amount: receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined,
-    };
+    // Amount for the underpayment guard. BTC: msat → BTC. USDT: ERC-20 base units
+    // (6 decimals) → USDT. NOTE: the exact USDT amount field/units are provisional
+    // until verified against a real deposit; assuming base-units (÷1e6) fails SAFE —
+    // if IBEX reports a larger unit the guard under-counts → MANUAL_REVIEW, never overpay.
+    let amount: number | undefined;
+    if (isStable) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
+    else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
+    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
   },
 };

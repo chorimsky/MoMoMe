@@ -10,21 +10,39 @@ import { EUR_XAF_PEG } from "../../../shared/domain.js";
 export const CCY = { MSAT: 0, SATS: 1, BTC: 2, USD: 3, EUR: 8, USDT: 29, USDC: 30 } as const;
 
 // Used until the first live refresh (and if IBEX is unreachable).
-const FALLBACK = { btcUsd: 65000, usdtUsd: 1, eurUsd: 1.08 };
-let cache: { btcUsd: number; usdtUsd: number; eurUsd: number; at: number } | null = null;
+const FALLBACK = { btcUsd: 65000, usdtUsd: 1, usdcUsd: 1, eurUsd: 1.08 };
+let cache: { btcUsd: number; usdtUsd: number; usdcUsd: number; eurUsd: number; at: number } | null = null;
 
 /** Merge a fresh pull from IBEX into the cache (keep last-known for any null). */
-export function setRates(r: { btcUsd?: number | null; usdtUsd?: number | null; eurUsd?: number | null }): void {
+export function setRates(r: { btcUsd?: number | null; usdtUsd?: number | null; usdcUsd?: number | null; eurUsd?: number | null }): void {
+  // Only a pull that returned at least one REAL number counts as "fresh". A
+  // degraded feed (IBEX 5xx/429 → rate() returns null for every leg) must NOT
+  // re-stamp `at`, otherwise ratesFresh() would stay true forever while the price
+  // is frozen and live quotes would price real crypto on a stale/fallback rate.
+  const hasReal = r.btcUsd != null || r.usdtUsd != null || r.usdcUsd != null || r.eurUsd != null;
+  if (!hasReal && !cache) return; // dead feed on cold boot → stay unpriced (ratesFresh() = false → quoting refuses)
   cache = {
     btcUsd: r.btcUsd ?? cache?.btcUsd ?? FALLBACK.btcUsd,
     usdtUsd: r.usdtUsd ?? cache?.usdtUsd ?? FALLBACK.usdtUsd,
+    usdcUsd: r.usdcUsd ?? cache?.usdcUsd ?? FALLBACK.usdcUsd,
     eurUsd: r.eurUsd ?? cache?.eurUsd ?? FALLBACK.eurUsd,
-    at: Date.now(),
+    at: hasReal ? Date.now() : (cache?.at ?? 0), // degraded pull keeps the last real timestamp so it ages out
   };
+}
+
+/** True only when we hold a real IBEX pull that's recent enough to price on.
+ *  The background refresh runs every 30s, so anything older than a few minutes
+ *  means the feed is dead (or never populated) — and pricing real crypto on a
+ *  stale/fallback rate would over- or under-charge the customer. Quoting must
+ *  refuse when this is false AND real money can move. */
+const MAX_RATE_AGE_MS = 5 * 60_000;
+export function ratesFresh(maxAgeMs: number = MAX_RATE_AGE_MS): boolean {
+  return !!cache && Date.now() - cache.at < maxAgeMs;
 }
 
 export function btcUsd(): number { return cache?.btcUsd ?? FALLBACK.btcUsd; }
 export function usdtUsd(): number { return cache?.usdtUsd ?? FALLBACK.usdtUsd; }
+export function usdcUsd(): number { return cache?.usdcUsd ?? FALLBACK.usdcUsd; }
 /** XAF per USD = fixed CFA/EUR peg ÷ live EUR/USD (both legs real). */
 export function usdXaf(): number { return EUR_XAF_PEG / (cache?.eurUsd ?? FALLBACK.eurUsd); }
 

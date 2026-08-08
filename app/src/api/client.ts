@@ -5,11 +5,16 @@
 import type {
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
-  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceSnapshot, PeexPanel,
+  Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceReport, SuspiciousTransactionReport, PeexPanel,
   DeliverySnapshot, MobileMoneyInfo, ReportsSnapshot, HealthSnapshot, AuditEntry,
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
+  TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
+  VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, MerchantDirectoryEntry, AmbassadorSummary,
+  Method, AppFeatures,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
+import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
+import { idbGet, idbSet } from "../lib/idb.js";
 
 export interface AdminSessionUser { id: string; username: string; role: AdminRole; }
 
@@ -17,6 +22,8 @@ export interface AdminSessionUser { id: string; username: string; role: AdminRol
 // Set VITE_API_BASE to point at a separately-hosted backend (e.g. a persistent
 // Node host) without code changes.
 const BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
+/** The API base URL (e.g. "https://…/api"), for the developer docs to display. */
+export const API_BASE = BASE;
 
 /* ---------- admin session token ---------- */
 const TOKEN_KEY = "mm_admin_token";
@@ -34,28 +41,124 @@ export function getAdminToken(): string | null { return adminToken; }
    and sent on every request so the backend can attribute and filter the sender's
    payments. */
 const SENDER_KEY = "mm_sender_id";
+function newId(): string {
+  return crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+// True when senderId was minted THIS load (no prior localStorage value) — such an
+// id was never enrolled server-side, so early unsigned requests are safely accepted
+// and enrolment needn't block them. A PERSISTED id might already be enrolled.
+let bornFresh = false;
 function ensureSenderId(): string {
   try {
     let v = localStorage.getItem(SENDER_KEY);
-    if (!v) { v = (crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`); localStorage.setItem(SENDER_KEY, v); }
+    if (!v) { v = newId(); localStorage.setItem(SENDER_KEY, v); bornFresh = true; }
     return v;
   } catch {
-    return "anon"; // storage blocked (private mode) — degrade to a single anon bucket
+    // Storage blocked (private mode): use a fresh PER-SESSION id, never a shared
+    // global bucket — otherwise private-mode users would share one another's data.
+    bornFresh = true;
+    return `eph_${newId()}`;
   }
 }
-const senderId = ensureSenderId();
+let senderId = ensureSenderId();
 export function getSenderId(): string { return senderId; }
 
+/* ---------- device proof-of-possession (signed requests) ----------
+   The device enrols a keypair for its id (trust-on-first-use) and signs every
+   request thereafter, so a stolen id can't act without the private key. Enrolment
+   is best-effort and non-blocking: until it succeeds the server still accepts the
+   id unsigned (legacy path), so the app never breaks. See lib/deviceAccount.ts. */
+const ENROLLED_IDB = "mm_dev_enrolled";
+let signingActive = false;
+
+async function enrollDevice(id: string, authPub: JsonWebKey, wrapPub: JsonWebKey): Promise<"ok" | "conflict" | "error"> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(`${BASE}/me/devices`, {
+        method: "POST", signal: ctrl.signal,
+        headers: { "Content-Type": "application/json", "X-MM-Sender": id },
+        body: JSON.stringify({ authPub, wrapPub }),
+      });
+      if (res.ok) return "ok";
+      if (res.status === 409) return "conflict";
+      return "error";
+    } finally { clearTimeout(timer); }
+  } catch { return "error"; }
+}
+
+/** Enrol + activate signing. Runs once at startup. req() awaits this only when it
+ *  MUST (a persisted id that could already be enrolled → rotate before requests
+ *  fire); a brand-new id enrols in the background so requests never wait on it. */
+const deviceReady: Promise<void> = (async () => {
+  try {
+    const enrolledId = await idbGet<string>(ENROLLED_IDB);
+    if (enrolledId === senderId) { signingActive = true; return; } // returning enrolled device — instant
+
+    // Enrol (and, on conflict, rotate) in the background; flip signing on when done.
+    const enrollP = (async () => {
+      const { authPubJwk, wrapPubJwk } = await devicePublicKeys();
+      let result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+      if (result === "conflict") {
+        // Our keys don't own this id (e.g. IndexedDB was cleared but the id persisted).
+        // Rotate to a fresh id and enrol there — the old id's data is unrecoverable
+        // (the accepted end-to-end tradeoff), but the app keeps working.
+        senderId = newId();
+        try { localStorage.setItem(SENDER_KEY, senderId); } catch { /* ignore */ }
+        result = await enrollDevice(senderId, authPubJwk, wrapPubJwk);
+      }
+      if (result === "ok") { await idbSet(ENROLLED_IDB, senderId); signingActive = true; }
+      // "error" (offline): stay unsigned and retry next load; server still accepts the id.
+    })();
+
+    // A brand-new id is NOT enrolled server-side, so early unsigned requests are
+    // safely accepted — don't block them on the enrol round-trip (was an up-to-8s
+    // stall on first load over 2G). A PERSISTED-but-unenrolled id might already own a
+    // server key (IDB eviction) → await enrol/rotation first so a request can't fire
+    // with an enrolled id but no signature (which would 401).
+    if (!bornFresh) await enrollP;
+  } catch { /* never block the app on enrolment */ }
+})();
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-MM-Sender": senderId,
-      ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  await deviceReady; // returning/persisted devices settle here; brand-new ones resolve instantly
+
+  let res: Response;
+  // Timeout so a STALLED (half-open) connection — the dominant failure mode on 2G/
+  // metered data in the target market — fails cleanly instead of hanging the spinner
+  // forever. Abort → same typed network error as a dropped connection.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  // Sign the request (proof-of-possession) once the device is enrolled. The server
+  // verifies the signature for enrolled ids; unsigned is accepted only pre-enrolment.
+  const method = (init?.method ?? "GET").toUpperCase();
+  const bodyStr = typeof init?.body === "string" ? init.body : "";
+  let sigHeaders: Record<string, string> = {};
+  if (signingActive) {
+    try { const { ts, sig } = await signRequest(method, path, bodyStr); sigHeaders = { "X-MM-Ts": ts, "X-MM-Sig": sig }; }
+    catch { /* signing failed → send unsigned */ }
+  }
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...init,
+      signal: ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-MM-Sender": senderId,
+        ...sigHeaders,
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    // No response at all — offline / DNS / dropped connection / timeout (common on
+    // patchy mobile data). Surface as a typed network error (status 0) so the UI shows
+    // a friendly "you're offline, retry" instead of a raw "Failed to fetch" or a hang.
+    throw new ApiError("network", 0);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and
     // signal the console to fall back to the login gate.
@@ -64,26 +167,30 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
     }
     let message = `Request failed (${res.status})`;
+    let code: string | undefined;
     try {
       const body = await res.json();
       if (body?.message) message = body.message;
+      if (typeof body?.error === "string") code = body.error; // stable code for i18n mapping
     } catch {
       /* non-JSON error */
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, code);
   }
   return res.json() as Promise<T>;
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  // `code` is the server's stable error slug (e.g. "quote_expired") — map it to a
+  // localized string; `message` is the English fallback for unknown codes.
+  constructor(message: string, public status: number, public code?: string) {
     super(message);
     this.name = "ApiError";
   }
 }
 
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string } }>("/config"),
+  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
   // Admin auth. login stores the session token; session checks the current one.
   adminLogin: async (username: string, password: string) => {
@@ -117,7 +224,7 @@ export const api = {
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),
 
-  createPayment: (body: CreatePaymentRequest) =>
+  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string }) =>
     req<Payment>("/payments", { method: "POST", body: JSON.stringify(body) }),
 
   confirmPayment: (id: string) =>
@@ -129,16 +236,65 @@ export const api = {
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
 
+  // Refund-claim: when a payout couldn't land, the sender supplies a Lightning
+  // invoice to receive their crypto back (paid outbound via IBEX).
+  refundDestination: (id: string, bolt11: string) =>
+    req<Payment>(`/payments/${id}/refund-destination`, { method: "POST", body: JSON.stringify({ bolt11 }) }),
+
   listPayments: () => req<Payment[]>("/payments"),
 
   // The sender's distinct recent recipients (anonymous, no login) — "send again".
   recentRecipients: () => req<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>("/me/recipients"),
+
+  // ---- Merchant ecosystem ----
+  merchantMe: () => req<{ merchant: MerchantAccount }>("/merchant/me"),
+  createMerchant: (body: { businessName: string; category: string; country: CountryCode; settlementPhone: string; tier: "individual" | "business"; location?: MerchantAccount["location"]; ref?: string }) =>
+    req<{ merchant: MerchantAccount }>("/merchant", { method: "POST", body: JSON.stringify(body) }),
+  merchantVerifyRequest: () => req<{ sent: boolean; devCode?: string }>("/merchant/verify/request", { method: "POST", body: "{}" }),
+  merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
+  merchantSummary: () => req<MerchantSummary>("/merchant/me/summary"),
+  merchantLinks: () => req<{ links: MerchantLink[] }>("/merchant/links"),
+  createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"]; clientName?: string; dueDate?: string }) =>
+    req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),
+  disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
+  resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${encodeURIComponent(code)}`),
+  resolveMerchantByCode: (code: string) => req<MerchantLinkPublic>(`/merchant/by-code/${encodeURIComponent(code)}`),
+  setMerchantListing: (listed: boolean) => req<{ merchant: MerchantAccount }>("/merchant/listing", { method: "POST", body: JSON.stringify({ listed }) }),
+  discover: (opts: { country?: string; category?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as [string, string][]).toString();
+    return req<{ merchants: MerchantDirectoryEntry[] }>(`/discover${qs ? `?${qs}` : ""}`);
+  },
+
+  // ---- Referrals / ambassadors ----
+  getReferral: () => req<AmbassadorSummary>("/me/referral"),
+  claimReferral: (ref: string) => req<{ ok: boolean }>("/me/referral/claim", { method: "POST", body: JSON.stringify({ ref }) }),
+
+  // Encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts).
+  vaultList: (since?: string) => req<VaultRecord[]>(`/me/vault${since ? `?since=${encodeURIComponent(since)}` : ""}`),
+  vaultPut: (recordId: string, body: { ciphertext: string; iv: string; ver: number }) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: "PUT", body: JSON.stringify(body) }),
+  vaultDelete: (recordId: string) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: "DELETE" }),
+
+  // Phase 4 — phone-anchor + E2E recovery. `recovery` is the vault key wrapped by
+  // the user's recovery code (server-opaque). Restore returns account records + blob.
+  anchorRequest: (phone: string) =>
+    req<{ sent: boolean; devCode?: string }>("/me/anchor/request", { method: "POST", body: JSON.stringify({ phone }) }),
+  anchorVerify: (phone: string, code: string, recovery: unknown) =>
+    req<{ ok: boolean; accountId: string }>("/me/anchor/verify", { method: "POST", body: JSON.stringify({ phone, code, recovery }) }),
+  anchorRestore: (phone: string, code: string) =>
+    req<{ accountId: string; records: VaultRecord[]; recovery: { salt: string; iterations: number; iv: string; ct: string } | null }>("/me/anchor/restore", { method: "POST", body: JSON.stringify({ phone, code }) }),
 
   ledger: (paymentId: string) => req<LedgerEntry[]>(`/ledger/${paymentId}`),
 
   adminOverview: () => req<AdminOverview>("/admin/overview"),
   adminCustomers: () => req<AdminCustomer[]>("/admin/customers"),
   adminPayments: () => req<Payment[]>("/admin/payments"),
+
+  // Developer API keys (Super-Admin). Create returns the plaintext `secret` ONCE.
+  adminApiKeys: () => req<{ keys: ApiKey[] }>("/admin/apikeys"),
+  adminCreateApiKey: (label: string) => req<{ key: ApiKey; secret: string }>("/admin/apikeys", { method: "POST", body: JSON.stringify({ label }) }),
+  adminRevokeApiKey: (id: string) => req<{ ok: boolean }>(`/admin/apikeys/${id}`, { method: "DELETE" }),
 
   adminSettings: () => req<AdminSettings>("/admin/settings"),
   saveSettings: (patch: Partial<AdminSettings>) =>
@@ -149,11 +305,40 @@ export const api = {
   claimIdentity: (id: string) => req<Identity>(`/admin/identities/${id}/claim`, { method: "POST" }),
 
   adminLiquidity: () => req<LiquiditySnapshot>("/admin/liquidity"),
+  adminTreasury: () => req<{ pools: TreasuryPool[]; destinations: AdminSettings["treasury"]; history: TreasuryWithdrawal[] }>("/admin/treasury"),
+  saveTreasuryDestinations: (d: Partial<AdminSettings["treasury"]>) =>
+    req<{ destinations: AdminSettings["treasury"] }>("/admin/treasury/destinations", { method: "PUT", body: JSON.stringify(d) }),
+  treasuryWithdraw: (rail: TreasuryRail, amount: number) =>
+    req<{ ok: boolean; entry?: TreasuryWithdrawal }>("/admin/treasury/withdraw", { method: "POST", body: JSON.stringify({ rail, amount }) }),
   adminPricing: () => req<PricingInfo>("/admin/pricing"),
   adminRevenue: (period = "30d") => req<RevenueReport>(`/admin/revenue?period=${period}`),
-  adminCompliance: () => req<ComplianceSnapshot>("/admin/compliance"),
+  adminCompliance: () => req<ComplianceReport>("/admin/compliance"),
+  complianceDispose: (id: string, status: "cleared" | "escalated", note: string) =>
+    req<{ ok: boolean }>(`/admin/compliance/cases/${id}/dispose`, { method: "POST", body: JSON.stringify({ status, note }) }),
+  complianceFileSTR: (caseId: string, reason: string) =>
+    req<{ ok: boolean; str?: SuspiciousTransactionReport }>("/admin/compliance/str", { method: "POST", body: JSON.stringify({ caseId, reason }) }),
+  complianceExportCsv: async (type: "cases" | "strs" | "ctr" | "events"): Promise<"ok" | "fail"> => {
+    try {
+      const res = await fetch(`${BASE}/admin/compliance/export?type=${type}`, { headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {} });
+      if (!res.ok) return "fail";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `momome-compliance-${type}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return "ok";
+    } catch { return "fail"; }
+  },
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
+  adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[]; fees: MomoFeeInfo | null }>("/admin/momo"),
+  momoCashout: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
+  momoCashin: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
+  momoTransfer: (phone: string, amount: number) =>
+    req<{ ok: boolean; op?: MomoOp }>("/admin/momo/transfer", { method: "POST", body: JSON.stringify({ phone, amount }) }),
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),

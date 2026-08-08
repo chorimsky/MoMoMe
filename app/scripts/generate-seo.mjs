@@ -20,8 +20,23 @@ import { renderOgImages } from "./og.mjs";
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 const SITE = (process.env.SITE_URL || "https://momome.xyz").replace(/\/$/, "");
 const APP = "/send";
-const BUILD_DATE = process.env.SEO_DATE || "2026-06-05";
+// lastmod: pin with SEO_DATE for a reproducible build, else stamp today so the
+// sitemap never ships a stale date (it was hard-coded to a fixed past date).
+const BUILD_DATE = process.env.SEO_DATE || new Date().toISOString().slice(0, 10);
 const BRAND = "MoMo›Me";
+// Google Search Console meta-tag verification token (optional; URL-prefix method).
+// Set GSC_VERIFICATION at build to emit <meta name="google-site-verification"> on
+// every prerendered page. The DNS-TXT method (Domain property) needs no code.
+const GSC = process.env.GSC_VERIFICATION || "";
+// Public SPA routes worth indexing — served by the app shell, same URL in EN/FR
+// (language is a client toggle, so no separate /fr/ path and no hreflang pair).
+const APP_PAGES = [
+  { path: "/send", priority: 0.9, changefreq: "weekly" },
+  { path: "/claim", priority: 0.5, changefreq: "monthly" },
+  { path: "/contact", priority: 0.5, changefreq: "monthly" },
+  { path: "/terms", priority: 0.3, changefreq: "yearly" },
+  { path: "/privacy", priority: 0.3, changefreq: "yearly" },
+];
 
 /* ---------- helpers ---------- */
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -490,8 +505,16 @@ h1{font-size:clamp(28px,5.2vw,46px);margin:.1em 0 .25em}h2{font-size:clamp(21px,
 p{margin:.6em 0}.wrap{max-width:880px;margin:0 auto;padding:0 20px}
 header.site{border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:20}
 header.site .wrap{display:flex;align-items:center;justify-content:space-between;height:62px;gap:12px}
-.logo{font-family:"Bagel Fat One",Fredoka,sans-serif;font-size:25px;letter-spacing:-.03em;white-space:nowrap}
+.logo{font-family:"Bagel Fat One",Fredoka,sans-serif;font-size:25px;letter-spacing:-.03em;white-space:nowrap;display:inline-flex;align-items:center;gap:8px}
 .logo .y{color:var(--brand)}.logo .o{color:var(--accent)}.logo .g{color:var(--green)}
+.momo-mark{flex:none;line-height:0}
+.momo-tuft{transform-box:fill-box;transform-origin:50% 100%;animation:mTuft 3.2s ease-in-out infinite}
+.momo-lid{transform-box:fill-box;transform-origin:center;transform:scaleY(0);animation:mBlink 5.4s ease-in-out infinite}
+.momo-glint{animation:mGlint 4s ease-in-out infinite}
+@keyframes mTuft{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(8deg)}}
+@keyframes mBlink{0%,90%,100%{transform:scaleY(0)}94%,96%{transform:scaleY(1)}}
+@keyframes mGlint{0%,100%{opacity:.5}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.momo-tuft,.momo-lid,.momo-glint{animation:none}.momo-lid{transform:scaleY(0)}}
 nav.top{display:flex;align-items:center;gap:16px}nav.top a{color:var(--ink2);font-weight:700;font-size:14px}
 @media(max-width:560px){nav.top{gap:10px}nav.top a:not(.btn){display:none}}
 .btn{display:inline-block;background:var(--brand);color:#1c1813;font-family:Fredoka;font-weight:600;padding:11px 19px;border-radius:999px;font-size:15px;white-space:nowrap}
@@ -528,10 +551,28 @@ const learnUrl = (lc) => `${LOCALES[lc].prefix}/${LOCALES[lc].learnSeg}/`;
 const covUrl = (lc) => `${LOCALES[lc].prefix}/${LOCALES[lc].covSeg}/`;
 const homeUrl = (lc) => (lc === "fr" ? "/fr/" : "/");
 
+/* Momo — MoMoMe's own goggle-eyed mascot, static SVG using this page's tokens, with
+   idle blink / tuft-sway / glint (no JS; the React app adds pointer interactivity). */
+function momo(size = 30) {
+  return `<svg class="momo-mark" width="${size}" height="${size}" viewBox="0 0 96 96" role="img" aria-label="Momo mascot" style="overflow:visible">
+<path class="momo-tuft" d="M54 3 l-11 16 h6 l-5 11 14 -17 h-6 z" fill="var(--brand)" stroke="var(--ink)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M26 52 q-10 2 -11 12" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>
+<path d="M70 52 q10 2 11 12" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>
+<ellipse cx="40" cy="84" rx="7" ry="5" fill="var(--ink)"/><ellipse cx="56" cy="84" rx="7" ry="5" fill="var(--ink)"/>
+<rect x="25" y="18" width="46" height="62" rx="23" fill="var(--brand)" stroke="var(--ink)" stroke-width="4"/>
+<rect x="25" y="36" width="46" height="8" fill="var(--ink)"/>
+<circle cx="48" cy="40" r="16" fill="var(--ink)"/><circle cx="48" cy="40" r="12.5" fill="#e9edf3"/><circle cx="48" cy="40" r="9.5" fill="#fff"/>
+<circle cx="48" cy="40" r="4.7" fill="var(--ink)"/><circle cx="50" cy="38" r="1.9" fill="#fff"/>
+<circle class="momo-glint" cx="43.5" cy="35.5" r="2.4" fill="#fff"/>
+<g class="momo-lid"><circle cx="48" cy="40" r="9.7" fill="var(--brand)"/><path d="M39.6 40 h16.8" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/></g>
+<circle cx="33" cy="55" r="4.5" fill="var(--accent)" opacity="0.5"/><circle cx="63" cy="55" r="4.5" fill="var(--accent)" opacity="0.5"/>
+<path d="M40 57 q8 8 16 0" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>
+</svg>`;
+}
 function header(lc) {
   const t = T[lc];
   return `<header class="site"><div class="wrap">
-<a class="logo" href="${homeUrl(lc)}"><span class="y">MoMo</span><span class="g">›</span><span class="o">Me</span></a>
+<a class="logo" href="${homeUrl(lc)}">${momo(30)}<span class="y">MoMo</span><span class="g">›</span><span class="o">Me</span></a>
 <nav class="top"><a href="${learnUrl(lc)}">${t.navLearn}</a><a href="${covUrl(lc)}">${t.navCov}</a><a class="btn" href="${APP}">${t.payCta}</a></nav>
 </div></header>`;
 }
@@ -563,6 +604,7 @@ function shell({ lc, url, altUrl, title, description, keywords, jsonld, body, og
   const fr = lc === "fr" ? url : altUrl;
   return `<!DOCTYPE html><html lang="${LOCALES[lc].lang}"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#FFC92E">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}">
 ${keywords ? `<meta name="keywords" content="${esc(keywords)}">` : ""}
@@ -571,6 +613,7 @@ ${keywords ? `<meta name="keywords" content="${esc(keywords)}">` : ""}
 <link rel="alternate" hreflang="fr" href="${SITE}${fr}">
 <link rel="alternate" hreflang="x-default" href="${SITE}${en}">
 <meta name="robots" content="index,follow,max-image-preview:large">
+${GSC ? `<meta name="google-site-verification" content="${esc(GSC)}">` : ""}
 <meta property="og:type" content="website"><meta property="og:site_name" content="${esc(BRAND)}"><meta property="og:locale" content="${lc === "fr" ? "fr_FR" : "en_US"}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}"><meta property="og:image" content="${img}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
@@ -869,13 +912,17 @@ function sitemap() {
     const alts = `<xhtml:link rel="alternate" hreflang="en" href="${X(e.paths.en)}"/><xhtml:link rel="alternate" hreflang="fr" href="${X(e.paths.fr)}"/><xhtml:link rel="alternate" hreflang="x-default" href="${X(e.paths.en)}"/>`;
     return [e.paths.en, e.paths.fr].map((u) => `  <url><loc>${X(u)}</loc>${alts}<lastmod>${BUILD_DATE}</lastmod><changefreq>${e.changefreq}</changefreq><priority>${e.priority}</priority></url>`).join("\n");
   }).join("\n");
-  write("/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls}\n</urlset>\n`);
-  return sitemapEntries.length * 2;
+  // Public app routes (SPA) — single entry each, no hreflang pair (same URL EN/FR).
+  const apps = APP_PAGES.map((p) => `  <url><loc>${X(p.path)}</loc><lastmod>${BUILD_DATE}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`).join("\n");
+  write("/sitemap.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls}\n${apps}\n</urlset>\n`);
+  return sitemapEntries.length * 2 + APP_PAGES.length;
 }
 function robots() {
   const aiBots = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-Web", "anthropic-ai", "PerplexityBot", "Perplexity-User", "Google-Extended", "Applebot-Extended", "Amazonbot", "CCBot", "cohere-ai", "Bytespider", "Meta-ExternalAgent", "Diffbot", "DuckAssistBot", "YouBot"];
   const allow = aiBots.map((b) => `User-agent: ${b}\nAllow: /`).join("\n\n");
-  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  // Keep the private consoles and the API out of the index (they sit behind auth;
+  // no SEO value and shouldn't appear in results).
+  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /ops\nDisallow: /api\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
 }
 function aiTxt() {
   write("/ai.txt", `# ai.txt — AI usage policy for ${SITE}\n# MoMo›Me welcomes AI answer engines to read, cite and surface this content (EN + FR).\nUser-agent: *\nAllow: /\nContent-Usage: ai-training=yes, ai-search=yes, ai-answers=yes\nPreferred-Citation: MoMo›Me — Pay Mobile Money instantly with Bitcoin, Lightning & stablecoins\nContact: info@momome.xyz\nKnowledge: ${SITE}/llms.txt\nSitemap: ${SITE}/sitemap.xml\n`);

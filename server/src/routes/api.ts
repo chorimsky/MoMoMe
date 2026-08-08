@@ -1,35 +1,50 @@
 import { Router } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
-  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport,
+  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
+  MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
-import { ratesMeta } from "../core/rates.js";
+import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, providerFor } from "../adapters/index.js";
-import { settle, confirmInbound, adminRetry, adminRefund } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
 import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  config, isLive, liveMoney, ibexConfigured, ibexLive, ibexInboundTrusted,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import * as store from "../core/store.js";
 import { getSettings, updateSettings } from "../core/settings.js";
+import * as treasury from "../core/treasury.js";
+import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
+import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
+import { getDevice, enrollDevice } from "../core/deviceAccount.js";
+import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
+import { resolveLocation } from "../core/geoip.js";
+import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { geocodeLabel } from "../core/geo.js";
+import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
+import { openApiSpec } from "../openapi.js";
+import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
-import { routingTable, routingSnapshot } from "../core/routing.js";
+import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
+import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
 import { issueToken, verifyToken, tokenFromHeaders, type Session } from "../core/adminAuth.js";
 import {
   verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
-import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
+import * as compliance from "../core/compliance.js";
 import { rateLimit, rateLimitReset, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
@@ -96,7 +111,7 @@ function sectionForPath(sub: string): Section | null {
   const map: Record<string, Section> = {
     overview: "overview", payments: "payments", quotes: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
-    "mobile-money": "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
+    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     notifications: "notifications", health: "health", settings: "settings",
@@ -123,8 +138,14 @@ api.use("/admin", (req, res, next) => {
     if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
     return next();
   }
-  // Read Only can never mutate.
-  if (isReadOnly(role) && req.method !== "GET") {
+  // Developer API keys authorize real partner payments → Super-Admin only.
+  if (sub === "/apikeys" || sub.startsWith("/apikeys/")) {
+    if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+    return next();
+  }
+  // Read Only can never mutate — except changing their OWN password (self-service,
+  // handled below), which must not be blocked by the read-only method check.
+  if (isReadOnly(role) && req.method !== "GET" && sub !== "/password") {
     return res.status(403).json({ error: "forbidden", message: "Read-only access." });
   }
   // Section gate — fail CLOSED: every admin route must map to a section the role
@@ -141,6 +162,25 @@ api.use("/admin", (req, res, next) => {
   // than "payments" section access — a Support Agent can view but not move funds.
   if (/^\/payments\/[^/]+\/(retry|refund)$/.test(sub) && !canMovePaymentFunds(role)) {
     return res.status(403).json({ error: "forbidden", message: "Your role can't retry or refund payments." });
+  }
+  // Treasury sweep / destination config moves or redirects REAL crypto out of the
+  // platform wallet — the strictest gate: Super Admin only (viewing balances is fine
+  // for the liquidity section above; only the mutations are locked down here).
+  if (/^\/treasury\/(withdraw|destinations)$/.test(sub) && !isSuperAdmin(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Treasury withdrawals are Super Admin only." });
+  }
+  // Manual Mobile Money cash-in / cash-out moves real funds — same fund-movement
+  // gate as payment retry/refund (Ops Manager + Super Admin).
+  if (/^\/momo\/(cashout|cashin|transfer)$/.test(sub) && !canMovePaymentFunds(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Your role can't move Mobile Money funds." });
+  }
+  // Compliance dispositions, report filing (STR/ANIF) AND the CSV export are the
+  // compliance-officer function — Compliance Officer + Super Admin only. The export
+  // carries the confidential STR register + subject PII, so a general (e.g. Read-Only)
+  // console viewer must not be able to pull it. Viewing the dashboard is open to the
+  // compliance section; the STR register within it is stripped for non-officers below.
+  if (/^\/compliance\/(cases|str|export)\b/.test(sub) && !canFileReports(role)) {
+    return res.status(403).json({ error: "forbidden", message: "Only a Compliance Officer can disposition cases, file reports or export." });
   }
   next();
 });
@@ -210,18 +250,86 @@ function senderOf(req: { headers: Record<string, string | string[] | undefined> 
   return typeof s === "string" && s ? s : undefined;
 }
 
+const SIG_SKEW_MS = 300_000; // ±5 min tolerance (real phone clocks drift)
+function hdr(req: ReqLike, name: string): string | undefined {
+  const v = req.headers[name];
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === "string" && s ? s : undefined;
+}
+type ReqLike = { headers: Record<string, string | string[] | undefined>; method?: string; url?: string; rawBody?: Buffer };
+
+/**
+ * Verify the per-request signature: ECDSA-P256 over
+ *   `${METHOD}\n${path}\n${ts}\n${base64(sha256(rawBody))}`
+ * against the device's enrolled public key, with a fresh timestamp. The client
+ * signs the exact bytes it sends; we hash `rawBody` (see app.ts keepRaw) so the
+ * hashes match without re-serialising.
+ */
+async function verifyDeviceSig(req: ReqLike, authPub: JsonWebKey): Promise<boolean> {
+  const ts = hdr(req, "x-mm-ts");
+  const sigB64 = hdr(req, "x-mm-sig");
+  if (!ts || !sigB64) return false;
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Math.abs(Date.now() - tsNum) > SIG_SKEW_MS) return false;
+  try {
+    const key = await webcrypto.subtle.importKey("jwk", authPub, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const bodyHash = await webcrypto.subtle.digest("SHA-256", req.rawBody ?? new Uint8Array(0));
+    const bodyHashB64 = Buffer.from(bodyHash).toString("base64");
+    const msg = new TextEncoder().encode(`${(req.method ?? "GET").toUpperCase()}\n${req.url ?? ""}\n${ts}\n${bodyHashB64}`);
+    const sig = Buffer.from(sigB64, "base64");
+    return await webcrypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig, msg);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The AUTHENTICATED owner of a request:
+ *  • unknown/unenrolled id → the id itself (legacy bearer — unchanged behaviour);
+ *  • enrolled id → the id ONLY if the request carries a valid signature, else
+ *    undefined (a stolen id without the private key can no longer act).
+ */
+/** A valid developer API key → its partner owner id ("key:<id>"), else undefined.
+ *  Accepts `Authorization: Bearer mk_…` or `X-API-Key: mk_…`. Admin session tokens
+ *  (a different format, never "mk_"-prefixed) are ignored here. */
+function partnerOf(req: ReqLike): string | undefined {
+  const auth = hdr(req, "authorization");
+  const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7).trim() : undefined;
+  return verifyApiKey(bearer ?? hdr(req, "x-api-key")) ?? undefined;
+}
+
+async function ownerOf(req: ReqLike): Promise<string | undefined> {
+  // Developer/partner requests authenticate with an API key, not a device signature.
+  const partner = partnerOf(req);
+  if (partner) return partner;
+  const id = senderOf(req);
+  if (!id) return undefined;
+  const dev = getDevice(id);
+  if (!dev) return id; // not enrolled yet → legacy path
+  return (await verifyDeviceSig(req, dev.authPub)) ? id : undefined;
+}
+
+/** The vault scope for a request: the anchored ACCOUNT id if the device has one,
+ *  else its (authenticated) device id — so every device on the same phone shares
+ *  one encrypted contact book. */
+async function vaultOwnerOf(req: ReqLike): Promise<string | undefined> {
+  const dev = await ownerOf(req);
+  if (!dev) return undefined;
+  return accountOf(dev) ?? dev;
+}
+
 /** True when the request carries a valid admin session token (any role). */
 function isAdminRequest(req: { headers: Record<string, string | string[] | undefined> }): boolean {
   return !!verifyToken(tokenFromHeaders(req.headers));
 }
 
 /** May this requester view this payment? Admins always; otherwise the request's
- *  anonymous sender id must match the payment's. Prevents enumerating other
- *  people's payments/ledgers by id (the id is the only thing the caller needs). */
-function mayViewPayment(req: { headers: Record<string, string | string[] | undefined> }, senderId: string | undefined): boolean {
+ *  AUTHENTICATED owner (signed, for enrolled devices) must match the payment's.
+ *  Prevents enumerating other people's payments/ledgers by id. */
+async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promise<boolean> {
   if (!senderId) return true;          // legacy/seed payments with no owner
   if (isAdminRequest(req)) return true; // admin console (e.g. ledger drawer)
-  return senderOf(req) === senderId;
+  return (await ownerOf(req)) === senderId;
 }
 
 /* ---------- quotes ---------- */
@@ -234,11 +342,27 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
   if (typeof xaf !== "number" || !Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
     return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
   }
-  if (!["LIGHTNING", "ONCHAIN", "USDT"].includes(method)) {
+  if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
     return res.status(400).json({ error: "bad_method", message: "Unknown payment method." });
+  }
+  // Refuse a method the operator has disabled (the customer flow already hides it,
+  // but guard the API so a stale client / direct call can't quote a dead rail).
+  if (!getSettings().methods[method as keyof AdminSettings["methods"]]) {
+    return res.status(400).json({ error: "method_unavailable", message: "This payment method isn't available right now." });
   }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {
     return res.status(400).json({ error: "bad_country", message: "Unsupported country." });
+  }
+  if (!COUNTRIES[country as keyof typeof COUNTRIES]?.active) {
+    return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
+  }
+  // PRICING SAFETY: never quote real money on a stale/fallback FX rate. The feed
+  // refreshes every 30s; if it's dead (or never populated on a cold boot during an
+  // IBEX outage) the cache falls back to a hardcoded BTC price, which would over- or
+  // under-charge the customer. Refuse when real value can move and rates aren't fresh.
+  // (Sandbox/demo has no real money, so a fallback rate is harmless there.)
+  if (liveMoney() && !ratesFresh()) {
+    return res.status(503).json({ error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." });
   }
   const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
   const totalXaf = xaf + feeXaf;
@@ -266,8 +390,11 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {
+  // RASTER ONLY — no SVG. The brand logo is echoed to every client (customer + admin)
+  // via the public /config endpoint; an SVG can carry <script>/onload, so accepting it
+  // would let a settings-role operator broadcast active markup to all users.
   return typeof v === "string"
-    && /^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(v)
+    && /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v)
     && v.length <= 360_000;
 }
 
@@ -279,6 +406,10 @@ api.get("/config", (_req, res) => {
     // Live platform fee (fraction) so the customer's pre-quote fee preview tracks
     // the admin's Rates & Pricing setting instead of a hardcoded constant.
     feePct: getSettings().pricing.feePct,
+    // Which crypto pay-in methods are enabled — the customer flow only shows these.
+    methods: getSettings().methods,
+    // Which product surfaces are enabled — the client hides anything turned off.
+    features: getSettings().features,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
     // Public support contact (admin-managed in Settings → Company) so the Help
@@ -293,8 +424,33 @@ api.get("/config", (_req, res) => {
   });
 });
 
+/* ---------- developer API: machine-readable spec (public) ---------- */
+api.get("/openapi.json", (_req, res) => {
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.json(openApiSpec(config.publicUrl));
+});
+
+/* ---------- developer API keys (Super-Admin; gated in the /admin middleware) ---------- */
+api.get("/admin/apikeys", (_req, res) => res.json({ keys: listApiKeys() }));
+api.post("/admin/apikeys", (req, res) => {
+  if (!getSettings().features.developerApi) return res.status(403).json({ error: "feature_off", message: "The developer API is disabled." });
+  const label = String((req.body ?? {}).label ?? "").slice(0, 80);
+  const { key, secret } = createApiKey(label);
+  // `secret` is returned exactly ONCE — the client shows it and it's never recoverable.
+  res.status(201).json({ key, secret });
+});
+api.delete("/admin/apikeys/:id", (req, res) => {
+  return revokeApiKey(String(req.params.id))
+    ? res.json({ ok: true })
+    : res.status(404).json({ error: "not_found", message: "Key not found or already revoked." });
+});
+
 /* ---------- recipient name resolution ---------- */
-api.get("/recipients/resolve", rateLimitMiddleware("resolve", 120, 60_000), async (req, res) => {
+api.get("/recipients/resolve", rateLimitMiddleware("resolve", 60, 60_000), async (req, res) => {
+  // Tie resolution to an identified device — it discloses names (the internal identity
+  // graph aggregates other users' confirmations), so it must not be a fully-anonymous
+  // enumeration oracle. The send flow always carries a device id, so no UX impact.
+  if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const phone = String(req.query.phone ?? "").slice(0, 24); // bound input → bounded cache key / work
   const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
   try {
@@ -324,6 +480,14 @@ api.get("/admin/merchants", (_req, res) => {
 api.get("/admin/routing", (_req, res) => {
   res.json(routingSnapshot());
 });
+// Ops: force a payout rail up or down. Down → the pre-flight gate stops minting
+// addresses for it; up → re-enable the moment a provider (e.g. PawaPay) is fixed.
+api.post("/admin/routing/:aggregator", (req, res) => {
+  const name = req.params.aggregator as Aggregator;
+  if (name !== "pawapay" && name !== "peexit") return res.status(400).json({ error: "bad_aggregator", message: "Unknown payout rail." });
+  setAggregatorUp(name, (req.body ?? {}).up !== false);
+  res.json({ ok: true, routing: routingSnapshot() });
+});
 api.post("/admin/merchants/:id/validate", (req, res) => {
   const m = merchant.validateMerchant(req.params.id, (req.body ?? {}).displayName);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant not found." });
@@ -351,7 +515,7 @@ api.post("/identities/claim/request", rateLimitMiddleware("claim_req", 6, 60_000
     return res.status(409).json({ error: "already_claimed", message: "This account is already claimed." });
   }
   // devCode is sandbox-only; in production the code is sent by SMS.
-  res.json({ sent: true, devCode: isLive() ? undefined : r.code });
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
 });
 
 api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_000), (req, res) => {
@@ -385,8 +549,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   const detected = detectProvider(recipient.phone, recipient.country);
   if (detected && country.providers.includes(detected)) recipient.provider = detected;
   // Never store a null/blank name — fall back to the number so downstream UI
-  // (activity, receipts) and the identity layer always have a string.
-  if (typeof recipient.name !== "string" || !recipient.name.trim()) recipient.name = recipient.phone;
+  // (activity, receipts) and the identity layer always have a string. Sanitize +
+  // cap (it's forwarded to the payout aggregator's disburse({name}) and stored): strip
+  // control chars, collapse whitespace, cap at 60 — matches the admin cash-out cap.
+  const cleanName = typeof recipient.name === "string"
+    ? recipient.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60)
+    : "";
+  recipient.name = cleanName || recipient.phone;
   // Atomically claim the quote BEFORE any async work — a locked rate becomes
   // exactly one payment even if two requests race on the same quoteId (the
   // loser gets 404). A claimed quote is gone, so the rate can't be replayed.
@@ -395,6 +564,45 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   if (Date.now() > Date.parse(quote.expiresAt)) {
     return res.status(409).json({ error: "quote_expired", message: "This quote has expired — please re-quote." });
   }
+  // ── PRE-FLIGHT PAYOUT GATE ──────────────────────────────────────────────────────
+  // Before ANY inbound address/QR is minted (BTC on-chain, Lightning, or USDT), prove a
+  // payout can actually land — otherwise a paid invoice would strand real crypto. Every
+  // hard payout precondition is checked here; a failure un-claims the quote (the rate
+  // stays valid) and refuses, so no address ever exists for an un-payable transfer.
+  // (Intentional manual-review holds — large-amount approval, low-trust merchant — are
+  // deliberately NOT gated: those still pay out after operator sign-off.)
+  const block = (status: number, error: string, message: string) => {
+    store.putQuote(quote); // un-claim — the locked rate is untouched
+    return res.status(status).json({ error, message });
+  };
+  // 1) Ops kill-switch — payouts globally paused.
+  if (!getSettings().ops.acceptingPayments) return block(503, "payments_paused", "Payouts are temporarily paused. Please try again shortly.");
+  // 2) Corridor payout ceiling for this Mobile Money provider.
+  if (quote.xaf > PROVIDER_PAYOUT_MAX[recipient.provider]) return block(400, "amount_too_high", `The maximum payout to ${recipient.provider} Mobile Money is ${PROVIDER_PAYOUT_MAX[recipient.provider].toLocaleString()} XAF.`);
+  // 3) Internal XAF treasury float must cover this payout.
+  if (availableFloatXaf() < quote.xaf) {
+    console.warn(`[payout-gate] BLOCKED float: treasury ${availableFloatXaf()} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country})`);
+    return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
+  }
+  // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
+  //    inbound will be real crypto (IBEX + trusted); a simulated inbound may use a
+  //    simulated rail. This is the "service functional + has balance" check.
+  const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
+  const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
+  if (!ready.ok) {
+    // Surface WHY so a "payouts unavailable" incident is diagnosable from the logs
+    // (rails_down vs no_live_rail vs insufficient_rail_balance) without needing admin.
+    console.warn(`[payout-gate] BLOCKED rail: ${recipient.provider}/${recipient.country} ${quote.xaf} XAF reason=${ready.reason} willBeReal=${willBeReal}`);
+    return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
+  }
+  // Attribute the payment to the authenticated device. Refuse if auth failed (an
+  // enrolled id sending no/invalid signature → ownerOf undefined): creating a
+  // senderId-less payment would make it world-readable via mayViewPayment's
+  // ownerless bypass. Legit clients (new or signed) always resolve to a real id.
+  const owner = await ownerOf(req);
+  if (owner === undefined) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+
+  // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
   const ref = nextRef();
   let instruction;
@@ -406,7 +614,12 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
       callbackUrl: `${config.publicUrl}/webhooks/${providerFor(quote.method)}`,
     });
   } catch (e) {
-    return res.status(502).json({ error: "rail_error", message: e instanceof Error ? e.message : "Rail provider error." });
+    // Couldn't mint the inbound address (e.g. a stablecoin whose IBEX receive combo
+    // isn't enabled → "invalid combination"). Un-claim the quote and return a CLEAN,
+    // non-leaking "method unavailable" — never a raw provider error / 502.
+    console.error(`[pay] createInstruction failed (${quote.method}):`, e instanceof Error ? e.message : e);
+    store.putQuote(quote);
+    return res.status(503).json({ error: "method_unavailable", message: "This payment method isn't available right now. Please choose another or try again shortly." });
   }
   const payment: Payment = {
     id: id("pay"),
@@ -416,7 +629,7 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     displayStatus: "Pending",
     method: quote.method,
     recipient,
-    senderId: senderOf(req), // anonymous device id — attributes the payment to its sender
+    senderId: owner, // authenticated device id — attributes the payment to its sender
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
@@ -430,6 +643,28 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     createdAt: now,
     updatedAt: now,
   };
+  // Merchant attribution: if this came from a merchant payment link, tag it — but
+  // ONLY when the recipient actually matches that merchant's settlement number, so
+  // a caller can't falsely credit a merchant's sales.
+  const body = (req.body ?? {}) as { merchantLinkCode?: string; merchantCode?: string };
+  const linkCode = typeof body.merchantLinkCode === "string" ? body.merchantLinkCode : "";
+  const merchantCode = typeof body.merchantCode === "string" ? body.merchantCode : "";
+  if (linkCode) {
+    const link = getLink(linkCode);
+    const m = link && !link.disabledAt ? merchantById(link.merchantId) : undefined;
+    if (m && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+      payment.merchantId = m.id;
+      payment.merchantLinkCode = link!.code;
+    }
+  } else if (merchantCode) {
+    // Directory / scan-to-pay (by public code): tag the sale to the merchant when
+    // the recipient matches its settlement number — so counter-poster scans are
+    // attributed by merchantId, not just the loose phone fallback.
+    const m = merchantByCode(merchantCode);
+    if (m && m.status === "active" && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+      payment.merchantId = m.id;
+    }
+  }
   store.putPayment(payment);
   // (the quote was already atomically claimed above — a locked rate is used once)
   if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
@@ -438,6 +673,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   // becomes an account once it has actually received money (see stateMachine).
   // Optional intelligence layer — fire-and-forget, NEVER blocks the payment.
   void peex.enrich(payment);
+  // Coarse geo-origin (IP → country/city) for operator fraud/AML review —
+  // fire-and-forget, never blocks or slows creation; backfilled when it resolves.
+  void resolveLocation(req).then((loc) => {
+    if (!loc) return;
+    const p = store.getPayment(payment.id);
+    if (p) { p.senderLocation = loc; store.putPayment(p); }
+  }).catch(() => {});
   res.json(payment);
 });
 
@@ -452,6 +694,11 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
 api.post("/payments/:id/confirm", async (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // Only the payment's own sender may drive its confirmation (BOLA guard, matching
+  // /payments/:id and /refund-destination). Fund theft is already impossible
+  // downstream — a fake inbound on a live rail forces MANUAL_REVIEW — but this stops
+  // a stranger poking another sender's sandbox payment through settle().
+  if (!(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   if (p.state === "AWAITING_INBOUND") {
     const inst = p.payInstruction;
     if (inst.provider === "ibex" && inst.providerRef) {
@@ -481,22 +728,45 @@ api.post("/payments/:id/simulate", (req, res) => {
   res.json(p);
 });
 
-api.get("/payments/:id", (req, res) => {
+/**
+ * Refund-claim: a payment whose payout couldn't land is REFUND_PENDING; the sender
+ * submits a Lightning invoice here to receive their crypto back (paid outbound via IBEX).
+ */
+api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 10, 60_000), async (req, res) => {
+  const p = store.getPayment(req.params.id);
+  // Ownership: only the original sender (matching device id) may direct the refund —
+  // otherwise anyone with a payment id could divert the refund to their own invoice.
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  const bolt11 = typeof (req.body ?? {}).bolt11 === "string" ? (req.body.bolt11 as string).trim() : "";
+  if (!/^ln(bc|tb|bcrt)\w+$/i.test(bolt11)) return res.status(400).json({ error: "bad_invoice", message: "Enter a valid Lightning invoice (starts with ln…)." });
+  const r = await completeRefund(p, bolt11);
+  if (!r.ok) {
+    const message = r.error === "amount_mismatch" ? "The invoice amount must match your original payment — or use an amount-less invoice."
+      : r.error === "not_refundable" ? "This payment isn't awaiting a refund."
+      : r.error === "refund_lightning_only" ? "Automated refunds are available for Lightning payments only."
+      : r.error === "bad_invoice" ? "Couldn't read that Lightning invoice. Please paste it again."
+      : "Couldn't process the refund. Please check the invoice and try again.";
+    return res.status(r.error === "not_refundable" ? 409 : 400).json({ error: r.error, message });
+  }
+  res.json(store.getPayment(p.id) ?? p);
+});
+
+api.get("/payments/:id", async (req, res) => {
   const p = store.getPayment(req.params.id);
   // 404 (not 403) on a non-owned payment too, so the id space can't be probed.
-  if (!p || !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   res.json(p);
 });
 
 // Sender-scoped: a customer sees only their OWN payments (by anonymous device id).
-api.get("/payments", (req, res) => {
-  const sid = senderOf(req);
+api.get("/payments", async (req, res) => {
+  const sid = await ownerOf(req);
   res.json(sid ? store.listPayments().filter((p) => p.senderId === sid) : []);
 });
 
 /** The sender's distinct recent recipients — powers "send again" quick-pick. */
-api.get("/me/recipients", (req, res) => {
-  const sid = senderOf(req);
+api.get("/me/recipients", async (req, res) => {
+  const sid = await ownerOf(req);
   if (!sid) return res.json([]);
   const seen = new Set<string>();
   const out: Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }> = [];
@@ -510,10 +780,348 @@ api.get("/me/recipients", (req, res) => {
   res.json(out);
 });
 
-api.get("/ledger/:paymentId", (req, res) => {
+api.get("/ledger/:paymentId", async (req, res) => {
   const p = store.getPayment(req.params.paymentId);
-  if (p && !mayViewPayment(req, p.senderId)) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (p && !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   res.json(entriesFor(req.params.paymentId));
+});
+
+/* ---------- encrypted contact vault (zero-knowledge) ----------
+   The server stores/returns opaque ciphertext only; all crypto is on-device.
+   Scoped to the anonymous sender/device id — a missing id means no vault. */
+api.get("/me/vault", async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.json([]);
+  const since = typeof req.query.since === "string" ? req.query.since : undefined;
+  res.json(listVault(sid, since));
+});
+
+api.put("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
+  const body = (req.body ?? {}) as { ciphertext?: unknown; iv?: unknown; ver?: unknown };
+  const ciphertext = typeof body.ciphertext === "string" ? body.ciphertext : "";
+  const iv = typeof body.iv === "string" ? body.iv : "";
+  const ver = typeof body.ver === "number" ? body.ver : 1;
+  // Opaque blobs only — reject anything implausibly large (≈48KB ciphertext cap).
+  if (!ciphertext || !iv || ciphertext.length > 48_000 || iv.length > 128) {
+    return res.status(400).json({ error: "bad_record", message: "Invalid vault record." });
+  }
+  res.json(upsertVault(sid, { recordId: String(req.params.recordId).slice(0, 64), ciphertext, iv, ver }));
+});
+
+api.delete("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  const sid = await vaultOwnerOf(req);
+  if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
+  const rec = deleteVault(sid, String(req.params.recordId).slice(0, 64));
+  if (!rec) return res.status(404).json({ error: "not_found", message: "Not found." });
+  res.json(rec);
+});
+
+/* ---------- device enrollment (proof-of-possession) ----------
+   Trust-on-first-use: a device registers its public keypair for its id. This
+   call is intentionally UNSIGNED (it establishes the key); afterwards every
+   request for that id must be signed. Re-enrolling a different key → 409, and
+   the client rotates to a fresh id. */
+api.post("/me/devices", rateLimitMiddleware("device_enroll", 20, 60_000), (req, res) => {
+  const id = senderOf(req);
+  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  const body = (req.body ?? {}) as { authPub?: JsonWebKey; wrapPub?: JsonWebKey };
+  const okJwk = (k?: JsonWebKey) => !!k && k.kty === "EC" && k.crv === "P-256" && typeof k.x === "string" && typeof k.y === "string";
+  if (!okJwk(body.authPub) || !okJwk(body.wrapPub)) return res.status(400).json({ error: "bad_key", message: "Invalid device key." });
+  const r = enrollDevice(id, body.authPub as JsonWebKey, body.wrapPub as JsonWebKey);
+  if (!r.ok) return res.status(409).json({ error: "device_conflict", message: "This device id is already enrolled with a different key." });
+  res.json({ ok: true, deviceId: id });
+});
+
+/* ---------- Phase 4 — phone-anchor + E2E recovery ----------
+   Anchor a device to a phone (portable account); a recovery-code-wrapped vault
+   key is escrowed so a new device can restore it. The OTP authorises account
+   access; only the recovery code (held by the user) can unwrap the key. */
+function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number; iv: string; ct: string } {
+  const o = b as { salt?: unknown; iterations?: unknown; iv?: unknown; ct?: unknown };
+  return !!o && typeof o.salt === "string" && o.salt.length <= 128
+    && typeof o.iterations === "number" && Number.isInteger(o.iterations) && o.iterations >= 100_000 && o.iterations <= 1_000_000
+    && typeof o.iv === "string" && o.iv.length <= 128 && typeof o.ct === "string" && o.ct.length <= 4096;
+}
+
+api.post("/me/anchor/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+  if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const r = requestAnchor(String((req.body ?? {}).phone ?? ""));
+  if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
+});
+
+api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const dev = await ownerOf(req);
+  if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const { phone, code, recovery } = (req.body ?? {}) as { phone?: string; code?: string; recovery?: unknown };
+  const v = verifyAnchorCode(String(phone ?? ""), String(code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  const accountId = accountIdForPhone(String(phone));
+  // GUARD: if this number already has an established account (records escrowed under
+  // ANOTHER device's vault key) and this device isn't already part of it, backing up
+  // here would (a) overwrite the recovery escrow with a key that can't decrypt the
+  // real contacts and (b) mix this device's key into the account — silently orphaning
+  // and un-recovering everything. Such a device must RESTORE (adopt the account key),
+  // not back up. Same-device re-backup (already linked) is fine — same key.
+  const alreadyMine = accountOf(dev) === accountId;
+  if (!alreadyMine && (!!getRecovery(accountId) || listVault(accountId).length > 0)) {
+    return res.status(409).json({ error: "restore_first", message: "This number already has a backup on another device. Restore it here first." });
+  }
+  linkDevice(dev, String(phone));
+  reassignVault(dev, accountId); // move this device's existing contacts into the shared account
+  if (recovery !== undefined) {
+    if (!validRecoveryBlob(recovery)) return res.status(400).json({ error: "bad_recovery", message: "Invalid recovery data." });
+    putRecovery(accountId, recovery);
+  }
+  res.json({ ok: true, accountId });
+});
+
+api.post("/me/anchor/restore", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const dev = await ownerOf(req);
+  if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const { phone, code } = (req.body ?? {}) as { phone?: string; code?: string };
+  const v = verifyAnchorCode(String(phone ?? ""), String(code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  const accountId = linkDevice(dev, String(phone)); // join the account on this device
+  res.json({ accountId, records: listVault(accountId), recovery: getRecovery(accountId) ?? null });
+});
+
+/* ============================================================
+   Merchant ecosystem — self-onboarded businesses that accept payments.
+   Device-owned (ownerOf); settlement-phone ownership proven with the anchor OTP.
+   See docs/merchant-ecosystem.md.
+   ============================================================ */
+function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+
+/** Create / update my merchant profile (starts pending until the phone is verified). */
+api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const b = (req.body ?? {}) as { businessName?: string; category?: string; country?: string; settlementPhone?: string; tier?: string; location?: MerchantAccount["location"] };
+  const businessName = String(b.businessName ?? "").trim();
+  const country = (COUNTRIES[b.country as CountryCode] ? b.country : "CM") as CountryCode;
+  const settlementPhone = String(b.settlementPhone ?? "").replace(/\D/g, "");
+  if (businessName.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your business name." });
+  // Don't onboard into a corridor that can never pay out (mirrors /quotes) — else the
+  // merchant would list on the map but every checkout to them would 400 country_inactive.
+  if (!COUNTRIES[country]?.active) return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
+  if (settlementPhone.length < 8) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
+  const provider = detectProvider(settlementPhone, country);
+  if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
+  const tier = b.tier === "business" ? "business" : "individual";
+  // Sanitize the client-supplied location: cap the label, and only keep coordinates
+  // that are finite and in range — never trust the raw body (this is echoed publicly
+  // on /discover).
+  const rawLoc = b.location;
+  const cleanLoc = ((): MerchantAccount["location"] | undefined => {
+    if (!rawLoc || typeof rawLoc !== "object") return undefined;
+    const out: NonNullable<MerchantAccount["location"]> = {};
+    if (typeof rawLoc.label === "string" && rawLoc.label.trim()) out.label = rawLoc.label.trim().slice(0, 60);
+    if (typeof rawLoc.lat === "number" && Number.isFinite(rawLoc.lat) && Math.abs(rawLoc.lat) <= 90 &&
+        typeof rawLoc.lng === "number" && Number.isFinite(rawLoc.lng) && Math.abs(rawLoc.lng) <= 180) {
+      out.lat = rawLoc.lat; out.lng = rawLoc.lng;
+    }
+    return Object.keys(out).length ? out : undefined;
+  })();
+  let m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: cleanLoc });
+  // No SMS provider yet → we can't deliver an OTP. Bring the account to "active" so the
+  // dashboard is usable, but do NOT mark the phone verified — verifiedPhone must reflect
+  // a real ownership proof, since it gates the public directory, pay-link creation, and
+  // the "Verified" badge buyers see. Marking it here let anyone list an arbitrary
+  // settlement phone as "Verified" (impersonation/phishing). Re-enable self-serve
+  // verification by wiring an SMS provider and setting SMS_ENABLED=true.
+  if (!config.smsEnabled) m = activateUnverified(m.id) ?? m;
+  // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
+  // (once — recordReferral is a no-op if already attributed or self-referral). Skipped
+  // when the referrals feature is switched off.
+  const ref = typeof (req.body as { ref?: string }).ref === "string" ? (req.body as { ref?: string }).ref! : "";
+  if (ref && getSettings().features.referrals) recordReferral(owner, ref);
+  res.status(201).json({ merchant: publicMerchant(m), smsEnabled: config.smsEnabled });
+});
+
+/** Send an OTP to the settlement number to prove ownership. */
+api.post("/merchant/verify/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
+  const r = requestAnchor(m.settlementPhone);
+  if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
+  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
+});
+
+/** Verify the OTP → the merchant account goes live. */
+api.post("/merchant/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
+  const v = verifyAnchorCode(m.settlementPhone, String((req.body ?? {}).code ?? ""));
+  if (!v.ok) return res.status(v.reason === "bad_code" ? 400 : 410).json({ error: v.reason === "bad_code" ? "bad_code" : "expired", message: v.reason === "bad_code" ? "That code is incorrect." : "That code has expired. Request a new one." });
+  res.json({ merchant: publicMerchant(activateMerchant(m.id)!) });
+});
+
+/** My merchant account (or 404 if not onboarded). */
+api.get("/merchant/me", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  res.json({ merchant: publicMerchant(m) });
+});
+
+/** Dashboard read-model: today's + all-time sales and recent transactions. */
+api.get("/merchant/me/summary", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  const sales = salesFor(m).filter((p) => p.displayStatus === "Completed");
+  const today = todayISO();
+  const todays = sales.filter((p) => p.createdAt.slice(0, 10) === today);
+  const sum = (ps: typeof sales) => ps.reduce((s, p) => s + p.xaf, 0);
+  const allXaf = sum(sales), todayXaf = sum(todays);
+  res.json({
+    merchant: publicMerchant(m),
+    today: { salesXaf: todayXaf, count: todays.length, avgXaf: todays.length ? Math.round(todayXaf / todays.length) : 0 },
+    all: { salesXaf: allXaf, count: sales.length },
+    recent: sales.slice(0, 30),
+  });
+});
+
+/* ---- payment links / QR ---- */
+api.get("/merchant/links", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  // Derive per-link "paid" state from completed payments that carry the link code,
+  // so invoices can show Paid / partially paid instead of staying open forever.
+  const paidByLink = new Map<string, { count: number; xaf: number; at: string }>();
+  for (const p of salesFor(m)) {
+    if (p.displayStatus !== "Completed" || !p.merchantLinkCode) continue;
+    const cur = paidByLink.get(p.merchantLinkCode) ?? { count: 0, xaf: 0, at: "" };
+    cur.count += 1; cur.xaf += p.xaf; if (p.createdAt > cur.at) cur.at = p.createdAt;
+    paidByLink.set(p.merchantLinkCode, cur);
+  }
+  const links = linksForMerchant(m.id).map((l) => ({ ...l, paid: paidByLink.get(l.code) }));
+  res.json({ links });
+});
+api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number before accepting payments." });
+  const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind; clientName?: string; dueDate?: string };
+  if (b.kind === "invoice" && !getSettings().features.invoices) return res.status(403).json({ error: "feature_off", message: "Invoices aren't available right now." });
+  const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.min(Math.round(b.amountXaf), MAX_XAF) : undefined;
+  res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind, clientName: b.clientName, dueDate: b.dueDate }) });
+});
+api.delete("/merchant/links/:code", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  return disableLink(String(req.params.code), m.id) ? res.json({ ok: true }) : res.status(404).json({ error: "not_found", message: "Link not found." });
+});
+
+/** PUBLIC — resolve a payment link for the /pay/:code page (enough to run the send flow). */
+api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), (req, res) => {
+  const link = getLink(String(req.params.code));
+  if (!link || link.disabledAt) return res.status(404).json({ error: "not_found", message: "This payment link isn't active." });
+  const m = merchantById(link.merchantId);
+  if (!m || m.status !== "active") return res.status(404).json({ error: "not_found", message: "This merchant isn't active." });
+  const pub: MerchantLinkPublic = {
+    code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind, clientName: link.clientName, dueDate: link.dueDate,
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+  };
+  res.json(pub);
+});
+
+/* ---- discovery directory ("Pay with MoMo›Me") ---- */
+/** Opt my merchant in/out of the public directory. */
+api.post("/merchant/listing", rateLimitMiddleware("merchant_write", 30, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number first." });
+  res.json({ merchant: publicMerchant(setListed(m.id, (req.body ?? {}).listed !== false)!) });
+});
+
+/** PUBLIC — browse accepting merchants (no settlement numbers exposed). */
+api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), (req, res) => {
+  if (!getSettings().features.directory) return res.json({ merchants: [] });
+  const country = typeof req.query.country === "string" ? req.query.country : undefined;
+  const category = typeof req.query.category === "string" ? req.query.category : undefined;
+  const q = typeof req.query.q === "string" ? req.query.q.slice(0, 60) : undefined;
+  const entries: MerchantDirectoryEntry[] = directory({ country, category, q }).slice(0, 200).map((m) => {
+    // Prefer the merchant's own precise coordinates (captured at onboarding) —
+    // an exact storefront pin. Fall back to the coarse city gazetteer (jittered)
+    // only for legacy label-only merchants that never captured a location.
+    const stored = typeof m.location?.lat === "number" && typeof m.location?.lng === "number"
+      ? { lat: m.location.lat, lng: m.location.lng } : undefined;
+    const pt = stored ?? geocodeLabel([m.location?.label, m.businessName], m.code);
+    return {
+      code: m.code, businessName: m.businessName, category: m.category, country: m.country,
+      location: (m.location?.label || pt) ? { ...(m.location?.label ? { label: m.location.label } : {}), ...(pt ?? {}) } : undefined,
+      verifiedPhone: m.verifiedPhone,
+    };
+  });
+  res.json({ merchants: entries });
+});
+
+/** PUBLIC — resolve a merchant by its public code for an open-amount checkout (/m/:code). */
+api.get("/merchant/by-code/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), (req, res) => {
+  if (!getSettings().features.scanToPay) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
+  const m = merchantByCode(String(req.params.code));
+  if (!m || m.status !== "active" || !m.verifiedPhone) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
+  const pub: MerchantLinkPublic = {
+    code: m.code, kind: "link",
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+  };
+  res.json(pub);
+});
+
+/* ============================================================
+   Referrals / ambassadors — the viral loop. Every device gets a shareable code;
+   a device that arrived via ?ref is attributed once. The ambassador view is that
+   attribution joined with the merchant layer. See docs/growth-engine.md.
+   ============================================================ */
+function ambassadorTier(activeMerchants: number): AmbassadorTier {
+  return activeMerchants >= 10 ? "regional_lead" : activeMerchants >= 3 ? "city_lead" : "rep";
+}
+
+/** Attribute THIS device to a referrer (once). Called on first arrival via ?ref. */
+api.post("/me/referral/claim", rateLimitMiddleware("ref_claim", 20, 60_000), async (req, res) => {
+  if (!getSettings().features.referrals) return res.json({ ok: false });
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const ref = String((req.body ?? {}).ref ?? "");
+  res.json({ ok: ref ? recordReferral(owner, ref) : false });
+});
+
+/** My referral code + who I've brought (the ambassador dashboard feed). */
+api.get("/me/referral", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const referred = referralsOf(owner);
+  const merchants: ReferredMerchant[] = [];
+  for (const o of referred) {
+    const m = merchantByOwner(o);
+    if (!m) continue;
+    const firstPayment = salesFor(m).some((p) => p.displayStatus === "Completed");
+    merchants.push({ businessName: m.businessName, code: m.code, status: m.status, firstPayment });
+  }
+  const activeMerchants = merchants.filter((m) => m.status === "active" && m.firstPayment).length;
+  const summary: AmbassadorSummary = {
+    code: refCodeFor(owner), referredCount: referred.length, merchants,
+    activeMerchants, tier: ambassadorTier(activeMerchants),
+  };
+  res.json(summary);
 });
 
 /* ---------- admin ---------- */
@@ -589,6 +1197,21 @@ api.get("/admin/settings", (_req, res) => {
 });
 api.put("/admin/settings", (req, res) => {
   const patch = (req.body ?? {}) as Partial<AdminSettings>;
+  // RBAC on privileged sections. This generic PUT reaches everyone with `settings`
+  // access (incl. Finance Manager) and merges whatever it's handed — so it must NOT
+  // be a back door around the stricter dedicated routes.
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  const superAdmin = !!role && isSuperAdmin(role);
+  // Treasury sweep destinations move REAL crypto — managed ONLY via the Super-Admin,
+  // address-validated /admin/treasury/destinations route, never here (this path had
+  // no gate and no validation → a lesser role could repoint the sweep to their wallet).
+  if (patch.treasury !== undefined) {
+    return res.status(403).json({ error: "forbidden", message: "Manage treasury destinations under Liquidity (Super Admin)." });
+  }
+  // Ops guardrails (kill-switch, payout-approval threshold) and AML/compliance controls
+  // are Super-Admin-only risk settings; drop them from lesser roles so their legitimate
+  // company/pricing/channel saves still succeed.
+  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; delete patch.features; }
   const pr = patch.pricing;
   if (pr) {
     const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;
@@ -607,7 +1230,7 @@ api.put("/admin/settings", (req, res) => {
   }
   const logo = patch.company?.logo;
   if (logo !== undefined && logo !== null && !isValidLogo(logo)) {
-    return res.status(400).json({ error: "bad_logo", message: "Logo must be a PNG, JPEG, WebP, GIF or SVG image under 256 KB." });
+    return res.status(400).json({ error: "bad_logo", message: "Logo must be a PNG, JPEG, WebP or GIF image under 256 KB." });
   }
   const op = patch.ops;
   if (op?.payoutApprovalXaf !== undefined) {
@@ -615,6 +1238,31 @@ api.put("/admin/settings", (req, res) => {
     if (typeof n !== "number" || !Number.isFinite(n) || n < MIN_XAF || n > MAX_XAF) {
       return res.status(400).json({ error: "bad_ops", message: `Approval threshold must be ${MIN_XAF}–${MAX_XAF} XAF.` });
     }
+  }
+  const cp = patch.compliance;
+  if (cp) {
+    const posXaf = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n > 0 && n <= 1_000_000_000;
+    for (const k of ["ctrThresholdXaf", "cddThresholdXaf", "structuringXaf"] as const) {
+      if (cp[k] !== undefined && !posXaf(cp[k])) return res.status(400).json({ error: "bad_compliance", message: `${k} must be a positive XAF amount.` });
+    }
+    // CDD is the lower, occasional-transaction trigger; it must not exceed the CTR
+    // reporting threshold or mid-band transactions would fall through both rules.
+    if (cp.ctrThresholdXaf !== undefined && cp.cddThresholdXaf !== undefined && cp.cddThresholdXaf > cp.ctrThresholdXaf) {
+      return res.status(400).json({ error: "bad_compliance", message: "CDD trigger must be ≤ the CTR threshold." });
+    }
+    if (cp.structuringWindowH !== undefined && !(Number.isFinite(cp.structuringWindowH) && cp.structuringWindowH >= 1 && cp.structuringWindowH <= 720)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Structuring window must be 1–720 hours." });
+    }
+    if (cp.retentionYears !== undefined && !(Number.isFinite(cp.retentionYears) && cp.retentionYears >= 1 && cp.retentionYears <= 30)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Retention must be 1–30 years." });
+    }
+    if (cp.sanctionsList !== undefined && (!Array.isArray(cp.sanctionsList) || cp.sanctionsList.some((x) => typeof x !== "string") || cp.sanctionsList.length > 1000)) {
+      return res.status(400).json({ error: "bad_compliance", message: "Watchlist must be a list of ≤1000 strings." });
+    }
+    // Cap free-text lengths defensively.
+    if (typeof cp.officer === "string") cp.officer = cp.officer.slice(0, 120);
+    if (typeof cp.reportingEntity === "string") cp.reportingEntity = cp.reportingEntity.slice(0, 200);
+    if (Array.isArray(cp.sanctionsList)) cp.sanctionsList = cp.sanctionsList.map((x) => x.slice(0, 200));
   }
   res.json(updateSettings(patch));
 });
@@ -672,6 +1320,119 @@ api.get("/admin/liquidity", (_req, res) => {
     ],
   });
 });
+
+/* ---------- treasury (crypto wallet sweep) ----------
+   View: live IBEX balances, sender-owed liabilities, safely-withdrawable, stored
+   destinations, and the withdrawal history. Mutations (destinations, withdraw) are
+   Super-Admin gated in the /admin middleware above. */
+api.get("/admin/treasury", async (_req, res) => {
+  const pools = await treasury.treasuryPools();
+  res.json({ pools, destinations: getSettings().treasury, history: treasury.withdrawalHistory() });
+});
+
+// A treasury address: a Lightning address (user@domain), a bech32/base58 BTC address,
+// or an 0x… ERC-20 address. Loose validation — the rail's send call is authoritative.
+function looksLikeAddress(v: unknown): v is string {
+  if (typeof v !== "string" || v.length > 120) return false;
+  const s = v.trim();
+  return s === "" || /^[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s) || /^(bc1|[13])[a-z0-9]{20,}$/i.test(s) || /^0x[0-9a-f]{40}$/i.test(s);
+}
+api.put("/admin/treasury/destinations", (req, res) => {
+  const b = (req.body ?? {}) as Partial<AdminSettings["treasury"]>;
+  const fields: (keyof AdminSettings["treasury"])[] = ["lnAddress", "btcOnchain", "usdtAddress", "usdcAddress"];
+  const patch: Partial<AdminSettings["treasury"]> = {};
+  for (const f of fields) {
+    if (b[f] === undefined) continue;
+    if (!looksLikeAddress(b[f])) return res.status(400).json({ error: "bad_address", message: `That ${f} doesn't look like a valid address.` });
+    patch[f] = (b[f] as string).trim();
+  }
+  const s = updateSettings({ treasury: { ...getSettings().treasury, ...patch } });
+  res.json({ destinations: s.treasury });
+});
+
+api.post("/admin/treasury/withdraw", async (req, res) => {
+  const { rail, amount } = (req.body ?? {}) as { rail?: TreasuryRail; amount?: number };
+  if (!rail || !["lightning", "onchain", "usdt", "usdc"].includes(rail)) {
+    return res.status(400).json({ error: "bad_rail", message: "Choose a valid withdrawal rail." });
+  }
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  }
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await treasury.withdraw(rail, amount, by);
+  if (!r.ok) {
+    const message = r.error === "no_destination" ? "No destination is configured for this rail — set one first."
+      : r.error === "stablecoin_unavailable" ? "USDT/USDC withdrawals aren't available yet (IBEX hasn't enabled stablecoin send)."
+      : r.error === "balance_unavailable" ? "Couldn't confirm the wallet balance right now. Please try again shortly."
+      : r.error === "exceeds_withdrawable" ? "That exceeds the withdrawable balance (funds owed to senders are protected)."
+      : r.error === "duplicate" ? "An identical withdrawal was just submitted — not repeating it (avoids sending crypto twice)."
+      : r.error === "bad_amount" ? "Enter a valid amount."
+      : "The withdrawal couldn't be sent. Please try again.";
+    const status = r.error === "exceeds_withdrawable" || r.error === "no_destination" ? 400 : r.error === "duplicate" ? 409 : 502;
+    return res.status(status).json({ error: r.error, message, entry: r.entry });
+  }
+  res.json({ ok: true, entry: r.entry });
+});
+
+/* ---------- Mobile Money ops (manual cash-in / cash-out) ----------
+   View: live rail balances + op history (mobilemoney section). Mutations
+   (cashout/cashin) require fund-movement rights, gated in the /admin middleware. */
+api.get("/admin/momo", async (_req, res) => {
+  const [balances, fees] = await Promise.all([momoOps.balances("CM"), momoOps.feeInfo().catch(() => null)]);
+  res.json({ balances, history: momoOps.history(), fees });
+});
+
+api.post("/admin/momo/cashout", async (req, res) => {
+  const { phone, amount, country, name } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode; name?: string };
+  const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.cashout(phone, cc as CountryCode, amount, by, typeof name === "string" ? name.trim().slice(0, 60) : undefined);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+api.post("/admin/momo/cashin", async (req, res) => {
+  const { phone, amount, country, name } = (req.body ?? {}) as { phone?: string; amount?: number; country?: CountryCode; name?: string };
+  const cc = (country && COUNTRIES[country as keyof typeof COUNTRIES]) ? country : "CM";
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.cashin(phone, cc as CountryCode, amount, by, typeof name === "string" ? name.trim().slice(0, 60) : undefined);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+// Rebalance the Peexit Payout wallet → Collection wallet through a controlled
+// treasury number (disburse then collect). Same fund-movement gate as cash-out.
+api.post("/admin/momo/transfer", async (req, res) => {
+  const { phone, amount } = (req.body ?? {}) as { phone?: string; amount?: number };
+  if (typeof phone !== "string" || phone.replace(/\D/g, "").length < 8) return res.status(400).json({ error: "bad_number", message: "Enter a valid treasury Mobile Money number." });
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a valid amount." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "admin";
+  const r = await momoOps.transferToCollection(phone, amount, by);
+  if (!r.ok) return res.status(momoErrStatus(r.error)).json({ error: r.error, message: momoErrMessage(r.error), op: r.op });
+  res.json({ ok: true, op: r.op });
+});
+
+function momoErrStatus(e?: string): number {
+  if (e === "duplicate") return 409;
+  return e === "rail_unavailable" || e === "peexit_cashin_unavailable" ? 503 : e === "bad_number" || e === "bad_amount" || e === "insufficient_balance" ? 400 : 502;
+}
+function momoErrMessage(e?: string): string {
+  switch (e) {
+    case "bad_number": return "That doesn't look like a supported MTN/Orange number.";
+    case "bad_amount": return "Enter a valid amount.";
+    case "insufficient_balance": return "The rail's wallet balance is below this amount.";
+    case "duplicate": return "An identical operation was just submitted — not repeating it (avoids a double payment). Wait a moment if this is intentional.";
+    case "rail_unavailable": return "That rail isn't live/reachable right now.";
+    case "peexit_cashin_unavailable": return "Orange cash-in via Peexit isn't available yet (Collect API not wired).";
+    // Anything else is the raw provider/rail error (a rejected payout/deposit) —
+    // surface it verbatim; this is an operator tool, the real reason is what helps.
+    default: return e ? `Rail rejected the operation — ${e}` : "The operation couldn't be completed. Please try again.";
+  }
+}
 
 /* ---------- pricing / FX engine ---------- */
 api.get("/admin/pricing", (_req, res) => {
@@ -769,33 +1530,48 @@ api.get("/admin/revenue", (req, res) => {
 });
 
 /* ---------- compliance ---------- */
-api.get("/admin/compliance", (_req, res) => {
-  const ids = listIdentities();
-  const verified = ids.filter((i) => i.claimed).length;
-  const pays = store.listPayments();
-  // Flag large, failed, OR Peex-review transactions — annotate each with the
-  // Peex risk signal so the intelligence layer visibly feeds the review queue.
-  const flagged = pays
-    .map((p) => {
-      const v = peex.getVerification(p.ref);
-      const large = p.xaf >= 100_000;
-      const failed = p.displayStatus === "Failed";
-      const peexReview = v?.signal === "review";
-      if (!large && !failed && !peexReview) return null;
-      let reason: string;
-      let level: "warn" | "bad";
-      if (failed) { reason = "Failed delivery — review"; level = "bad"; }
-      else if (peexReview) { reason = `Peex flagged for review (risk ${v!.riskScore})`; level = "warn"; }
-      else { reason = "Large transaction"; level = "warn"; }
-      return { ref: p.ref, phone: p.recipient.phone, amountXaf: p.xaf, reason, level, peexRisk: v?.riskScore, peexSignal: v?.signal };
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null)
-    .slice(0, 10);
-  const audit = pays
-    .flatMap((p) => p.events.map((e) => ({ at: e.at, ref: p.ref, event: e.state })))
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 14);
-  res.json({ kyc: { verified, pending: ids.length - verified, rejected: 0 }, flagged, audit });
+// AML/CFT compliance console — runs detection then returns the full report
+// (cases, STRs, CTR register, tamper-evident event log, posture metrics).
+api.get("/admin/compliance", (req, res) => {
+  compliance.scanCompliance();
+  const rep = compliance.report();
+  // The STR register is officer-confidential (tipping-off risk) — hide it from
+  // non-filing roles (e.g. Read Only) who can still see the dashboard/cases.
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (!role || !canFileReports(role)) rep.strs = [];
+  res.json(rep);
+});
+
+// Disposition a case: clear (false positive) or escalate (needs officer follow-up).
+api.post("/admin/compliance/cases/:id/dispose", (req, res) => {
+  const { status, note } = (req.body ?? {}) as { status?: string; note?: string };
+  if (status !== "cleared" && status !== "escalated") return res.status(400).json({ error: "bad_status", message: "Status must be cleared or escalated." });
+  if (typeof note !== "string" || note.trim().length < 3) return res.status(400).json({ error: "bad_note", message: "A disposition note is required." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "officer";
+  const r = compliance.disposeCase(req.params.id, status, by, note.trim().slice(0, 500));
+  if (!r.ok) return res.status(r.error === "not_found" ? 404 : 409).json({ error: r.error, message: r.error === "already_reported" ? "This case has already been reported." : "Case not found." });
+  res.json({ ok: true });
+});
+
+// File a Suspicious Transaction Report (déclaration de soupçon → ANIF) from a case.
+api.post("/admin/compliance/str", (req, res) => {
+  const { caseId, reason } = (req.body ?? {}) as { caseId?: string; reason?: string };
+  if (typeof caseId !== "string" || !caseId) return res.status(400).json({ error: "bad_case", message: "A case id is required." });
+  if (typeof reason !== "string" || reason.trim().length < 10) return res.status(400).json({ error: "bad_reason", message: "A suspicion narrative (≥10 chars) is required." });
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "officer";
+  const r = compliance.fileSTR(caseId, by, reason.trim().slice(0, 2000));
+  if (!r.ok) return res.status(r.error === "not_found" ? 404 : 409).json({ error: r.error, message: r.error === "already_reported" ? "An STR was already filed for this case." : "Case not found." });
+  res.json({ ok: true, str: r.str });
+});
+
+// Regulator-ready CSV export (cases / STRs / CTR register / tamper-evident log).
+api.get("/admin/compliance/export", (req, res) => {
+  const type = String(req.query.type ?? "cases");
+  if (!["cases", "strs", "ctr", "events"].includes(type)) return res.status(400).json({ error: "bad_type" });
+  const body = compliance.exportCsv(type as "cases" | "strs" | "ctr" | "events");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="momome-compliance-${type}.csv"`);
+  res.send(body);
 });
 
 /* ---------- delivery management ---------- */
@@ -837,13 +1613,19 @@ api.get("/admin/delivery", (_req, res) => {
   res.json(snapshot);
 });
 
-/* ---------- mobile money (PawaPay) ---------- */
+/* ---------- mobile money ---------- */
 api.get("/admin/mobile-money", (_req, res) => {
   const all = store.listPayments();
+  // Show the ACTIVE payout rail's config, not a hardcoded one. Peexit serves both
+  // MTN and Orange today (PawaPay is out of rotation); fall back to PawaPay only if
+  // it's the sole configured rail, else default to the Peexit view.
+  const activeRail: "peexit" | "pawapay" = peexitConfigured() || !pawapayConfigured() ? "peexit" : "pawapay";
+  const railKey = activeRail === "peexit" ? config.peexit.apiKey : config.pawapay.apiKey;
   const info: import("../../../shared/types.js").MobileMoneyInfo = {
+    aggregator: activeRail === "peexit" ? "Peexit" : "PawaPay",
     environment: isLive() ? "Production" : "Sandbox",
-    webhookUrl: `${config.publicUrl}/webhooks/pawapay`,
-    apiKeyMasked: config.pawapay.apiKey ? `pawapay_••••${config.pawapay.apiKey.slice(-4)}` : "pawapay_sandbox_••••",
+    webhookUrl: `${config.publicUrl}/webhooks/${activeRail}`,
+    apiKeyMasked: railKey ? `${activeRail}_••••${railKey.slice(-4)}` : `${activeRail}_sandbox_••••`,
     payoutConfirmation: "Async callback + reconciliation",
     providers: (() => {
       // Status from real aggregator health: a provider is Online when an
@@ -988,6 +1770,12 @@ api.post("/admin/payments/:id/retry", async (req, res) => {
 api.post("/admin/payments/:id/refund", (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // A settled Lightning inbound must be refunded via the sender's Lightning-invoice
+  // claim flow (which actually returns the sats), not admin ledger reversal (which
+  // would mark it refunded while the sats become sweepable treasury).
+  if (p.payInstruction.method === "LIGHTNING" && p.events.some((e) => e.state === "INBOUND_CONFIRMED")) {
+    return res.status(400).json({ error: "use_refund_claim", message: "Refund a Lightning payment through the sender's refund-claim flow (a Lightning invoice), not admin ledger reversal." });
+  }
   const ok = adminRefund(p);
   res.json({ ok, payment: p });
 });
@@ -1002,7 +1790,11 @@ api.post("/admin/peex/test", async (_req, res) => {
 
 /* ---------- ops ---------- */
 const FLOW: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED"];
-api.get("/ops/snapshot", (_req, res) => {
+api.get("/ops/snapshot", (req, res) => {
+  // This lives outside the `/admin` mount, so guard it explicitly — it exposes the
+  // live transaction feed + treasury float and was previously world-readable.
+  const session = verifyToken(tokenFromHeaders(req.headers));
+  if (!session || !getUser(session.uid)) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
   const all = store.listPayments();
   const live = all.filter((p) => !["DELIVERED", "FAILED", "REFUNDED"].includes(p.state));
   const rows: OpsTx[] = all.slice(0, 22).map((p) => ({

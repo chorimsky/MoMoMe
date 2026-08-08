@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
-import { useI18n } from "../../lib/i18n.js";
+import { useI18n, errMessage } from "../../lib/i18n.js";
+import { useFeatures } from "../../lib/features.js";
 import { api } from "../../api/client.js";
+import { pollMs } from "../../lib/net.js";
 import { FlowCard, Label, Stepper, Row, useExpiry } from "./ui.js";
 import type { Draft } from "./SendApp.js";
 
 const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MANUAL_REVIEW"];
 
+// USDC is intentionally NOT offered yet — its IBEX receive combo isn't enabled
+// (ethereum + currencyId 30 returns "invalid combination"). To expose it once IBEX
+// enables USDC receive and IBEX_USDC_ACCOUNT_ID is set, add "USDC" to this array.
 const METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
-const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮" };
-const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)" };
+const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮", USDC: "$" };
+const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)", USDC: "oklch(0.58 0.14 250)" };
 
 /* ---------- contact-picker helpers ---------- */
 type CC = Draft["country"];
@@ -40,8 +46,9 @@ function pickBestContactNumber(tels: string[] | undefined, fallback: CC): { coun
 }
 
 /* ============================================================ 1 — DETAILS */
-export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number }) {
+export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; lockRecipient?: boolean }) {
   const { t } = useI18n();
+  const features = useFeatures();
   const c = COUNTRIES[s.country];
   // Live admin fee (from /config) so the preview tracks Rates & Pricing; fall
   // back to the shared default until config loads. The authoritative fee still
@@ -85,7 +92,9 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
   // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
     const d = s.phone.replace(/\D/g, "");
-    if (d.length < 8) { set({ recipientName: "", nameSource: "idle" }); return; }
+    // Reset resolving on the early return too — otherwise deleting digits back under
+    // 8 while a resolve is in flight leaves the spinner stuck and Continue disabled.
+    if (d.length < 8) { setResolving(false); set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     let active = true;
     const id = setTimeout(async () => {
@@ -99,7 +108,10 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
           // the device contact picker or a recent recipient. Keep it; only clear
           // when there's no user-provided name to fall back on (typed numbers).
           const keepName = (s.recipientName || "").trim().length >= 2 && (s.nameSource === "manual" || s.nameSource === "internal");
-          if (keepName) set({ nameSource: "manual", ...prov });
+          // Keep an already-trusted "internal" contact (paid before) trusted — don't
+          // downgrade it to "manual", which would force the "I've checked this number"
+          // re-acknowledgment on Review for someone they've already paid.
+          if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
           else set({ recipientName: "", nameSource: "unknown", ...prov });
         } else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
       } catch {
@@ -114,15 +126,29 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
   const valid = s.xaf >= MIN_XAF && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
+  // Early typo signal: a long-enough number that matches no known MTN/Orange prefix.
+  // Soft (doesn't block — prefix lists evolve) — the real guard is the review-step tick.
+  const numLooksOff = s.phone.replace(/\D/g, "").length >= 8 && !resolving && !verified && !detectProvider(s.phone.replace(/\D/g, ""), s.country);
 
   return (
     <FlowCard>
       <Stepper i={0} />
-      <h2 style={{ fontSize: 25, marginTop: 16 }}>{t("pay_title")}</h2>
-      <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 20px", lineHeight: 1.5 }}>{t("details_sub")}</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginTop: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ fontSize: 20 }}>{t("pay_title")}</h2>
+          <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
+        </div>
+        {!lockRecipient && features.scanToPay && (
+          <Link to="/scan" aria-label={t("scan_cta")} title={t("scan_cta")}
+            style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", textDecoration: "none", fontSize: 12.5, fontWeight: 650 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M7 12h10" /></svg>
+            {t("scan_cta")}
+          </Link>
+        )}
+      </div>
 
-      {recents.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
+      {!lockRecipient && recents.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
           <Label>{t("send_again")}</Label>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, margin: "0 -2px" }}>
             {recents.map((r) => (
@@ -143,28 +169,28 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: "none" }}>
-              <select value={s.country} aria-label={t("mm_number")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
-                style={{ appearance: "none", cursor: "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%" }}>
-                {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.code}</option>)}
+              <select value={s.country} disabled={lockRecipient} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
+                style={{ appearance: "none", cursor: lockRecipient ? "default" : "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%", opacity: lockRecipient ? 0.75 : 1 }}>
+                {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code} disabled={!co.active}>{co.dial} {co.code}{co.active ? "" : " — soon"}</option>)}
               </select>
               <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
             </div>
-            <input ref={phoneRef} value={s.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
+            <input ref={phoneRef} value={s.phone} readOnly={lockRecipient} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
               type="tel" inputMode="tel" autoComplete="tel" name="mm-number"
-              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 15, color: "var(--ink)", outline: "none", minWidth: 0 }} />
-            <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
+              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: lockRecipient ? "var(--surface-2)" : "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
+            {!lockRecipient && <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
               style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", cursor: "pointer", font: "inherit", fontWeight: 650, fontSize: 13, color: "var(--ink-2)" }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.8" /><path d="M5.5 19.5c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
               <span className="cta-rest">{t("from_contacts")}</span>
-            </button>
+            </button>}
           </div>
           {contactNote && <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{contactNote}</div>}
 
-          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
             {c.providers.map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={s.provider === pid} onClick={() => set({ provider: pid })} />)}
           </div>
 
-          <div style={{ marginTop: 14 }} aria-live="polite">
+          <div style={{ marginTop: 12 }} aria-live="polite">
             {resolving ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
                 <Spinner size={15} /> <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{t("checking_name")}</span>
@@ -185,47 +211,58 @@ export function DetailsStep({ s, set, next, feePct }: { s: Draft; set: (p: Parti
                   <span style={{ fontSize: 13, fontWeight: 650, color: "var(--ink)" }}>{s.nameSource === "manual" ? t("confirm_name") : t("name_unverified")}</span>
                 </div>
                 <input value={s.recipientName} onChange={(e) => set({ recipientName: e.target.value })} placeholder={t("enter_name_ph")} aria-label={t("enter_name_ph")}
-                  style={{ width: "100%", padding: "11px 13px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 14.5, color: "var(--ink)", outline: "none" }} />
+                  style={{ width: "100%", padding: "11px 13px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
               </div>
             ) : null}
           </div>
 
-      <div style={{ marginTop: 24 }}>
+      {numLooksOff && (
+        <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.4 }}>{t("num_check")}</div>
+      )}
+
+      <div style={{ marginTop: 14 }}>
         <Label>{t("amount_q")}</Label>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "16px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
           <input className="num" value={fmt(s.xaf)} aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
-            style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 34, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
-          <span style={{ fontWeight: 600, fontSize: 17, color: "var(--ink-3)" }}>XAF</span>
+            style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 27, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
+          <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-3)" }}>XAF</span>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           {[10000, 25000, 50000, 100000].map((v) => (
-            <button key={v} onClick={() => set({ xaf: v })}
-              style={{ flex: 1, cursor: "pointer", padding: "9px 0", borderRadius: 9, fontWeight: 600, fontSize: 12.5, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: "var(--ink-2)" }}>
+            <button key={v} onClick={() => set({ xaf: v })} aria-pressed={s.xaf === v}
+              style={{ flex: 1, cursor: "pointer", padding: "10px 0", minHeight: 44, borderRadius: 9, fontWeight: 600, fontSize: 13, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: s.xaf === v ? "var(--ink)" : "var(--ink-2)" }}>
               {fmt(v / 1000)}k
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontSize: 13, color: "var(--ink-3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13, color: "var(--ink-3)" }}>
           <span>{t("fee")}</span>
           <span className="num" style={{ fontWeight: 600 }}>{fmt(fee)} XAF</span>
         </div>
         {s.xaf > 0 && s.xaf < MIN_XAF && (
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>{t("min_amount")}</div>
+          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)" }}>{t("min_amount")}</div>
         )}
       </div>
 
-      <button className="btn btn-primary" disabled={!valid} onClick={next} style={{ width: "100%", marginTop: 24, padding: "16px" }}>{t("continue")}</button>
+      <button className="btn btn-primary btn-block" disabled={!valid} onClick={next} style={{ marginTop: 16 }}>{t("continue")}</button>
     </FlowCard>
   );
 }
 
 /* ============================================================ 2 — METHOD */
-export function MethodStep({ s, set, back, next, busy }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean }) {
+export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean; methods?: Partial<Record<Method, boolean>> }) {
   const { t, ml } = useI18n();
+  // Only show crypto rails the operator has enabled; if the current pick was
+  // disabled, fall back to the first available one.
+  const available = methods ? METHODS.filter((k) => methods[k]) : METHODS;
+  useEffect(() => {
+    if (available.length && !available.includes(s.method)) set({ method: available[0] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available.join(",")]);
   return (
     <FlowCard>
       <Stepper i={1} />
-      <h2 style={{ fontSize: 24, marginTop: 16 }}>{t("method_title")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("method_title")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 22px", lineHeight: 1.5 }}>{t("method_sub")}</p>
 
       {s.xaf >= 200000 && (
@@ -236,7 +273,7 @@ export function MethodStep({ s, set, back, next, busy }: { s: Draft; set: (p: Pa
       )}
 
       <div style={{ display: "grid", gap: 11 }}>
-        {METHODS.map((k) => {
+        {available.map((k) => {
           const on = s.method === k;
           return (
             <button key={k} onClick={() => set({ method: k })} aria-pressed={on}
@@ -271,10 +308,13 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
   const c = COUNTRIES[s.country];
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
   const { label, expired } = useExpiry(quote.expiresAt);
+  // Wrong-number is the #1 (irreversible) error on Mobile Money. When the name
+  // isn't provider/history-verified, require an explicit "I checked the number" tick.
+  const [ack, setAck] = useState(false);
   return (
     <FlowCard>
       <Stepper i={2} />
-      <h2 style={{ fontSize: 24, marginTop: 16 }}>{t("review_title")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{t("review_title")}</h2>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0 4px", paddingBottom: 14, borderBottom: "1px solid var(--line-2)" }}>
         <Flag country={s.country} size={26} />
@@ -294,6 +334,8 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
       <div style={{ padding: "22px 0 18px", textAlign: "center", borderBottom: "1px solid var(--line-2)" }}>
         <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("they_receive")}</div>
         <div className="num" style={{ fontSize: 42, fontWeight: 750, color: "var(--ink)", letterSpacing: "-0.03em", marginTop: 6 }}>{fmt(quote.xaf)} <span style={{ fontSize: 20, color: "var(--ink-3)" }}>XAF</span></div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4, maxWidth: 320, margin: "9px auto 0" }}>{t("cashout_note")}</div>
+        {quote.estimateOnly && <div style={{ fontSize: 11.5, color: "var(--warn)", fontWeight: 600, lineHeight: 1.4, maxWidth: 320, margin: "6px auto 0" }}>{t("onchain_estimate")}</div>}
       </div>
 
       <div style={{ marginTop: 4 }}>
@@ -309,12 +351,18 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         {expired ? t("rate_expired") : `${t("rate_locked")} · ${t("expires_in")} ${label}`}
       </div>
 
+      {!verified && !expired && (
+        <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 14, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--warn)", background: "var(--send-wash)", cursor: "pointer" }}>
+          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ marginTop: 2, width: 18, height: 18, flex: "none", accentColor: "var(--accent)" }} />
+          <span style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{t("unverified_ack")}</span>
+        </label>
+      )}
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
         <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>
         {expired ? (
           <button className="btn btn-primary" onClick={refresh} disabled={busy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("refresh_rate")}</button>
         ) : (
-          <button className="btn btn-primary" onClick={next} disabled={busy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("confirm_payment")}</button>
+          <button className="btn btn-primary" onClick={next} disabled={busy || (!verified && !ack)} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("confirm_payment")}</button>
         )}
       </div>
     </FlowCard>
@@ -340,22 +388,31 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   // demo the rail isn't actually paid — tap "I've paid" to simulate it.)
   useEffect(() => {
     let active = true;
+    let id: ReturnType<typeof setTimeout>;
+    const gap = () => pollMs(2500, 6000); // back off on slow/metered links
     const poll = async () => {
-      try {
-        const p = await api.getPayment(payment.id);
-        if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
-      } catch { /* keep polling */ }
-      if (active) setTimeout(poll, 2500);
+      // Skip the round-trip while backgrounded (data/battery); resume on return.
+      if (!document.hidden) {
+        try {
+          const p = await api.getPayment(payment.id);
+          if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
+        } catch { /* keep polling */ }
+      }
+      // Stop once the invoice has expired — no point burning metered data polling a
+      // dead invoice; the "code expired / refresh" UI takes over.
+      if (active && Date.parse(inst.expiresAt) > Date.now()) id = setTimeout(poll, gap());
     };
-    const id = setTimeout(poll, 2500);
-    return () => { active = false; clearTimeout(id); };
+    id = setTimeout(poll, gap());
+    const onVis = () => { if (!document.hidden && active) { clearTimeout(id); poll(); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { active = false; clearTimeout(id); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payment.id]);
 
   return (
     <FlowCard>
       <Stepper i={3} />
-      <h2 style={{ fontSize: 22, marginTop: 16 }}>{ml(method, "payTitle")}</h2>
+      <h2 style={{ fontSize: 20, marginTop: 12 }}>{ml(method, "payTitle")}</h2>
       <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 14px", lineHeight: 1.5 }}>{ml(method, "payDesc")}</p>
 
       {/* The linked Mobile Money recipient — so the payer always sees exactly
@@ -366,7 +423,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
           <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{recName}</div>
           <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
-          <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>
+          {method === "LIGHTNING" && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>}
           <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("reference")} · {payment.ref}</div>
         </div>
       </div>
@@ -375,8 +432,8 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         {demoMode ? (
           <div style={{ width: 210, padding: "22px 16px", borderRadius: 14, border: "1px dashed var(--warn)", background: "var(--send-wash)", textAlign: "center" }}>
             <div style={{ fontSize: 26 }}>🧪</div>
-            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>Sandbox demo</div>
-            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>This is not a real invoice — don't pay it with a wallet. Tap <b>"{t("ive_paid")}"</b> below to simulate the payment.</div>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>{t("sandbox_title")}</div>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>{t("sandbox_desc")}</div>
           </div>
         ) : (
           <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
@@ -425,7 +482,8 @@ const MAX_POLL_MS = 4 * 60_000;
 export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivity }: { paymentId: string; method: Method; onDone: () => void; reset: () => void; onViewActivity: () => void }) {
   const { t } = useI18n();
   const [state, setState] = useState<PaymentState>("AWAITING_INBOUND");
-  const [outcome, setOutcome] = useState<"pending" | "review" | "failed">("pending");
+  const [outcome, setOutcome] = useState<"pending" | "review" | "failed" | "refund" | "refunded">("pending");
+  const [payment, setPayment] = useState<Payment | null>(null);
   const [slow, setSlow] = useState(false);
 
   // onDone is recreated on every parent (SendApp) render. Keep the latest in a
@@ -440,37 +498,50 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
     let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
     const poll = async () => {
-      try {
-        const p = await api.getPayment(paymentId);
-        if (!active) return;
-        setState(p.state);
-        if (p.state === "DELIVERED") {
-          timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
-          return;
+      // Skip the round-trip while the tab is backgrounded — spares metered mobile
+      // data + battery; the visibilitychange listener fetches the moment they return.
+      if (!document.hidden) {
+        try {
+          const p = await api.getPayment(paymentId);
+          if (!active) return;
+          setState(p.state);
+          setPayment(p);
+          if (p.state === "DELIVERED") {
+            timer = setTimeout(() => { if (active) onDoneRef.current(); }, 700);
+            return;
+          }
+          if (p.state === "REFUNDED") { setOutcome("refunded"); return; }
+          // Payout couldn't land → the sender claims their crypto back. While a refund is
+          // in flight (destination already provided) keep polling until REFUNDED.
+          if (p.state === "REFUND_PENDING") {
+            if (p.refundNeedsDestination) { setOutcome("refund"); return; }
+          } else if (FAIL_STATES.includes(p.state)) {
+            // Terminal non-delivery — stop polling and show an honest outcome
+            // instead of spinning forever (the prototype/earlier build would hang).
+            setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
+            return;
+          }
+        } catch {
+          /* transient; keep polling */
         }
-        if (FAIL_STATES.includes(p.state)) {
-          // Terminal non-delivery — stop polling and show an honest outcome
-          // instead of spinning forever (the prototype/earlier build would hang).
-          setOutcome(p.state === "MANUAL_REVIEW" ? "review" : "failed");
-          return;
-        }
-      } catch {
-        /* transient; keep polling */
       }
       if (!active) return;
       const elapsed = Date.now() - started;
       if (elapsed > SLOW_AFTER_MS) setSlow(true);
       // Stop polling at the cap; the slow screen already offers "View activity".
       if (elapsed > MAX_POLL_MS) return;
-      // Ease off once we've crossed into "slow" so a stuck payment doesn't keep
-      // polling at full rate.
-      timer = setTimeout(poll, elapsed > SLOW_AFTER_MS ? 2500 : 800);
+      // Ease off once we've crossed into "slow"; back off further on a slow/metered link.
+      timer = setTimeout(poll, pollMs(elapsed > SLOW_AFTER_MS ? 2500 : 800, elapsed > SLOW_AFTER_MS ? 6000 : 2500));
     };
     poll();
-    return () => { active = false; if (timer) clearTimeout(timer); };
+    const onVis = () => { if (!document.hidden && active) { if (timer) clearTimeout(timer); poll(); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { active = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [paymentId]);
 
-  if (outcome !== "pending") {
+  if (outcome === "refund" && payment) return <RefundClaim payment={payment} reset={reset} />;
+  if (outcome === "refunded") return <RefundedCard reset={reset} />;
+  if (outcome === "review" || outcome === "failed") {
     const failed = outcome === "failed";
     return (
       <FlowCard>
@@ -525,6 +596,107 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
           );
         })}
       </div>
+    </FlowCard>
+  );
+}
+
+/* Refund-claim — a payout couldn't land; the sender pastes a Lightning invoice to
+   receive their crypto back (paid outbound via IBEX). Amount is bounded server-side. */
+export function RefundClaim({ payment, reset }: { payment: Payment; reset: () => void }) {
+  const { t } = useI18n();
+  const [bolt11, setBolt11] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<null | "refunded" | "settling">(null);
+  // Don't setState after unmount (navigating away mid-poll) — avoids React warnings
+  // and wasted getPayment requests on metered data.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+
+  const submit = async () => {
+    // Accept exactly what wallets copy: a `lightning:` URI prefix, uppercase, and
+    // any surrounding whitespace — normalise before validating so a valid invoice is
+    // never falsely rejected on the money-back path.
+    const inv = bolt11.trim().replace(/^lightning:/i, "").trim().toLowerCase();
+    if (!/^ln(bc|tb|bcrt)[0-9][a-z0-9]+$/.test(inv)) { setErr(t("refund_input")); return; }
+    setBusy(true); setErr(null);
+    try {
+      const p = await api.refundDestination(payment.id, inv);
+      if (!mounted.current) return;
+      if (p.state === "REFUNDED") { setResult("refunded"); return; }
+      for (let i = 0; i < 12; i++) { // refund in flight — poll a short while for settlement
+        await new Promise((r) => setTimeout(r, 2500));
+        if (!mounted.current) return;
+        const cur = await api.getPayment(payment.id);
+        if (!mounted.current) return;
+        if (cur.state === "REFUNDED") { setResult("refunded"); return; }
+      }
+      // Submitted but not yet confirmed — DON'T claim it's done. Show a settling state.
+      setResult("settling");
+    } catch (e) {
+      if (mounted.current) setErr(errMessage(e, t));
+    } finally { if (mounted.current) setBusy(false); }
+  };
+
+  if (result === "refunded") return <RefundedCard reset={reset} />;
+  if (result === "settling") return <RefundSettlingCard reset={reset} />;
+
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--warn)", fontSize: 28, fontWeight: 800 }}>↺</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_sub")}</p>
+      </div>
+      <div style={{ marginTop: 18, padding: "12px 14px", borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("refund_amount_label")}</span>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{payment.payInstruction.amountLabel}</span>
+      </div>
+      <div style={{ marginTop: 16 }}><Label>{t("refund_input")}</Label></div>
+      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="lnbc…" rows={3}
+        style={{ width: "100%", marginTop: 6, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", font: "inherit", fontSize: 16, resize: "vertical", boxSizing: "border-box" }} />
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.45 }}>{t("refund_input_hint")}</div>
+      {err && <div role="alert" style={{ marginTop: 12, padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>{err}</div>}
+      <button className="btn btn-primary" onClick={submit} disabled={busy || !bolt11.trim()} style={{ width: "100%", marginTop: 18, padding: "16px" }}>
+        {busy ? t("refund_submitting") : t("refund_submit")}
+      </button>
+      <button className="btn btn-ghost" onClick={reset} disabled={busy} style={{ width: "100%", marginTop: 8 }}>{t("try_again")}</button>
+    </FlowCard>
+  );
+}
+
+function RefundedCard({ reset }: { reset: () => void }) {
+  const { t } = useI18n();
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--recv)", fontSize: 30, fontWeight: 800 }}>✓</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_done_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_done_sub")}</p>
+      </div>
+      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 20, padding: "16px" }}>{t("try_again")}</button>
+    </FlowCard>
+  );
+}
+
+/* Refund submitted but not yet confirmed — an honest "on its way / check Activity"
+   state instead of a premature green "done". */
+function RefundSettlingCard({ reset }: { reset: () => void }) {
+  const { t } = useI18n();
+  return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--send-wash)", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+          <span style={{ color: "var(--warn)", fontSize: 28, fontWeight: 800 }}>↺</span>
+        </div>
+        <h2 style={{ fontSize: 22 }}>{t("refund_settling_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_settling_sub")}</p>
+      </div>
+      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 20, padding: "16px" }}>{t("try_again")}</button>
     </FlowCard>
   );
 }

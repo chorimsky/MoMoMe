@@ -7,17 +7,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Identity } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
-import { Logo, Spinner, ThemeToggle } from "../components/atoms.js";
-import { useI18n } from "../lib/i18n.js";
-import { useNarrow } from "../lib/useNarrow.js";
-import { api, ApiError } from "../api/client.js";
+import { Spinner } from "../components/atoms.js";
+import { SiteHeader, SiteFooter } from "../components/nav.js";
+import { useI18n, errMessage } from "../lib/i18n.js";
+import { api } from "../api/client.js";
 import { FlowCard, Label } from "./send/ui.js";
 
 type Step = "number" | "otp" | "done";
 
 export function Claim() {
-  const { t, lang, setLang } = useI18n();
-  const sm = useNarrow();
+  const { t } = useI18n();
   const [step, setStep] = useState<Step>("number");
   const [country, setCountry] = useState<keyof typeof COUNTRIES>("CM");
   const [phone, setPhone] = useState("6 90 55 18 72");
@@ -27,7 +26,7 @@ export function Claim() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const fail = (e: unknown) => setErr(e instanceof ApiError ? e.message : t("error_generic"));
+  const fail = (e: unknown) => setErr(errMessage(e, t));
 
   async function sendCode() {
     setBusy(true); setErr(null);
@@ -51,18 +50,9 @@ export function Claim() {
   const validNumber = phone.replace(/\D/g, "").length >= 8;
 
   return (
-    <div className="app-bg" style={{ minHeight: "100vh", background: "var(--paper)" }}>
-      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "18px clamp(16px,4vw,24px) 56px" }}>
-        <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px 22px" }}>
-          <Link to="/" style={{ textDecoration: "none" }}><Logo size={sm ? 26 : 34} /></Link>
-          <nav style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <ThemeToggle size={34} />
-            <button onClick={() => setLang(lang === "en" ? "fr" : "en")} style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink-2)", fontWeight: 700, fontSize: 12.5, padding: "6px 11px", borderRadius: 999, fontFamily: "inherit" }}>
-              {lang === "en" ? "FR" : "EN"}
-            </button>
-            <Link to="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-3)", textDecoration: "none", padding: "7px 11px", borderRadius: 8 }}>Home</Link>
-          </nav>
-        </div>
+    <div className="app-bg" style={{ background: "var(--paper)" }}>
+      <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: "12px clamp(16px,4vw,24px) 40px" }}>
+        <SiteHeader />
 
         {err && (
           <div role="alert" style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600 }}>{err}</div>
@@ -78,12 +68,12 @@ export function Claim() {
                 <div style={{ position: "relative" }}>
                   <select value={country} aria-label={t("mm_number")} onChange={(e) => setCountry(e.target.value as keyof typeof COUNTRIES)}
                     style={{ appearance: "none", cursor: "pointer", padding: "14px 30px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 600, fontSize: 14, color: "var(--ink)", height: "100%" }}>
-                    {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code}>{co.dial} {co.name}</option>)}
+                    {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code} disabled={!co.active}>{co.dial} {co.name}{co.active ? "" : " — soon"}</option>)}
                   </select>
                   <span style={{ position: "absolute", right: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
                 </div>
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")} inputMode="tel"
-                  style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 15, color: "var(--ink)", outline: "none", minWidth: 0 }} />
+                  style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
               </div>
               <button className="btn btn-primary" disabled={!validNumber || busy} onClick={sendCode} style={{ width: "100%", marginTop: 24, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("claim_send_code")}</button>
             </FlowCard>
@@ -127,6 +117,7 @@ export function Claim() {
             </FlowCard>
           )}
         </div>
+        <SiteFooter current="claim" />
       </div>
     </div>
   );

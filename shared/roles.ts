@@ -58,6 +58,14 @@ export function canMovePaymentFunds(role: AdminRole): boolean {
   return PAYMENT_FUNDS_ROLES.includes(role);
 }
 
+/** Roles allowed to DISPOSITION compliance cases and FILE reports (STR/ANIF) — the
+ *  designated compliance officer function under the CEMAC AML reg. Viewing the
+ *  compliance console follows section access; acting on cases is stricter. */
+export const COMPLIANCE_FILING_ROLES: AdminRole[] = ["Super Admin", "Compliance Officer"];
+export function canFileReports(role: AdminRole): boolean {
+  return COMPLIANCE_FILING_ROLES.includes(role);
+}
+
 /** Public view of an admin user (never includes the password hash). */
 export interface AdminUserView {
   id: string;

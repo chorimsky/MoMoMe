@@ -10,11 +10,11 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
 };
 
 export const COUNTRIES: Record<CountryCode, Country> = {
-  CM: { name: "Cameroon", code: "CM", dial: "+237", ccy: "XAF", providers: ["MTN", "ORANGE"] },
-  GA: { name: "Gabon", code: "GA", dial: "+241", ccy: "XAF", providers: ["AIRTEL", "MTN"] },
-  TD: { name: "Chad", code: "TD", dial: "+235", ccy: "XAF", providers: ["AIRTEL", "MTN"] },
-  CG: { name: "Congo", code: "CG", dial: "+242", ccy: "XAF", providers: ["MTN", "AIRTEL"] },
-  CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"] },
+  CM: { name: "Cameroon", code: "CM", dial: "+237", ccy: "XAF", providers: ["MTN", "ORANGE"], active: true },
+  GA: { name: "Gabon", code: "GA", dial: "+241", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false },
+  TD: { name: "Chad", code: "TD", dial: "+235", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false },
+  CG: { name: "Congo", code: "CG", dial: "+242", ccy: "XAF", providers: ["MTN", "AIRTEL"], active: false },
+  CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"], active: false },
 };
 
 /** Local subscriber digits for a number (strips the country dial code). */
@@ -54,6 +54,7 @@ export const LN_ADDRESS_DOMAIN = "momome.xyz";
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure
   USDT: 150,
+  USDC: 150, // stablecoin — same low exposure as USDT
   ONCHAIN: 280, // wider; 10–60 min exposure window
 };
 
@@ -61,12 +62,13 @@ export const METHOD_ASSET: Record<Method, InboundAsset> = {
   LIGHTNING: "BTC",
   ONCHAIN: "BTC",
   USDT: "USDT",
+  USDC: "USDC",
 };
 
 /** Flat platform fee shown to the user, on top of the FX spread. */
 export const FEE_PCT = 0.025;
 
-export const MIN_XAF = 1; // lowered from 500 for testing (tiny real Lightning amounts)
+export const MIN_XAF = 500; // realistic floor — below this the crypto + MoMo cash-out fees make a transfer uneconomic
 export const MAX_XAF = 5_000_000;
 
 /** Per-payout corridor caps (Mobile Money operator limits). */
@@ -87,6 +89,7 @@ export const QUOTE_TTL_SEC: Record<Method, number> = {
   // per-rail spread covers the slightly longer rate lock.
   LIGHTNING: 600,
   USDT: 150,
+  USDC: 150,
   ONCHAIN: 900,
 };
 
@@ -97,4 +100,5 @@ export const METHOD_META: Record<
   LIGHTNING: { name: "Lightning", arrival: "Within seconds", fast: true },
   ONCHAIN: { name: "Bitcoin", arrival: "10–60 minutes", fast: false },
   USDT: { name: "USDT", arrival: "Within seconds", fast: true },
+  USDC: { name: "USDC", arrival: "Within seconds", fast: true },
 };

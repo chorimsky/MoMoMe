@@ -13,8 +13,8 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 #     Apache shared/cloud hosting usually disallows mod_proxy (ProxyPass), so we
 #     302-redirect to the API host; LNURL (LUD-16) clients follow redirects.
 #     If your plan allows ProxyPass, prefer a real reverse proxy instead.
-RewriteRule ^\.well-known/lnurlp/(.*)$ https://api.momome.xyz/.well-known/lnurlp/$1 [L,R=302]
-RewriteRule ^lnurl/pay/(.*)$ https://api.momome.xyz/lnurl/pay/$1 [L,R=302]
+RewriteRule ^\.well-known/lnurlp/(.*)$ https://momome-api-production.up.railway.app/.well-known/lnurlp/$1 [L,R=302]
+RewriteRule ^lnurl/pay/(.*)$ https://momome-api-production.up.railway.app/lnurl/pay/$1 [L,R=302]
 
 # --- SPA fallback: serve index.html for client-side routes, but never for a
 #     real file or directory (so /assets/*, /og/*, the generated SEO HTML, and
@@ -30,7 +30,13 @@ RewriteRule ^ index.html [L]
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
   Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
-  Header always set Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+  # Content-Security-Policy — verified against the prod build (fonts, OSM tiles, the
+  # Railway API, the /wallet wasm worker, and the two inline scripts in index.html all
+  # load; disallowed origins are blocked). NOTE: the two 'sha256-…' hashes pin the
+  # inline theme + service-worker scripts in app/index.html — if you EDIT those scripts,
+  # regenerate the hashes (openssl dgst -sha256 -binary | openssl base64) or the page
+  # breaks. If the backend host (connect-src) changes from the Railway default, update it.
+  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-AwpjKjR51WAmVn4oih/C2mMuLcqlB7o94sO04RIudps=' 'sha256-3hcv+MhFRT9GjZc2vmLwM/kZsFbOYDYRiVgV9P2gDKM='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://momome-api-production.up.railway.app; worker-src 'self' blob:; manifest-src 'self'"
 
   # Hashed build assets are immutable; HTML must revalidate so deploys show up.
   <FilesMatch "\.(js|css|woff2?|ttf|png|jpe?g|webp|gif|svg)$">
@@ -38,6 +44,28 @@ RewriteRule ^ index.html [L]
   </FilesMatch>
   <FilesMatch "\.(html|txt|xml)$">
     Header set Cache-Control "no-cache"
+  </FilesMatch>
+
+  # --- Wallet island: cross-origin isolation (SharedArrayBuffer) for the
+  #     in-browser Lightning wallet (Wavelength wasm). Scoped to /wallet ONLY —
+  #     COEP require-corp would otherwise block the cross-origin OpenStreetMap
+  #     tiles on /discover. /wallet is entered/left via full page loads, so the
+  #     isolation never leaks across client routes (see app/src/pages/Wallet.tsx).
+  <If "%{REQUEST_URI} =~ m#^/wallet(/|\?|$)#">
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always set Cross-Origin-Embedder-Policy "require-corp"
+  </If>
+  # The wasm runtime is same-origin, but tag it CORP same-origin so it loads
+  # cleanly as a subresource under the /wallet require-corp context.
+  <If "%{REQUEST_URI} =~ m#^/wavewalletdk/#">
+    Header always set Cross-Origin-Resource-Policy "same-origin"
+    Header always set Cross-Origin-Embedder-Policy "require-corp"
+  </If>
+  # The wallet's dedicated wasm worker (assets/wavewalletdk-worker-<hash>.js) is
+  # spawned inside the isolated /wallet realm, so it must carry COEP itself.
+  <FilesMatch "wavewalletdk-worker.*\.js$">
+    Header always set Cross-Origin-Embedder-Policy "require-corp"
+    Header always set Cross-Origin-Resource-Policy "same-origin"
   </FilesMatch>
 </IfModule>
 

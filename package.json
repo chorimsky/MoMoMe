@@ -12,6 +12,11 @@
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "body-parser": "^1.20.5"
+    }
   }
 }

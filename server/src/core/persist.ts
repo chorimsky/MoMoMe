@@ -54,6 +54,13 @@ function openDb(): Db | null {
 }
 
 const db = openDb();
+
+/** True when a durable SQLite database is open (state survives restarts). False when
+ *  the layer fell back to in-memory (node:sqlite missing / DB not writable) — in which
+ *  case a restart loses everything. The boot sequence refuses to run a real-money rail
+ *  in that state (see index.ts). */
+export function persistDurable(): boolean { return db !== null; }
+
 const sel = db?.prepare("SELECT json FROM snapshot WHERE key = ?") ?? null;
 const up = db?.prepare("INSERT INTO snapshot(key, json) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json") ?? null;
 

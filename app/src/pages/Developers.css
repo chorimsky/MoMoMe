@@ -1,0 +1,87 @@
+/* ============================================================
+   Developer API docs (/developers) — a clean, modern API reference.
+   Shares momome.css tokens; adds a docs layout + code blocks.
+   ============================================================ */
+.dev { max-width: 1140px; margin: 0 auto; padding: 20px clamp(16px, 4vw, 32px) 64px; }
+
+.dev-hero { padding: clamp(20px, 5vw, 44px) 0 clamp(24px, 4vw, 40px); border-bottom: 1px solid var(--line); }
+.dev-hero .eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; color: var(--accent); background: var(--accent-wash); border: 1px solid color-mix(in oklab, var(--accent) 25%, var(--line)); padding: 5px 12px; border-radius: 999px; }
+.dev-hero h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 5.4vw, 46px); letter-spacing: -0.03em; margin: 16px 0 0; }
+.dev-hero p { font-size: clamp(15px, 2.2vw, 17px); color: var(--ink-2); line-height: 1.6; margin: 12px 0 0; max-width: 62ch; }
+.dev-hero .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+
+.dev-layout { display: grid; grid-template-columns: 216px 1fr; gap: clamp(28px, 5vw, 56px); margin-top: 32px; align-items: start; }
+@media (max-width: 900px) { .dev-layout { grid-template-columns: 1fr; gap: 0; } }
+
+/* sidebar */
+.dev-nav { position: sticky; top: 18px; }
+@media (max-width: 900px) {
+  .dev-nav { position: static; margin-bottom: 24px; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+  .dev-nav::-webkit-scrollbar { display: none; }
+}
+.dev-nav a { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink-3); text-decoration: none; padding: 7px 10px; border-radius: 8px; white-space: nowrap; }
+.dev-nav a:hover { color: var(--ink); background: var(--surface-2); }
+.dev-nav a.on { color: var(--accent); background: var(--accent-wash); }
+.dev-nav .grp { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; font-weight: 750; color: var(--ink-3); padding: 14px 10px 4px; }
+@media (max-width: 900px) { .dev-nav .grp { display: none; } }
+
+/* content */
+.dev-main { min-width: 0; }
+.dev-sec { padding: 8px 0 30px; border-bottom: 1px solid var(--line-2); scroll-margin-top: 16px; }
+.dev-sec:last-child { border-bottom: 0; }
+.dev-sec h2 { font-family: var(--font-display); font-weight: 600; font-size: clamp(21px, 3vw, 26px); letter-spacing: -0.02em; margin: 0 0 4px; }
+.dev-sec h3 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 22px 0 0; }
+.dev-sec p { font-size: 14.5px; color: var(--ink-2); line-height: 1.65; margin: 10px 0 0; }
+.dev-sec ul { margin: 10px 0 0; padding-left: 20px; }
+.dev-sec li { font-size: 14.5px; color: var(--ink-2); line-height: 1.6; margin: 6px 0 0; }
+.dev-sec code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--ink); }
+
+/* Scoped under .dev — `.step` and `.step .n` are generic names also used on the
+   landing page; unscoped, these global rules leaked onto Landing's steps and grid-
+   placed their children into overlapping cells. */
+.dev .step { display: grid; grid-template-columns: 26px 1fr; gap: 12px; margin-top: 16px; }
+.dev .step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-weight: 800; font-size: 12.5px; font-family: var(--font-mono); }
+.dev .step .t { font-size: 14.5px; color: var(--ink-2); line-height: 1.55; }
+.dev .step .t b { color: var(--ink); }
+
+/* endpoint block */
+.ep { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.ep-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.verb { font-family: var(--font-mono); font-weight: 800; font-size: 11px; letter-spacing: .04em; padding: 4px 8px; border-radius: 6px; color: #fff; }
+.verb.get { background: var(--info); } .verb.post { background: var(--recv); } .verb.del { background: var(--bad); }
+.ep-path { font-family: var(--font-mono); font-size: 13.5px; font-weight: 600; color: var(--ink); word-break: break-all; }
+.ep-desc { font-size: 13.5px; color: var(--ink-2); padding: 12px 14px 0; line-height: 1.55; }
+.ep-body { padding: 4px 14px 14px; }
+
+/* code blocks */
+.code { position: relative; margin-top: 12px; border-radius: 12px; overflow: hidden; border: 1px solid oklch(0.32 0.014 68); background: oklch(0.19 0.012 68); }
+.code .bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid oklch(0.30 0.014 68); }
+.code .lbl { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: oklch(0.66 0.012 80); }
+.code .copy { font-size: 11.5px; font-weight: 700; color: oklch(0.78 0.012 80); background: transparent; border: 1px solid oklch(0.36 0.014 68); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
+.code .copy:hover { color: #fff; border-color: oklch(0.5 0.014 68); }
+.code pre { margin: 0; padding: 14px 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.code code { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; color: oklch(0.9 0.01 90); white-space: pre; background: none; border: 0; padding: 0; }
+.code .k { color: oklch(0.82 0.13 76); }   /* keys / verbs */
+.code .s { color: oklch(0.74 0.12 158); }  /* strings */
+.code .c { color: oklch(0.6 0.012 80); }   /* comments */
+
+/* params / errors table */
+.tbl { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.tbl .r { display: grid; grid-template-columns: 1.1fr 0.7fr 2fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); font-size: 13px; }
+.tbl .r:last-child { border-bottom: 0; }
+.tbl .r.h { background: var(--surface-2); font-weight: 700; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+.tbl .r .nm { font-family: var(--font-mono); font-weight: 650; color: var(--ink); word-break: break-word; }
+.tbl .r .ty { font-family: var(--font-mono); color: var(--ink-3); font-size: 12px; }
+.tbl .r .ds { color: var(--ink-2); line-height: 1.45; }
+@media (max-width: 560px) { .tbl .r { grid-template-columns: 1fr; gap: 2px; } .tbl .r.h { display: none; } }
+
+.callout { margin-top: 16px; padding: 13px 16px; border-radius: var(--r); background: var(--brand-wash); border: 1px solid color-mix(in oklab, var(--brand) 30%, var(--line)); font-size: 13.5px; color: var(--ink); line-height: 1.55; }
+.callout b { font-weight: 700; }
+
+/* interactive quote playground */
+.tryit { margin-top: 14px; }
+.tryit-form { display: grid; grid-template-columns: 1fr 1fr 0.8fr auto; gap: 12px; align-items: end; }
+.tryit-form label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+.tryit-note { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.tryit-note code { font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 560px) { .tryit-form { grid-template-columns: 1fr 1fr; } .tryit-form button { grid-column: 1 / -1; } }

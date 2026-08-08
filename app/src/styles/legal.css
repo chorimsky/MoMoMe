@@ -6,7 +6,12 @@
 
 body { background: var(--paper); -webkit-font-smoothing: antialiased; }
 
-.page { max-width: 760px; margin: 0 auto; padding: 24px clamp(20px, 5vw, 36px) 40px; }
+.page {
+  max-width: 760px; margin: 0 auto;
+  /* safe-area top + a floor for the notch when installed as a PWA (viewport-fit=cover) */
+  padding: max(24px, env(safe-area-inset-top)) clamp(20px, 5vw, 36px) calc(40px + env(safe-area-inset-bottom));
+  min-height: 100vh; min-height: 100dvh;
+}
 
 /* ---- top bar (mirrors index .lp-top) ---- */
 .pg-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: clamp(32px, 6vw, 56px); }

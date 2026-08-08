@@ -10,6 +10,7 @@ import { PROVIDERS } from "@shared/domain.js";
 import { fmt } from "../lib/format.js";
 import { api } from "../api/client.js";
 import { useTheme } from "../lib/theme.js";
+import { useI18n } from "../lib/i18n.js";
 
 /* ---------- brand logo (uploaded via admin → shown app-wide) ----------
    One shared source of truth: fetched once from /config, kept live via the
@@ -122,47 +123,157 @@ export function ThemeToggle({ size = 36 }: { size?: number }) {
 /* ---------- Momo — the mascot ----------
    A friendly lightning character: speed, trust, Mobile Money. Used sparingly
    (welcome, success, empty, loading), never inside transactional flows. */
-export function Momo({ size = 96, mood = "happy", className }: { size?: number; mood?: "happy" | "wink" | "wow"; className?: string }) {
+export function Momo({ size = 96, mood = "happy", className, interactive = true }: { size?: number; mood?: "happy" | "wink" | "wow"; className?: string; interactive?: boolean }) {
+  // Momo — MoMoMe's own goggle-eyed capsule mascot. Idle life (blink, tuft sway, lens
+  // glint) runs via CSS; the goggle's pupil tracks the pointer and the whole character
+  // jumps with a spark when poked (tap/click). All motion respects reduced-motion.
+  const happy = mood === "happy", wow = mood === "wow", wink = mood === "wink";
+  const ref = useRef<SVGSVGElement>(null);
+  const [pupil, setPupil] = useState({ x: 0, y: 0 });
+  const [poked, setPoked] = useState(false);
+
+  useEffect(() => {
+    if (!interactive || wink) return;
+    let raf = 0;
+    const onMove = (e: PointerEvent) => {
+      if (raf) return; // throttle to one update per frame
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const el = ref.current; if (!el) return;
+        const r = el.getBoundingClientRect();
+        const ex = r.left + r.width / 2, ey = r.top + r.height * 0.42; // goggle centre
+        const dx = e.clientX - ex, dy = e.clientY - ey, d = Math.hypot(dx, dy) || 1;
+        const reach = 3.8, k = Math.min(1, d / 220); // ease toward full reach
+        setPupil({ x: +(dx / d * reach * k).toFixed(2), y: +(dy / d * reach * k).toFixed(2) });
+      });
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); if (raf) cancelAnimationFrame(raf); };
+  }, [interactive, wink]);
+
+  const poke = () => { if (!interactive) return; setPoked(true); window.setTimeout(() => setPoked(false), 760); };
+
   return (
-    <svg width={size} height={size} viewBox="0 0 96 96" className={className} role="img" aria-label="Momo the lightning mascot" style={{ flex: "none" }}>
-      {/* feet */}
-      <ellipse cx="39" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
-      <ellipse cx="59" cy="85" rx="7" ry="5" fill="var(--brand-ink)" />
-      {/* body */}
-      <circle cx="48" cy="46" r="34" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="4" />
-      {/* cheeks */}
-      <circle cx="29" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
-      <circle cx="67" cy="53" r="5" fill="var(--accent)" opacity="0.5" />
-      {/* eyes */}
-      {mood === "wink"
-        ? <path d="M34 44 q4 3 8 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />
-        : <><circle cx="38" cy="44" r="5" fill="var(--brand-ink)" /><circle cx="39.6" cy="42.3" r="1.6" fill="#fff" /></>}
-      <circle cx="58" cy="44" r="5" fill="var(--brand-ink)" />
-      <circle cx="59.6" cy="42.3" r="1.6" fill="#fff" />
-      {/* mouth */}
-      {mood === "wow"
-        ? <ellipse cx="48" cy="58" rx="5" ry="6" fill="var(--brand-ink)" />
-        : <path d="M38 56 q10 9 20 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />}
-      {/* lightning spark */}
-      <path d="M79 16 l-10 13 h5.5 l-4.5 11 13 -15 h-5.5 z" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+    <svg ref={ref} width={size} height={size} viewBox="0 0 96 96" className={`momo ${className ?? ""}`.trim()} role="img" aria-label="Momo the lightning mascot"
+      onPointerDown={poke} style={{ flex: "none", overflow: "visible", cursor: interactive ? "pointer" : undefined }}>
+      <defs>
+        <radialGradient id="momoBody" cx="50%" cy="36%" r="72%">
+          <stop offset="52%" stopColor="var(--brand)" />
+          <stop offset="100%" stopColor="color-mix(in oklab, var(--brand) 76%, var(--brand-ink))" />
+        </radialGradient>
+      </defs>
+      <g className={poked ? "momo-inner momo-poke" : "momo-inner"}>
+        {/* lightning-bolt hair tuft (sways) */}
+        <path className="momo-tuft" d="M54 3 l-11 16 h6 l-5 11 14 -17 h-6 z" fill="var(--brand)" stroke="var(--brand-ink)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+        {/* stubby arms */}
+        <path d="M26 52 q-10 2 -11 12" fill="none" stroke="var(--brand-ink)" strokeWidth="5" strokeLinecap="round" />
+        <path d="M70 52 q10 2 11 12" fill="none" stroke="var(--brand-ink)" strokeWidth="5" strokeLinecap="round" />
+        {/* feet */}
+        <ellipse cx="40" cy="84" rx="7" ry="5" fill="var(--brand-ink)" />
+        <ellipse cx="56" cy="84" rx="7" ry="5" fill="var(--brand-ink)" />
+        {/* capsule body with soft volume shading */}
+        <rect x="25" y="18" width="46" height="62" rx="23" fill="url(#momoBody)" stroke="var(--brand-ink)" strokeWidth="4" />
+        {/* goggle strap */}
+        <rect x="25" y="36" width="46" height="8" fill="var(--brand-ink)" />
+        {/* one big goggle: dark frame → light ring → white lens */}
+        <circle cx="48" cy="40" r="16" fill="var(--brand-ink)" />
+        <circle cx="48" cy="40" r="12.5" fill="#e9edf3" />
+        <circle cx="48" cy="40" r="9.5" fill="#fff" />
+        {/* pupil — tracks the pointer; wink shows a happy arc instead */}
+        {wink
+          ? <path d="M41 41 q7 6 14 0" fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />
+          : <g style={{ transform: `translate(${pupil.x}px, ${pupil.y}px)`, transition: "transform .14s ease-out" }}>
+              <circle cx="48" cy="40" r={wow ? 3.6 : 4.7} fill="var(--brand-ink)" />
+              <circle cx="50" cy="38" r="1.9" fill="#fff" />
+            </g>}
+        {/* lens glint (pulses) */}
+        <circle className="momo-glint" cx="43.5" cy="35.5" r="2.4" fill="#fff" />
+        {/* eyelid — collapsed (eye open) at rest, scales closed to blink */}
+        {!wink && (
+          <g className="momo-lid">
+            <circle cx="48" cy="40" r="9.7" fill="var(--brand)" />
+            <path d="M39.6 40 h16.8" fill="none" stroke="var(--brand-ink)" strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        )}
+        {/* cheeks */}
+        <circle cx="33" cy="55" r="4.5" fill="var(--accent)" opacity="0.5" />
+        <circle cx="63" cy="55" r="4.5" fill="var(--accent)" opacity="0.5" />
+        {/* mouth */}
+        {wow
+          ? <ellipse cx="48" cy="60" rx="5" ry="6" fill="var(--brand-ink)" />
+          : <path d={happy ? "M40 57 q8 8 16 0" : "M41 58 q7 6 14 0"} fill="none" stroke="var(--brand-ink)" strokeWidth="4" strokeLinecap="round" />}
+      </g>
+      {/* spark burst on poke */}
+      <g className={poked ? "momo-spark momo-spark-on" : "momo-spark"} fill="var(--accent)" stroke="var(--brand-ink)" strokeWidth="1.5" strokeLinejoin="round">
+        <path d="M71 15 l2.3 5.2 5.2 2.3 -5.2 2.3 -2.3 5.2 -2.3 -5.2 -5.2 -2.3 5.2 -2.3 z" />
+        <path d="M19 23 l1.7 3.8 3.8 1.7 -3.8 1.7 -1.7 3.8 -1.7 -3.8 -3.8 -1.7 3.8 -1.7 z" />
+      </g>
     </svg>
   );
 }
 
-/* ---------- real QR ---------- */
-export function QR({ value, size = 188 }: { value: string; size?: number }) {
+/* ---------- real QR ----------
+   Branded, scannable QR. Short payloads (pay links, merchant/referral codes,
+   on-chain addresses) render at error-correction level H so we can drop the
+   MoMo›Me mark in the centre (H recovers ~30%, the mark covers ~20% — always
+   scannable). Long payloads (a `lightning:` BOLT11 invoice) stay at level L
+   and unbranded so the dense code remains comfortably scannable on screen. */
+let _qrMark: HTMLImageElement | null = null;
+function qrMark(): HTMLImageElement {
+  if (_qrMark) return _qrMark;
+  const img = new Image();
+  img.src = "/favicon.svg";
+  _qrMark = img;
+  return img;
+}
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  if (typeof ctx.roundRect === "function") { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+export function QR({ value, size = 188, brand = true }: { value: string; size?: number; brand?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!ref.current || !value) return;
-    QRCode.toCanvas(ref.current, value, {
-      width: size,
+    let cancelled = false;
+    const withMark = brand && value.length <= 120;
+    const cv = ref.current;
+    // Render the backing store at 2–3× the CSS size so the code stays crisp on
+    // hi-DPI screens and — critically — when the poster is printed. CSS keeps it
+    // at `size`; all overlay math derives from cv.width so it scales cleanly.
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const scale = Math.min(Math.max(Math.round(dpr), 2), 3);
+    QRCode.toCanvas(cv, value, {
+      width: size * scale,
       margin: 1,
       color: { dark: "#1a1714", light: "#ffffff" },
-      // Long payloads (a `lightning:` BOLT11 invoice) make a dense QR — drop to
-      // level L so it stays comfortably scannable on screen; short addresses keep M.
-      errorCorrectionLevel: value.length > 120 ? "L" : "M",
+      errorCorrectionLevel: withMark ? "H" : "L",
+    }).then(() => {
+      if (cancelled) return;
+      // qrcode's toCanvas writes an inline style at the backing-store size — pin it
+      // back to the intended CSS size for BOTH branded and long/unbranded codes.
+      cv.style.width = `${size}px`; cv.style.height = `${size}px`;
+      if (!withMark) return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const draw = () => {
+        if (cancelled) return;
+        const px = cv.width;
+        const c = px / 2;
+        const pad = Math.round(px * 0.26);
+        const lg = Math.round(px * 0.2);
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        roundRectPath(ctx, c - pad / 2, c - pad / 2, pad, pad, pad * 0.28);
+        ctx.fill();
+        try { ctx.drawImage(qrMark(), c - lg / 2, c - lg / 2, lg, lg); } catch { /* mark not ready */ }
+        ctx.restore();
+      };
+      const mark = qrMark();
+      if (mark.complete && mark.naturalWidth) draw();
+      else mark.addEventListener("load", draw, { once: true });
     }).catch(() => {});
-  }, [value, size]);
+    return () => { cancelled = true; };
+  }, [value, size, brand]);
   return <canvas ref={ref} width={size} height={size} style={{ width: size, height: size, borderRadius: 10, display: "block" }} aria-label="Payment QR code" role="img" />;
 }
 
@@ -245,8 +356,9 @@ export function Flag({ country, size = 18 }: { country: CountryCode; size?: numb
 
 /* ---------- copy field ---------- */
 export function CopyField({ value, label, mono = true }: { value: string; label?: string; mono?: boolean }) {
+  const { t } = useI18n();
   const [done, setDone] = useState(false);
-  const copy = () => {
+  const doCopy = () => {
     try {
       navigator.clipboard.writeText(value);
     } catch {
@@ -255,13 +367,14 @@ export function CopyField({ value, label, mono = true }: { value: string; label?
     setDone(true);
     setTimeout(() => setDone(false), 1400);
   };
+  const copyLabel = t("copy");
   return (
-    <button type="button" onClick={copy} title="Copy" aria-label={label ? `Copy ${label}` : "Copy"} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", font: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
+    <button type="button" onClick={doCopy} title={copyLabel} aria-label={label ? `${copyLabel} ${label}` : copyLabel} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", font: "inherit", display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{ minWidth: 0, flex: 1 }}>
         {label && <span style={{ display: "block", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--ink-3)", fontWeight: 700, marginBottom: 2 }}>{label}</span>}
         <span className={mono ? "mono" : ""} style={{ fontSize: 12.5, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{value}</span>
       </span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: done ? "var(--recv)" : "var(--accent)", flex: "none" }}>{done ? "Copied" : "Copy"}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: done ? "var(--recv)" : "var(--accent)", flex: "none" }}>{done ? t("copied") : copyLabel}</span>
     </button>
   );
 }

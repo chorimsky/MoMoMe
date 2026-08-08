@@ -5,19 +5,24 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/generate-seo.mjs",
+    "build": "node scripts/gen-icons.mjs && tsc --noEmit && vite build && node scripts/generate-seo.mjs",
     "seo": "node scripts/generate-seo.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lightninglabs/wavelength-react": "^0.1.1",
+    "@lightninglabs/wavelength-web": "^0.1.1",
+    "jsqr": "^1.4.0",
+    "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "@types/leaflet": "^1.9.22",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

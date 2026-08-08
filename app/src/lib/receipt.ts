@@ -14,12 +14,19 @@ export interface ReceiptStrings {
   recipient: string; mobileNumber: string; amountDelivered: string; fee: string; totalPaid: string;
   paidWith: string; amountSent: string; valueUsd: string;
   reference: string; date: string; status: string; completed: string; footer: string;
+  /** BCP-47 locale for the date on the receipt — matches the app language so the
+   *  downloaded/shared receipt reads the same as the on-screen one. Defaults en-GB. */
+  locale?: string;
 }
 
 const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// SVG <text> neither wraps nor clips, so a long value (recipient names run up to
+// 60 chars) would overflow the card and overlap its label. Cap the displayed
+// value; every real field (phone, amount, ref, date) is well under this.
+const trunc = (s: string, n = 30) => { const v = String(s); return v.length > n ? v.slice(0, n - 1).trimEnd() + "…" : v; };
 const fullPhone = (p: Payment) => `${COUNTRIES[p.recipient.country].dial} ${p.recipient.phone}`;
-const whenStr = (p: Payment) =>
-  new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const whenStr = (p: Payment, locale = "en-GB") =>
+  new Date(p.createdAt).toLocaleString(locale, { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 /** What the sender actually paid: the rail and the crypto amount. Exported so the
  *  on-screen receipt and the downloadable PNG stay identical. */
@@ -46,8 +53,11 @@ export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true)
       `${s.valueUsd}: ${usdStr(p)}`,
     ] : []),
     `${s.reference}: ${p.ref}`,
-    `${s.date}: ${whenStr(p)}`,
+    `${s.date}: ${whenStr(p, s.locale)}`,
     `${s.status}: ${s.completed}`,
+    ``,
+    // Viral tail: every shared receipt is a growth vector back to the product.
+    `Paid with MoMo›Me — crypto & Mobile Money, delivered instantly. momome.xyz`,
   ].join("\n");
 }
 
@@ -72,7 +82,7 @@ function buildSvg(p: Payment, s: ReceiptStrings, includeCrypto = true): { svg: s
     [s.totalPaid, `${fmt(p.xaf + p.feeXaf)} XAF`],
     ...cryptoRows,
     [s.reference, p.ref],
-    [s.date, whenStr(p)],
+    [s.date, whenStr(p, s.locale)],
   ];
   const cx = W / 2;
   // Brand wordmark geometry: a green lightning bolt centred (nudged right so the
@@ -93,7 +103,7 @@ function buildSvg(p: Payment, s: ReceiptStrings, includeCrypto = true): { svg: s
     const y = rowsStart + i * rowH;
     const line = i < rows.length ? `<line x1="${padX}" y1="${y + 16}" x2="${rightX}" y2="${y + 16}" stroke="${C.line}" stroke-width="1"/>` : "";
     return `<text x="${padX}" y="${y}" font-family="${FONT}" font-size="20" fill="${C.ink3}">${esc(k)}</text>
-<text x="${rightX}" y="${y}" font-family="${FONT}" font-size="21" font-weight="700" fill="${C.ink}" text-anchor="end">${esc(v)}</text>${line}`;
+<text x="${rightX}" y="${y}" font-family="${FONT}" font-size="21" font-weight="700" fill="${C.ink}" text-anchor="end">${esc(trunc(v))}</text>${line}`;
   }).join("\n");
 
   const pillW = 150, pillX = rightX - pillW;

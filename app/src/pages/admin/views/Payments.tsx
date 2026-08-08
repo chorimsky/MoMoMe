@@ -15,9 +15,10 @@ import { useAdminUser } from "../AdminGate.js";
 import { Failed, Loading } from "./Overview.js";
 
 function exportCsv(rows: Payment[]) {
-  const head = ["Reference", "Recipient", "Phone", "Country", "Provider", "Amount XAF", "Fee XAF", "Rail", "Status", "Created"];
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = rows.map((p) => [p.ref, p.recipient.name, p.recipient.phone, p.recipient.country, p.recipient.provider, p.xaf, p.feeXaf, p.method, p.displayStatus, p.createdAt].map(esc).join(","));
+  const head = ["Reference", "Recipient", "Phone", "Country", "Provider", "Amount XAF", "Fee XAF", "Rail", "Status", "Created", "Origin country", "Origin city", "Origin IP"];
+  // Neutralize CSV formula injection on any free-text cell (matches the server export guard).
+  const esc = (v: string | number) => { let s = String(v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+  const lines = rows.map((p) => [p.ref, p.recipient.name, p.recipient.phone, p.recipient.country, p.recipient.provider, p.xaf, p.feeXaf, p.method, p.displayStatus, p.createdAt, p.senderLocation?.country ?? "", p.senderLocation?.city ?? "", p.senderLocation?.ip ?? ""].map(esc).join(","));
   const csv = [head.map(esc).join(","), ...lines].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   const a = document.createElement("a");
@@ -33,6 +34,18 @@ const FILTERS = ["All", "Completed", "Pending", "Failed"] as const;
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Emoji flag from an ISO-3166 alpha-2 code (works for any country, not just CEMAC). */
+function ccFlag(cc?: string): string {
+  if (!cc || !/^[a-zA-Z]{2}$/.test(cc)) return "🌍";
+  return String.fromCodePoint(...[...cc.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}
+/** One-line "where the payment came from", or null if the origin is unknown. */
+function originLine(p: Payment): string | null {
+  const l = p.senderLocation;
+  if (!l) return null;
+  return [l.city, l.countryCode].filter(Boolean).join(", ") || l.country || l.countryCode || null;
 }
 
 export function PaymentsView() {
@@ -98,7 +111,12 @@ export function PaymentsView() {
                   <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.xaf)} XAF</span>
                   <RailBadge rail={p.method} />
                   <Pill status={p.displayStatus} />
-                  <span className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{fmtDate(p.createdAt)}</span>
+                  <span style={{ minWidth: 0 }}>
+                    <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{fmtDate(p.createdAt)}</span>
+                    {originLine(p) && (
+                      <span title="Payment origin" style={{ display: "block", fontSize: 10, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ccFlag(p.senderLocation?.countryCode)} {originLine(p)}</span>
+                    )}
+                  </span>
                   <span style={{ textAlign: "right", fontSize: 12, fontWeight: 650, color: "var(--accent)" }}>View</span>
                 </button>
               ))}
@@ -169,6 +187,20 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
             <KV k="Fee" v={`${fmt(p.feeXaf)} XAF`} />
             <KV k="Total" v={`${fmt(p.totalXaf)} XAF`} />
             <KV k="Inbound rail" v={method?.name ?? p.method} />
+          </Block>
+          <Block title="Sent from">
+            {p.senderLocation ? (
+              <>
+                <KV k="Origin" v={`${ccFlag(p.senderLocation.countryCode)} ${p.senderLocation.country ?? p.senderLocation.countryCode ?? "—"}`} />
+                {(p.senderLocation.city || p.senderLocation.region) && <KV k="City / region" v={[p.senderLocation.city, p.senderLocation.region].filter(Boolean).join(", ")} />}
+                {p.senderLocation.ip && <KV k="IP address" v={p.senderLocation.ip} />}
+                <KV k="Source" v={p.senderLocation.source === "header" ? "Edge geo header" : "IP lookup"} />
+              </>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.45 }}>
+                {p.source === "lnurl" ? "Paid via an external Lightning wallet — no app origin." : "Origin not available for this payment."}
+              </div>
+            )}
           </Block>
           <Block title="Ledger">
             {ledgerErr && <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Ledger unavailable.</div>}

@@ -7,7 +7,7 @@ import type { AdminCustomer } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { api } from "../../../api/client.js";
 import { Flag } from "../../../components/atoms.js";
-import { fmt } from "../../../lib/format.js";
+import { compactXaf, fmt } from "../../../lib/format.js";
 import { Bar, Card, KV, Pill, SectionTitle, SegToggle } from "../AdminUI.js";
 import { useAdmin } from "../context.js";
 import { Failed, Loading } from "./Overview.js";
@@ -69,8 +69,8 @@ export function CustomersView() {
                 <span className="num" style={{ fontSize: 12.5, fontWeight: 600 }}>{r.phone}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}><Flag country={r.country} size={14} />{COUNTRIES[r.country].name}</span>
                 <Pill status={r.verification} />
-                <span className="num" style={{ fontSize: 13 }}>{r.txns}</span>
-                <span className="num" style={{ fontSize: 13 }}>{fmt(r.volumeXaf / 1_000_000, 1)}M XAF</span>
+                <span className="num" style={{ fontSize: 13 }}>{fmt(r.txns)}</span>
+                <span className="num" style={{ fontSize: 13 }} title={`${fmt(r.volumeXaf)} XAF`}>{compactXaf(r.volumeXaf)} XAF</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="num" style={{ fontSize: 13, fontWeight: 700, color: r.risk > 50 ? "var(--bad)" : r.risk > 25 ? "var(--warn)" : "var(--recv)" }}>{r.risk}</span>
                   <span style={{ width: 40 }}><Bar pct={r.risk} tone={riskTone(r.risk)} /></span>
@@ -126,7 +126,7 @@ function CustomerDrawer({ c, onClose }: { c: AdminCustomer; onClose: () => void 
           </div>
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)", marginBottom: 4 }}>Activity & risk</div>
-            <KV k="Transactions" v={c.txns} />
+            <KV k="Transactions" v={fmt(c.txns)} />
             <KV k="Lifetime volume" v={`${fmt(c.volumeXaf)} XAF`} />
             <KV k="Risk score" v={c.risk} tone={riskTone(c.risk)} />
           </div>

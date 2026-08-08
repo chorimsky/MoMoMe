@@ -10,21 +10,35 @@ import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
+import { pawapayConfigured } from "../config.js";
 import { transactionStatus } from "../adapters/ibex.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 
 export const webhooks = Router();
 
 // Peexit payout callback — the second aggregator's async confirmation/failure.
+// Authenticated with HTTP Basic Auth (credentials we gave Peexit). The body is an
+// ARRAY of transactions. We ack fast, then for each one settle ONLY on the
+// AUTHORITATIVE re-query via GET /disbursement/all_requests. We do NOT trust the
+// POSTed body status: Peexit 404s fresh transactions for ~3 days, so the re-query
+// is routinely inconclusive right when a callback fires — trusting the body there
+// let a spoofed `failed` refund an already-paid payout (double-spend). When the
+// re-query is inconclusive we HOLD; reconcileStuckPayouts re-queries later.
 webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  const sig = req.headers["x-peexit-signature"];
-  if (!peexit.verifyWebhook(raw, Array.isArray(sig) ? sig[0] : sig)) return res.status(401).json({ error: "bad_signature" });
-  let event;
-  try { event = peexit.parsePayoutEvent(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
-  if (!event) return res.json({ ok: true, ignored: true });
-  void onPayoutResult(event.ref, event.status).catch((e) => console.error("peexit payout result", event!.ref, e));
+  const auth = req.headers["authorization"];
+  if (!peexit.verifyCallbackAuth(Array.isArray(auth) ? auth[0] : auth)) return res.status(401).json({ error: "unauthorized" });
+  let events;
+  try { events = peexit.parsePayoutEvents(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
   res.json({ ok: true });
+  for (const ev of events) {
+    if (!peexit.statusByKey(ev.ref)) continue; // not one of ours
+    void (async () => {
+      const q = await peexit.queryStatus(ev.ref);
+      if (q === "COMPLETED" || q === "FAILED") await onPayoutResult(ev.ref, q);
+      // else: inconclusive re-query → leave it; the reconcile backstop settles it.
+    })().catch((e) => console.error("peexit payout result", ev.ref, e));
+  }
 });
 
 // PawaPay payout callback — async confirmation/failure of a Mobile Money payout.
@@ -32,6 +46,10 @@ webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
 // re-querying GET /payouts/{payoutId} (so we don't depend on verifying their
 // RFC-9421 callback signature). Acks fast, then settles/refunds in background.
 webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => {
+  // PawaPay is not an active rail — reject when unconfigured so this stays a closed,
+  // non-amplifiable endpoint. (When re-enabled, add RFC-9421 signature verification
+  // with PAWAPAY_WEBHOOK_SECRET; the authoritative re-query remains the backstop.)
+  if (!pawapayConfigured()) return res.status(404).json({ error: "not_found" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   let payoutId: string | undefined;
   try { payoutId = (JSON.parse(raw) as { payoutId?: string }).payoutId; } catch { return res.status(400).json({ error: "bad_json" }); }

@@ -6,8 +6,8 @@ export type CountryCode = "CM" | "GA" | "TD" | "CG" | "CF";
 export type ProviderId = "MTN" | "ORANGE" | "AIRTEL";
 
 /** Inbound rail the sender pays over. Recipient always gets Mobile Money. */
-export type Method = "LIGHTNING" | "ONCHAIN" | "USDT";
-export type InboundAsset = "BTC" | "USDT";
+export type Method = "LIGHTNING" | "ONCHAIN" | "USDT" | "USDC";
+export type InboundAsset = "BTC" | "USDT" | "USDC";
 
 export interface Country {
   name: string;
@@ -15,6 +15,9 @@ export interface Country {
   dial: string;
   ccy: "XAF";
   providers: ProviderId[];
+  /** Whether the corridor is live. Inactive countries are shown as "coming soon"
+   *  in pickers (so users see the roadmap) but can't be selected. Only CM today. */
+  active: boolean;
 }
 
 export interface Provider {
@@ -93,10 +96,63 @@ export interface Recipient {
   nameSource: NameSource;
 }
 
+/* ---------- Contacts (E2E-encrypted) ----------
+   The plaintext shape lives ONLY on the device. It is serialized, encrypted
+   with the device vault key, and synced to the server as an opaque VaultRecord
+   (ciphertext) — the server never sees these fields. See
+   docs/device-account-and-contacts.md. */
+export interface Contact {
+  id: string;               // client-generated uuid (also the VaultRecord.recordId)
+  name: string;
+  phone: string;            // local digits
+  country: CountryCode;
+  provider: ProviderId;
+  favorite: boolean;
+  note?: string;
+  source: "manual" | "picker" | "payment";
+  lastPaidAt?: string;      // ISO — set when a payment to this number succeeds
+  createdAt: string;        // ISO
+  updatedAt: string;        // ISO
+}
+
+/** A developer/partner API key — public view (the secret is never returned after
+ *  creation). See server/src/core/apiKeys.ts and the /developers docs. */
+export interface ApiKey {
+  id: string;
+  label: string;
+  prefix: string;        // e.g. "mk_1a2b3c4" — identifies the key without revealing it
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+}
+
+/** What the server stores/returns for the vault — opaque ciphertext only. */
+export interface VaultRecord {
+  recordId: string;
+  ciphertext: string;       // base64( AES-256-GCM( vaultKey, JSON(Contact) ) )
+  iv: string;               // base64 (96-bit, per record)
+  ver: number;              // envelope schema version
+  updatedAt: string;        // ISO — server-assigned on write, drives delta sync
+  deleted: boolean;         // tombstone (kept so other devices learn of deletes)
+}
+
 export interface PaymentEvent {
   at: string; // ISO
   state: PaymentState;
   note?: string;
+}
+
+/** Coarse geo-origin of the payment, resolved best-effort from the request IP at
+ *  creation time — for operator fraud / AML visibility (never shown to the sender).
+ *  City/region are approximate; a null field means it couldn't be determined. */
+export interface SenderLocation {
+  ip?: string;          // origin IP (masked in list views; full in the detail drawer)
+  country?: string;     // "Cameroon"
+  countryCode?: string; // ISO-3166 alpha-2, e.g. "CM"
+  region?: string;      // "Littoral"
+  city?: string;        // "Douala"
+  source: "header" | "lookup"; // proxy geo-header vs IP-lookup service
+  at: string;           // ISO — when resolved
 }
 
 export interface Payment {
@@ -109,6 +165,14 @@ export interface Payment {
   recipient: Recipient;
   /** Anonymous device id of the sender who created this payment (no login). */
   senderId?: string;
+  /** Coarse geo-origin (IP → country/city), resolved best-effort at creation for
+   *  operator fraud/AML review. Absent for lnurl/webhook-created payments. */
+  senderLocation?: SenderLocation;
+  /** Set when the payment was made through a merchant payment link/QR — the exact
+   *  merchant it settles to (attribution beyond settlement-phone matching). */
+  merchantId?: string;
+  /** The merchant payment-link code this payment came from, when applicable. */
+  merchantLinkCode?: string;
   /** How the payment was initiated: the in-app send flow ("app", default) or an
    *  external Lightning wallet paying the recipient's Lightning Address ("lnurl"). */
   source?: "app" | "lnurl";
@@ -124,6 +188,11 @@ export interface Payment {
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
+  /** Set when a payout couldn't land and the inbound crypto must be refunded — the
+   *  sender still needs to supply a refund destination (the refund-claim flow). */
+  refundNeedsDestination?: boolean;
+  /** IBEX outbound transaction id of the refund payment (set once the refund is submitted). */
+  refundTxId?: string;
   events: PaymentEvent[];
   createdAt: string;
   updatedAt: string;
@@ -131,15 +200,16 @@ export interface Payment {
 
 export interface PayInstruction {
   method: Method;
-  /** BOLT11 invoice for Lightning, on-chain address for BTC, TRC20 address for USDT. */
+  /** BOLT11 invoice for Lightning, on-chain BTC address, or Ethereum ERC-20 address for USDT/USDC. */
   code: string;
-  /** What goes in the QR. For Lightning this is the invoice; for chains a URI. */
+  /** What goes in the QR. Lightning: `lightning:` invoice; BTC: `bitcoin:` BIP-21
+   *  URI with amount; USDT/USDC: the bare ERC-20 address (widest wallet support). */
   qr: string;
   asset: InboundAsset;
   amount: number;
   amountLabel: string;
   expiresAt: string;
-  /** Provider's settlement key (LN payment hash / on-chain or TRC20 address) used
+  /** Provider's settlement key (LN payment hash / on-chain BTC or ERC-20 address) used
    *  to match an inbound webhook back to this payment. */
   providerRef?: string;
   /** Which rail provider issued this instruction. */
@@ -212,7 +282,7 @@ export interface LedgerEntry {
   account: LedgerAccount;
   direction: "debit" | "credit";
   amount: number;
-  currency: "BTC" | "USDT" | "XAF";
+  currency: "BTC" | "USDT" | "USDC" | "XAF";
   at: string;
 }
 
@@ -235,7 +305,7 @@ export interface Identity {
   lightningAddress: string;
   status: "Active";
   claimed: boolean;
-  balances: { XAF: number; BTC: number; USDT: number };
+  balances: { XAF: number; BTC: number; USDT: number; USDC: number };
   createdAt: string;
   lastSeen: string;
   firstPaymentRef?: string;
@@ -302,6 +372,102 @@ export interface MerchantGraph {
   resolutionLog: ResolutionLogEntry[];
 }
 
+/* ---------- Merchant Ecosystem (self-onboarded acceptance accounts) ----------
+   Distinct from the resolution-graph `Merchant` above (auto-discovered payee intel):
+   a MerchantAccount is a business that signed up to ACCEPT payments. See
+   docs/merchant-ecosystem.md. */
+export type MerchantTier = "individual" | "business";
+export type MerchantAccountStatus = "pending" | "active" | "suspended";
+
+export interface MerchantAccount {
+  id: string;                 // internal id
+  code: string;               // public identity, e.g. "MOM-CM-004523"
+  businessName: string;
+  category: string;           // "Restaurant", "Freelancer", "Hotel", …
+  country: CountryCode;
+  settlementPhone: string;    // Mobile Money number that receives the payouts
+  provider: ProviderId;       // detected from the settlement number
+  location?: { label?: string; lat?: number; lng?: number };
+  tier: MerchantTier;
+  status: MerchantAccountStatus;
+  verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
+  listed?: boolean;           // opted into the public "Pay with MoMo›Me" directory
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Privacy-safe public directory entry — NO settlement number (revealed only at
+ *  the pay step). Powers the "Pay with MoMo›Me" discovery page. */
+export interface MerchantDirectoryEntry {
+  code: string;               // MOM-CC-######
+  businessName: string;
+  category: string;
+  country: CountryCode;
+  // Map coordinates so the directory can plot the business. These are the merchant's
+  // OWN captured pin when they opted into "use my location" (precise), otherwise a
+  // coarse city-centroid resolved from the free-text label. Never a settlement number.
+  location?: { label?: string; lat?: number; lng?: number };
+  verifiedPhone: boolean;
+}
+
+export type MerchantLinkKind = "link" | "qr" | "invoice";
+
+export interface MerchantLink {
+  code: string;               // short public code → /pay/<code>
+  merchantId: string;
+  amountXaf?: number;         // fixed amount, or omitted = customer enters (open)
+  label?: string;             // "Table 4", or the invoice reference
+  kind: MerchantLinkKind;
+  clientName?: string;        // invoice: who it's billed to
+  dueDate?: string;           // invoice: ISO date (YYYY-MM-DD)
+  createdAt: string;
+  disabledAt?: string;
+  /** Derived (read-model only, not stored): completed payments that carry this
+   *  link code — lets an invoice show Paid / partially-paid. */
+  paid?: { count: number; xaf: number; at: string };
+}
+
+/** The product-surface feature switches, surfaced to the client via /config. */
+export type AppFeatures = AdminSettings["features"];
+
+/** Public projection of a payment link for the /pay/:code page (safe to expose). */
+export interface MerchantLinkPublic {
+  code: string;
+  amountXaf?: number;
+  label?: string;
+  kind: MerchantLinkKind;
+  clientName?: string;
+  dueDate?: string;
+  merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean };
+}
+
+/** Merchant dashboard read-model. */
+export interface MerchantSummary {
+  merchant: MerchantAccount;
+  today: { salesXaf: number; count: number; avgXaf: number };
+  all: { salesXaf: number; count: number };
+  recent: Payment[];
+}
+
+/* ---------- Referrals / ambassadors (Growth Engine) ---------- */
+export type AmbassadorTier = "rep" | "city_lead" | "regional_lead";
+
+export interface ReferredMerchant {
+  businessName: string;
+  code: string;                 // MOM-CC-######
+  status: MerchantAccountStatus;
+  firstPayment: boolean;        // has at least one completed sale
+}
+
+/** Ambassador dashboard read-model — a referrer's code and who they've brought. */
+export interface AmbassadorSummary {
+  code: string;                 // this owner's referral code
+  referredCount: number;        // total devices/accounts referred
+  merchants: ReferredMerchant[];// referred accounts that became merchants
+  activeMerchants: number;      // referred merchants that are active AND took a payment
+  tier: AmbassadorTier;
+}
+
 /* ---------- route-selection engine ---------- */
 export interface AggregatorHealth {
   name: Aggregator;
@@ -332,7 +498,7 @@ export interface AdminSettings {
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: {
     feePct: number;
-    spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+    spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
     /** Cost assumptions for net-margin intelligence (set from your real rail
      *  contracts): payout = Mobile Money disbursement cost as a fraction of the
      *  delivered XAF; rail = crypto-in cost as a fraction of the total billed;
@@ -346,11 +512,126 @@ export interface AdminSettings {
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
   };
+  /** Which crypto pay-in methods customers can use. A disabled method is hidden
+   *  from the customer flow and refused by /quotes, so users never see or pick a
+   *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */
+  methods: { LIGHTNING: boolean; ONCHAIN: boolean; USDT: boolean; USDC: boolean };
+  /** Product-surface switches — a super-admin can turn any of these features on or
+   *  off platform-wide. A disabled feature is hidden in the client (via /config); the
+   *  primary endpoints also refuse it server-side (directory, scan-to-pay resolve,
+   *  invoice creation, referral claim/attribution, developer key issuance). */
+  features: {
+    directory: boolean;    // the public "Pay with MoMo›Me" discovery directory + map
+    scanToPay: boolean;    // scan-a-QR / pay-by-merchant-code checkout
+    referrals: boolean;    // referral codes + ambassador program
+    invoices: boolean;     // merchant invoices (vs plain payment links)
+    developerApi: boolean; // partner API keys + developer portal
+    diaspora: boolean;     // the diaspora remittance corridor page
+  };
+  /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
+   *  configurable so they track the current regulation; defaults follow the
+   *  CEMAC standard. */
+  compliance: {
+    /** Designated compliance officer (name/username) — the AML responsible person. */
+    officer: string;
+    /** Legal reporting entity named on regulatory reports. */
+    reportingEntity: string;
+    /** Large-transaction reporting threshold (systematic report). */
+    ctrThresholdXaf: number;
+    /** Occasional-transaction CDD / identification trigger. */
+    cddThresholdXaf: number;
+    /** Structuring window (hours) and the cumulative XAF that trips a smurfing alert. */
+    structuringWindowH: number;
+    structuringXaf: number;
+    /** Names / MSISDNs screened as a sanctions / terrorism-financing watchlist. */
+    sanctionsList: string[];
+    /** AML record retention (years). CEMAC standard = 10. */
+    retentionYears: number;
+  };
+  /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
+   *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until
+   *  its destination is set. Empty string = unset. */
+  treasury: {
+    /** Lightning address (user@domain) for BTC withdrawals over Lightning. */
+    lnAddress: string;
+    /** On-chain Bitcoin address for BTC withdrawals. */
+    btcOnchain: string;
+    /** ERC-20 (Ethereum) address for USDT withdrawals. */
+    usdtAddress: string;
+    /** ERC-20 (Ethereum) address for USDC withdrawals. */
+    usdcAddress: string;
+  };
+}
+
+/* ---------- treasury withdrawal ---------- */
+export type TreasuryRail = "lightning" | "onchain" | "usdt" | "usdc";
+/** One crypto pool's real (on-rail) balance, what's owed to senders, and the
+ *  safely-withdrawable remainder. All in the asset's natural unit (BTC / USDT / USDC). */
+export interface TreasuryPool {
+  asset: "BTC" | "USDT" | "USDC";
+  rails: TreasuryRail[];
+  balance: number;       // real IBEX account balance
+  liabilities: number;   // crypto owed to held / refund-pending senders
+  withdrawable: number;  // max(0, balance − liabilities)
+  balanceKnown: boolean; // false when the live balance couldn't be fetched
+}
+/** An append-only record of an executed (or attempted) treasury withdrawal. */
+export interface TreasuryWithdrawal {
+  id: string;
+  at: string;
+  rail: TreasuryRail;
+  asset: "BTC" | "USDT" | "USDC";
+  amount: number;
+  destination: string;
+  by: string;            // admin username
+  status: "sent" | "settled" | "failed";
+  txId?: string;
+  error?: string;
+}
+
+/* ---------- admin Mobile Money ops (manual cash-in / cash-out) ---------- */
+export type MomoOpKind = "cashout" | "cashin" | "transfer_out" | "transfer_in";
+export type MomoRail = "pawapay" | "peexit";
+/** An append-only record of a manual admin Mobile Money operation. A cash-out
+ *  (disburse to a number) or cash-in (collect from a number) via PawaPay/Peexit;
+ *  or the two legs of a wallet REBALANCE (transfer_out = disburse payout→treasury
+ *  phone, transfer_in = collect treasury phone→collection), linked by transferId. */
+export interface MomoOp {
+  id: string;
+  at: string;
+  kind: MomoOpKind;
+  provider: ProviderId;   // MTN / ORANGE — detected from the number
+  rail: MomoRail;
+  phone: string;
+  amount: number;         // XAF
+  by: string;             // admin username
+  status: "accepted" | "completed" | "failed";
+  providerRef?: string;
+  error?: string;
+  /** Actual fee the rail charged for this op (XAF), captured from the settled row
+   *  when the rail reports it. undefined until known. */
+  feeXaf?: number;
+  /** Links the two legs of a payout→collection wallet rebalance. */
+  transferId?: string;
+}
+/** A rail's live Mobile Money wallet balance (XAF), null when unavailable. */
+export interface MomoRailBalance { rail: MomoRail; label: string; balanceXaf: number | null; }
+/** The rail's fee schedule (XAF or %, as the rail reports it), for cost-aware ops.
+ *  Values are null when the rail doesn't expose them. `pctOf` marks whether a value
+ *  is a percentage (true) or a flat XAF amount (false/undefined). */
+export interface MomoFeeInfo {
+  rail: MomoRail;
+  /** Fee to DISBURSE (cash-out / rebalance leg 1), per operator. */
+  disburse: { mtn: number | null; orange: number | null };
+  /** Fee to COLLECT (cash-in / rebalance leg 2), per operator. */
+  collect: { mtn: number | null; orange: number | null };
+  /** True when the numbers above are percentages of the amount; false = flat XAF. */
+  pct: boolean;
 }
 
 /* ---------- liquidity ---------- */
 export interface LiquidityPool {
-  asset: "BTC" | "USDT" | "XAF";
+  asset: "BTC" | "USDT" | "USDC" | "XAF";
   label: string;
   balance: number;
   capacity: number;
@@ -364,7 +645,7 @@ export interface LiquiditySnapshot {
 export interface PricingInfo {
   feePct: number;
   eurXafPeg: number;
-  spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number };
+  spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */
@@ -410,12 +691,15 @@ export interface DeliverySnapshot {
   providers: Array<{ id: ProviderId; successRatePct: number; avgDeliverySec: number; failures: number; pending: number; volumeXaf: number }>;
 }
 
-/* ---------- mobile money (PawaPay) ---------- */
+/* ---------- mobile money ---------- */
 export interface MobileMoneyInfo {
+  /** Human name of the active payout aggregator (e.g. "Peexit") — the rail whose
+   *  environment/webhook/key are shown below. Derived from live config, not hardcoded. */
+  aggregator: string;
   environment: string;
   webhookUrl: string;
   apiKeyMasked: string;
-  /** Payouts are confirmed asynchronously by the PawaPay callback (+ reconciliation backstop). */
+  /** Payouts are confirmed asynchronously by the rail's callback (+ reconciliation backstop). */
   payoutConfirmation: string;
   providers: Array<{ id: ProviderId; status: "Online" | "Offline" | "Maintenance"; successRatePct: number; maxPayoutXaf: number }>;
   routing: Array<{ country: CountryCode; providers: ProviderId[] }>;
@@ -459,6 +743,89 @@ export interface ComplianceSnapshot {
     peexSignal?: "clear" | "review";
   }>;
   audit: Array<{ at: string; ref: string; event: string }>;
+}
+
+/* ============================================================
+   AML / CFT compliance engine (CEMAC Règlement N°01 / GABAC / ANIF Cameroun).
+   A tamper-evident, retained record of detection → case → disposition → report.
+   ============================================================ */
+/** Why a transaction was flagged. Maps to the CEMAC obligation it satisfies. */
+export type ComplianceCaseType =
+  | "ctr_threshold"   // large transaction ≥ reporting threshold (systematic report)
+  | "cdd_trigger"     // occasional transaction ≥ CDD/identification threshold
+  | "structuring"     // smurfing — sub-threshold txns aggregating over a window
+  | "sanctions"       // subject matches a sanctions / terrorism-financing list
+  | "high_risk"       // intelligence signal / low-trust / high-risk profile
+  | "manual";         // opened by a compliance officer
+export type ComplianceSeverity = "low" | "medium" | "high";
+/** Case lifecycle. Dispositions are recorded in the immutable event log. */
+export type ComplianceCaseStatus = "open" | "cleared" | "escalated" | "reported";
+
+export interface ComplianceCase {
+  id: string;
+  at: string;             // ISO — when the case opened
+  type: ComplianceCaseType;
+  severity: ComplianceSeverity;
+  subjectPhone: string;
+  subjectName?: string;
+  ref?: string;           // payment / op reference, when tied to one
+  amountXaf: number;
+  rationale: string;      // human-readable reason for the flag
+  status: ComplianceCaseStatus;
+  officer?: string;       // who dispositioned it
+  dispositionNote?: string;
+  dispositionAt?: string;
+  strId?: string;         // linked Suspicious Transaction Report, if filed
+}
+
+/** A filed Suspicious Transaction Report (Déclaration de soupçon → ANIF). */
+export interface SuspiciousTransactionReport {
+  id: string;             // internal reference (e.g. STR-2026-000001)
+  at: string;
+  filedBy: string;        // designated compliance officer
+  reportingEntity: string;
+  caseId: string;
+  subjectPhone: string;
+  subjectName?: string;
+  ref?: string;
+  amountXaf: number;
+  reason: string;         // suspicion narrative
+}
+
+/** One entry in the append-only, hash-chained compliance event log — the legal
+ *  guard. Every open / disposition / STR filing writes an event; the chain lets
+ *  anyone prove the record was neither altered nor backdated. */
+export interface ComplianceEvent {
+  seq: number;            // monotonic sequence
+  at: string;
+  actor: string;          // "system" or officer username
+  action: string;         // CASE_OPENED · CASE_CLEARED · CASE_ESCALATED · STR_FILED
+  caseId?: string;
+  ref?: string;
+  detail?: string;
+  prevHash: string;       // hash of the previous event (genesis = "0")
+  hash: string;           // sha256(prevHash + canonical(event without hash))
+}
+
+/** The compliance console payload. */
+export interface ComplianceReport {
+  officer: string | null;         // designated compliance officer (settings)
+  reportingEntity: string;
+  thresholds: { ctrXaf: number; cddXaf: number; structuringWindowH: number; structuringXaf: number; retentionYears: number };
+  kyc: { verified: number; pending: number; rejected: number };
+  metrics: {
+    openCases: number; highSeverityOpen: number; reportedCases: number;
+    strFiled: number; ctrCount: number; retentionYears: number;
+    /** Hash chain verified end-to-end (tamper-evidence intact). */
+    integrityOk: boolean; eventCount: number;
+    /** True when the chain is HMAC-keyed with a server secret (resists a privileged
+     *  insider). False = plain hash — accidental-corruption detection only. */
+    chainKeyed: boolean;
+  };
+  cases: ComplianceCase[];
+  strs: SuspiciousTransactionReport[];
+  ctr: Array<{ ref: string; at: string; phone: string; name?: string; amountXaf: number }>;
+  events: ComplianceEvent[];
 }
 
 /* ---------- Peex integration panel (optional intelligence layer) ---------- */

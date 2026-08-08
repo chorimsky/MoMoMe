@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo, useBrandLogo } from "../../components/atoms.js";
@@ -10,14 +10,34 @@ import { FlowCard, Row } from "./ui.js";
 function fullPhone(p: Payment): string {
   return COUNTRIES[p.recipient.country].dial + " " + p.recipient.phone;
 }
-function when(p: Payment): string {
-  return new Date(p.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+function when(p: Payment, lang: "en" | "fr"): string {
+  return new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const logo = useBrandLogo(); // the LIVE brand logo (admin-uploaded) → on the receipt
   const [busy, setBusy] = useState(false);
+  // Accessible modal: focus the dialog on open, trap Tab inside it, close on
+  // Escape, and restore focus to the trigger on unmount.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = dialogRef.current;
+    const prev = document.activeElement as HTMLElement | null;
+    node?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      if (e.key === "Tab" && node) {
+        const f = node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); prev?.focus?.(); };
+  }, [onClose]);
   // Sender's own record shows how they paid (crypto · USD); toggle OFF for a
   // recipient-safe, Mobile-Money-only receipt.
   const [showCrypto, setShowCrypto] = useState(true);
@@ -30,6 +50,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     paidWith: t("receipt_paid_with"), amountSent: t("receipt_amount_sent"), valueUsd: t("receipt_value_usd"),
     reference: t("reference"), date: t("date"),
     status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
+    locale: lang === "fr" ? "fr-FR" : "en-GB",
   };
   const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo, showCrypto); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
   const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo, showCrypto); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
@@ -45,7 +66,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
       [t("receipt_value_usd"), usdStr(payment)],
     ] as Array<[string, string]> : []),
     [t("reference"), payment.ref],
-    [t("date"), when(payment)],
+    [t("date"), when(payment, lang)],
   ];
   // Notch that punches the "ticket" perforation — coloured to match the scrim.
   const notch = (side: "left" | "right"): CSSProperties => ({
@@ -54,14 +75,17 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     ...(side === "left" ? { left: -9 } : { right: -9 }),
   });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "grid", placeItems: "center", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
-      <div onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.01 64 / 0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 20, zIndex: 50, backdropFilter: "blur(2px)" }}>
+      {/* margin:auto centers the ticket when it fits; when it's taller than the
+          viewport (crypto rows shown) the scrim scrolls and the top logo + bottom
+          Close button stay reachable instead of being clipped by grid-centering. */}
+      <div ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()} className="card" role="dialog" aria-modal="true" aria-label={t("receipt_success")} style={{ width: "100%", maxWidth: 348, margin: "auto", padding: 0, overflow: "hidden", boxShadow: "var(--shadow-pop)", animation: "popIn .22s ease", outline: "none" }}>
         {/* header — branded band + success badge + the delivered amount */}
         <div style={{ background: "var(--brand-wash)", padding: "20px 24px 22px", textAlign: "center" }}>
           <Logo size={28} />
           <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", margin: "16px auto 0", fontSize: 25, fontWeight: 800, boxShadow: "0 8px 22px oklch(0.6 0.1 158 / 0.35)" }}>✓</div>
           <div style={{ marginTop: 12, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16.5 }}>{t("receipt_success")}</div>
-          <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
+          <div className="num" style={{ fontSize: 30, fontWeight: 750, color: "var(--ink)", marginTop: 8, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{fmt(payment.xaf)} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>XAF</span></div>
           <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>{t("delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></div>
         </div>
 
@@ -75,8 +99,8 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
         <div style={{ padding: "12px 24px 6px", background: "var(--surface)" }}>
           {rows.map(([k, v], i) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
-              <span style={{ fontSize: 12.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{k}</span>
-              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", whiteSpace: "nowrap", color: "var(--ink)" }}>{v}</span>
+              <span style={{ fontSize: 12.5, color: "var(--ink-3)", whiteSpace: "nowrap", flex: "none" }}>{k}</span>
+              <span className={/\d/.test(v) ? "num" : ""} style={{ fontSize: 13, fontWeight: 650, textAlign: "right", color: "var(--ink)", minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
             </div>
           ))}
           {/* status as a friendly green pill */}
@@ -116,8 +140,8 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   );
 }
 
-export function SuccessStep({ payment, reset }: { payment: Payment; reset: () => void }) {
-  const { t } = useI18n();
+export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payment; reset: () => void; onViewActivity: () => void }) {
+  const { t, lang } = useI18n();
   const [showReceipt, setShowReceipt] = useState(false);
   return (
     <FlowCard>
@@ -135,7 +159,7 @@ export function SuccessStep({ payment, reset }: { payment: Payment; reset: () =>
           <Momo size={108} mood="wow" className="momo-celebrate" />
         </div>
         <h2 style={{ fontSize: 25 }}>{t("success_title")}</h2>
-        <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em" }}>{fmt(payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>
+        <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{fmt(payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>
         <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 0" }}>{t("delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></p>
       </div>
 
@@ -146,11 +170,16 @@ export function SuccessStep({ payment, reset }: { payment: Payment; reset: () =>
         <hr className="hair" />
         <Row k={t("reference")} v={payment.ref} />
         <hr className="hair" />
-        <Row k={t("date_time")} v={when(payment)} />
+        <Row k={t("date_time")} v={when(payment, lang)} />
       </div>
 
-      <button className="btn btn-primary" onClick={reset} style={{ width: "100%", marginTop: 18, padding: "16px" }}>{t("make_another")}</button>
-      <button className="btn btn-ghost" onClick={() => setShowReceipt(true)} style={{ width: "100%", marginTop: 8 }}>{t("view_receipt")}</button>
+      <button className="btn btn-primary btn-block" onClick={reset} style={{ marginTop: 18 }}>{t("make_another")}</button>
+      {/* Give a clear path into transaction history — before this, Success
+          dead-ended and the sender had to "Make another" just to reach Activity. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button className="btn btn-ghost" onClick={() => setShowReceipt(true)} style={{ flex: 1 }}>{t("view_receipt")}</button>
+        <button className="btn btn-ghost" onClick={onViewActivity} style={{ flex: 1 }}>{t("view_activity")}</button>
+      </div>
 
       {showReceipt && <Receipt payment={payment} onClose={() => setShowReceipt(false)} />}
     </FlowCard>

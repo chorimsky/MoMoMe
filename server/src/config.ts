@@ -11,6 +11,15 @@ function env(key: string, fallback = ""): string {
   return process.env[key] ?? fallback;
 }
 
+/** Read a SECRET (credential / token / key): trims surrounding whitespace and quotes.
+ *  These routinely sneak in when secrets are injected via echo/CI — a trailing newline
+ *  corrupted IBEX's OAuth body and produced an invalid `Bearer <key>\n` header for
+ *  PawaPay (undici rejects it), and a stray quote broke Peexit's exact-match auth — all
+ *  with no boot-time signal. Use this for every provider credential. */
+function secret(key: string, fallback = ""): string {
+  return (process.env[key] ?? fallback).trim().replace(/^["']+|["']+$/g, "");
+}
+
 /** True when an *_ENV flag names production — case- and whitespace-insensitive, so
  *  PAWAPAY_ENV="Production" / " production " behave like "production" instead of
  *  silently falling back to sandbox (a real footgun that hid a misconfig). */
@@ -35,18 +44,18 @@ export const config = {
    *  from IBEX_ENV (sandbox|production) but each is individually overridable. */
   ibex: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
-    clientId: env("IBEX_CLIENT_ID"),
-    clientSecret: env("IBEX_CLIENT_SECRET"),
-    accountId: env("IBEX_ACCOUNT_ID"),
+    clientId: secret("IBEX_CLIENT_ID"),
+    clientSecret: secret("IBEX_CLIENT_SECRET"),
+    accountId: secret("IBEX_ACCOUNT_ID"),
     // Separate IBEX account per stablecoin (IBEX is account-per-currency, so they
     // can't share the Bitcoin account): USDT = currencyId 29, USDC = currencyId 30,
     // both on Ethereum/ERC-20.
-    usdtAccountId: env("IBEX_USDT_ACCOUNT_ID"),
-    usdcAccountId: env("IBEX_USDC_ACCOUNT_ID"),
-    webhookSecret: env("IBEX_WEBHOOK_SECRET"),
+    usdtAccountId: secret("IBEX_USDT_ACCOUNT_ID"),
+    usdcAccountId: secret("IBEX_USDC_ACCOUNT_ID"),
+    webhookSecret: secret("IBEX_WEBHOOK_SECRET"),
     apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
     authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),
-    audience: env("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
+    audience: secret("IBEX_AUDIENCE", sandbox ? "https://api-sandbox.poweredbyibex.io" : "https://ibexhub.ibexmercado.com"),
     // Documented IBEX webhook sender IPs (sandbox vs prod) — used to allowlist
     // inbound webhooks alongside the shared secret. Override via IBEX_WEBHOOK_IPS.
     webhookIps: env("IBEX_WEBHOOK_IPS", sandbox ? "35.243.242.121,34.74.236.191" : "34.148.92.171,35.196.168.24")
@@ -65,8 +74,8 @@ export const config = {
     apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
     // Accept either name — PawaPay's dashboard/docs call it the "API token", so
     // PAWAPAY_API_TOKEN is the intuitive var; PAWAPAY_API_KEY kept for back-compat.
-    apiKey: env("PAWAPAY_API_KEY") || env("PAWAPAY_API_TOKEN"),
-    webhookSecret: env("PAWAPAY_WEBHOOK_SECRET"),
+    apiKey: secret("PAWAPAY_API_KEY") || secret("PAWAPAY_API_TOKEN"),
+    webhookSecret: secret("PAWAPAY_WEBHOOK_SECRET"),
   }))(!isProdEnv("PAWAPAY_ENV")),
 
   /** Peexit (Peex) — the SECOND Mobile Money payout aggregator. Real disbursement
@@ -75,17 +84,16 @@ export const config = {
   peexit: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PEEXIT_API_URL", sandbox ? "https://sandbox.peexit.com/api/v1" : "https://server.peexit.com/api/v1"),
-    // the Peexit SECRETKEY — SAME key for disbursement AND collection. STRIP stray
-    // surrounding quotes/whitespace: a trailing `"` in the env var passed /operators
-    // + disbursement (lenient) but the Collect service exact-matches → 401 "key does
-    // not exist". Sanitizing fixes collection without breaking the others.
-    apiKey: (env("PEEXIT_API_KEY") || "").trim().replace(/^["']+|["']+$/g, ""),
+    // the Peexit SECRETKEY — SAME key for disbursement AND collection. secret() strips
+    // stray surrounding quotes/whitespace: a trailing `"` passed /operators + disbursement
+    // (lenient) but the Collect service exact-matches → 401 "key does not exist".
+    apiKey: secret("PEEXIT_API_KEY"),
     // Peexit's notification callback authenticates with HTTP Basic Auth using
     // credentials WE define and hand to Peexit (NOT an HMAC signature). We
     // validate the inbound Authorization header against these. Sandbox default
     // per Peexit docs is peex/peex_callback; production creds are ours to set.
-    callbackUser: env("PEEXIT_CALLBACK_USER", "peex"),
-    callbackPass: env("PEEXIT_CALLBACK_PASS"),
+    callbackUser: secret("PEEXIT_CALLBACK_USER", "peex"),
+    callbackPass: secret("PEEXIT_CALLBACK_PASS"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the

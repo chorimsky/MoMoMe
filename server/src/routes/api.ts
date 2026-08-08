@@ -390,8 +390,11 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), (req, res) => {
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
 function isValidLogo(v: unknown): v is string {
+  // RASTER ONLY — no SVG. The brand logo is echoed to every client (customer + admin)
+  // via the public /config endpoint; an SVG can carry <script>/onload, so accepting it
+  // would let a settings-role operator broadcast active markup to all users.
   return typeof v === "string"
-    && /^data:image\/(png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(v)
+    && /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v)
     && v.length <= 360_000;
 }
 
@@ -1227,7 +1230,7 @@ api.put("/admin/settings", (req, res) => {
   }
   const logo = patch.company?.logo;
   if (logo !== undefined && logo !== null && !isValidLogo(logo)) {
-    return res.status(400).json({ error: "bad_logo", message: "Logo must be a PNG, JPEG, WebP, GIF or SVG image under 256 KB." });
+    return res.status(400).json({ error: "bad_logo", message: "Logo must be a PNG, JPEG, WebP or GIF image under 256 KB." });
   }
   const op = patch.ops;
   if (op?.payoutApprovalXaf !== undefined) {

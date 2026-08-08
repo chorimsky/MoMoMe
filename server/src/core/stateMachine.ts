@@ -30,14 +30,18 @@ export function availableFloatXaf(): number {
   return XAF_FLOAT_BASE + balance("external_recipient", "XAF") + balance("payout_float_XAF", "XAF");
 }
 
-const SEQ: PaymentState[] = [
-  "QUOTED", "AWAITING_INBOUND", "INBOUND_DETECTED", "INBOUND_CONFIRMED",
-  "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED",
-];
-const rank = (s: PaymentState) => {
-  const i = SEQ.indexOf(s);
-  return i === -1 ? -1 : i;
-};
+/** True once the inbound has been booked to the ledger (the INBOUND_CONFIRMED
+ *  transition ran). This is the correct idempotency signal — NOT a rank() check:
+ *  the off-sequence hold/terminal states (MANUAL_REVIEW / REFUND_PENDING /
+ *  REFUNDED / FAILED) all map to rank -1, so a `rank(state) >= INBOUND_CONFIRMED`
+ *  guard was FALSE for them and let an at-least-once duplicate settled webhook
+ *  re-drive the entire settlement on a held payment — double-posting the ledger,
+ *  double-reserving float, double-counting the fee, and potentially firing a
+ *  second payout or abandoning an in-flight refund. A payment that expired at
+ *  AWAITING_INBOUND and only later truly paid has no INBOUND_CONFIRMED event, so
+ *  the reconcile recovery path (reconcileStuckInbounds → confirmInbound on FAILED)
+ *  still works. */
+const inboundBooked = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED");
 
 const DISPLAY: Partial<Record<PaymentState, DisplayStatus>> = {
   DELIVERED: "Completed",
@@ -103,9 +107,12 @@ function beginRefund(p: Payment, note: string): void {
   transition(p, "REFUND_PENDING", note);
 }
 
-/** Inbound seen in mempool / HTLC held. Idempotent, only moves forward. */
+/** Inbound seen in mempool / HTLC held. Idempotent, only moves forward. Only an
+ *  as-yet-unseen inbound (still AWAITING_INBOUND) advances to DETECTED — guarding by
+ *  state, not rank(), so a stray "detected" webhook can't resurrect a held/terminal
+ *  payment (whose rank is -1) back to INBOUND_DETECTED. */
 export function markDetected(p: Payment) {
-  if (rank(p.state) >= rank("INBOUND_DETECTED")) return;
+  if (p.state !== "AWAITING_INBOUND") return;
   transition(p, "INBOUND_DETECTED");
 }
 
@@ -115,7 +122,7 @@ export function markDetected(p: Payment) {
  * units) lets us guard against underpayment before paying out.
  */
 export async function confirmInbound(p: Payment, actualAmount?: number): Promise<void> {
-  if (rank(p.state) >= rank("INBOUND_CONFIRMED")) return; // already settling/settled
+  if (inboundBooked(p)) return; // already settling/settled/held — never re-book (see inboundBooked)
   // Compare against the amount LOCKED at quote time (carried on the instruction),
   // never a freshly-recomputed rate — spot drifts, and the customer paid the locked
   // invoice amount. Recomputing here would falsely trip the guard on a good payment.

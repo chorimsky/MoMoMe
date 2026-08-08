@@ -123,8 +123,10 @@ export async function collectStatus(trackId: string): Promise<PayoutStatus | nul
   try {
     const res = await peex(`/collection/all_requests?track_id=${encodeURIComponent(trackId)}`, { method: "GET" });
     if (res.status === 404 || !res.ok) return null;
-    const d = (await res.json()) as { paid_time?: string | null; status?: string; fees?: number } | Array<{ paid_time?: string | null; status?: string; fees?: number }>;
-    const row = Array.isArray(d) ? d[0] : d;
+    const d = (await res.json()) as { track_id?: string; paid_time?: string | null; status?: string; fees?: number } | Array<{ track_id?: string; paid_time?: string | null; status?: string; fees?: number }>;
+    // Exact track_id match on the array form (same 3-day sibling-row risk as the
+    // disbursement path) — a blind d[0] could settle a cash-in against another txn.
+    const row = Array.isArray(d) ? d.find((r) => r.track_id === trackId) : d;
     if (!row) return null;
     if (typeof row.fees === "number") feeByRef.set(trackId, row.fees); // Peexit reports the exact fee on the row
     if (row.status) return mapStatus(row.status);
@@ -148,7 +150,12 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     // window (too new or >3 days); keep the last known status.
     if (res.status === 404 || !res.ok) return cached;
     const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string; fees?: number }>;
-    const row = Array.isArray(arr) ? (arr.find((r) => r.track_id === idempotencyKey) ?? arr[0]) : undefined;
+    // Require an EXACT track_id match — the endpoint "returns our requests from the
+    // last 3 days", so if Peexit's server-side track_id filter is ignored/loose, a
+    // blind arr[0] fallback would settle/fail THIS payout on an unrelated sibling
+    // transaction (release crypto for a payout that never landed, or spuriously
+    // refund a paid one). No match → keep the last known status, exactly like 404.
+    const row = Array.isArray(arr) ? arr.find((r) => r.track_id === idempotencyKey) : undefined;
     if (row && typeof row.fees === "number") feeByRef.set(idempotencyKey, row.fees);
     if (!row?.status) return cached;
     const mapped = mapStatus(row.status);

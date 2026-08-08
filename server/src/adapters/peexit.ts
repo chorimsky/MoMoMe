@@ -12,6 +12,7 @@
    PEEXIT_API_KEY is set; otherwise simulated.
    ============================================================ */
 import crypto from "node:crypto";
+import { fetchT } from "./http.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { id } from "../core/ids.js";
 import { config, peexitLive } from "../config.js";
@@ -34,15 +35,23 @@ function splitName(name?: string): { first: string; last: string } {
   return { first: parts[0], last: parts.slice(1).join(" ") || parts[0] };
 }
 
+// Known-pending statuses — the payout is accepted but not yet settled.
+const PEEXIT_PENDING = new Set(["new", "pending", "processing", "accepted", "in_progress", "inprogress", "queued", "initiated"]);
 function mapStatus(s: string | undefined): PayoutStatus {
-  const x = (s ?? "").toLowerCase();
-  if (x === "paid") return "COMPLETED";
-  if (["failed", "rejected", "cancelled", "canceled"].includes(x)) return "FAILED";
-  return "PENDING"; // new / pending / processing
+  const x = (s ?? "").toLowerCase().trim();
+  // Only UNAMBIGUOUS money-delivered terms complete a payout — completing releases the
+  // held crypto, so we never guess a synonym that might merely mean "request accepted".
+  if (["paid", "success", "successful"].includes(x)) return "COMPLETED";
+  if (["failed", "rejected", "cancelled", "canceled", "declined", "reversed"].includes(x)) return "FAILED";
+  // Anything not in the known-pending set is a status we've never seen — surface it so a
+  // real (settled/failed) synonym is caught and added deliberately, rather than silently
+  // held as PENDING forever (crypto stranded).
+  if (x && !PEEXIT_PENDING.has(x)) console.warn(`[peexit] unrecognized status "${x}" → treating as PENDING (verify mapping)`);
+  return "PENDING";
 }
 
 async function peex(path: string, init: RequestInit): Promise<Response> {
-  return fetch(`${config.peexit.apiUrl}${path}`, {
+  return fetchT(`${config.peexit.apiUrl}${path}`, {
     ...init,
     headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey, ...(init.headers ?? {}) },
   });
@@ -83,7 +92,16 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
   if (!res.ok) throw new Error(`Peexit disbursement failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as { request?: { id?: number | string; status?: string } };
   const reqObj = data.request ?? (data as { id?: number | string; status?: string });
-  statusByRef.set(req.idempotencyKey, mapStatus(reqObj.status));
+  const mapped = mapStatus(reqObj.status);
+  // Positive-acceptance check (PawaPay asserts the same on its accept states): a genuine
+  // accept carries an id and/or a non-failure status. A 2xx that maps to FAILED, or one
+  // with NEITHER an id nor a status (soft error / unexpected shape), is NOT an accepted
+  // payout — throw so submitWithRetry → beginRefund handles it, instead of the payment
+  // stranding in PAYOUT_REQUESTED (crypto held, never delivered, never refunded).
+  if (mapped === "FAILED" || (reqObj.id == null && !reqObj.status)) {
+    throw new Error(`Peexit disbursement not accepted: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  statusByRef.set(req.idempotencyKey, mapped);
   return String(reqObj.id ?? req.idempotencyKey);
 }
 

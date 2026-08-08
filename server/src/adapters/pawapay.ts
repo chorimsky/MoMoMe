@@ -12,6 +12,7 @@
    confirm by re-querying GET /v2/payouts/{payoutId} (authoritative).
    ============================================================ */
 import crypto from "node:crypto";
+import { fetchT } from "./http.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { id } from "../core/ids.js";
@@ -92,7 +93,7 @@ export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
 async function liveSubmit(req: DisburseRequest, payoutId: string): Promise<void> {
   // v2 API: POST /v2/payouts. The recipient carries the provider (MTN_MOMO_CMR /
   // ORANGE_CMR …) directly — no separate correspondent/country/customerTimestamp.
-  const res = await fetch(`${config.pawapay.apiUrl}/v2/payouts`, {
+  const res = await fetchT(`${config.pawapay.apiUrl}/v2/payouts`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${config.pawapay.apiKey}` },
     body: JSON.stringify({
@@ -124,7 +125,7 @@ function mapStatus(raw: string | undefined): PayoutStatus {
  *  v2: GET /v2/payouts/{id} → { status: "FOUND"|"NOT_FOUND", data: { status } }. */
 export async function queryStatusByPayoutId(payoutId: string): Promise<PayoutStatus> {
   try {
-    const res = await fetch(`${config.pawapay.apiUrl}/v2/payouts/${payoutId}`, {
+    const res = await fetchT(`${config.pawapay.apiUrl}/v2/payouts/${payoutId}`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
     if (!res.ok) return "PENDING";
@@ -144,7 +145,7 @@ export async function deposit(req: DisburseRequest): Promise<DepositResult> {
   const real = pawapayLive();
   const depositId = real ? payoutIdFor(req.idempotencyKey) : id("dep");
   if (!real) return { status: "accepted", providerRef: depositId, simulated: true };
-  const res = await fetch(`${config.pawapay.apiUrl}/v2/deposits`, {
+  const res = await fetchT(`${config.pawapay.apiUrl}/v2/deposits`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${config.pawapay.apiKey}` },
     body: JSON.stringify({
@@ -167,7 +168,7 @@ export async function deposit(req: DisburseRequest): Promise<DepositResult> {
 /** Authoritative deposit status: GET /v2/deposits/{id} → data.status. */
 export async function queryDepositStatus(depositId: string): Promise<PayoutStatus> {
   try {
-    const res = await fetch(`${config.pawapay.apiUrl}/v2/deposits/${depositId}`, { headers: { authorization: `Bearer ${config.pawapay.apiKey}` } });
+    const res = await fetchT(`${config.pawapay.apiUrl}/v2/deposits/${depositId}`, { headers: { authorization: `Bearer ${config.pawapay.apiKey}` } });
     if (!res.ok) return "PENDING";
     const d = (await res.json()) as { status?: string; data?: { status?: string } };
     if ((d.status ?? "").toUpperCase() === "NOT_FOUND") return "PENDING";
@@ -197,7 +198,7 @@ export async function availableBalanceXaf(country: CountryCode, _provider?: Prov
   const iso = ISO3[country] ?? "CMR";
   if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;
   try {
-    const res = await fetch(`${config.pawapay.apiUrl}/v2/wallet-balances`, {
+    const res = await fetchT(`${config.pawapay.apiUrl}/v2/wallet-balances`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
     if (!res.ok) return null;

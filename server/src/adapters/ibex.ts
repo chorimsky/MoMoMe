@@ -15,6 +15,7 @@
    echoes the shared secret in the body and sends from a fixed IP set.
    ============================================================ */
 import crypto from "node:crypto";
+import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
@@ -39,7 +40,7 @@ async function getAccessToken(force = false): Promise<string> {
         client_secret: config.ibex.clientSecret,
         audience: config.ibex.audience,
       });
-      const res = await fetch(config.ibex.authUrl, {
+      const res = await fetchT(config.ibex.authUrl, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body,
@@ -57,7 +58,7 @@ async function getAccessToken(force = false): Promise<string> {
  *  IBEX Hub uses a RAW Authorization header (the token, no "Bearer "). */
 async function ibex(path: string, init: RequestInit): Promise<Response> {
   const call = async (token: string) =>
-    fetch(`${config.ibex.apiUrl}${path}`, {
+    fetchT(`${config.ibex.apiUrl}${path}`, {
       ...init,
       headers: { "content-type": "application/json", authorization: token, ...(init.headers ?? {}) },
     });

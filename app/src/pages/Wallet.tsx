@@ -486,6 +486,16 @@ function MobileMoneyPayout() {
     return () => { active = false; clearTimeout(h); };
   }, [digits]);
 
+  // Tick every second while a quote is on screen so the expiry countdown updates and
+  // the Pay button disables the moment the locked rate lapses (the quote is only firm
+  // until expiresAt; paying a stale quote would 409 at createPayment and dead-end).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!quote || payment) return;
+    const h = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(h);
+  }, [quote, payment]);
+
   const canQuote = amt >= MIN_XAF && digits.length >= 8 && name.trim().length >= 2 && !resolving && !busy;
 
   const getQuote = async () => {
@@ -594,9 +604,16 @@ function MobileMoneyPayout() {
   // ---- Quote review ----
   if (quote) {
     const short = spendable < needSats;
+    const secsLeft = Math.max(0, Math.round((Date.parse(quote.expiresAt) - now) / 1000));
+    const expired = secsLeft <= 0;
     return (
       <div style={{ ...card }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Confirm transfer</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Confirm transfer</div>
+          <span className="num" style={{ fontSize: 11.5, color: expired ? "var(--bad)" : "var(--ink-3)" }}>
+            {expired ? "rate expired" : `rate holds ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, "0")}`}
+          </span>
+        </div>
         <Row k="Recipient" v={`${name || digits} · ${PROVIDERS[provider]?.short ?? provider}`} />
         <Row k="They receive" v={`${fmtXaf(quote.xaf)} XAF`} strong />
         <Row k="You pay" v={`${fmtSats(needSats)} sats`} />
@@ -604,13 +621,18 @@ function MobileMoneyPayout() {
         <div style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 0 0", lineHeight: 1.5 }}>
           Paid from your wallet over Lightning; delivery to Mobile Money settles on the platform rail (IBEX → Peexit). Signet beta — real delivery needs the wallet and platform on the same network.
         </div>
-        {short ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>Wallet balance is {fmtSats(spendable)} sats — not enough to cover this transfer.</div> : null}
+        {expired ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>This quote expired — refresh to lock the current rate.</div>
+          : short ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>Wallet balance is {fmtSats(spendable)} sats — not enough to cover this transfer.</div> : null}
         {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={reset} disabled={busy}>Back</button>
-          <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy || short} onClick={() => { void payFromWallet(); }}>
-            {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay from wallet"}
-          </button>
+          {expired
+            ? <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void getQuote(); }}>
+                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Refresh quote"}
+              </button>
+            : <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy || short} onClick={() => { void payFromWallet(); }}>
+                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay from wallet"}
+              </button>}
         </div>
       </div>
     );

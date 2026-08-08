@@ -641,6 +641,21 @@ async function main() {
     ok("M2: a failed refund payout REOPENS the claim (not stranded)",
       storeMod.getPayment("pay_reffail")!.state === "REFUND_PENDING" && storeMod.getPayment("pay_reffail")!.refundNeedsDestination === true && !storeMod.getPayment("pay_reffail")!.refundTxId);
 
+    // M5: double-loss backstop AT CLAIM TIME. A payout marked FAILED (→ REFUND_PENDING)
+    // that actually settled must NOT be refunded — the sender could paste a bolt11 before
+    // the 120s reconcile timer fires. completeRefund re-queries the payout; a COMPLETED
+    // verdict diverts to MANUAL_REVIEW and pays NO refund.
+    const { aggregatorByName } = await import("../src/core/routing.js");
+    seedPayment("pay_recompleted", "h_recompleted", BTC_IN);
+    // A simulated (sandbox) disburse registers the ref so queryStatus() reports COMPLETED.
+    await aggregatorByName("peexit").disburse({ idempotencyKey: "pay_recompleted", provider: "MTN", country: "CM", phone: "677000000", xaf: 50000, name: "NANA JEAN PAUL" });
+    { const pr = storeMod.getPayment("pay_recompleted")!; pr.state = "REFUND_PENDING"; pr.displayStatus = "Pending"; pr.refundNeedsDestination = true; pr.aggregator = "peexit"; storeMod.putPayment(pr); }
+    const dl = await completeRefund(storeMod.getPayment("pay_recompleted")!, "lnbc1refundok");
+    ok("M5: refund-claim on a re-verified-COMPLETED payout → MANUAL_REVIEW, NO refund paid (no double-loss)",
+      dl.ok === false && dl.error === "payout_completed"
+      && storeMod.getPayment("pay_recompleted")!.state === "MANUAL_REVIEW"
+      && !storeMod.getPayment("pay_recompleted")!.refundTxId);
+
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -467,6 +467,21 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
   // Over/under-refund guard: accept an amount-less invoice (we set the amount) or one
   // that matches the inbound within 1%. Never pay an invoice for MORE than was received.
   if (invMsat !== 0 && (invMsat > inboundMsat || invMsat < inboundMsat * 0.99)) return { ok: false, error: "amount_mismatch" };
+  // Double-loss backstop AT CLAIM TIME: a payout marked FAILED can later read
+  // COMPLETED (a transient rail failure that actually settled). reconcileFailedPayouts
+  // catches this, but only on a 120s timer — a sender who pastes a bolt11 within seconds
+  // beats it, and once we clear refundNeedsDestination below the backstop no longer
+  // fires. So re-query the payout authoritatively here (queryStatus itself re-checks the
+  // rail): if it now reports COMPLETED, hold for an operator instead of paying the refund
+  // — otherwise MoMo was paid AND the crypto is returned (full double-loss).
+  if (p.aggregator) {
+    let payoutStatus: PayoutStatus | null = null;
+    try { payoutStatus = await aggregatorByName(p.aggregator).queryStatus(p.ref); } catch { /* unverifiable → fall through; a genuine FAILED still refunds */ }
+    if (payoutStatus === "COMPLETED") {
+      transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED at refund-claim — do NOT refund");
+      return { ok: false, error: "payout_completed" };
+    }
+  }
   // Claim the refund — idempotent: a second submit while in flight is rejected above.
   p.refundNeedsDestination = false;
   putPayment(p);

@@ -36,10 +36,13 @@
 .dev-sec li { font-size: 14.5px; color: var(--ink-2); line-height: 1.6; margin: 6px 0 0; }
 .dev-sec code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--ink); }
 
-.step { display: grid; grid-template-columns: 26px 1fr; gap: 12px; margin-top: 16px; }
-.step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-weight: 800; font-size: 12.5px; font-family: var(--font-mono); }
-.step .t { font-size: 14.5px; color: var(--ink-2); line-height: 1.55; }
-.step .t b { color: var(--ink); }
+/* Scoped under .dev — `.step` and `.step .n` are generic names also used on the
+   landing page; unscoped, these global rules leaked onto Landing's steps and grid-
+   placed their children into overlapping cells. */
+.dev .step { display: grid; grid-template-columns: 26px 1fr; gap: 12px; margin-top: 16px; }
+.dev .step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-weight: 800; font-size: 12.5px; font-family: var(--font-mono); }
+.dev .step .t { font-size: 14.5px; color: var(--ink-2); line-height: 1.55; }
+.dev .step .t b { color: var(--ink); }
 
 /* endpoint block */
 .ep { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }

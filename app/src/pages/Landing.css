@@ -50,10 +50,16 @@
 .how-sub { color: var(--ink-3); font-size: 15px; margin-top: 8px; }
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 4vw, 48px); margin-top: clamp(32px, 5vw, 52px); }
 @media (max-width: 720px) { .steps { grid-template-columns: 1fr; gap: 32px; } }
-.step-ic { width: 56px; height: 56px; border-radius: 18px; margin-bottom: 16px; }
-.step .n { display: inline-block; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: .06em; }
-.step h3 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin-top: 8px; letter-spacing: -0.01em; }
-.step p { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
+/* All step rules are scoped under `.how` so the GLOBAL `.step` rule from
+   Developers.css (a `26px 1fr` grid + circular `.n` badge, unscoped) can't hijack
+   the landing step layout — it was placing the four children into a 2-col grid and
+   overlapping the title with the description. `display:block` here restores normal
+   flow; the number sits as a small badge on the icon's corner. */
+.how .step { display: block; position: relative; margin-top: 0; }
+.how .step-ic { position: relative; width: 56px; height: 56px; border-radius: 18px; margin-bottom: 16px; }
+.how .step .n { position: absolute; top: -6px; left: 42px; z-index: 2; min-width: 24px; height: 24px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand); color: var(--brand-ink); border: 2px solid var(--paper); border-radius: 999px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 800; letter-spacing: .02em; }
+.how .step h3 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin-top: 0; letter-spacing: -0.01em; }
+.how .step p { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
 
 /* Why MomoMe */
 .why { padding-top: clamp(48px, 8vw, 80px); border-top: 1px solid var(--line); }

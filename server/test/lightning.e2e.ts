@@ -446,14 +446,24 @@ async function main() {
     const { adminRetry, adminRefund, onPayoutResult, completeRefund, reconcileStuckRefunds } = await import("../src/core/stateMachine.js");
     const nets = (id: string) => { const m: Record<string, number> = {}; for (const e of entriesFor(id)) m[e.currency] = (m[e.currency] ?? 0) + (e.direction === "debit" ? e.amount : -e.amount); return m; };
 
-    // Refund a settled (but here treated as undelivered) payment → ledger nets to zero.
-    seedPayment("pay_refund", "h_refund", BTC_IN);
+    // Refund a settled ON-CHAIN payment (operator returns the crypto out-of-band, then
+    // adminRefund reverses the ledger) → ledger nets to zero.
+    seedPayment("pay_refund", "h_refund", BTC_IN, "ONCHAIN");
     await confirmInbound(storeMod.findByProviderRef("h_refund")!, BTC_IN);
     storeMod.getPayment("pay_refund")!.displayStatus = "Pending"; // make it refundable
-    adminRefund(storeMod.getPayment("pay_refund")!);
+    ok("adminRefund reverses an on-chain payment", adminRefund(storeMod.getPayment("pay_refund")!) === true);
     const rn = nets("pay_refund");
     ok("refund reverses ledger to zero (no float overstatement)", Math.abs(rn.BTC ?? 0) < 1e-9 && Math.abs(rn.XAF ?? 0) < 1e-9);
     ok("refunded payment is REFUNDED", storeMod.getPayment("pay_refund")!.state === "REFUNDED");
+
+    // A settled LIGHTNING inbound must NOT be adminRefund-reversible — it holds real sats
+    // with an automated return path (the sender-invoice claim flow); reversing its ledger
+    // without a send would convert held sats into sweepable treasury. adminRefund refuses it.
+    seedPayment("pay_ln_norefund", "h_ln_norefund", BTC_IN);
+    await confirmInbound(storeMod.findByProviderRef("h_ln_norefund")!, BTC_IN);
+    storeMod.getPayment("pay_ln_norefund")!.displayStatus = "Pending";
+    ok("adminRefund refuses a settled Lightning inbound (use the claim flow)",
+      adminRefund(storeMod.getPayment("pay_ln_norefund")!) === false && storeMod.getPayment("pay_ln_norefund")!.state !== "REFUNDED");
     // Idempotent: a second refund must be a no-op (never double-reverse the ledger).
     const secondRefund = adminRefund(storeMod.getPayment("pay_refund")!);
     const rn2 = nets("pay_refund");
@@ -465,11 +475,13 @@ async function main() {
     const ledgerMod2 = await import("../src/core/ledger.js");
     const domainMod = await import("../../shared/domain.js");
     const availFloat = domainMod.XAF_FLOAT_BASE + ledgerMod2.balance("external_recipient", "XAF") + ledgerMod2.balance("payout_float_XAF", "XAF");
-    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN);
+    // On-chain so the cleanup adminRefund below is legitimate (a Lightning inbound would
+    // — correctly — refuse adminRefund and use the claim flow instead).
+    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN, "ONCHAIN");
     overP.xaf = availFloat + 100_000; overP.totalXaf = overP.xaf + overP.feeXaf; storeMod.putPayment(overP);
     await confirmInbound(storeMod.findByProviderRef("h_float_over")!, BTC_IN);
     ok("over-committing payout is held for float (MANUAL_REVIEW)", storeMod.getPayment("pay_float_over")!.state === "MANUAL_REVIEW");
-    adminRefund(storeMod.getPayment("pay_float_over")!); // release its ledger reservation so later tests have float
+    ok("adminRefund releases the held on-chain reservation", adminRefund(storeMod.getPayment("pay_float_over")!) === true); // release its ledger reservation so later tests have float
 
     // Retry a MANUAL_REVIEW payment that had reached FX-lock (a LATE hold) → delivered,
     // ledger balanced, NO double-pay. (adminRetry refuses a pre-FX-lock hold.)

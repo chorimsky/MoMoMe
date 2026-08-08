@@ -446,6 +446,13 @@ export function adminRefund(p: Payment): boolean {
   // posts the inverse of EVERY existing entry, so a second refund would double-
   // reverse and unbalance the ledger.
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false;
+  // adminRefund only REVERSES the ledger — it assumes the crypto was returned
+  // out-of-band (the on-chain/USDT case, where beginRefund routes to MANUAL_REVIEW for
+  // exactly this). A LIGHTNING inbound holds real sats with an AUTOMATED return path
+  // (the sender-invoice claim → completeRefund actually pays a bolt11). Reversing its
+  // ledger here would mark it REFUNDED while the sats stay put, converting them into
+  // sweepable treasury without ever returning them. Force the claim flow instead.
+  if (p.payInstruction.method === "LIGHTNING" && inboundBooked(p)) return false;
   reversePayment(p.id);
   transition(p, "REFUND_PENDING", "refund initiated by admin");
   transition(p, "REFUNDED", "refunded by admin");

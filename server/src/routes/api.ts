@@ -1770,6 +1770,12 @@ api.post("/admin/payments/:id/retry", async (req, res) => {
 api.post("/admin/payments/:id/refund", (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // A settled Lightning inbound must be refunded via the sender's Lightning-invoice
+  // claim flow (which actually returns the sats), not admin ledger reversal (which
+  // would mark it refunded while the sats become sweepable treasury).
+  if (p.payInstruction.method === "LIGHTNING" && p.events.some((e) => e.state === "INBOUND_CONFIRMED")) {
+    return res.status(400).json({ error: "use_refund_claim", message: "Refund a Lightning payment through the sender's refund-claim flow (a Lightning invoice), not admin ledger reversal." });
+  }
   const ok = adminRefund(p);
   res.json({ ok, payment: p });
 });

@@ -80,11 +80,26 @@ export function merchantByCode(code: string): StoredMerchant | undefined {
   return id ? merchants.get(id) : undefined;
 }
 
-/** Mark the settlement phone verified → the account goes live. */
+/** Mark the settlement phone verified → the account goes live. ONLY call after a
+ *  real ownership proof (the OTP verify flow) — verifiedPhone gates the public
+ *  directory, pay-link creation, and the "Verified" badge shown to buyers. */
 export function activateMerchant(id: string): StoredMerchant | undefined {
   const m = merchants.get(id);
   if (!m) return undefined;
   m.verifiedPhone = true;
+  if (m.status === "pending") m.status = "active";
+  m.updatedAt = new Date().toISOString();
+  touch("merchants2");
+  return m;
+}
+
+/** Bring an account to "active" WITHOUT proving phone ownership — used when no SMS
+ *  provider is wired up so the dashboard is usable, but verifiedPhone stays false so
+ *  the trust-gated features (directory listing, pay-link creation, Verified badge)
+ *  remain blocked until a real ownership proof exists. Never marks the phone verified. */
+export function activateUnverified(id: string): StoredMerchant | undefined {
+  const m = merchants.get(id);
+  if (!m) return undefined;
   if (m.status === "pending") m.status = "active";
   m.updatedAt = new Date().toISOString();
   touch("merchants2");

@@ -29,7 +29,7 @@ import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
-import { createMerchant, merchantByOwner, activateMerchant, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
@@ -923,10 +923,13 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
     return Object.keys(out).length ? out : undefined;
   })();
   let m = createMerchant(owner, { businessName, category: String(b.category ?? "Other"), country, settlementPhone, provider, tier, location: cleanLoc });
-  // No SMS provider yet → we can't deliver an OTP in production, so skip phone
-  // verification and take the merchant live immediately. Re-enable OTP by setting
-  // SMS_ENABLED=true once an SMS service is integrated.
-  if (!config.smsEnabled) m = activateMerchant(m.id) ?? m;
+  // No SMS provider yet → we can't deliver an OTP. Bring the account to "active" so the
+  // dashboard is usable, but do NOT mark the phone verified — verifiedPhone must reflect
+  // a real ownership proof, since it gates the public directory, pay-link creation, and
+  // the "Verified" badge buyers see. Marking it here let anyone list an arbitrary
+  // settlement phone as "Verified" (impersonation/phishing). Re-enable self-serve
+  // verification by wiring an SMS provider and setting SMS_ENABLED=true.
+  if (!config.smsEnabled) m = activateUnverified(m.id) ?? m;
   // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
   // (once — recordReferral is a no-op if already attributed or self-referral). Skipped
   // when the referrals feature is switched off.

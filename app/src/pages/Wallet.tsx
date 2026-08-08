@@ -532,6 +532,29 @@ function MobileMoneyPayout() {
     }
   };
 
+  // Retry the PAY step for the EXISTING payment — never mint a new payment/invoice.
+  // On a flaky link send() can settle server-side while its promise rejects; a naive
+  // retry that re-created the payment would pay a second invoice (double-pay + double
+  // payout). So first re-check: if the payment already left AWAITING_INBOUND the
+  // inbound landed — just resume polling. Otherwise re-pay the SAME BOLT11 (single-use,
+  // so it can't settle twice). Mirrors the main send flow's repay() guard.
+  const retryPay = async () => {
+    const p = payment;
+    if (!p) return;
+    setErr(null); setBusy(true);
+    try {
+      const cur = await api.getPayment(p.id).catch(() => p);
+      if (mounted.current) setPayment(cur);
+      if (cur.state !== "AWAITING_INBOUND") { pollDelivery(cur.id); return; } // already paid → watch, don't re-pay
+      await send({ invoice: cur.payInstruction.code });
+      pollDelivery(cur.id);
+    } catch (e) {
+      if (!mounted.current) return;
+      setErr(errMsg(e));
+      setBusy(false);
+    }
+  };
+
   const reset = () => { setQuote(null); setPayment(null); setErr(null); setBusy(false); };
 
   // ---- Result / in-flight ----
@@ -558,7 +581,7 @@ function MobileMoneyPayout() {
         {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 4, textAlign: "center" }}>{err}</div> : null}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           {err && !delivered && !failed && (
-            <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void payFromWallet(); }}>
+            <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void retryPay(); }}>
               {busy ? <Spinner size={14} color="var(--accent-ink)" /> : "Try payment again"}
             </button>
           )}

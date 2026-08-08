@@ -113,10 +113,13 @@ export async function transactionStatus(transactionId: string): Promise<{ settle
     invoice?: { settleDateUtc?: string | null; receiveMsat?: number; state?: { name?: string } };
   };
   const inv = d.invoice ?? {};
+  // Truth signals ONLY: sats actually received. Do NOT use `usdAmount > 0` — this
+  // file's own header documents it as `0` for paid AND unpaid invoices (and it may
+  // carry the invoice's REQUESTED usd value before payment), so it can false-settle
+  // an unpaid invoice → authorize a real Mobile-Money payout for crypto never received.
   const settled =
     !!d.settledAt || !!inv.settleDateUtc ||
-    (typeof inv.receiveMsat === "number" && inv.receiveMsat > 0) ||
-    (typeof d.usdAmount === "number" && d.usdAmount > 0);
+    (typeof inv.receiveMsat === "number" && inv.receiveMsat > 0);
   const state = (inv.state?.name ?? "").toUpperCase();
   const failed = !settled && ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"].includes(state);
   return { settled, failed };

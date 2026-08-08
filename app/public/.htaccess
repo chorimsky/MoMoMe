@@ -13,8 +13,8 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 #     Apache shared/cloud hosting usually disallows mod_proxy (ProxyPass), so we
 #     302-redirect to the API host; LNURL (LUD-16) clients follow redirects.
 #     If your plan allows ProxyPass, prefer a real reverse proxy instead.
-RewriteRule ^\.well-known/lnurlp/(.*)$ https://api.momome.xyz/.well-known/lnurlp/$1 [L,R=302]
-RewriteRule ^lnurl/pay/(.*)$ https://api.momome.xyz/lnurl/pay/$1 [L,R=302]
+RewriteRule ^\.well-known/lnurlp/(.*)$ https://momome-api-production.up.railway.app/.well-known/lnurlp/$1 [L,R=302]
+RewriteRule ^lnurl/pay/(.*)$ https://momome-api-production.up.railway.app/lnurl/pay/$1 [L,R=302]
 
 # --- SPA fallback: serve index.html for client-side routes, but never for a
 #     real file or directory (so /assets/*, /og/*, the generated SEO HTML, and

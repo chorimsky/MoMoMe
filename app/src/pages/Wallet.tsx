@@ -20,6 +20,7 @@ import {
   useWalletSend, useWalletCreate, useWalletUnlock, useWalletRestore, useWalletActivity,
 } from "@lightninglabs/wavelength-react";
 import { api } from "../api/client.js";
+import { useI18n } from "../lib/i18n.js";
 import type { Quote, Payment, ProviderId, NameSource, PaymentState } from "@shared/types.js";
 import { PROVIDERS, COUNTRIES, MIN_XAF, detectProvider } from "@shared/domain.js";
 import { Logo, QR, Spinner } from "../components/atoms.js";
@@ -99,6 +100,7 @@ const card: React.CSSProperties = { background: "var(--surface)", border: "1px s
 const input: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontSize: 15, color: "var(--ink)", outline: "none" };
 
 export function Wallet() {
+  const { t } = useI18n();
   const isolated = typeof window === "undefined" || window.crossOriginIsolated;
   return (
     <div className="app-bg" style={{ background: "var(--paper)", minHeight: "100dvh" }}>
@@ -106,12 +108,12 @@ export function Wallet() {
         {/* Full-nav header (plain <a>) so this stays an isolated island. */}
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 16px" }}>
           <a href="/" aria-label="MoMo›Me — home" style={{ textDecoration: "none", display: "inline-flex" }}><Logo size={30} /></a>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ {WALLET_NETWORK} · beta</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ {WALLET_NETWORK} · {t("wallet_beta")}</span>
         </header>
 
-        <h1 style={{ fontSize: "clamp(24px,5vw,30px)", letterSpacing: "-0.02em" }}>Lightning wallet</h1>
+        <h1 style={{ fontSize: "clamp(24px,5vw,30px)", letterSpacing: "-0.02em" }}>{t("wallet_title")}</h1>
         <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 18px", lineHeight: 1.55 }}>
-          A self-custodial Lightning wallet that runs in your browser — an alternative rail alongside the settlement engine. No node or channels to manage.
+          {t("wallet_intro")}
         </p>
 
         {WALLET_NETWORK === "mainnet" && !MAINNET_AVAILABLE ? <MainnetPending /> :
@@ -128,11 +130,12 @@ export function Wallet() {
 /** Shown when the build is pointed at mainnet but mainnet isn't wired up yet
  *  (no published gateway + access pending). Keeps the flip explicit and honest. */
 function MainnetPending() {
+  const { t } = useI18n();
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Mainnet isn't live yet</div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_mainnet_title")}</div>
       <p style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.55 }}>
-        The embedded wallet runs on signet (test coins) for now. Mainnet needs Lightning Labs to publish their mainnet gateway and grant access — once that lands and the seed-backup step is complete, this page moves to real bitcoin. For now, switch back to signet to try it.
+        {t("wallet_mainnet_body")}
       </p>
     </div>
   );
@@ -141,18 +144,20 @@ function MainnetPending() {
 /** Shown if the page wasn't loaded cross-origin-isolated (e.g. reached via a client-side
  *  link instead of a fresh load). A hard reload picks up the COOP/COEP headers. */
 function IsolationHelp() {
+  const { t } = useI18n();
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Open the wallet in a fresh tab</div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_isolation_title")}</div>
       <p style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.55 }}>
-        The wallet needs a cross-origin-isolated context (for secure in-browser storage). Reload this page to enable it.
+        {t("wallet_isolation_body")}
       </p>
-      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 14, textDecoration: "none", display: "inline-flex" }}>Reload wallet</a>
+      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 14, textDecoration: "none", display: "inline-flex" }}>{t("wallet_reload")}</a>
     </div>
   );
 }
 
 function WalletInner() {
+  const { t } = useI18n();
   const { phase, error } = useWallet();
   const balance = useWalletBalance();
   // The one-time recovery phrase to back up, captured from a fresh create(). The SDK
@@ -189,19 +194,19 @@ function WalletInner() {
           {/* Balance (hero) with an inline ready/syncing chip. */}
           <div style={{ ...card }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span className="overline">Balance</span>
+              <span className="overline">{t("wallet_balance")}</span>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: phase === "syncing" ? "var(--warn)" : "var(--recv)", flex: "none" }} />
-                {phase === "syncing" ? "Syncing" : "Ready"}
+                {phase === "syncing" ? t("wallet_syncing_short") : t("wallet_ready_short")}
               </span>
             </div>
             <div className="num" style={{ fontSize: 32, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
               {sats != null ? fmtSats(sats) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
             </div>
             {balance && balance.pendingInSat > 0
-              ? <div style={{ fontSize: 12.5, color: "var(--recv)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} sats incoming</div>
+              ? <div style={{ fontSize: 12.5, color: "var(--recv)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} {t("wallet_sats_incoming")}</div>
               : sats === 0
-              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>Empty wallet — use <b>Receive</b> below to add sats.</div>
+              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>{t("wallet_empty_pre")}<b>{t("wallet_receive")}</b>{t("wallet_empty_post")}</div>
               : null}
           </div>
 
@@ -219,12 +224,13 @@ function WalletInner() {
 /** The wasm runtime is booting (first load streams ~130 MB, so this can take a
  *  moment). A warm, honest loading state beats a bare spinner. */
 function BootingCard({ phase }: { phase: string }) {
+  const { t } = useI18n();
   return (
     <div style={{ ...card, display: "flex", alignItems: "center", gap: 12 }}>
       <Spinner size={18} color="var(--accent)" />
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 650 }}>{statusLabel(phase)}</div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>First load downloads the wallet software — this can take a moment.</div>
+        <div style={{ fontSize: 13.5, fontWeight: 650 }}>{statusLabel(phase, t)}</div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("wallet_booting_hint")}</div>
       </div>
     </div>
   );
@@ -233,13 +239,14 @@ function BootingCard({ phase }: { phase: string }) {
 /** The runtime hit a terminal error (e.g. a stuck storage lock). Offer the fix that
  *  actually works — a full reload — instead of stranding the user on a dead screen. */
 function ErrorCard({ error }: { error: Error | null }) {
+  const { t } = useI18n();
   return (
     <div style={{ ...card, borderColor: "var(--bad)" }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Wallet couldn't start</div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_error_title")}</div>
       <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
-        {error ? String(error.message ?? error).slice(0, 140) : "The in-browser wallet runtime stopped."} Reloading the page usually fixes it.
+        {error ? String(error.message ?? error).slice(0, 140) : t("wallet_error_stopped")}{t("wallet_error_reload_hint")}
       </p>
-      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 12, textDecoration: "none", display: "inline-flex" }}>Reload wallet</a>
+      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 12, textDecoration: "none", display: "inline-flex" }}>{t("wallet_reload")}</a>
     </div>
   );
 }
@@ -247,11 +254,12 @@ function ErrorCard({ error }: { error: Error | null }) {
 /** Recent wallet activity (newest first) from the daemon's event log. */
 const KIND_GLYPH: Record<string, string> = { send: "↑", receive: "↓", deposit: "↓", exit: "⇄" };
 function Activity() {
+  const { t } = useI18n();
   const items = useWalletActivity().slice(0, 8);
   if (!items.length) return null;
   return (
     <div style={{ ...card }}>
-      <div className="overline" style={{ marginBottom: 8 }}>Activity</div>
+      <div className="overline" style={{ marginBottom: 8 }}>{t("wallet_activity")}</div>
       <div style={{ display: "grid" }}>
         {items.map((e) => <ActivityRow key={e.id} e={e} />)}
       </div>
@@ -277,11 +285,12 @@ function ActivityRow({ e }: { e: Entry }) {
  *  backed up (e.g. created before this step existed, or a reload dropped the one-time
  *  phrase). Honest about the hard constraint: the phrase can't be reshown. */
 function BackupWarning() {
+  const { t } = useI18n();
   return (
     <div style={{ ...card, borderColor: "var(--warn)", background: "var(--send-wash)" }}>
-      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--warn-ink)" }}>⚠ Recovery phrase not backed up</div>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--warn-ink)" }}>{t("wallet_backup_warn_title")}</div>
       <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
-        The recovery phrase can only be shown when a wallet is created and can't be retrieved later. If you didn't save it, don't add real funds — create a fresh wallet and back up its phrase first.
+        {t("wallet_backup_warn_body")}
       </p>
     </div>
   );
@@ -289,6 +298,7 @@ function BackupWarning() {
 
 /** First run: either create a fresh wallet or restore one from a recovery phrase. */
 function CreateOrRestore({ onCreated, onRestored }: { onCreated: (mnemonic: string[]) => void; onRestored: () => void }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"create" | "restore">("create");
   return (
     <div style={{ ...card }}>
@@ -296,7 +306,7 @@ function CreateOrRestore({ onCreated, onRestored }: { onCreated: (mnemonic: stri
         {(["create", "restore"] as const).map((m) => (
           <button key={m} type="button" onClick={() => setMode(m)}
             style={{ flex: 1, padding: "8px 0", borderRadius: "calc(var(--r) - 3px)", border: "none", background: mode === m ? "var(--surface)" : "transparent", boxShadow: mode === m ? "var(--shadow-sm)" : "none", color: mode === m ? "var(--ink)" : "var(--ink-3)", fontWeight: 650, fontSize: 13.5, cursor: "pointer" }}>
-            {m === "create" ? "Create" : "Restore"}
+            {m === "create" ? t("wallet_tab_create") : t("wallet_tab_restore")}
           </button>
         ))}
       </div>
@@ -309,6 +319,7 @@ function CreateOrRestore({ onCreated, onRestored }: { onCreated: (mnemonic: stri
  *  the device. On success the SDK returns the recovery phrase ONCE — handed straight
  *  to the mandatory backup step. */
 function CreateForm({ onCreated }: { onCreated: (mnemonic: string[]) => void }) {
+  const { t } = useI18n();
   const { create, createPending, createError } = useWalletCreate();
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -320,15 +331,15 @@ function CreateForm({ onCreated }: { onCreated: (mnemonic: string[]) => void }) 
   };
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Create your wallet</div>
-      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>A new self-custodial wallet on {WALLET_NETWORK}. Your keys stay on this device — the password encrypts them and is never sent anywhere. You'll back up a recovery phrase next.</p>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_create_title")}</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_create_body_a")}{WALLET_NETWORK}{t("wallet_create_body_b")}</p>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password (min 8 characters)" autoComplete="new-password" style={input} />
-        <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Confirm password" autoComplete="new-password" style={input} />
+        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_pw_ph")} autoComplete="new-password" style={input} />
+        <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder={t("wallet_pw_confirm_ph")} autoComplete="new-password" style={input} />
       </div>
-      {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>Passwords don't match.</div> : null}
+      {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{t("wallet_pw_mismatch")}</div> : null}
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canCreate} onClick={() => { void submit(); }}>
-        {createPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Create wallet"}
+        {createPending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_create_btn")}
       </button>
       {createError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(createError.message ?? createError).slice(0, 120)}</div> : null}
     </div>
@@ -338,6 +349,7 @@ function CreateForm({ onCreated }: { onCreated: (mnemonic: string[]) => void }) 
 /** Restore an existing wallet on a new device from its recovery phrase. `recoverState`
  *  makes the daemon rebuild balances/history from the seed via the operator indexer. */
 function RestoreForm({ onRestored }: { onRestored: () => void }) {
+  const { t } = useI18n();
   const { restore, restorePending, restoreError } = useWalletRestore();
   const [phrase, setPhrase] = useState("");
   const [pw, setPw] = useState("");
@@ -350,15 +362,15 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
   };
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Restore your wallet</div>
-      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>Enter your 12- or 24-word recovery phrase and set a password to encrypt it on this device.</p>
-      <textarea value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="Recovery phrase (words separated by spaces)" rows={3}
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_restore_title")}</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_restore_body")}</p>
+      <textarea value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder={t("wallet_phrase_ph")} rows={3}
         autoComplete="off" autoCapitalize="none" spellCheck={false}
         style={{ ...input, marginTop: 12, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 13.5 }} />
-      {phrase.trim() && !validLen ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{words.length} words — a phrase is 12 or 24 words.</div> : null}
-      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password (min 8 characters)" autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
+      {phrase.trim() && !validLen ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{words.length} {t("wallet_words_hint")}</div> : null}
+      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_pw_new_ph")} autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canRestore} onClick={() => { void submit(); }}>
-        {restorePending ? <Spinner size={15} color="var(--accent-ink)" /> : "Restore wallet"}
+        {restorePending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_restore_btn")}
       </button>
       {restoreError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(restoreError.message ?? restoreError).slice(0, 120)}</div> : null}
     </div>
@@ -369,6 +381,7 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
  *  phrase, then verifies the user actually saved it (re-enter two random words)
  *  before the wallet can be used — the phrase can never be shown again. */
 function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed: () => void }) {
+  const { t } = useI18n();
   const [step, setStep] = useState<"show" | "verify">("show");
   // Two distinct 1-based positions to quiz — derived from the phrase so no RNG.
   const q1 = (mnemonic.length >> 1) % mnemonic.length;
@@ -380,9 +393,9 @@ function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed
   if (step === "show") {
     return (
       <div style={{ ...card, borderColor: "var(--warn)" }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>Back up your recovery phrase</div>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_backup_title")}</div>
         <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
-          Write these {mnemonic.length} words down in order and keep them offline. They're the <b>only</b> way to recover this wallet — we can't show them again and can't reset them.
+          {t("wallet_backup_write_pre")} {mnemonic.length} {t("wallet_backup_write_post")}
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, margin: "12px 0" }}>
           {mnemonic.map((w, i) => (
@@ -392,23 +405,23 @@ function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed
             </div>
           ))}
         </div>
-        <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setStep("verify")}>I've written them down</button>
+        <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setStep("verify")}>{t("wallet_backup_written_btn")}</button>
       </div>
     );
   }
   return (
     <div style={{ ...card, borderColor: "var(--warn)" }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Confirm your backup</div>
-      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>Enter the words at these positions to confirm you saved the phrase.</p>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_backup_confirm_title")}</div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_backup_confirm_body")}</p>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Word #{q1 + 1}
+        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{t("wallet_word")} #{q1 + 1}
           <input value={a1} onChange={(e) => setA1(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} style={{ ...input, marginTop: 4, fontFamily: "var(--font-mono)" }} /></label>
-        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Word #{q2 + 1}
+        <label style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{t("wallet_word")} #{q2 + 1}
           <input value={a2} onChange={(e) => setA2(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} style={{ ...input, marginTop: 4, fontFamily: "var(--font-mono)" }} /></label>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => setStep("show")}>Show phrase</button>
-        <button className="btn btn-primary" style={{ flex: 1 }} disabled={!ok} onClick={onConfirmed}>Confirm &amp; open wallet</button>
+        <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => setStep("show")}>{t("wallet_show_phrase")}</button>
+        <button className="btn btn-primary" style={{ flex: 1 }} disabled={!ok} onClick={onConfirmed}>{t("wallet_confirm_open")}</button>
       </div>
     </div>
   );
@@ -416,16 +429,17 @@ function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed
 
 /** A wallet already exists on this device — unlock it with its password. */
 function UnlockWallet() {
+  const { t } = useI18n();
   const { unlock, unlockPending, unlockError } = useWalletUnlock();
   const [pw, setPw] = useState("");
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Unlock your wallet</div>
-      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>Enter the password you set when you created this wallet.</p>
-      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password" autoComplete="current-password" style={{ ...input, marginTop: 12 }}
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_unlock_title")}</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_unlock_body")}</p>
+      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_password_ph")} autoComplete="current-password" style={{ ...input, marginTop: 12 }}
         onKeyDown={(e) => { if (e.key === "Enter" && pw && !unlockPending) void unlock({ password: pw }); }} />
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!pw || unlockPending} onClick={() => { void unlock({ password: pw }); }}>
-        {unlockPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Unlock"}
+        {unlockPending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_unlock_btn")}
       </button>
       {unlockError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(unlockError.message ?? unlockError).slice(0, 120)}</div> : null}
     </div>
@@ -444,6 +458,7 @@ const FAIL_STATES: PaymentState[] = ["FAILED", "MANUAL_REVIEW", "REFUND_PENDING"
 const POLL_CAP_MS = 4 * 60_000;
 
 function MobileMoneyPayout() {
+  const { t } = useI18n();
   const balance = useWalletBalance();
   const { send } = useWalletSend();
   const [phone, setPhone] = useState("");
@@ -574,14 +589,14 @@ function MobileMoneyPayout() {
     const rec = payment.recipient;
     return (
       <div style={{ ...card }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Send to Mobile Money</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{t("wallet_send_momo")}</div>
         <div style={{ display: "grid", placeItems: "center", gap: 8, padding: "8px 0" }}>
           {delivered
             ? <div style={{ fontSize: 30 }}>✅</div>
             : failed ? <div style={{ fontSize: 30 }}>⚠️</div>
             : <Spinner size={26} color="var(--accent)" />}
           <div style={{ fontSize: 15, fontWeight: 750, textAlign: "center" }}>
-            {delivered ? "Delivered" : failed ? "Couldn't deliver" : err ? "Payment not sent" : "Settling…"}
+            {delivered ? t("wallet_delivered") : failed ? t("wallet_cant_deliver") : err ? t("wallet_not_sent") : t("wallet_settling")}
           </div>
           <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "center" }}>
             {fmtXaf(payment.xaf)} XAF → {rec.name || rec.phone} · {PROVIDERS[rec.provider]?.short ?? rec.provider} {COUNTRIES[rec.country]?.dial} {rec.phone}
@@ -592,10 +607,10 @@ function MobileMoneyPayout() {
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           {err && !delivered && !failed && (
             <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void retryPay(); }}>
-              {busy ? <Spinner size={14} color="var(--accent-ink)" /> : "Try payment again"}
+              {busy ? <Spinner size={14} color="var(--accent-ink)" /> : t("wallet_try_again")}
             </button>
           )}
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={reset}>{delivered || failed ? "Done" : "Close"}</button>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={reset}>{delivered || failed ? t("wallet_done") : t("wallet_close")}</button>
         </div>
       </div>
     );
@@ -609,29 +624,29 @@ function MobileMoneyPayout() {
     return (
       <div style={{ ...card }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Confirm transfer</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_confirm_transfer")}</div>
           <span className="num" style={{ fontSize: 11.5, color: expired ? "var(--bad)" : "var(--ink-3)" }}>
-            {expired ? "rate expired" : `rate holds ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, "0")}`}
+            {expired ? t("wallet_rate_expired") : `${t("wallet_rate_holds")} ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, "0")}`}
           </span>
         </div>
-        <Row k="Recipient" v={`${name || digits} · ${PROVIDERS[provider]?.short ?? provider}`} />
-        <Row k="They receive" v={`${fmtXaf(quote.xaf)} XAF`} strong />
-        <Row k="You pay" v={`${fmtSats(needSats)} sats`} />
-        <Row k="Fee" v={`${fmtXaf(quote.feeXaf)} XAF`} />
+        <Row k={t("recipient")} v={`${name || digits} · ${PROVIDERS[provider]?.short ?? provider}`} />
+        <Row k={t("wallet_they_receive")} v={`${fmtXaf(quote.xaf)} XAF`} strong />
+        <Row k={t("wallet_you_pay")} v={`${fmtSats(needSats)} sats`} />
+        <Row k={t("wallet_fee")} v={`${fmtXaf(quote.feeXaf)} XAF`} />
         <div style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 0 0", lineHeight: 1.5 }}>
-          Paid from your wallet over Lightning; delivery to Mobile Money settles on the platform rail (IBEX → Peexit). Signet beta — real delivery needs the wallet and platform on the same network.
+          {t("wallet_bridge_note")}
         </div>
-        {expired ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>This quote expired — refresh to lock the current rate.</div>
-          : short ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>Wallet balance is {fmtSats(spendable)} sats — not enough to cover this transfer.</div> : null}
+        {expired ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>{t("wallet_quote_expired_hint")}</div>
+          : short ? <div style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>{t("wallet_balance_is")} {fmtSats(spendable)} {t("wallet_not_enough_suffix")}</div> : null}
         {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={reset} disabled={busy}>Back</button>
+          <button className="btn btn-ghost" style={{ flex: "0 0 auto" }} onClick={reset} disabled={busy}>{t("wallet_back")}</button>
           {expired
             ? <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={() => { void getQuote(); }}>
-                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Refresh quote"}
+                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_refresh_quote")}
               </button>
             : <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy || short} onClick={() => { void payFromWallet(); }}>
-                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay from wallet"}
+                {busy ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_pay_from_wallet")}
               </button>}
         </div>
       </div>
@@ -642,8 +657,8 @@ function MobileMoneyPayout() {
   const verified = nameSource === "provider" || nameSource === "internal";
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>Send to Mobile Money</div>
-      <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "6px 0 12px", lineHeight: 1.5 }}>Pay an MTN or Orange Money number in Cameroon straight from this wallet.</p>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_send_momo")}</div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "6px 0 12px", lineHeight: 1.5 }}>{t("wallet_momo_intro")}</p>
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
           <span style={{ display: "inline-flex", alignItems: "center", padding: "0 11px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink-2)" }}>{COUNTRIES.CM.dial}</span>
@@ -651,9 +666,9 @@ function MobileMoneyPayout() {
         </div>
         {digits.length >= 8 && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--ink-2)" }}>
-            {resolving ? <><Spinner size={12} color="var(--accent)" /> Checking…</>
+            {resolving ? <><Spinner size={12} color="var(--accent)" /> {t("wallet_checking")}</>
               : verified ? <span style={{ color: "var(--recv)" }}>✓ {name} · {PROVIDERS[provider]?.name}</span>
-              : <input value={name} onChange={(e) => { setName(e.target.value); setNameSource("manual"); }} placeholder="Recipient name" style={{ ...input, padding: "8px 11px", fontSize: 13 }} />}
+              : <input value={name} onChange={(e) => { setName(e.target.value); setNameSource("manual"); }} placeholder={t("wallet_recipient_name_ph")} style={{ ...input, padding: "8px 11px", fontSize: 13 }} />}
           </div>
         )}
         <div style={{ display: "flex", gap: 6 }}>
@@ -665,14 +680,14 @@ function MobileMoneyPayout() {
           ))}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
-          <input value={xaf ? fmtXaf(amt) : ""} onChange={(e) => setXaf(e.target.value)} inputMode="numeric" placeholder="Amount" style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
+          <input value={xaf ? fmtXaf(amt) : ""} onChange={(e) => setXaf(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_ph")} style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
           <span style={{ display: "inline-flex", alignItems: "center", padding: "0 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--ink-2)" }}>XAF</span>
         </div>
-        {amt > 0 && amt < MIN_XAF ? <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Minimum {fmtXaf(MIN_XAF)} XAF.</div> : null}
+        {amt > 0 && amt < MIN_XAF ? <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("wallet_minimum")} {fmtXaf(MIN_XAF)} XAF.</div> : null}
       </div>
       {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canQuote} onClick={() => { void getQuote(); }}>
-        {busy ? <Spinner size={15} color="var(--accent-ink)" /> : "Get quote"}
+        {busy ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_get_quote")}
       </button>
     </div>
   );
@@ -690,6 +705,7 @@ function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
 
 /** Generate a Lightning invoice to receive a payment, shown as a branded QR. */
 function Receive() {
+  const { t } = useI18n();
   const { receive, receivePending, receiveError } = useWalletReceive();
   const activity = useWalletActivity();
   const [sats, setSats] = useState("");
@@ -709,22 +725,22 @@ function Receive() {
 
   return (
     <div style={{ ...card }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Receive</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("wallet_receive")}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder="Amount in sats" style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
-        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Note (optional)" maxLength={80} style={{ ...input, flex: "1 1 150px" }} />
+        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_sats_ph")} style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
+        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t("wallet_note_ph")} maxLength={80} style={{ ...input, flex: "1 1 150px" }} />
       </div>
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={receivePending || amt <= 0} onClick={() => { void gen(); }}>
-        {receivePending ? <Spinner size={15} color="var(--accent-ink)" /> : "Generate invoice"}
+        {receivePending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_generate_invoice")}
       </button>
       {receiveError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(receiveError.message ?? receiveError).slice(0, 120)}</div> : null}
       {invoice && (
         <div style={{ display: "grid", placeItems: "center", marginTop: 16, gap: 10 }}>
           <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={`lightning:${invoice}`} size={200} /></div>
           {paid
-            ? <div style={{ fontSize: 14, fontWeight: 750, color: "var(--recv)" }}>✓ Paid</div>
-            : <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Waiting for payment…</div>}
-          <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? "Copied ✓" : "Copy invoice"}</button>
+            ? <div style={{ fontSize: 14, fontWeight: 750, color: "var(--recv)" }}>{t("wallet_paid")}</div>
+            : <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{t("wallet_waiting_payment")}</div>}
+          <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? t("wallet_copied") : t("wallet_copy_invoice")}</button>
         </div>
       )}
     </div>
@@ -733,6 +749,7 @@ function Receive() {
 
 /** Pay a BOLT11 invoice from the wallet. */
 function Send() {
+  const { t } = useI18n();
   const { send, sendPending, sendError, sendData } = useWalletSend();
   const [bolt11, setBolt11] = useState("");
   const pay = async () => {
@@ -740,20 +757,20 @@ function Send() {
     if (!inv) return;
     await send({ invoice: inv });
   };
-  const paste = async () => { try { const t = await navigator.clipboard?.readText(); if (t) setBolt11(t.trim()); } catch { /* clipboard blocked */ } };
+  const paste = async () => { try { const txt = await navigator.clipboard?.readText(); if (txt) setBolt11(txt.trim()); } catch { /* clipboard blocked */ } };
   return (
     <div style={{ ...card }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 15, fontWeight: 700 }}>Send</span>
-        <button className="btn btn-ghost btn-sm" onClick={() => { void paste(); }}>Paste</button>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_send")}</span>
+        <button className="btn btn-ghost btn-sm" onClick={() => { void paste(); }}>{t("wallet_paste")}</button>
       </div>
-      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="Paste a Lightning invoice (lnbc…)" rows={3}
+      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder={t("wallet_bolt11_ph")} rows={3}
         style={{ ...input, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 12.5 }} />
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={sendPending || !bolt11.trim()} onClick={() => { void pay(); }}>
-        {sendPending ? <Spinner size={15} color="var(--accent-ink)" /> : "Pay invoice"}
+        {sendPending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_pay_invoice")}
       </button>
       {sendError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(sendError.message ?? sendError).slice(0, 120)}</div> : null}
-      {sendData ? <div style={{ fontSize: 13, color: "var(--recv)", fontWeight: 650, marginTop: 8 }}>✓ Payment sent</div> : null}
+      {sendData ? <div style={{ fontSize: 13, color: "var(--recv)", fontWeight: 650, marginTop: 8 }}>{t("wallet_payment_sent")}</div> : null}
     </div>
   );
 }
@@ -764,14 +781,14 @@ function Send() {
 function spendableSats(b: Balance): number {
   return Math.max(0, Math.round((b.confirmedSat ?? 0) + (b.creditAvailableSat ?? 0)));
 }
-function statusLabel(phase: string): string {
+function statusLabel(phase: string, t: (k: string) => string): string {
   switch (phase) {
-    case "ready": return "Wallet ready";
-    case "syncing": return "Syncing…";
-    case "needsWallet": return "Set up your wallet";
-    case "locked": return "Wallet locked";
-    case "error": return "Wallet error";
-    default: return "Starting wallet…";
+    case "ready": return t("wallet_status_ready");
+    case "syncing": return t("wallet_status_syncing");
+    case "needsWallet": return t("wallet_status_setup");
+    case "locked": return t("wallet_status_locked");
+    case "error": return t("wallet_status_error");
+    default: return t("wallet_status_starting");
   }
 }
 function fmtSats(n: number): string { return new Intl.NumberFormat("en-US").format(n); }

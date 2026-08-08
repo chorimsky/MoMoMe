@@ -47,28 +47,38 @@ async function getDWK(): Promise<CryptoKey> {
   return key;
 }
 
+let vmkInit: Promise<CryptoKey> | null = null;
 /** Load or lazily create the vault key. Falls back to a session-only key if
  *  IndexedDB/WebCrypto is unavailable (private mode) — contacts then live only
- *  for the session rather than crashing the app. */
+ *  for the session rather than crashing the app.
+ *
+ *  MEMOIZED: without a shared in-flight promise, two concurrent first-run callers
+ *  (e.g. loadContacts() from the Contacts tab and rememberPaidContact() after a
+ *  payment) would both see no wrapped VMK, both generate+wrap+store a key, and the
+ *  second write would win — silently orphaning every record encrypted under the first
+ *  (losing) key (decryptRecord returns null and skips them forever). */
 async function unlockVault(): Promise<CryptoKey> {
   if (vmk) return vmk;
-  try {
-    const dwk = await getDWK();
-    const wrapped = await idbGet<ArrayBuffer>(VMK_KEY);
-    if (wrapped) {
-      vmk = await crypto.subtle.unwrapKey("raw", wrapped, dwk, "AES-KW", { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-    } else {
-      const fresh = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
-      const wrappedBuf = await crypto.subtle.wrapKey("raw", fresh, dwk, "AES-KW");
-      await idbSet(VMK_KEY, wrappedBuf);
-      const raw = await crypto.subtle.exportKey("raw", fresh);
-      vmk = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  if (!vmkInit) vmkInit = (async () => {
+    try {
+      const dwk = await getDWK();
+      const wrapped = await idbGet<ArrayBuffer>(VMK_KEY);
+      if (wrapped) {
+        vmk = await crypto.subtle.unwrapKey("raw", wrapped, dwk, "AES-KW", { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+      } else {
+        const fresh = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+        const wrappedBuf = await crypto.subtle.wrapKey("raw", fresh, dwk, "AES-KW");
+        await idbSet(VMK_KEY, wrappedBuf);
+        const raw = await crypto.subtle.exportKey("raw", fresh);
+        vmk = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+      }
+    } catch {
+      // No persistent storage — degrade to an ephemeral in-memory key.
+      vmk = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     }
-  } catch {
-    // No persistent storage — degrade to an ephemeral in-memory key.
-    vmk = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  }
-  return vmk;
+    return vmk!;
+  })();
+  return vmkInit;
 }
 
 async function encryptContact(c: Contact): Promise<{ ciphertext: string; iv: string }> {

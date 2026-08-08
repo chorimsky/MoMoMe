@@ -42,6 +42,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Fredoka:wght@400;500;600;700&family=Baloo+2:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<!-- CSP: this inline script is sha256-hash-pinned in app/public/.htaccess + vercel.json.
+     If you edit it, regenerate the hash or the page breaks under CSP. -->
 <script>
   // Apply the saved theme before first paint to avoid a flash of the wrong theme.
   (function () {
@@ -81,6 +83,8 @@
   </main>
 </noscript>
 <script type="module" src="/src/main.tsx"></script>
+<!-- CSP: this inline script is sha256-hash-pinned in app/public/.htaccess + vercel.json.
+     If you edit it, regenerate the hash or the page breaks under CSP. -->
 <script>
   // Register the service worker (installability + offline app shell). Best-effort.
   if ("serviceWorker" in navigator) {

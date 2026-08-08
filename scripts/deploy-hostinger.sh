@@ -36,9 +36,12 @@ VITE_API_BASE="$API_BASE" SITE_URL="$SITE" pnpm --filter @momome/app build
 echo "Uploading…"
 # No --delete (safe): overwrites changed files, leaves Hostinger-managed files
 # (e.g. .well-known/acme-challenge for SSL) untouched.
-rsync -rz --stats -e "ssh -p $SSH_PORT -o BatchMode=yes" \
-  app/dist/ "$SSH_USER@$SSH_HOST:$WEB_ROOT/" 2>&1 \
-  | grep -iE "Number of files transferred|Total transferred file size" || true
+# NOTE: this must FAIL LOUDLY. A previous `… | grep … || true` swallowed a failed
+# rsync (e.g. an unreachable SSH host / missing deploy key) and let the script exit 0,
+# so a deploy that shipped NOTHING looked successful. Let rsync's exit propagate
+# (set -e aborts on failure). ConnectTimeout fails fast instead of hanging.
+rsync -rzh --info=stats1,progress2 -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=15" \
+  app/dist/ "$SSH_USER@$SSH_HOST:$WEB_ROOT/"
 
 echo "Verifying…"
 LIVE=$(curl -s "$SITE/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1)

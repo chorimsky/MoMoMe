@@ -35,12 +35,15 @@ tar -xzf "$TMP" -C "$DEST"
 # URL that Vite's dev server serves as HTML (Vite can't emit a worker from inside an
 # optimized dep), so Wallet.tsx passes an explicit workerURL pointing here. The file
 # ships in the installed package (same pinned version as the runtime archive).
-WORKER_SRC="../node_modules/@lightninglabs/wavelength-web/dist/wavewalletdk-worker.js"
-if [[ -f "$WORKER_SRC" ]]; then
+# Locate the worker file wherever pnpm placed it — root node_modules OR app/node_modules,
+# which differs by hoisting (esp. on Vercel's clean install). `find` is robust to both.
+WORKER_SRC="$(find ../node_modules node_modules -path '*@lightninglabs/wavelength-web/dist/wavewalletdk-worker.js' 2>/dev/null | head -1)"
+if [[ -n "$WORKER_SRC" && -f "$WORKER_SRC" ]]; then
   cp "$WORKER_SRC" "$DEST/wavewalletdk-worker.js"
-  echo "✅ worker → $DEST/wavewalletdk-worker.js"
+  echo "✅ worker → $DEST/wavewalletdk-worker.js  (from $WORKER_SRC)"
 else
-  echo "⚠️  $WORKER_SRC not found — run pnpm install first (wallet worker not hosted)." >&2
+  echo "❌ wavewalletdk-worker.js not found under node_modules — run pnpm install first." >&2
+  exit 1
 fi
 
 echo "✅ Wavelength runtime $VER → $DEST ($(du -sh "$DEST" | cut -f1))"

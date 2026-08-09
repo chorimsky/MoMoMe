@@ -13,7 +13,7 @@ import { config } from "../config.js";
 import { getSettings } from "../core/settings.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { rateFor, formatAmount } from "../core/fx.js";
-import { createInstruction, providerFor } from "../adapters/index.js";
+import { createInstruction } from "../adapters/index.js";
 import { id, nextRef } from "../core/ids.js";
 import * as store from "../core/store.js";
 import * as peex from "../integrations/peex/service.js";
@@ -81,7 +81,6 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
       method: "LIGHTNING",
       ref,
       amount: btc,
-      callbackUrl: `${config.publicUrl}/webhooks/${providerFor("LIGHTNING")}`,
     });
   } catch (e) {
     return res.json(lnErr(e instanceof Error ? e.message : "Could not create the invoice."));

@@ -10,13 +10,13 @@ import {
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
-import { createInstruction, providerFor } from "../adapters/index.js";
+import { createInstruction, adapterFor, adapterByName } from "../adapters/index.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
-import { transactionStatus } from "../adapters/ibex.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive, ibexInboundTrusted,
+  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  blinkConfigured, blinkLive,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import * as store from "../core/store.js";
@@ -585,9 +585,10 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
     return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
   }
   // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
-  //    inbound will be real crypto (IBEX + trusted); a simulated inbound may use a
-  //    simulated rail. This is the "service functional + has balance" check.
-  const willBeReal = providerFor(quote.method) === "ibex" && ibexInboundTrusted();
+  //    inbound will be real crypto (a trusted rail, e.g. IBEX/Blink in production); a
+  //    simulated inbound may use a simulated rail. "service functional + has balance".
+  //    trusted() on the primary rail for this method generalises the old IBEX-only check.
+  const willBeReal = adapterFor(quote.method).trusted();
   const ready = await payoutReady(recipient.provider, recipient.country, quote.xaf, willBeReal);
   if (!ready.ok) {
     // Surface WHY so a "payouts unavailable" incident is diagnosable from the logs
@@ -607,11 +608,13 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   const ref = nextRef();
   let instruction;
   try {
+    // The registry picks the rail (IBEX base → added rails → sandbox) and builds the
+    // matching /webhooks/<rail> callback itself, so the callback always targets the
+    // rail that actually issued the instruction (correct even under rail failover).
     instruction = await createInstruction({
       method: quote.method,
       ref,
       amount: quote.inboundAmount,
-      callbackUrl: `${config.publicUrl}/webhooks/${providerFor(quote.method)}`,
     });
   } catch (e) {
     // Couldn't mint the inbound address (e.g. a stablecoin whose IBEX receive combo
@@ -701,14 +704,16 @@ api.post("/payments/:id/confirm", async (req, res) => {
   if (!(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   if (p.state === "AWAITING_INBOUND") {
     const inst = p.payInstruction;
-    if (inst.provider === "ibex" && inst.providerRef) {
-      // REAL rail: settle ONLY if IBEX confirms the crypto actually arrived.
-      // Tapping "I've paid" without paying does nothing; a genuine payment also
-      // auto-settles via the webhook + reconcile without any tap.
-      const s = await transactionStatus(inst.providerRef).catch(() => null);
+    const adapter = adapterByName(inst.provider ?? "");
+    if (adapter?.confirmSettlement && inst.providerRef) {
+      // REAL rail (IBEX / Blink / …): settle ONLY if the rail confirms the crypto
+      // actually arrived. Tapping "I've paid" without paying does nothing; a genuine
+      // payment also auto-settles via the webhook + reconcile without any tap.
+      const s = await adapter.confirmSettlement(inst.providerRef).catch(() => null);
       if (s?.settled) await confirmInbound(p, inst.amount);
-    } else if (inst.provider === "sandbox") {
-      // Simulated rail (USDT / no IBEX creds) — no real on-chain payment exists.
+    } else if (!adapter?.trusted()) {
+      // Simulated / untrusted rail (sandbox demo) — no real on-chain payment exists,
+      // so drive the simulated settlement. Never do this for a trusted rail.
       void settle(p);
     }
   }
@@ -1689,6 +1694,7 @@ api.get("/admin/health", (_req, res) => {
   const health: import("../../../shared/types.js").HealthSnapshot = {
     apis: [
       { name: "IBEX · Crypto inbound", status: ibexConfigured() ? "Online" : "Offline", detail: envLabel(ibexConfigured(), config.ibex.env) },
+      { name: "Blink · Crypto inbound", status: blinkConfigured() ? "Online" : "Offline", detail: envLabel(blinkConfigured(), config.blink.env) },
       { name: "PawaPay · Mobile Money", status: pawapayConfigured() ? "Online" : "Offline", detail: envLabel(pawapayConfigured(), config.pawapay.env) },
       { name: "Peexit · Mobile Money", status: peexitConfigured() ? "Online" : "Offline", detail: envLabel(peexitConfigured(), config.peexit.env) },
       { name: "FX feed (IBEX rates)", status: fxLive ? "Online" : "Degraded", detail: fxLive ? "live" : "fallback rates" },
@@ -1722,6 +1728,19 @@ api.get("/admin/rails", (_req, res) => {
       // real payout when this opt-in is on (off by default).
       sandboxPayout: config.ibex.allowSandboxPayout,
     },
+    // All crypto inbound rails (IBEX is the base, priority-ordered). Additive to the
+    // `crypto` field above so existing views keep working while new ones can list rails.
+    cryptoRails: [
+      {
+        name: "IBEX Hub", base: true, env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
+        apiUrl: config.ibex.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
+      },
+      {
+        name: "Blink", base: false, env: config.blink.env, configured: blinkConfigured(), live: blinkLive(),
+        apiUrl: config.blink.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], walletId: head(config.blink.walletId),
+        webhookSecret: config.blink.webhookSecret ? "set" : "unset",
+      },
+    ],
     payout: [
       { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(), apiUrl: config.pawapay.apiUrl, apiKey: mask(config.pawapay.apiKey) },
       { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(), apiUrl: config.peexit.apiUrl, apiKey: mask(config.peexit.apiKey) },

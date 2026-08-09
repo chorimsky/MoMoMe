@@ -19,8 +19,8 @@ import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
-import { config, ibexInboundTrusted } from "../config.js";
-import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
+import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
+import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
 
 const btcToMsat = (btc: number) => Math.round(btc * 1e11); // 1 BTC = 1e11 msat
 const msatToBtc = (msat: number) => msat / 1e11;
@@ -81,9 +81,11 @@ export async function rate(fromCurrencyId: number, toCurrencyId: number): Promis
  *  boot when IBEX is configured and PUBLIC_URL is publicly reachable. */
 export async function registerAccountWebhook(): Promise<void> {
   const url = `${config.publicUrl}/webhooks/ibex`;
-  // Register on every account we receive into — the Bitcoin account AND the USDT
-  // account (if configured) — so on-chain BTC and ERC-20 USDT deposits both notify.
-  const accounts = [config.ibex.accountId, config.ibex.usdtAccountId].filter(Boolean);
+  // Register on every account we receive into — the Bitcoin account AND each
+  // configured stablecoin account (USDT + USDC) — so on-chain BTC and ERC-20
+  // deposits all notify. (USDC was previously omitted → USDC deposits silently
+  // never registered their webhook.) De-dupe in case ids coincide.
+  const accounts = [...new Set([config.ibex.accountId, config.ibex.usdtAccountId, config.ibex.usdcAccountId].filter(Boolean))];
   for (const acct of accounts) {
     const res = await ibex(`/accounts/${acct}/webhooks`, {
       method: "POST",
@@ -229,6 +231,11 @@ function stablecoinAccountId(m: Method): string {
 
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
+  // IBEX is the BASE crypto rail — priority 0 so it's chosen ahead of any other
+  // configured crypto rail for the methods it supports.
+  priority: 0,
+  configured: () => ibexConfigured(),
+  trusted: () => ibexInboundTrusted(),
   // Stablecoins (USDT/USDC on Ethereum) are handled only when their dedicated IBEX
   // account is configured; otherwise the sandbox adapter covers them.
   supports: (m: Method) => m === "LIGHTNING" || m === "ONCHAIN" || !!stablecoinAccountId(m),
@@ -345,5 +352,12 @@ export const ibexAdapter: RailAdapter = {
     if (isStable) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
     else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
     return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
+  },
+
+  // Authoritative re-query used by the webhook handler + reconcile backstop so a
+  // forged/replayed "settled" webhook can never drive a real payout, and a lost
+  // webhook still settles. null = indeterminate (e.g. an on-chain address).
+  confirmSettlement(providerRef: string): Promise<SettlementStatus | null> {
+    return transactionStatus(providerRef);
   },
 };

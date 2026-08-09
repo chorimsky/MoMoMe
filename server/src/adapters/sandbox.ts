@@ -18,6 +18,13 @@ function rand(alphabet: string, len: number): string {
 
 export const sandboxAdapter: RailAdapter = {
   name: "sandbox",
+  // Highest number = lowest priority: the sandbox is the always-on CATCH-ALL, only
+  // chosen for a method no configured real rail handles (or when none is configured).
+  priority: Number.MAX_SAFE_INTEGER,
+  // Always available (zero-credential) and never trusted — a simulated inbound must
+  // never authorize a real Mobile-Money payout.
+  configured: () => true,
+  trusted: () => false,
   supports: () => true,
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {

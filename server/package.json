@@ -12,7 +12,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:ln": "tsx test/lightning.e2e.ts",
-    "test:settle": "tsx test/settlement-idempotency.test.ts"
+    "test:settle": "tsx test/settlement-idempotency.test.ts",
+    "test:health": "tsx test/rail-health.test.ts",
+    "test:registry": "tsx test/rail-registry.test.ts",
+    "test:registry:cfg": "tsx test/rail-registry-configured.test.ts",
+    "test:blink": "tsx test/blink.test.ts",
+    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/settlement-idempotency.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -96,6 +96,23 @@ export const config = {
     callbackPass: secret("PEEXIT_CALLBACK_PASS"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
+  /** Blink (Galoy) — SECOND crypto INBOUND rail alongside IBEX (Lightning +
+   *  on-chain BTC). GraphQL API authed with an `X-API-KEY` header. Activates
+   *  when BLINK_API_KEY + BLINK_WALLET_ID are set (independent of RAILS_MODE,
+   *  like IBEX). URL derives from BLINK_ENV: production = mainnet, else the
+   *  staging (signet/testnet) endpoint. See server/src/adapters/blink.ts. */
+  blink: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    apiUrl: env("BLINK_API_URL", sandbox ? "https://api.staging.galoy.io/graphql" : "https://api.blink.sv/graphql"),
+    apiKey: secret("BLINK_API_KEY"),
+    // The BTC wallet that receives inbound sats. Get it from the Blink dashboard or
+    // `query me { defaultAccount { wallets { id walletCurrency } } }` (the BTC wallet).
+    walletId: secret("BLINK_WALLET_ID"),
+    // Shared secret Blink echoes / signs its callback with (we define it). Unset →
+    // callbacks are rejected whenever a real payout could result (fail closed).
+    webhookSecret: secret("BLINK_WEBHOOK_SECRET"),
+  }))(!isProdEnv("BLINK_ENV")),
+
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
    *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted
    *  random secret is used — never the password). */
@@ -133,6 +150,13 @@ export function ibexConfigured(): boolean {
   return !!(config.ibex.clientId && config.ibex.clientSecret && config.ibex.accountId);
 }
 
+/** True when Blink (Galoy) credentials are present — activates the second real
+ *  crypto inbound rail (Lightning + on-chain BTC), independent of RAILS_MODE,
+ *  exactly like IBEX. Needs both an API key and the receiving BTC wallet id. */
+export function blinkConfigured(): boolean {
+  return !!(config.blink.apiKey && config.blink.walletId);
+}
+
 /** Real Mobile Money payout rails activate per-aggregator when their key is
  *  set — independent of RAILS_MODE — so one can go live before the other. */
 export function pawapayConfigured(): boolean { return !!config.pawapay.apiKey; }
@@ -148,13 +172,22 @@ export function ibexLive(): boolean { return ibexConfigured() && config.ibex.env
  *  take real mainnet sats → genuinely real money). Scope this per-payment to the
  *  IBEX rail — a simulated inbound (provider "sandbox") must never qualify. */
 export function ibexInboundTrusted(): boolean { return ibexLive() || (ibexConfigured() && config.ibex.allowSandboxPayout); }
+/** Blink is production-mainnet or staging-testnet — there is no "sandbox pays real
+ *  sats" nuance (staging is signet/testnet), so a Blink inbound is trusted only in
+ *  production. Mirrors ibexInboundTrusted() for the second crypto rail. */
+export function blinkLive(): boolean { return blinkConfigured() && config.blink.env === "production"; }
+export function blinkInboundTrusted(): boolean { return blinkLive(); }
 export function pawapayLive(): boolean { return pawapayConfigured() && config.pawapay.env === "production"; }
 export function peexitLive(): boolean { return peexitConfigured() && config.peexit.env === "production"; }
 export function aggregatorLive(name: string): boolean {
   return name === "pawapay" ? pawapayLive() : name === "peexit" ? peexitLive() : false;
 }
-/** Any rail that moves REAL funds is active → simulation must be off. */
-export function liveMoney(): boolean { return ibexLive() || pawapayLive() || peexitLive(); }
+/** Any rail that moves REAL funds is active → simulation must be off. A production
+ *  crypto inbound (IBEX or Blink) counts too — a real inbound settling would drive a
+ *  real payout. NOTE: the FX rate feed currently sources from IBEX (core/rates.ts);
+ *  a production deployment therefore still needs IBEX creds present for live pricing
+ *  even when Blink is the crypto rail. IBEX is the BASE rail by design. */
+export function liveMoney(): boolean { return ibexLive() || blinkLive() || pawapayLive() || peexitLive(); }
 
 /** IBEX is all-or-nothing: reject a partial credential set at boot. In
  *  production, also require a webhook secret and a reachable https PUBLIC_URL,
@@ -173,6 +206,22 @@ export function assertIbexConfig(): void {
     if (!config.ibex.webhookSecret) missing.push("IBEX_WEBHOOK_SECRET");
     if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
     if (missing.length) throw new Error(`IBEX inbound can authorize a real payout — set: ${missing.join(", ")} (or disable IBEX_ALLOW_SANDBOX_PAYOUT).`);
+  }
+}
+
+/** Blink is all-or-nothing (key + wallet id). In production a settled Blink inbound
+ *  authorizes a real payout, so require its callback secret + an https PUBLIC_URL —
+ *  verifyWebhook fails closed otherwise, so the secret must exist. Mirrors IBEX. */
+export function assertBlinkConfig(): void {
+  const parts = [config.blink.apiKey, config.blink.walletId];
+  if (parts.some(Boolean) && !parts.every(Boolean)) {
+    throw new Error("Partial Blink config: set BLINK_API_KEY and BLINK_WALLET_ID together (or none).");
+  }
+  if (blinkConfigured() && blinkInboundTrusted()) {
+    const missing: string[] = [];
+    if (!config.blink.webhookSecret) missing.push("BLINK_WEBHOOK_SECRET");
+    if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
+    if (missing.length) throw new Error(`Blink inbound can authorize a real payout — set: ${missing.join(", ")}.`);
   }
 }
 

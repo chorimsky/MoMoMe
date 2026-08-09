@@ -12,7 +12,8 @@ import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types
 import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
-import { isLive, ibexInboundTrusted, aggregatorLive } from "../config.js";
+import { isLive, aggregatorLive } from "../config.js";
+import { railTrusted, confirmSettlement, adapterByName } from "../adapters/index.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
@@ -195,7 +196,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   // (production, or sandbox when IBEX_ALLOW_SANDBOX_PAYOUT is set — sandbox LN
   // invoices take real mainnet sats). A simulated inbound (provider "sandbox",
   // e.g. USDT) is not.
-  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+  const cryptoReal = railTrusted(p.payInstruction.provider);
 
   // Route to a FUNDED aggregator (PawaPay / Peexit) — the API with wallet balance
   // picks up the payout. For real money, require a LIVE rail so a sandbox-configured
@@ -311,14 +312,17 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
   }
 }
 
-/** Backstop for a lost inbound webhook: poll IBEX for Lightning payments still
- *  awaiting inbound and settle any that IBEX reports paid. Idempotent — only
- *  ever advances a genuinely-settled payment. (On-chain settles by address via
- *  the account webhook; it isn't pollable by transaction id here.) */
+/** Backstop for a lost inbound webhook: poll the issuing rail for Lightning payments
+ *  still awaiting inbound and settle any the rail reports paid. Works for any rail
+ *  exposing confirmSettlement (IBEX, Blink, …). Idempotent — only ever advances a
+ *  genuinely-settled payment. (On-chain settles by address via the account webhook;
+ *  it isn't pollable by transaction id here.) */
 export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of listPayments()) {
-    if (p.payInstruction.provider !== "ibex" || p.payInstruction.method !== "LIGHTNING") continue;
+    // Only Lightning on a rail that supports authoritative re-query is pollable here.
+    const adapter = adapterByName(p.payInstruction.provider ?? "");
+    if (!adapter?.confirmSettlement || p.payInstruction.method !== "LIGHTNING") continue;
     // AWAITING/DETECTED settle; FAILED is re-checked to RECOVER an invoice that
     // was really paid but wrongly expired (a lost webhook we couldn't reconcile).
     const recoverable = p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED" || p.state === "FAILED";
@@ -326,7 +330,7 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
     if (Date.parse(p.updatedAt) > cutoff) continue;
     if (p.state === "FAILED" && Date.now() - Date.parse(p.createdAt) > 72 * 3600_000) continue; // don't re-check ancient failures
     try {
-      const s = await transactionStatus(p.payInstruction.providerRef);
+      const s = await confirmSettlement(p.payInstruction.provider, p.payInstruction.providerRef);
       if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); continue; } // settle / recover (LN = full lock)
       // Genuinely unpaid + past expiry → expire so it doesn't sit on "Waiting…"
       // forever. Only when NOT paid (settled check above ran first). No funds moved.
@@ -401,7 +405,7 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   if (availableFloatXaf() < 0) return false;
 
   // Is THIS payment's crypto inbound real money? (Same test as confirmInbound.)
-  const cryptoReal = p.payInstruction.provider === "ibex" && ibexInboundTrusted();
+  const cryptoReal = railTrusted(p.payInstruction.provider);
   // Reuse the original aggregator (idempotent on the ref); else pick a funded one,
   // requiring a LIVE rail when real money is involved.
   const agg = p.aggregator

@@ -1,15 +1,17 @@
 import { createApp } from "./app.js";
-import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, ibexConfigured, liveMoney, peexitLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, ibexConfigured, blinkConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll, persistDurable } from "./core/persist.js";
 import { pruneExpiredQuotes } from "./core/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
+import { registerBlinkCallback } from "./adapters/blink.js";
 import { setRates, CCY } from "./core/rates.js";
 
 assertLiveConfig();
 assertIbexConfig();
+assertBlinkConfig();
 assertAdminSecurity(); // fail closed on a default admin password in production
 // Fail closed: never run a real-money rail on a non-durable store (node:sqlite missing
 // or DB_PATH not writable) — payments, ledger and the 10-year compliance chain would be
@@ -36,8 +38,12 @@ const app = createApp();
 setInterval(() => {
   void reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
   void reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
-  if (ibexConfigured()) {
+  // Inbound reconcile applies to any crypto rail with authoritative re-query
+  // (IBEX or Blink). Refund reconcile is IBEX-specific (refunds pay out via IBEX).
+  if (ibexConfigured() || blinkConfigured()) {
     void reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+  }
+  if (ibexConfigured()) {
     void reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   }
   void reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
@@ -72,8 +78,17 @@ if (ibexConfigured() && config.publicUrl.startsWith("https://")) {
     .catch((e) => console.error("IBEX register account webhook failed", e));
 }
 
+// Blink (Galoy) callback endpoint — so Lightning/on-chain receives notify us.
+// Same gate as IBEX: only when configured and PUBLIC_URL is publicly reachable.
+if (blinkConfigured() && config.publicUrl.startsWith("https://")) {
+  void registerBlinkCallback()
+    .then((ok) => { if (ok) console.log(`Blink callback → ${config.publicUrl}/webhooks/blink`); })
+    .catch((e) => console.error("Blink register callback failed", e));
+}
+
 const server = app.listen(config.port, () => {
-  const crypto = ibexConfigured() ? `IBEX Hub (${config.ibex.env})` : "sandbox";
+  const rails = [ibexConfigured() && `IBEX Hub (${config.ibex.env})`, blinkConfigured() && `Blink (${config.blink.env})`].filter(Boolean);
+  const crypto = rails.length ? rails.join(" + ") : "sandbox";
   console.log(`MoMo›Me settlement engine → http://localhost:${config.port}  [payout: ${config.railsMode}, crypto: ${crypto}]`);
 });
 

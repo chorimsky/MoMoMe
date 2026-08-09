@@ -8,6 +8,7 @@
 import type { ProviderId, CountryCode, Aggregator, RoutingSnapshot, AggregatorHealth, ExecutionLogEntry } from "../../../shared/types.js";
 import { pawapayConfigured, peexitConfigured, aggregatorLive } from "../config.js";
 import { register, touch } from "./persist.js";
+import { HealthTracker, type RailHealthState } from "./railHealth.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
 
@@ -41,33 +42,26 @@ const SUPPORTS: Record<Aggregator, ProviderId[]> = {
  *  to Peexit while PawaPay is out (restore MTN/AIRTEL→pawapay when it's re-enabled). */
 const PREFERRED: Record<ProviderId, Aggregator> = { MTN: "peexit", ORANGE: "peexit", AIRTEL: "peexit" };
 
-/** After a rail is taken out of rotation, allow ONE probe payment through this long
- *  after, to re-test whether it has recovered (the "timed re-probe" half of recovery). */
+/** Availability + auto-failover for payout aggregators, on the SHARED tracker also
+ *  used by the crypto-inbound rail registry (adapters/index.ts) — one implementation
+ *  of "3 strikes → out, one probe after a cooldown". After a rail is taken out of
+ *  rotation, ONE probe is allowed after PROBE_COOLDOWN_MS to re-test recovery. */
 const PROBE_COOLDOWN_MS = 10 * 60_000;
-interface Health { success: number; failure: number; totalLatencyMs: number; consecFail: number; up: boolean; downSince: number; }
-const health: Record<Aggregator, Health> = {
-  pawapay: { success: 0, failure: 0, totalLatencyMs: 0, consecFail: 0, up: true, downSince: 0 },
-  peexit: { success: 0, failure: 0, totalLatencyMs: 0, consecFail: 0, up: true, downSince: 0 },
-};
-/** A rail may be selected if it's up, OR it's been down past the probe cooldown
- *  (one re-test attempt). A failed probe re-stamps downSince → it backs off again. */
-function eligible(a: Aggregator): boolean {
-  const h = health[a];
-  return h.up || (h.downSince > 0 && Date.now() - h.downSince >= PROBE_COOLDOWN_MS);
-}
+const health = new HealthTracker(Object.keys(AGGREGATORS), { probeCooldownMs: PROBE_COOLDOWN_MS });
+const eligible = (a: Aggregator): boolean => health.eligible(a);
 const executions: ExecutionLogEntry[] = [];
 
 register(
   "routing",
-  () => ({ health, executions: executions.slice(0, 60) }),
-  (d: { health: Record<Aggregator, Health>; executions: ExecutionLogEntry[] }) => {
-    Object.assign(health, d.health);
+  () => ({ health: health.dump(), executions: executions.slice(0, 60) }),
+  (d: { health: Record<string, RailHealthState>; executions: ExecutionLogEntry[] }) => {
+    health.load(d.health);
     executions.push(...d.executions);
   },
 );
 
-const successRate = (a: Aggregator) => { const h = health[a]; const t = h.success + h.failure; return t ? h.success / t : 1; };
-const avgLatency = (a: Aggregator) => { const h = health[a]; return h.success ? Math.round(h.totalLatencyMs / h.success) : 0; };
+const successRate = (a: Aggregator) => health.successRate(a);
+const avgLatency = (a: Aggregator) => health.avgLatency(a);
 
 /** Pick the payout aggregator: the preferred one while it's available, else fail
  *  over to the healthiest available alternative (by success rate, then latency). */
@@ -156,11 +150,7 @@ export async function payoutReady(provider: ProviderId, country: CountryCode, am
 
 /** Record a payout outcome — feeds success rate, latency, and auto-failover. */
 export function recordExecution(e: ExecutionLogEntry): void {
-  const h = health[e.aggregator];
-  if (e.status === "COMPLETED") { h.success += 1; h.totalLatencyMs += e.latencyMs; h.consecFail = 0; h.up = true; h.downSince = 0; }
-  // 3 strikes → out. Re-stamp downSince on every failure-while-down too, so a FAILED
-  // probe (after the cooldown) re-arms the backoff instead of leaving the rail eligible.
-  else { h.failure += 1; h.consecFail += 1; if (h.consecFail >= 3) { h.up = false; h.downSince = Date.now(); } }
+  health.record(e.aggregator, e.status === "COMPLETED", e.latencyMs);
   executions.unshift(e);
   if (executions.length > 60) executions.pop();
   touch("routing");
@@ -171,20 +161,14 @@ export function recordExecution(e: ExecutionLogEntry): void {
  *  so the pre-flight gate blocks NEW addresses at once. Recovers via the probe cooldown
  *  or an admin re-enable. */
 export function markRailHardDown(name: Aggregator, reason: string): void {
-  const h = health[name];
-  h.downSince = Date.now(); // always re-arm the cooldown — a failed probe backs off again
-  h.up = false;
-  h.failure += 1;
-  h.consecFail = Math.max(h.consecFail, 3);
-  console.log(`[route] ${name} HARD DOWN · ${reason} — re-probe in ${Math.round(PROBE_COOLDOWN_MS / 60000)}m or admin re-enable`);
+  health.markHardDown(name);
+  console.log(`[route] ${name} HARD DOWN · ${reason} — re-probe in ${Math.round(health.probeCooldownMs / 60000)}m or admin re-enable`);
   touch("routing");
 }
 
 /** Admin/ops: force an aggregator up or down. Up clears the cooldown; down stamps it. */
 export function setAggregatorUp(name: Aggregator, up: boolean): void {
-  health[name].up = up;
-  if (up) { health[name].consecFail = 0; health[name].downSince = 0; }
-  else if (health[name].downSince === 0) health[name].downSince = Date.now();
+  health.setUp(name, up);
   touch("routing");
 }
 
@@ -193,9 +177,9 @@ export function routingTable(): Array<{ provider: ProviderId; aggregator: Aggreg
 }
 
 export function routingSnapshot(): RoutingSnapshot {
-  const aggregators: AggregatorHealth[] = (Object.keys(AGGREGATORS) as Aggregator[]).map((a) => ({
-    name: a, up: health[a].up, successRatePct: Math.round(successRate(a) * 100), avgLatencyMs: avgLatency(a),
-    count: health[a].success + health[a].failure, supports: SUPPORTS[a],
-  }));
+  const aggregators: AggregatorHealth[] = (Object.keys(AGGREGATORS) as Aggregator[]).map((a) => {
+    const c = health.counts(a);
+    return { name: a, up: health.isUp(a), successRatePct: Math.round(successRate(a) * 100), avgLatencyMs: avgLatency(a), count: c.success + c.failure, supports: SUPPORTS[a] };
+  });
   return { aggregators, decisions: routingTable(), executions: executions.slice(0, 20) };
 }

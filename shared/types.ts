@@ -212,8 +212,10 @@ export interface PayInstruction {
   /** Provider's settlement key (LN payment hash / on-chain BTC or ERC-20 address) used
    *  to match an inbound webhook back to this payment. */
   providerRef?: string;
-  /** Which rail provider issued this instruction. */
-  provider?: "ibex" | "sandbox";
+  /** Which rail provider issued this instruction — a rail adapter's `name`
+   *  ("ibex", "blink", "sandbox", …). Open string so new crypto rails can be
+   *  added without touching this shared type (see server/src/adapters). */
+  provider?: string;
 }
 
 export interface CreatePaymentRequest {

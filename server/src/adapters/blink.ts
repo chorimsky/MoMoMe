@@ -118,31 +118,53 @@ const M_ONCHAIN_ADDR = `mutation OnChainAddressCreate($input: OnChainAddressCrea
   onChainAddressCreate(input: $input) { address errors { message } }
 }`;
 
-/* ---------- webhook (callback) auth ---------- */
+/* ---------- webhook (callback) auth — Svix ---------- */
+// Blink delivers callbacks via Svix (confirmed in dev.blink.sv/api/webhooks). Svix signs
+// each message as base64( HMAC-SHA256( key, `${id}.${timestamp}.${body}` ) ), where the
+// key is the base64-decoded portion of the `whsec_…` endpoint signing secret, and the
+// `(svix|webhook)-signature` header carries space-separated `v1,<sig>` tokens.
+const timingEq = (a: string, b: string): boolean => {
+  const ab = Buffer.from(a), bb = Buffer.from(b);
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+};
+
+/** Svix signing key = the base64-decoded body of a `whsec_<base64>` secret. */
+function svixKey(secret: string): Buffer {
+  const raw = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  const decoded = Buffer.from(raw, "base64");
+  // If it wasn't valid base64 (round-trip mismatch), fall back to the raw bytes.
+  return decoded.length && decoded.toString("base64").replace(/=+$/, "") === raw.replace(/=+$/, "") ? decoded : Buffer.from(raw);
+}
+
 /** Is the raw callback body authentic?
- *  Layered defence: (1) fail CLOSED when a Blink inbound could authorize a real
- *  payout but no secret is configured (mirrors IBEX). (2) With a secret, accept if
- *  an HMAC-SHA256(body, secret) matches a signature header (hex or svix `v1,<b64>`).
- *  (3) Sandbox/testing with no secret → accept. Real settlement is STILL gated by
- *  the authoritative confirmSettlement re-query, so this is defence-in-depth. */
+ *  (1) No secret configured → accept ONLY when no real payout can result from a Blink
+ *      inbound (sandbox/testing); fail closed otherwise (mirrors IBEX). (2) With a
+ *      secret + Svix headers → verify the Svix signature. (3) With a secret but no Svix
+ *      headers → HMAC(body) hex/base64 fallback (generic/testing). Real settlement is
+ *      STILL gated by the authoritative confirmSettlement re-query, so this is
+ *      defence-in-depth: a wrong signature can never, on its own, settle real money.
+ *      Note: we do NOT hard-reject on timestamp age — Svix retries keep the original
+ *      timestamp for hours, and dropping a delayed retry would lose a settlement
+ *      notification (the reconcile backstop + re-query already prevent replay harm). */
 function verifyBlink(rawBody: string, headers: Record<string, string | string[] | undefined>): boolean {
   const secret = config.blink.webhookSecret;
-  if (!secret) return !blinkInboundTrusted(); // no secret → accept only when no real payout can result
-  const header = (k: string) => { const v = headers[k]; return (Array.isArray(v) ? v[0] : v) ?? ""; };
-  const provided = header("x-blink-signature") || header("blink-signature") || header("webhook-signature") || header("svix-signature");
-  if (!provided) return false;
-  const hexHmac = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  // svix-style signed payload: `${svix-id}.${svix-timestamp}.${body}` → base64 HMAC,
-  // header carries one or more space-separated `v1,<sig>` tokens.
-  const svixId = header("svix-id"), svixTs = header("svix-timestamp");
-  const b64Svix = svixId && svixTs
-    ? crypto.createHmac("sha256", secret).update(`${svixId}.${svixTs}.${rawBody}`).digest("base64")
-    : "";
-  const eq = (a: string, b: string) => {
-    const ab = Buffer.from(a), bb = Buffer.from(b);
-    return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
-  };
-  return provided.split(/[\s,]+/).some((tok) => tok && (eq(tok, hexHmac) || (b64Svix && eq(tok, b64Svix))));
+  if (!secret) return !blinkInboundTrusted();
+  const header = (k: string) => { const v = headers[k.toLowerCase()]; return (Array.isArray(v) ? v[0] : v) ?? ""; };
+  const sigHeader = header("svix-signature") || header("webhook-signature") || header("x-blink-signature") || header("blink-signature");
+  if (!sigHeader) return false;
+  // Each token is `v1,<sig>` (or a bare sig); collect the signature parts.
+  const tokens = sigHeader.split(/\s+/).map((t) => (t.includes(",") ? t.slice(t.indexOf(",") + 1) : t)).filter(Boolean);
+
+  const svixId = header("svix-id") || header("webhook-id");
+  const svixTs = header("svix-timestamp") || header("webhook-timestamp");
+  if (svixId && svixTs) {
+    const expected = crypto.createHmac("sha256", svixKey(secret)).update(`${svixId}.${svixTs}.${rawBody}`).digest("base64");
+    return tokens.some((t) => timingEq(t, expected));
+  }
+  // Fallback: plain HMAC over the raw body (hex or base64), raw-secret key.
+  const hex = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const b64 = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
+  return tokens.some((t) => timingEq(t, hex) || timingEq(t, b64));
 }
 
 export const blinkAdapter: RailAdapter = {
@@ -201,31 +223,36 @@ export const blinkAdapter: RailAdapter = {
   },
 
   parseEvent(body: unknown): RailEvent | null {
-    // Blink callback shape is provisional — parse defensively across likely layouts.
-    // A "transaction" object with an initiationVia.paymentHash (LN) or an on-chain
-    // address, a status/direction, and a settlementAmount (SATS).
+    // Real Blink callback shape (dev.blink.sv/api/webhooks): a top-level `eventType`
+    // ("receive.lightning" | "receive.onchain" | "send.*" | "*.intraledger") plus a
+    // `transaction` { id, status, initiationVia { paymentHash | address, type },
+    // settlementAmount (SATS), ... }. INBOUND is signalled by eventType `receive.*`
+    // (there is no `direction` field). A defensive flat-shape fallback is kept too.
     const b = body as {
       eventType?: string;
       transaction?: {
-        status?: string; direction?: string; settlementAmount?: number;
-        initiationVia?: { paymentHash?: string; address?: string };
-        settlementVia?: { transactionHash?: string };
+        status?: string; settlementAmount?: number;
+        initiationVia?: { paymentHash?: string; address?: string; type?: string };
       };
       paymentHash?: string; address?: string; status?: string; amount?: number;
     };
     const t = b.transaction ?? {};
-    const providerRef = t.initiationVia?.paymentHash ?? b.paymentHash ?? t.initiationVia?.address ?? b.address;
+    const iv = t.initiationVia ?? {};
+    const eventType = (b.eventType ?? "").toLowerCase();
+    if (eventType.startsWith("send.")) return null; // outbound — ignore
+
+    const providerRef = iv.paymentHash ?? b.paymentHash ?? iv.address ?? b.address;
     if (!providerRef) return null;
+
     const status = (t.status ?? b.status ?? "").toUpperCase();
-    const direction = (t.direction ?? "").toUpperCase();
     if (status === "FAILURE") return null; // failed/expired — ignore
-    // Only inbound receives matter. If direction is absent, don't assume a send.
-    if (direction && direction !== "RECEIVE") return null;
-    const confirmed = status === "SUCCESS";
+    const rawAmt = t.settlementAmount ?? b.amount;
+    if (typeof rawAmt === "number" && rawAmt < 0) return null; // negative settlement = outbound
+
+    const confirmed = status === "SUCCESS" || (eventType.startsWith("receive.") && typeof rawAmt === "number" && rawAmt > 0 && status === "");
     const detected = status === "PENDING";
     if (!confirmed && !detected) return null;
-    const sats = t.settlementAmount ?? b.amount;
-    const amount = typeof sats === "number" && sats > 0 ? satToBtc(Math.abs(sats)) : undefined;
+    const amount = typeof rawAmt === "number" && rawAmt !== 0 ? satToBtc(Math.abs(rawAmt)) : undefined;
     return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
   },
 

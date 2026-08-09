@@ -12,15 +12,24 @@ export const CCY = { MSAT: 0, SATS: 1, BTC: 2, USD: 3, EUR: 8, USDT: 29, USDC: 3
 // Used until the first live refresh (and if IBEX is unreachable).
 const FALLBACK = { btcUsd: 65000, usdtUsd: 1, usdcUsd: 1, eurUsd: 1.08 };
 let cache: { btcUsd: number; usdtUsd: number; usdcUsd: number; eurUsd: number; at: number } | null = null;
+// Which feed last supplied a REAL number ("IBEX" | "public" | "fallback"). Surfaced
+// via ratesMeta() for the admin health view — the rate source is no longer IBEX-only.
+let sourceLabel: "IBEX" | "public" | "fallback" = "fallback";
 
-/** Merge a fresh pull from IBEX into the cache (keep last-known for any null). */
-export function setRates(r: { btcUsd?: number | null; usdtUsd?: number | null; usdcUsd?: number | null; eurUsd?: number | null }): void {
+/** Merge a fresh pull into the cache (keep last-known for any null). `source` names the
+ *  feed the numbers came from (IBEX preferred; a vendor-neutral public source is the
+ *  fallback / the primary for a non-IBEX rail — see core/publicRates.ts). */
+export function setRates(
+  r: { btcUsd?: number | null; usdtUsd?: number | null; usdcUsd?: number | null; eurUsd?: number | null },
+  source: "IBEX" | "public" = "IBEX",
+): void {
   // Only a pull that returned at least one REAL number counts as "fresh". A
-  // degraded feed (IBEX 5xx/429 → rate() returns null for every leg) must NOT
-  // re-stamp `at`, otherwise ratesFresh() would stay true forever while the price
-  // is frozen and live quotes would price real crypto on a stale/fallback rate.
+  // degraded feed (5xx/429 → every leg null) must NOT re-stamp `at`, otherwise
+  // ratesFresh() would stay true forever while the price is frozen and live quotes
+  // would price real crypto on a stale/fallback rate.
   const hasReal = r.btcUsd != null || r.usdtUsd != null || r.usdcUsd != null || r.eurUsd != null;
   if (!hasReal && !cache) return; // dead feed on cold boot → stay unpriced (ratesFresh() = false → quoting refuses)
+  if (hasReal) sourceLabel = source;
   cache = {
     btcUsd: r.btcUsd ?? cache?.btcUsd ?? FALLBACK.btcUsd,
     usdtUsd: r.usdtUsd ?? cache?.usdtUsd ?? FALLBACK.usdtUsd,
@@ -48,7 +57,7 @@ export function usdXaf(): number { return EUR_XAF_PEG / (cache?.eurUsd ?? FALLBA
 
 export function ratesMeta() {
   return {
-    source: cache ? "IBEX" : "fallback",
+    source: cache ? sourceLabel : "fallback",
     updatedAt: cache ? new Date(cache.at).toISOString() : null,
     btcUsd: btcUsd(), usdtUsd: usdtUsd(), eurUsd: cache?.eurUsd ?? FALLBACK.eurUsd, usdXaf: usdXaf(),
   };

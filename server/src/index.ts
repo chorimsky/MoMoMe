@@ -8,6 +8,7 @@ import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
 import { registerBlinkCallback } from "./adapters/blink.js";
 import { setRates, CCY } from "./core/rates.js";
+import { fetchPublicRates } from "./core/publicRates.js";
 
 assertLiveConfig();
 assertIbexConfig();
@@ -55,15 +56,24 @@ setInterval(() => {
 // Evict expired quotes so the in-memory quotes map can't grow without bound.
 setInterval(() => { try { pruneExpiredQuotes(); } catch (e) { console.error("prune quotes", e); } }, 5 * 60_000).unref();
 
-// FX feed: pull IBEX's live BTC/USD, USDT/USD and EUR/USD into the rate cache so
-// quotes price at the same source that settles the inbound. Refreshed every 30s;
-// quoting reads the cache synchronously and locks the rate at quote time.
-if (ibexConfigured()) {
+// FX feed: keep the rate cache fresh so live quotes can price. IBEX is the preferred
+// source (same source that settles an IBEX inbound); when IBEX isn't configured (e.g.
+// a Blink-only rail) OR an IBEX pull is degraded, fall back to a vendor-neutral public
+// source so the feed still stands on its own — otherwise liveMoney() quotes would refuse
+// forever (`rates_unavailable`). Refreshed every 30s; quoting reads the cache
+// synchronously and locks the rate at quote time. Runs whenever any crypto rail is
+// configured or real money can move; pure sandbox/demo stays on the built-in fallback.
+if (ibexConfigured() || blinkConfigured() || liveMoney()) {
   const refreshFxRates = async () => {
-    const [btc, usdt, usdc, eur] = await Promise.all([
-      ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
-    ]);
-    setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur });
+    if (ibexConfigured()) {
+      const [btc, usdt, usdc, eur] = await Promise.all([
+        ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
+      ]);
+      if (btc != null) { setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur }, "IBEX"); return; }
+    }
+    // No IBEX (or IBEX returned no BTC price) → public source, so a non-IBEX rail prices.
+    const pub = await fetchPublicRates();
+    if (pub) setRates(pub, "public");
   };
   void refreshFxRates().catch((e) => console.error("fx rates", e));
   setInterval(() => void refreshFxRates().catch((e) => console.error("fx rates", e)), 30_000).unref();

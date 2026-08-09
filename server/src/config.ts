@@ -108,8 +108,10 @@ export const config = {
     // The BTC wallet that receives inbound sats. Get it from the Blink dashboard or
     // `query me { defaultAccount { wallets { id walletCurrency } } }` (the BTC wallet).
     walletId: secret("BLINK_WALLET_ID"),
-    // Shared secret Blink echoes / signs its callback with (we define it). Unset →
-    // callbacks are rejected whenever a real payout could result (fail closed).
+    // Blink signs callbacks via Svix. This is the endpoint's Svix SIGNING SECRET
+    // (`whsec_…`, shown by Blink when the callback endpoint is registered) — NOT a
+    // value we invent. Unset → callbacks are rejected whenever a real payout could
+    // result (fail closed). See verifyWebhook in adapters/blink.ts.
     webhookSecret: secret("BLINK_WEBHOOK_SECRET"),
   }))(!isProdEnv("BLINK_ENV")),
 

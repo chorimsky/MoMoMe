@@ -1690,14 +1690,14 @@ api.get("/admin/health", (_req, res) => {
   const inFlight = all.filter((p) => IN_FLIGHT.includes(p.state)).length;
   // Real integration status, derived from configuration (no fabricated latency).
   const envLabel = (configured: boolean, env: string) => (configured ? env : "not configured");
-  const fxLive = ratesMeta().source === "IBEX";
+  const fxLive = ratesMeta().source !== "fallback"; // IBEX or the public source both count as a live feed
   const health: import("../../../shared/types.js").HealthSnapshot = {
     apis: [
       { name: "IBEX · Crypto inbound", status: ibexConfigured() ? "Online" : "Offline", detail: envLabel(ibexConfigured(), config.ibex.env) },
       { name: "Blink · Crypto inbound", status: blinkConfigured() ? "Online" : "Offline", detail: envLabel(blinkConfigured(), config.blink.env) },
       { name: "PawaPay · Mobile Money", status: pawapayConfigured() ? "Online" : "Offline", detail: envLabel(pawapayConfigured(), config.pawapay.env) },
       { name: "Peexit · Mobile Money", status: peexitConfigured() ? "Online" : "Offline", detail: envLabel(peexitConfigured(), config.peexit.env) },
-      { name: "FX feed (IBEX rates)", status: fxLive ? "Online" : "Degraded", detail: fxLive ? "live" : "fallback rates" },
+      { name: "FX feed", status: fxLive ? "Online" : "Degraded", detail: fxLive ? `live (${ratesMeta().source})` : "fallback rates" },
     ],
     queue: { pending: inFlight, processing: all.filter((p) => p.state === "PAYOUT_REQUESTED").length, failed: all.filter((p) => p.displayStatus === "Failed").length },
   };

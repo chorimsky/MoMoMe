@@ -1,19 +1,21 @@
 /* ============================================================
    Blink (Galoy) rail adapter — pure-logic test (no network).
-   Covers parseEvent (webhook → normalised RailEvent), verifyWebhook (HMAC /
-   svix signature), and the sats↔BTC amount conversion. The GraphQL calls
-   (createInstruction / confirmSettlement) require live creds and aren't run
-   here; real settlement is guarded by confirmSettlement at the webhook layer.
+   Covers parseEvent (real Blink callback → normalised RailEvent, keyed on the
+   `receive.*`/`send.*` eventType), verifyWebhook (Svix signature scheme), and the
+   sats↔BTC amount conversion. The GraphQL calls (createInstruction /
+   confirmSettlement) need live creds and aren't run here; real settlement is
+   guarded by confirmSettlement at the webhook layer.
    Run: pnpm --filter @momome/server test:blink
    ============================================================ */
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-// Configure Blink BEFORE importing config/adapter (config reads env at load).
+// Configure Blink BEFORE importing config/adapter (config reads env at load). The
+// webhook secret is a Svix `whsec_<base64>` endpoint signing secret (as Blink issues).
 process.env.BLINK_API_KEY = "blink_test_key";
 process.env.BLINK_WALLET_ID = "wallet_test";
-process.env.BLINK_WEBHOOK_SECRET = "shh-secret";
-// BLINK_ENV unset → sandbox → not trusted (verifyWebhook still uses the secret).
+process.env.BLINK_WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+// BLINK_ENV unset → sandbox → not trusted (verifyWebhook still enforces the signature).
 
 let passed = 0;
 function ok(label: string, cond: boolean, detail = "") {
@@ -22,9 +24,20 @@ function ok(label: string, cond: boolean, detail = "") {
   console.log(`  ✓ ${label}${detail ? `  (${detail})` : ""}`);
 }
 
+// Replicate the adapter's Svix key derivation + signing so the test is self-contained.
+function svixKey(secret: string): Buffer {
+  const raw = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  const decoded = Buffer.from(raw, "base64");
+  return decoded.length && decoded.toString("base64").replace(/=+$/, "") === raw.replace(/=+$/, "") ? decoded : Buffer.from(raw);
+}
+function svixSign(secret: string, id: string, ts: string, body: string): string {
+  return crypto.createHmac("sha256", svixKey(secret)).update(`${id}.${ts}.${body}`).digest("base64");
+}
+
 async function main() {
   const { blinkAdapter } = await import("../src/adapters/blink.js");
   const { blinkConfigured, blinkLive } = await import("../src/config.js");
+  const SECRET = process.env.BLINK_WEBHOOK_SECRET!;
 
   console.log("\nBlink adapter — config + capabilities");
   ok("configured with key + wallet", blinkConfigured());
@@ -34,43 +47,46 @@ async function main() {
   ok("does NOT support USDT/USDC (Blink USD wallet is fiat, not ERC-20)", !blinkAdapter.supports("USDT") && !blinkAdapter.supports("USDC"));
   ok("priority is after IBEX (0)", blinkAdapter.priority > 0);
 
-  console.log("\nBlink adapter — parseEvent");
-  // Lightning received, confirmed. 25,000 sats = 0.00025 BTC.
+  console.log("\nBlink adapter — parseEvent (real receive.* shape)");
+  // receive.lightning, settled. 25,000 sats = 0.00025 BTC.
   {
-    const ev = blinkAdapter.parseEvent({ transaction: { status: "SUCCESS", direction: "RECEIVE", settlementAmount: 25000, initiationVia: { paymentHash: "hash_abc" } } });
-    ok("LN success → confirmed", ev?.kind === "confirmed" && ev.providerRef === "hash_abc");
+    const ev = blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "SUCCESS", settlementAmount: 25000, initiationVia: { paymentHash: "hash_abc", type: "lightning" } } });
+    ok("receive.lightning SUCCESS → confirmed", ev?.kind === "confirmed" && ev.providerRef === "hash_abc");
     ok("LN amount sats→BTC", ev?.amount === 0.00025, String(ev?.amount));
   }
   // Pending → detected.
   {
-    const ev = blinkAdapter.parseEvent({ transaction: { status: "PENDING", direction: "RECEIVE", initiationVia: { paymentHash: "h2" } } });
-    ok("LN pending → detected", ev?.kind === "detected" && ev.providerRef === "h2");
+    const ev = blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "PENDING", initiationVia: { paymentHash: "h2" } } });
+    ok("receive.lightning PENDING → detected", ev?.kind === "detected" && ev.providerRef === "h2");
   }
+  // Outbound send → ignored (eventType send.*).
+  ok("send.lightning → null (outbound)", blinkAdapter.parseEvent({ eventType: "send.lightning", transaction: { status: "SUCCESS", settlementAmount: 5000, initiationVia: { paymentHash: "h4" } } }) === null);
   // Failure → ignored.
-  ok("FAILURE → null (ignored)", blinkAdapter.parseEvent({ transaction: { status: "FAILURE", direction: "RECEIVE", initiationVia: { paymentHash: "h3" } } }) === null);
-  // Outbound send → ignored (only inbound receives matter).
-  ok("SEND direction → null", blinkAdapter.parseEvent({ transaction: { status: "SUCCESS", direction: "SEND", initiationVia: { paymentHash: "h4" } } }) === null);
-  // On-chain by address.
+  ok("FAILURE → null (ignored)", blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "FAILURE", initiationVia: { paymentHash: "h3" } } }) === null);
+  // Negative settlement (outbound) → ignored even without a send.* eventType.
+  ok("negative settlementAmount → null", blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "SUCCESS", settlementAmount: -5000, initiationVia: { paymentHash: "h5" } } }) === null);
+  // On-chain receive, matched by address.
   {
-    const ev = blinkAdapter.parseEvent({ transaction: { status: "SUCCESS", direction: "RECEIVE", settlementAmount: 100000, initiationVia: { address: "bc1qexampleaddr" } } });
-    ok("on-chain address → providerRef=address", ev?.providerRef === "bc1qexampleaddr" && ev.kind === "confirmed");
+    const ev = blinkAdapter.parseEvent({ eventType: "receive.onchain", transaction: { status: "SUCCESS", settlementAmount: 100000, initiationVia: { address: "bc1qexampleaddr", type: "onchain" } } });
+    ok("receive.onchain → providerRef=address", ev?.providerRef === "bc1qexampleaddr" && ev.kind === "confirmed");
   }
-  // Flat/top-level shape.
+  // receive.* with no explicit status but a positive amount → confirmed.
   {
-    const ev = blinkAdapter.parseEvent({ paymentHash: "flat_hash", status: "SUCCESS", amount: 5000 });
-    ok("flat shape parsed", ev?.providerRef === "flat_hash" && ev.kind === "confirmed" && ev.amount === 0.00005);
+    const ev = blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { settlementAmount: 5000, initiationVia: { paymentHash: "h6" } } });
+    ok("receive.* + positive amount, no status → confirmed", ev?.kind === "confirmed" && ev.amount === 0.00005);
   }
-  ok("no providerRef → null", blinkAdapter.parseEvent({ transaction: { status: "SUCCESS" } }) === null);
+  ok("no providerRef → null", blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "SUCCESS" } }) === null);
 
-  console.log("\nBlink adapter — verifyWebhook");
-  const body = JSON.stringify({ transaction: { status: "SUCCESS", initiationVia: { paymentHash: "x" } } });
-  const hexSig = crypto.createHmac("sha256", "shh-secret").update(body).digest("hex");
-  ok("valid HMAC hex signature accepted", blinkAdapter.verifyWebhook(body, { "x-blink-signature": hexSig }));
-  ok("wrong signature rejected", !blinkAdapter.verifyWebhook(body, { "x-blink-signature": "deadbeef" }));
-  ok("missing signature rejected", !blinkAdapter.verifyWebhook(body, {}));
-  // svix-style: sig over `${id}.${ts}.${body}` in base64.
-  const svixSig = crypto.createHmac("sha256", "shh-secret").update(`msg_1.1700000000.${body}`).digest("base64");
-  ok("svix v1 signature accepted", blinkAdapter.verifyWebhook(body, { "svix-id": "msg_1", "svix-timestamp": "1700000000", "svix-signature": `v1,${svixSig}` }));
+  console.log("\nBlink adapter — verifyWebhook (Svix)");
+  const body = JSON.stringify({ eventType: "receive.lightning", transaction: { status: "SUCCESS", initiationVia: { paymentHash: "x" } } });
+  const id = "msg_2abc", ts = "1700000000";
+  const sig = svixSign(SECRET, id, ts, body);
+  ok("valid Svix signature accepted", blinkAdapter.verifyWebhook(body, { "svix-id": id, "svix-timestamp": ts, "svix-signature": `v1,${sig}` }));
+  ok("standard webhook-* header aliases accepted", blinkAdapter.verifyWebhook(body, { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` }));
+  ok("multiple space-separated tokens, one valid → accepted", blinkAdapter.verifyWebhook(body, { "svix-id": id, "svix-timestamp": ts, "svix-signature": `v1,badsig v1,${sig}` }));
+  ok("wrong signature rejected", !blinkAdapter.verifyWebhook(body, { "svix-id": id, "svix-timestamp": ts, "svix-signature": "v1,ZGVhZGJlZWY=" }));
+  ok("tampered body rejected", !blinkAdapter.verifyWebhook(body + " ", { "svix-id": id, "svix-timestamp": ts, "svix-signature": `v1,${sig}` }));
+  ok("missing signature header rejected", !blinkAdapter.verifyWebhook(body, { "svix-id": id, "svix-timestamp": ts }));
 
   console.log(`\n✅ ${passed} assertions passed`);
 }

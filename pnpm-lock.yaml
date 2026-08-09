@@ -13,6 +13,9 @@ importers:
 
   app:
     dependencies:
+      '@lightninglabs/wavelength-core':
+        specifier: ^0.1.1
+        version: 0.1.1
       '@lightninglabs/wavelength-react':
         specifier: ^0.1.1
         version: 0.1.1(react@18.3.1)

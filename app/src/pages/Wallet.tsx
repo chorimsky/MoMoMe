@@ -96,6 +96,10 @@ const BACKED_UP_KEY = "mm_wallet_backed_up";
 function markBackedUp() { try { localStorage.setItem(BACKED_UP_KEY, "1"); } catch { /* storage blocked */ } }
 function hasBackedUp(): boolean { try { return localStorage.getItem(BACKED_UP_KEY) === "1"; } catch { return false; } }
 
+// One-shot per-session guard for the auto-reload that self-heals a transient cold-load
+// worker error (see WalletInner). sessionStorage so it resets on a new tab/session.
+const AUTO_RELOAD_KEY = "mm_wallet_autoreload";
+
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: 18 };
 const input: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontSize: 15, color: "var(--ink)", outline: "none" };
 
@@ -175,9 +179,32 @@ function WalletInner() {
   const booting = !open && !needsWallet && !locked && !errored;
   const sats = balance ? spendableSats(balance) : null;
 
+  // Self-heal the transient first-load "Wavelength worker error": the wasm worker
+  // occasionally fails to start on a COLD load (asset warm-up race) and a reload
+  // fixes it (assets are then cached). Do that reload automatically ONCE per session
+  // so a self-healing hiccup never shows a scary error card — but never loop (a
+  // second failure shows ErrorCard), and never while a one-time recovery phrase is on
+  // screen (a reload would lose it). The guard is cleared once the wallet is healthy.
+  // `recovering` is component state (not a render-time storage read) so a browser with
+  // sessionStorage blocked still falls through to the ErrorCard instead of spinning
+  // forever on the neutral booting card.
+  const [recovering, setRecovering] = useState(false);
+  useEffect(() => {
+    if (!errored || pendingBackup) return;
+    try {
+      if (sessionStorage.getItem(AUTO_RELOAD_KEY) === "1") return; // already retried this session
+      sessionStorage.setItem(AUTO_RELOAD_KEY, "1");
+      setRecovering(true);
+      window.location.reload();
+    } catch { /* sessionStorage blocked → fall through to the error card */ }
+  }, [errored, pendingBackup]);
+  useEffect(() => {
+    if (open || needsWallet || locked) { try { sessionStorage.removeItem(AUTO_RELOAD_KEY); } catch { /* ignore */ } }
+  }, [open, needsWallet, locked]);
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      {errored && <ErrorCard error={error} />}
+      {errored && (recovering ? <BootingCard phase="starting" /> : <ErrorCard error={error} />)}
       {booting && <BootingCard phase={phase} />}
 
       {needsWallet && <CreateOrRestore onCreated={setPendingBackup} onRestored={() => { markBackedUp(); setBackedUp(true); }} />}
@@ -353,9 +380,11 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
   const { restore, restorePending, restoreError } = useWalletRestore();
   const [phrase, setPhrase] = useState("");
   const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
   const words = phrase.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const validLen = words.length === 12 || words.length === 24;
-  const canRestore = validLen && pw.length >= 8 && !restorePending;
+  const mismatch = pw2.length > 0 && pw !== pw2;
+  const canRestore = validLen && pw.length >= 8 && pw === pw2 && !restorePending;
   const submit = async () => {
     await restore({ mnemonic: words, password: pw, recoverState: true });
     onRestored();
@@ -369,6 +398,8 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
         style={{ ...input, marginTop: 12, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 13.5 }} />
       {phrase.trim() && !validLen ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{words.length} {t("wallet_words_hint")}</div> : null}
       <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_pw_new_ph")} autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
+      <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder={t("wallet_pw_confirm_ph")} autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
+      {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{t("wallet_pw_mismatch")}</div> : null}
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canRestore} onClick={() => { void submit(); }}>
         {restorePending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_restore_btn")}
       </button>
@@ -383,9 +414,17 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
 function BackupSeed({ mnemonic, onConfirmed }: { mnemonic: string[]; onConfirmed: () => void }) {
   const { t } = useI18n();
   const [step, setStep] = useState<"show" | "verify">("show");
-  // Two distinct 1-based positions to quiz — derived from the phrase so no RNG.
-  const q1 = (mnemonic.length >> 1) % mnemonic.length;
-  const q2 = (q1 + 7) % mnemonic.length;
+  // Two DISTINCT positions to quiz, chosen with crypto RNG once at mount — so a user
+  // can't "pass" the check by memorising fixed slots instead of the whole phrase.
+  const [quiz] = useState<[number, number]>(() => {
+    const n = mnemonic.length;
+    const buf = new Uint32Array(2);
+    try { crypto.getRandomValues(buf); } catch { buf[0] = n >> 1; buf[1] = (n >> 1) + 7; }
+    let a = buf[0] % n; let b = buf[1] % n;
+    if (b === a) b = (a + 1) % n; // ensure distinct
+    return [a, b];
+  });
+  const [q1, q2] = quiz;
   const [a1, setA1] = useState("");
   const [a2, setA2] = useState("");
   const ok = a1.trim().toLowerCase() === mnemonic[q1] && a2.trim().toLowerCase() === mnemonic[q2];
@@ -618,7 +657,10 @@ function MobileMoneyPayout() {
 
   // ---- Quote review ----
   if (quote) {
-    const short = spendable < needSats;
+    // A buffer for the Lightning routing fee — paying exactly at balance would fail
+    // for the fee. ~0.5% + 2 sats covers typical routing on signet/mainnet.
+    const feeBuffer = Math.max(2, Math.ceil(needSats * 0.005));
+    const short = spendable < needSats + feeBuffer;
     const secsLeft = Math.max(0, Math.round((Date.parse(quote.expiresAt) - now) / 1000));
     const expired = secsLeft <= 0;
     return (

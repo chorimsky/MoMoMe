@@ -34,6 +34,11 @@ function securityHeaders(_req: Request, res: Response, next: NextFunction): void
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  // Default: never let a client OR an intermediary proxy cache API responses — they
+  // carry live payment state (the send-flow polls GET /payments/:id; a stale cached
+  // response makes the client miss DELIVERED) and PII. Endpoints that are genuinely
+  // cacheable (e.g. GET /openapi.json) override this with their own Cache-Control.
+  res.setHeader("Cache-Control", "no-store");
   next();
 }
 
@@ -43,7 +48,9 @@ export function createApp() {
   // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
   // client IP (rate limiting, webhook IP allowlist), not a spoofable XFF.
   app.set("trust proxy", 1);
-  app.use(cors({ origin: corsOrigin }));
+  // maxAge caches the CORS preflight (OPTIONS) for a day, so the send-flow's rapid
+  // polling of /payments/:id doesn't re-preflight every few seconds on some browsers.
+  app.use(cors({ origin: corsOrigin, maxAge: 86400 }));
   app.use(securityHeaders);
 
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().

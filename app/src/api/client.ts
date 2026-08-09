@@ -142,6 +142,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      // Never serve an API call from the browser HTTP cache — these are live,
+      // per-request signed calls (payment status polling especially), and a stale
+      // cached body would make the send flow miss a DELIVERED/settled state.
+      cache: "no-store",
       signal: ctrl.signal,
       headers: {
         "Content-Type": "application/json",

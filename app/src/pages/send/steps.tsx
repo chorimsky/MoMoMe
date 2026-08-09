@@ -474,7 +474,11 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
 /* ============================================================ 5 — PROCESSING (polls backend) */
 const ORDER: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED"];
 
-const SLOW_AFTER_MS = 30_000;
+// Show the reassuring "taking longer than usual" copy only after a genuinely long
+// wait. On slow/high-latency links each status poll can take several seconds, so a
+// normally-settling payment shouldn't trip this early — it settles server-side in a
+// second or two and appears in Activity regardless.
+const SLOW_AFTER_MS = 45_000;
 // Hard cap: stop polling after a few minutes rather than hammering the backend
 // forever. The payment keeps settling server-side and appears in Activity.
 const MAX_POLL_MS = 4 * 60_000;

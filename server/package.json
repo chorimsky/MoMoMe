@@ -18,8 +18,9 @@
     "test:registry:cfg": "tsx test/rail-registry-configured.test.ts",
     "test:blink": "tsx test/blink.test.ts",
     "test:outbound": "tsx test/outbound.test.ts",
+    "test:payouts": "tsx test/payouts.test.ts",
     "test:rates": "tsx test/public-rates.test.ts",
-    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/outbound.test.ts && tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts"
+    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

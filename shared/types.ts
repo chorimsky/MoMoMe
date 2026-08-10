@@ -331,7 +331,9 @@ export interface IdentityStats {
 export type MerchantInputType = "phone" | "merchant_code" | "qr" | "alias";
 export type VerificationSource = "unverified" | "aggregator" | "user_confirmed" | "admin";
 export type MerchantStatus = "active" | "pending" | "flagged";
-export type Aggregator = "pawapay" | "peexit";
+/** A payout (Mobile-Money) rail id. Open string so a new fiat API plugs in by adding
+ *  a PayoutAdapter (adapters/payouts.ts) — no type edit needed. Known: "peexit", "pawapay". */
+export type Aggregator = string;
 
 export interface Merchant {
   internalId: string;

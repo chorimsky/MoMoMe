@@ -3,64 +3,48 @@
    parse → match payment by providerRef → drive the state machine.
    Acks fast; settlement runs async (BACKEND_DESIGN §2 ingestion).
    ============================================================ */
-import express, { Router } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
+import { payoutByName } from "../adapters/payouts.js";
 import { findByProviderRef } from "../core/store.js";
 import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
-import * as pawapay from "../adapters/pawapay.js";
-import * as peexit from "../adapters/peexit.js";
-import { pawapayConfigured } from "../config.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 
 export const webhooks = Router();
 
-// Peexit payout callback — the second aggregator's async confirmation/failure.
-// Authenticated with HTTP Basic Auth (credentials we gave Peexit). The body is an
-// ARRAY of transactions. We ack fast, then for each one settle ONLY on the
-// AUTHORITATIVE re-query via GET /disbursement/all_requests. We do NOT trust the
-// POSTed body status: Peexit 404s fresh transactions for ~3 days, so the re-query
-// is routinely inconclusive right when a callback fires — trusting the body there
-// let a spoofed `failed` refund an already-paid payout (double-spend). When the
-// re-query is inconclusive we HOLD; reconcileStuckPayouts re-queries later.
-webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => {
+/* ---------- payout (fiat) callbacks — dispatched through the PayoutAdapter ----------
+   Every aggregator callback runs the SAME flow (verify → parse → authoritative re-query
+   → settle), so a new fiat rail gets webhook handling for free: its verifyCallback /
+   parseCallback live on its adapter. We ack fast, then settle ONLY on the AUTHORITATIVE
+   queryStatus re-query — never the POSTed body status. (Peexit 404s fresh transactions
+   for ~3 days, so the re-query is routinely inconclusive right when a callback fires;
+   trusting the body there let a spoofed `failed` refund an already-paid payout. When the
+   re-query is inconclusive we HOLD; reconcileStuckPayouts re-queries later.) */
+function handlePayoutCallback(name: string, req: Request, res: Response): Response | void {
+  const adapter = payoutByName(name);
+  if (!adapter) return res.status(404).json({ error: "unknown_aggregator" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  const auth = req.headers["authorization"];
-  if (!peexit.verifyCallbackAuth(Array.isArray(auth) ? auth[0] : auth)) return res.status(401).json({ error: "unauthorized" });
+  if (adapter.verifyCallback && !adapter.verifyCallback(raw, req.headers)) return res.status(401).json({ error: "unauthorized" });
   let events;
-  try { events = peexit.parsePayoutEvents(JSON.parse(raw)); } catch { return res.status(400).json({ error: "bad_json" }); }
-  res.json({ ok: true });
+  try { events = adapter.parseCallback ? adapter.parseCallback(JSON.parse(raw)) : []; }
+  catch { return res.status(400).json({ error: "bad_json" }); }
+  res.json({ ok: true }); // ack fast; settle in background
   for (const ev of events) {
-    if (!peexit.statusByKey(ev.ref)) continue; // not one of ours
+    if (!adapter.statusByKey(ev.ref)) continue; // not one of ours
     void (async () => {
-      const q = await peexit.queryStatus(ev.ref);
-      if (q === "COMPLETED" || q === "FAILED") await onPayoutResult(ev.ref, q);
-      // else: inconclusive re-query → leave it; the reconcile backstop settles it.
-    })().catch((e) => console.error("peexit payout result", ev.ref, e));
+      const status = await adapter.queryStatus(ev.ref); // AUTHORITATIVE re-query
+      if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status, ev.providerRef);
+      // else: inconclusive → leave it; the reconcile backstop settles it.
+    })().catch((e) => console.error(`${name} payout result`, ev.ref, e));
   }
-});
+}
 
-// PawaPay payout callback — async confirmation/failure of a Mobile Money payout.
-// We treat the callback as a trigger and confirm the AUTHORITATIVE status by
-// re-querying GET /payouts/{payoutId} (so we don't depend on verifying their
-// RFC-9421 callback signature). Acks fast, then settles/refunds in background.
-webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => {
-  // PawaPay is not an active rail — reject when unconfigured so this stays a closed,
-  // non-amplifiable endpoint. (When re-enabled, add RFC-9421 signature verification
-  // with PAWAPAY_WEBHOOK_SECRET; the authoritative re-query remains the backstop.)
-  if (!pawapayConfigured()) return res.status(404).json({ error: "not_found" });
-  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  let payoutId: string | undefined;
-  try { payoutId = (JSON.parse(raw) as { payoutId?: string }).payoutId; } catch { return res.status(400).json({ error: "bad_json" }); }
-  res.json({ ok: true });
-  if (!payoutId) return;
-  const ref = pawapay.refForPayoutId(payoutId);
-  if (!ref) return;
-  void (async () => {
-    const status = await pawapay.queryStatusByPayoutId(payoutId!);
-    if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ref, status, payoutId);
-  })().catch((e) => console.error("pawapay callback", ref, e));
-});
+// Named routes (external providers are registered to these exact URLs) + a generic
+// /payout/:name so a newly-plugged fiat rail is reachable with no route change.
+webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback("peexit", req, res));
+webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback("pawapay", req, res));
+webhooks.post("/payout/:name", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback(req.params.name, req, res));
 
 // Peex intelligence-layer webhook — signature-verified, logged. Registered
 // before the generic rail route. Failures here never affect payments.

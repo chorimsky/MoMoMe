@@ -1,0 +1,24 @@
+/* ============================================================
+   Vercel serverless entrypoint for the MoMo›Me backend.
+
+   Exports the SAME Express app the Railway server runs (createApp) as a Vercel
+   function handler — one request per invocation, no `app.listen`. A `rewrites` rule
+   in server/vercel.json sends every path (/api/*, /webhooks/*, /health, /) here.
+
+   ⚠️ MIGRATION STATUS (Phase 1): this makes the app *run* on Vercel, but it is NOT yet
+   production-ready:
+     • State still uses the in-memory/SQLite persist layer, which is per-instance and
+       NON-durable on serverless → safe only in SANDBOX until Phase 2 wires a managed
+       transactional database. `runBootChecks()` fails closed if a real-money rail is
+       set without durable storage, so this cannot silently go live prematurely.
+     • Background jobs (FX poller, reconcile backstops, quote pruning) and boot-time
+       webhook registration do NOT run here — they move to Vercel Cron in Phase 3.
+   Railway remains the production backend until the preview passes end-to-end (Phase 4).
+   ============================================================ */
+import { runBootChecks } from "../src/boot.js";
+import { createApp } from "../src/app.js";
+
+runBootChecks();
+
+// @vercel/node recognises a default-exported Express app and invokes it per request.
+export default createApp();

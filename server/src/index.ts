@@ -64,6 +64,7 @@ setInterval(() => { try { pruneExpiredQuotes(); } catch (e) { console.error("pru
 // synchronously and locks the rate at quote time. Runs whenever any crypto rail is
 // configured or real money can move; pure sandbox/demo stays on the built-in fallback.
 if (ibexConfigured() || blinkConfigured() || liveMoney()) {
+  let fxIbexDegraded = false; // log the IBEX→public fallback only on state CHANGE (no 30s spam)
   const refreshFxRates = async () => {
     if (ibexConfigured()) {
       // Guard the IBEX pull: if it THROWS (401/403/network), fall through to the public
@@ -74,9 +75,12 @@ if (ibexConfigured() || blinkConfigured() || liveMoney()) {
         const [btc, usdt, usdc, eur] = await Promise.all([
           ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
         ]);
-        if (btc != null) { setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur }, "IBEX"); return; }
+        if (btc != null) {
+          if (fxIbexDegraded) { console.log("IBEX FX recovered — pricing from IBEX again"); fxIbexDegraded = false; }
+          setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur }, "IBEX"); return;
+        }
       } catch (e) {
-        console.warn("IBEX FX pull failed — falling back to public rates:", e instanceof Error ? e.message : e);
+        if (!fxIbexDegraded) { console.warn("IBEX FX pull failed — falling back to public rates:", e instanceof Error ? e.message : e); fxIbexDegraded = true; }
       }
     }
     // No IBEX (or IBEX pull returned no BTC price / threw) → public source, so a

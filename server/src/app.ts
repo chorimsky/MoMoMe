@@ -5,7 +5,7 @@ import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
-import { listPayments } from "./core/store.js";
+import { store } from "./db/store.js";
 import { seedAdminUsers } from "./core/adminUsers.js";
 
 /** Browser origins allowed to call the API cross-origin: our own app domains.
@@ -83,7 +83,7 @@ export function createApp() {
 
   // Seed demo data only on a fresh SANDBOX database — NEVER when a real-money rail is
   // live (fabricated names/numbers/payments must not enter a regulated, live deployment).
-  if (!liveMoney() && listPayments().length === 0) seed();
+  void (async () => { if (!liveMoney() && (await store().listPayments()).length === 0) await seed(); })();
   // Ensure at least the initial Super Admin account exists (idempotent).
   seedAdminUsers();
   return app;

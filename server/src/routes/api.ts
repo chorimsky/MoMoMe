@@ -1052,7 +1052,7 @@ api.get("/merchant/me/summary", async (req, res) => {
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
-  const sales = salesFor(m).filter((p) => p.displayStatus === "Completed");
+  const sales = (await salesFor(m)).filter((p) => p.displayStatus === "Completed");
   const today = todayISO();
   const todays = sales.filter((p) => p.createdAt.slice(0, 10) === today);
   const sum = (ps: typeof sales) => ps.reduce((s, p) => s + p.xaf, 0);
@@ -1074,7 +1074,7 @@ api.get("/merchant/links", async (req, res) => {
   // Derive per-link "paid" state from completed payments that carry the link code,
   // so invoices can show Paid / partially paid instead of staying open forever.
   const paidByLink = new Map<string, { count: number; xaf: number; at: string }>();
-  for (const p of salesFor(m)) {
+  for (const p of await salesFor(m)) {
     if (p.displayStatus !== "Completed" || !p.merchantLinkCode) continue;
     const cur = paidByLink.get(p.merchantLinkCode) ?? { count: 0, xaf: 0, at: "" };
     cur.count += 1; cur.xaf += p.xaf; if (p.createdAt > cur.at) cur.at = p.createdAt;
@@ -1187,7 +1187,7 @@ api.get("/me/referral", async (req, res) => {
   for (const o of referred) {
     const m = merchantByOwner(o);
     if (!m) continue;
-    const firstPayment = salesFor(m).some((p) => p.displayStatus === "Completed");
+    const firstPayment = (await salesFor(m)).some((p) => p.displayStatus === "Completed");
     merchants.push({ businessName: m.businessName, code: m.code, status: m.status, firstPayment });
   }
   const activeMerchants = merchants.filter((m) => m.status === "active" && m.firstPayment).length;

@@ -29,7 +29,7 @@ import type {
   ComplianceCase, ComplianceCaseStatus, ComplianceCaseType, ComplianceEvent,
   ComplianceReport, ComplianceSeverity, Payment, SuspiciousTransactionReport,
 } from "../../../shared/types.js";
-import { listPayments } from "./store.js";
+import { store } from "../db/store.js";
 import { getSettings } from "./settings.js";
 import { payoutBlocked } from "./merchant.js";
 import { listIdentities } from "./identity.js";
@@ -186,11 +186,11 @@ function openCase(keys: Set<string>, at: string, type: ComplianceCaseType, subje
 /** Run the rule set over the current transaction stream and open any new cases.
  *  `now` is passed in (ISO) so the module never reads the clock itself. Idempotent:
  *  a case is opened at most once per (type, subject/ref). */
-export function scanCompliance(now: string = new Date().toISOString()): void {
+export async function scanCompliance(now: string = new Date().toISOString()): Promise<void> {
   const s = getSettings().compliance;
   const before = cases.length;
   const keys = caseKeys(); // live dedup set for this scan (O(1) checks → linear scan)
-  const pays = listPayments();
+  const pays = await store().listPayments();
 
   // Sanctions screening runs on EVERY counterparty (even a mere quote) — screening
   // the party is always appropriate. Everything else needs an actual transaction.

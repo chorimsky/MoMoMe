@@ -19,17 +19,20 @@
     "test:blink": "tsx test/blink.test.ts",
     "test:outbound": "tsx test/outbound.test.ts",
     "test:payouts": "tsx test/payouts.test.ts",
+    "test:pg": "tsx test/pg-store.test.ts",
     "test:rates": "tsx test/public-rates.test.ts",
     "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.21.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

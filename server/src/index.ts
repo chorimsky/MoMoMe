@@ -5,8 +5,13 @@ import { flushAll } from "./core/persist.js";
 import { registerAccountWebhook } from "./adapters/ibex.js";
 import { registerBlinkCallback, blinkBalances } from "./adapters/blink.js";
 import { reconcileTick, fxTick } from "./jobs.js";
+import { usingPostgres } from "./db/store.js";
+import { applySchema } from "./db/pg.js";
+import { hydrateSnapshots } from "./core/persist.js";
 
 runBootChecks(); // asserts + fail-closed durability/admin/peexit checks (shared with the Vercel handler)
+// Postgres backend: ensure the schema exists + rehydrate the non-money snapshots before serving.
+if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); }
 const app = createApp();
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME

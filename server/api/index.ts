@@ -17,8 +17,24 @@
    ============================================================ */
 import { runBootChecks } from "../src/boot.js";
 import { createApp } from "../src/app.js";
+import { usingPostgres } from "../src/db/store.js";
+import { applySchema } from "../src/db/pg.js";
+import { hydrateSnapshots } from "../src/core/persist.js";
+import { config, ibexConfigured, blinkConfigured } from "../src/config.js";
+import { registerAccountWebhook } from "../src/adapters/ibex.js";
+import { registerBlinkCallback } from "../src/adapters/blink.js";
 
 runBootChecks();
+// Postgres backend: create the schema if missing + rehydrate non-money snapshots before
+// the first request (top-level await — Vercel awaits the module before invoking it).
+if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); }
+// Register the rail webhooks on this cold start (both are idempotent — "already exists"
+// is treated as success). On Railway this happens in index.ts; the serverless handler
+// needs its own registration since it never runs index.ts.
+if (config.publicUrl.startsWith("https://")) {
+  if (ibexConfigured()) void registerAccountWebhook().catch((e) => console.error("IBEX webhook reg", e));
+  if (blinkConfigured()) void registerBlinkCallback().catch((e) => console.error("Blink callback reg", e));
+}
 
 // @vercel/node recognises a default-exported Express app and invokes it per request.
 export default createApp();

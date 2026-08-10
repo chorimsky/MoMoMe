@@ -129,3 +129,17 @@ export async function reversePayment(paymentId: string): Promise<void> {
   const inverse: Leg[] = rows.map((r) => { const a = Number(r.amount); return { account: r.account as LedgerAccount, currency: r.currency as LedgerEntry["currency"], direction: a >= 0 ? "credit" : "debit", amount: Math.abs(a) }; });
   await recordTxn(paymentId, inverse);
 }
+
+/* ---------------- snapshots (non-money collections: settings/routing/merchants/…) ----------------
+   Coarse key→JSON blobs with optimistic version bump. Money data never lives here — it's
+   in the quotes/payments/ledger tables. Last-writer-wins is acceptable for config-ish state. */
+export async function setSnapshot(key: string, json: string): Promise<void> {
+  await q(
+    `INSERT INTO snapshots(key, json, version, updated_at) VALUES($1, $2::jsonb, 1, now())
+     ON CONFLICT(key) DO UPDATE SET json = excluded.json, version = snapshots.version + 1, updated_at = now()`,
+    [key, json],
+  );
+}
+export async function allSnapshots(): Promise<Array<{ key: string; json: unknown }>> {
+  return q<{ key: string; json: unknown }>(`SELECT key, json FROM snapshots`);
+}

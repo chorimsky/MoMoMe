@@ -15,8 +15,12 @@
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { setSnapshot, allSnapshots } from "../db/repo.js";
 
 const DB_PATH = process.env.DB_PATH ?? "data/momome.db";
+/** Postgres snapshot backend (serverless): non-money collections persist to the
+ *  `snapshots` table instead of local SQLite. Selected by STORE_BACKEND=postgres. */
+const PG = (process.env.STORE_BACKEND ?? "").toLowerCase() === "postgres";
 
 interface Stmt { get(key: string): unknown; run(key: string, json: string): void; }
 interface Db { exec(sql: string): void; prepare(sql: string): Stmt; }
@@ -59,33 +63,63 @@ const db = openDb();
  *  the layer fell back to in-memory (node:sqlite missing / DB not writable) — in which
  *  case a restart loses everything. The boot sequence refuses to run a real-money rail
  *  in that state (see index.ts). */
-export function persistDurable(): boolean { return db !== null; }
+export function persistDurable(): boolean { return db !== null || PG; }
 
 const sel = db?.prepare("SELECT json FROM snapshot WHERE key = ?") ?? null;
 const up = db?.prepare("INSERT INTO snapshot(key, json) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json") ?? null;
 
 const dumpers = new Map<string, () => unknown>();
+const restorers = new Map<string, (data: unknown) => void>();
 
-/** Restore a collection from disk (if present) and register it for snapshotting. */
+/** Register a collection for snapshotting. SQLite: rehydrate synchronously now.
+ *  Postgres: restore is DEFERRED to hydrateSnapshots() at boot (a network DB can't be
+ *  read synchronously at module-load time). */
 export function register<T>(key: string, dump: () => T, restore: (data: T) => void): void {
-  if (sel) {
+  dumpers.set(key, dump as () => unknown);
+  restorers.set(key, restore as (d: unknown) => void);
+  if (!PG && sel) {
     const row = sel.get(key) as { json: string } | undefined;
     if (row) {
       try { restore(JSON.parse(row.json) as T); } catch (e) { console.error("persist restore", key, e); }
     }
   }
-  dumpers.set(key, dump as () => unknown);
 }
 
-/** Snapshot one collection to disk. Called after each mutation. No-op in-memory. */
+/** Snapshot one collection after a mutation. SQLite: synchronous write. Postgres:
+ *  fire-and-forget write-through (on Vercel, wrap in waitUntil to guarantee it drains
+ *  before the instance freezes — TODO for the deploy). No-op in pure in-memory. */
 export function touch(key: string): void {
-  if (!up) return;
   const dump = dumpers.get(key);
   if (!dump) return;
+  if (PG) {
+    void setSnapshot(key, JSON.stringify(dump())).catch((e) => console.error("persist pg write", key, e));
+    return;
+  }
+  if (!up) return;
   try { up.run(key, JSON.stringify(dump())); } catch (e) { console.error("persist write", key, e); }
 }
 
-/** Flush every collection (used on graceful shutdown). */
-export function flushAll(): void {
-  for (const key of dumpers.keys()) touch(key);
+/** Postgres only: load every snapshot row and restore it into the registered collections.
+ *  MUST run at boot AFTER the schema is applied and BEFORE serving requests. No-op on
+ *  SQLite (register() already restored synchronously). */
+export async function hydrateSnapshots(): Promise<void> {
+  if (!PG) return;
+  try {
+    for (const { key, json } of await allSnapshots()) {
+      const restore = restorers.get(key);
+      if (restore) { try { restore(json); } catch (e) { console.error("persist hydrate", key, e); } }
+    }
+  } catch (e) { console.error("persist hydrate all", e); }
+}
+
+/** Flush every collection (graceful shutdown / end of a serverless invocation). */
+export async function flushAll(): Promise<void> {
+  if (PG) {
+    await Promise.all([...dumpers.keys()].map((k) => setSnapshot(k, JSON.stringify(dumpers.get(k)!())).catch(() => {})));
+    return;
+  }
+  if (!up) return;
+  for (const key of dumpers.keys()) {
+    try { up.run(key, JSON.stringify(dumpers.get(key)!())); } catch (e) { console.error("persist write", key, e); }
+  }
 }

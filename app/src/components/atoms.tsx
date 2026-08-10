@@ -287,20 +287,27 @@ export function AssetGlyph({ kind, size = 30 }: { kind: "BTC" | "USDT"; size?: n
   );
 }
 
+// Rail-NEUTRAL by method — the crypto rail (IBEX/Blink) is an internal detail, so the
+// badge no longer hardcodes "IBEX". Pass `provider` (payInstruction.provider) to show
+// the actual rail that issued the payment, e.g. "Blink · Lightning".
 const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> = {
-  IBEX: { label: "IBEX · Lightning", color: "var(--lightning)", glyph: "⚡" },
-  LIGHTNING: { label: "IBEX · Lightning", color: "var(--lightning)", glyph: "⚡" },
-  USDT: { label: "IBEX · USDT", color: "var(--tron)", glyph: "◆" },
+  LIGHTNING: { label: "Lightning", color: "var(--lightning)", glyph: "⚡" },
+  USDT: { label: "USDT · Tron", color: "var(--tron)", glyph: "◆" },
+  USDC: { label: "USDC", color: "var(--tron)", glyph: "◆" },
   ONCHAIN: { label: "Bitcoin · on-chain", color: "var(--lightning)", glyph: "₿" },
   PawaPay: { label: "PawaPay", color: "var(--recv)", glyph: "◎" },
   FX: { label: "FX Engine", color: "var(--info)", glyph: "⇄" },
 };
-export function RailBadge({ rail }: { rail: string }) {
-  const m = RAIL_MAP[rail] ?? RAIL_MAP.IBEX;
+const PROVIDER_LABEL: Record<string, string> = { ibex: "IBEX", blink: "Blink", sandbox: "Demo" };
+export function RailBadge({ rail, provider }: { rail: string; provider?: string }) {
+  const m = RAIL_MAP[rail] ?? RAIL_MAP.LIGHTNING;
+  const p = provider ? PROVIDER_LABEL[provider.toLowerCase()] : undefined;
+  // Prefix the actual rail only for crypto-inbound methods (not PawaPay/FX badges).
+  const label = p && (rail === "LIGHTNING" || rail === "ONCHAIN" || rail === "USDT" || rail === "USDC") ? `${p} · ${m.label}` : m.label;
   return (
     <span className="pill" style={{ background: "var(--surface)" }}>
       <span style={{ color: m.color, fontSize: 13, lineHeight: 1 }}>{m.glyph}</span>
-      <span className="mono" style={{ fontSize: 11, letterSpacing: 0, whiteSpace: "nowrap" }}>{m.label}</span>
+      <span className="mono" style={{ fontSize: 11, letterSpacing: 0, whiteSpace: "nowrap" }}>{label}</span>
     </span>
   );
 }

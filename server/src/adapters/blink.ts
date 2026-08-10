@@ -27,7 +27,8 @@ import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, blinkConfigured, blinkInboundTrusted } from "../config.js";
-import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
+import { bolt11AmountMsat, bolt11PaymentHash } from "../core/bolt11.js";
+import type { InstructionRequest, OutboundResult, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
 
 const btcToSat = (btc: number) => Math.round(btc * 1e8); // 1 BTC = 1e8 sat (Blink BTC wallet unit)
 const satToBtc = (sat: number) => sat / 1e8;
@@ -98,8 +99,23 @@ function txByHashQuery(): string {
 }`;
 }
 
-/** Was this Lightning invoice actually PAID? Re-queries Blink by payment hash across
- *  both wallets. settled = a RECEIVE transaction with status SUCCESS; failed = a
+/** Raw transactions matching a payment hash across BOTH wallets (or null on error). */
+async function txsByHash(paymentHash: string): Promise<WalletTx[] | null> {
+  try {
+    const d = await gql<{ me?: { defaultAccount?: { btc?: { transactionsByPaymentHash?: WalletTx[] }; usd?: { transactionsByPaymentHash?: WalletTx[] } } } }>(
+      txByHashQuery(), { btc: config.blink.walletId, paymentHash },
+    );
+    const acct = d.me?.defaultAccount;
+    return [...(acct?.btc?.transactionsByPaymentHash ?? []), ...(acct?.usd?.transactionsByPaymentHash ?? [])];
+  } catch {
+    return null;
+  }
+}
+const dirIs = (t: WalletTx, dir: string) => (t.direction ?? "").toUpperCase() === dir;
+const statusIs = (t: WalletTx, s: string) => (t.status ?? "").toUpperCase() === s;
+
+/** Was this Lightning invoice actually PAID (INBOUND)? Re-queries Blink by payment hash
+ *  across both wallets. settled = a RECEIVE transaction with status SUCCESS; failed = a
  *  FAILURE tx and nothing settled. null when the lookup itself fails (network) —
  *  indeterminate, so the caller falls back to the (secret-gated) webhook and never
  *  over-settles. ON-CHAIN: an address isn't a payment hash and isn't pollable here →
@@ -107,18 +123,65 @@ function txByHashQuery(): string {
  *  re-check in confirmInbound instead of being wrongly reported "not settled". */
 export async function transactionStatus(paymentHash: string): Promise<SettlementStatus | null> {
   if (!/^[0-9a-fA-F]{64}$/.test(paymentHash)) return null; // not an LN payment hash (e.g. an on-chain address)
-  try {
-    const d = await gql<{ me?: { defaultAccount?: { btc?: { transactionsByPaymentHash?: WalletTx[] }; usd?: { transactionsByPaymentHash?: WalletTx[] } } } }>(
-      txByHashQuery(), { btc: config.blink.walletId, paymentHash },
+  const txs = await txsByHash(paymentHash);
+  if (!txs) return null;
+  const settled = txs.some((t) => dirIs(t, "RECEIVE") && statusIs(t, "SUCCESS"));
+  const failed = !settled && txs.some((t) => statusIs(t, "FAILURE"));
+  return { settled, failed };
+}
+
+/** Status of an OUTBOUND (refund) payment by its payment hash: settled = a SEND tx with
+ *  status SUCCESS; failed = a SEND FAILURE. null = indeterminate (lookup failed, or the
+ *  send isn't yet recorded) → the refund poll keeps waiting. */
+export async function sendStatus(paymentHash: string): Promise<SettlementStatus | null> {
+  if (!/^[0-9a-fA-F]{64}$/.test(paymentHash)) return null;
+  const txs = await txsByHash(paymentHash);
+  if (!txs) return null;
+  const settled = txs.some((t) => dirIs(t, "SEND") && statusIs(t, "SUCCESS"));
+  const failed = txs.some((t) => dirIs(t, "SEND") && statusIs(t, "FAILURE"));
+  if (!settled && !failed) return null; // no SEND tx yet → indeterminate, keep polling
+  return { settled, failed: !settled && failed };
+}
+
+/* ---------- outbound (refund) — pay a BOLT11 from the BTC wallet ---------- */
+// Refunds are Lightning + BTC-denominated (completeRefund gates method===LIGHTNING), so
+// they always send from the BTC wallet. PaymentSendResult: SUCCESS | ALREADY_PAID |
+// PENDING | FAILURE. We return the invoice's payment hash as the poll id.
+const M_LN_PAYMENT_SEND = `mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
+  lnInvoicePaymentSend(input: $input) { status errors { message } }
+}`;
+const M_LN_NOAMOUNT_PAYMENT_SEND = `mutation LnNoAmountInvoicePaymentSend($input: LnNoAmountInvoicePaymentInput!) {
+  lnNoAmountInvoicePaymentSend(input: $input) { status errors { message } }
+}`;
+
+async function payInvoiceOut(bolt11: string, amountMsat?: number): Promise<OutboundResult> {
+  const hash = bolt11PaymentHash(bolt11);
+  if (!hash) throw new Error("Blink refund: could not decode invoice payment hash");
+  const amountless = bolt11AmountMsat(bolt11) === 0;
+  let status: string; let errs: Array<{ message?: string }> | undefined;
+  if (amountless) {
+    // Amount-less invoice — WE set the amount (sats). completeRefund passes amountMsat.
+    const sats = Math.round((amountMsat ?? 0) / 1000);
+    if (sats < 1) throw new Error("Blink refund: amount-less invoice needs a positive amount");
+    const d = await gql<{ lnNoAmountInvoicePaymentSend: { status?: string; errors?: Array<{ message?: string }> } }>(
+      M_LN_NOAMOUNT_PAYMENT_SEND, { input: { walletId: config.blink.walletId, paymentRequest: bolt11, amount: sats } },
     );
-    const acct = d.me?.defaultAccount;
-    const txs: WalletTx[] = [...(acct?.btc?.transactionsByPaymentHash ?? []), ...(acct?.usd?.transactionsByPaymentHash ?? [])];
-    const settled = txs.some((t) => (t.direction ?? "").toUpperCase() === "RECEIVE" && (t.status ?? "").toUpperCase() === "SUCCESS");
-    const failed = !settled && txs.some((t) => (t.status ?? "").toUpperCase() === "FAILURE");
-    return { settled, failed };
-  } catch {
-    return null;
+    status = (d.lnNoAmountInvoicePaymentSend?.status ?? "").toUpperCase();
+    errs = d.lnNoAmountInvoicePaymentSend?.errors;
+  } else {
+    const d = await gql<{ lnInvoicePaymentSend: { status?: string; errors?: Array<{ message?: string }> } }>(
+      M_LN_PAYMENT_SEND, { input: { walletId: config.blink.walletId, paymentRequest: bolt11 } },
+    );
+    status = (d.lnInvoicePaymentSend?.status ?? "").toUpperCase();
+    errs = d.lnInvoicePaymentSend?.errors;
   }
+  throwUserErrors(errs, "lnInvoicePaymentSend");
+  // FAILURE = definitively not paid → THROW so completeRefund holds for review (safe:
+  // sats did not leave). SUCCESS/ALREADY_PAID = settled. PENDING = submitted; the refund
+  // poll confirms via sendStatus by hash. (An ambiguous transport error already threw in gql.)
+  if (status === "FAILURE") throw new Error("Blink refund: lnInvoicePaymentSend returned FAILURE");
+  const settled = status === "SUCCESS" || status === "ALREADY_PAID";
+  return { transactionId: hash, settled };
 }
 
 /* ---------- balances (both wallets) — treasury / ops visibility ---------- */
@@ -361,5 +424,14 @@ export const blinkAdapter: RailAdapter = {
   // relies on the callback (secret-gated) + expiry, exactly like IBEX on-chain.
   confirmSettlement(providerRef: string): Promise<SettlementStatus | null> {
     return transactionStatus(providerRef);
+  },
+
+  // Crypto-OUTBOUND (refunds) — pay the sender's BOLT11 from the BTC wallet, poll the
+  // SEND transaction by hash. Makes "Blink without IBEX" cover refunds too.
+  payInvoice(bolt11: string, amountMsat?: number): Promise<OutboundResult> {
+    return payInvoiceOut(bolt11, amountMsat);
+  },
+  outboundStatus(txId: string): Promise<SettlementStatus | null> {
+    return sendStatus(txId);
   },
 };

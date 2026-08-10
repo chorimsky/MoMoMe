@@ -273,7 +273,7 @@ export function PricingView() {
       </Grid>
 
       {/* live rates */}
-      <Card title="Live rates" sub="Mid-market reference from IBEX (the inbound settlement source), refreshed ~30s." style={{ marginTop: 16 }}>
+      <Card title="Live rates" sub="Mid-market reference from the public FX feed (rail-independent), refreshed ~30s." style={{ marginTop: 16 }}>
         <Grid cols={2} gap={16}>
           <div style={{ marginTop: 4 }}>
             {pricing.rates.map((rt) => (

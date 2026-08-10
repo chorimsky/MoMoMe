@@ -109,7 +109,7 @@ export function PaymentsView() {
                     </span>
                   </span>
                   <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.xaf)} XAF</span>
-                  <RailBadge rail={p.method} />
+                  <RailBadge rail={p.method} provider={p.payInstruction?.provider} />
                   <Pill status={p.displayStatus} />
                   <span style={{ minWidth: 0 }}>
                     <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{fmtDate(p.createdAt)}</span>

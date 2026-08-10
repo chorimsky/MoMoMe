@@ -13,13 +13,13 @@ import { putPayment, listPayments, findPaymentByRef } from "./store.js";
 import { recordTxn, reversePayment, balance } from "./ledger.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
-import { railTrusted, confirmSettlement, adapterByName } from "../adapters/index.js";
+import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
-import { transactionStatus, payInvoice, bolt11AmountMsat } from "../adapters/ibex.js";
+import { bolt11AmountMsat } from "./bolt11.js";
 
 /** Available XAF payout float = base treasury − everything already paid out
  *  (external_recipient) − everything RESERVED for an in-flight/held payout
@@ -353,7 +353,7 @@ export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
     if (p.state !== "REFUND_PENDING" || !p.refundTxId || p.refundNeedsDestination) continue;
     if (Date.parse(p.updatedAt) > cutoff) continue;
     try {
-      const s = await transactionStatus(p.refundTxId);
+      const s = await refundStatus(p.refundProvider, p.refundTxId);
       if (s?.settled) finalizeRefund(p);
       else if (s?.failed) reopenRefund(p); // failed outbound → reopen for a new invoice
     } catch (e) { console.error("reconcile refund", p.id, e); }
@@ -497,8 +497,9 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
   p.refundNeedsDestination = false;
   putPayment(p);
   try {
-    const r = await payInvoice(bolt11, invMsat === 0 ? inboundMsat : undefined);
+    const r = await payRefund(bolt11, invMsat === 0 ? inboundMsat : undefined);
     p.refundTxId = r.transactionId;
+    p.refundProvider = r.provider; // re-query the SAME rail that paid it
     putPayment(p);
     if (r.settled) finalizeRefund(p);
     else void pollRefund(p.ref);
@@ -538,7 +539,7 @@ async function pollRefund(ref: string): Promise<void> {
     await wait(delay);
     const p = findPaymentByRef(ref);
     if (!p || p.state !== "REFUND_PENDING" || !p.refundTxId) return; // resolved / unknown
-    const s = await transactionStatus(p.refundTxId).catch(() => null);
+    const s = await refundStatus(p.refundProvider, p.refundTxId).catch(() => null);
     if (s?.settled) { finalizeRefund(p); return; }
     if (s?.failed) { reopenRefund(p); return; } // failed → let the sender retry (was: stranded)
   }

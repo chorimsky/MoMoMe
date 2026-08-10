@@ -37,6 +37,15 @@ export interface SettlementStatus {
   failed: boolean;
 }
 
+/** Result of an OUTBOUND crypto payment (a refund to a sender / a treasury sweep).
+ *  `transactionId` is a rail id to poll `outboundStatus` by (for Lightning, the
+ *  invoice's payment hash). `settled` = confirmed synchronously; else poll. */
+export interface OutboundResult {
+  transactionId: string;
+  settled: boolean;
+  feesMsat?: number;
+}
+
 export interface RailAdapter {
   /** Stable rail id — also the /webhooks/:provider path segment and
    *  PayInstruction.provider value. Open string; must be unique across rails. */
@@ -65,4 +74,13 @@ export interface RailAdapter {
    *  and (b) reconcile lost webhooks. Return null when it can't be determined (e.g. an
    *  on-chain address). A rail with no pollable status (the sandbox) omits this. */
   confirmSettlement?(providerRef: string): Promise<SettlementStatus | null>;
+
+  /** OPTIONAL crypto-OUTBOUND (refund a sender / treasury sweep). Pays a BOLT11 invoice
+   *  from the rail's wallet; `amountMsat` is required for an amount-less invoice. A rail
+   *  that can't send omits this — the registry only routes refunds to rails that have it,
+   *  so "Blink without IBEX" (and vice-versa) refunds through whichever rail is live. */
+  payInvoice?(bolt11: string, amountMsat?: number): Promise<OutboundResult>;
+  /** OPTIONAL authoritative status of an OUTBOUND payment by its id (LN payment hash /
+   *  tx id). null = indeterminate. Pairs with payInvoice for the refund reconcile loop. */
+  outboundStatus?(txId: string): Promise<SettlementStatus | null>;
 }

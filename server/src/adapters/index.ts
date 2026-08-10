@@ -69,6 +69,33 @@ export function confirmSettlement(name: string | undefined, providerRef: string)
   return a?.confirmSettlement ? a.confirmSettlement(providerRef) : Promise.resolve(null);
 }
 
+/* ---------- crypto OUTBOUND (refunds) — rail-agnostic, mirrors inbound ---------- */
+/** The rail that sends crypto OUT (refunds): the highest-priority CONFIGURED + TRUSTED
+ *  rail that implements payInvoice. IBEX (base, priority 0) wins when live; Blink covers
+ *  it standalone → "Blink without IBEX" refunds work. undefined = nothing can send
+ *  (sandbox/demo, or staging rails that aren't trusted) → the caller holds the crypto. */
+export function outboundRail(): RailAdapter | undefined {
+  return activeRails().find((r) => r.trusted() && typeof r.payInvoice === "function");
+}
+
+export interface RefundResult { transactionId: string; settled: boolean; feesMsat?: number; provider: string; }
+/** Pay a refund BOLT11 through the live outbound rail. Prefers the trusted outbound rail
+ *  (Blink when it's the only one → "Blink without IBEX" refunds); otherwise falls back to
+ *  IBEX, the BASE outbound rail. In a no-real-rail demo the IBEX call throws (no creds) →
+ *  the state machine holds for review, exactly as before. */
+export async function payRefund(bolt11: string, amountMsat?: number): Promise<RefundResult> {
+  const rail = outboundRail() ?? ibexAdapter; // IBEX is the base outbound rail
+  if (!rail.payInvoice) throw new Error("no_outbound_rail");
+  const r = await rail.payInvoice(bolt11, amountMsat);
+  return { ...r, provider: rail.name };
+}
+/** Authoritative status of a refund previously paid on `provider` (falls back to the
+ *  current outbound rail if the provider wasn't recorded). null = indeterminate. */
+export function refundStatus(provider: string | undefined, txId: string): Promise<SettlementStatus | null> {
+  const a = provider ? adapterByName(provider) : outboundRail();
+  return a?.outboundStatus ? a.outboundStatus(txId) : Promise.resolve(null);
+}
+
 export interface CreateInboundRequest {
   method: Method;
   /** Payment ref — memo + idempotency key. */

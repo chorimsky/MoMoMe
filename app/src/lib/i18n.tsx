@@ -228,7 +228,7 @@ export const STRINGS: Dict = {
   wallet_they_receive: ["They receive", "Ils reçoivent"],
   wallet_you_pay: ["You pay", "Vous payez"],
   wallet_fee: ["Fee", "Frais"],
-  wallet_bridge_note: ["Paid from your wallet over Lightning; delivery to Mobile Money settles on the platform rail (IBEX → Peexit). Signet beta — real delivery needs the wallet and platform on the same network.", "Payé depuis votre portefeuille via Lightning ; la remise vers Mobile Money est réglée sur le rail de la plateforme (IBEX → Peexit). Bêta signet — la remise réelle nécessite que le portefeuille et la plateforme soient sur le même réseau."],
+  wallet_bridge_note: ["Paid from your wallet over Lightning; delivery to Mobile Money settles on the platform's crypto rail. Signet beta — real delivery needs the wallet and platform on the same network.", "Payé depuis votre portefeuille via Lightning ; la remise vers Mobile Money est réglée sur le rail crypto de la plateforme. Bêta signet — la remise réelle nécessite que le portefeuille et la plateforme soient sur le même réseau."],
   wallet_quote_expired_hint: ["This quote expired — refresh to lock the current rate.", "Ce devis a expiré — actualisez pour verrouiller le taux actuel."],
   wallet_balance_is: ["Wallet balance is", "Le solde du portefeuille est de"],
   wallet_not_enough_suffix: ["sats — not enough to cover this transfer.", "sats — insuffisant pour couvrir ce transfert."],

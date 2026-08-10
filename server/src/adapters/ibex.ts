@@ -196,19 +196,6 @@ export async function payLightningAddress(lnAddress: string, amountMsat: number)
   return { transactionId: String(d.transaction?.id ?? d.hash ?? ""), settled };
 }
 
-/** Amount encoded in a BOLT11 invoice's HRP, in msat: 0 = amount-less; null = unparseable.
- *  Used to bound a refund so we can never over-pay a sender-supplied invoice. */
-export function bolt11AmountMsat(bolt11: string): number | null {
-  const s = bolt11.trim().toLowerCase();
-  const sep = s.lastIndexOf("1"); // bech32 separator (data part excludes '1')
-  if (sep <= 0) return null;
-  const m = /^ln(bc|tb|bcrt)(\d*)([munp]?)$/.exec(s.slice(0, sep));
-  if (!m) return null;
-  if (!m[2]) return 0; // amount-less invoice
-  const factor: Record<string, number> = { m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12 };
-  return Math.round(Number(m[2]) * (factor[m[3]] ?? 1) * 1e11); // BTC→msat
-}
-
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded
  *  chain; if the IP can't be determined we don't block (the secret still gates). */
 function ipAllowed(headers: Record<string, string | string[] | undefined>): boolean {
@@ -360,4 +347,9 @@ export const ibexAdapter: RailAdapter = {
   confirmSettlement(providerRef: string): Promise<SettlementStatus | null> {
     return transactionStatus(providerRef);
   },
+
+  // Crypto-OUTBOUND (refunds / treasury) — IBEX pays a BOLT11 via /invoice/pay; the
+  // outbound status re-uses the same authoritative transaction re-query as inbound.
+  payInvoice: (bolt11: string, amountMsat?: number) => payInvoice(bolt11, amountMsat),
+  outboundStatus: (txId: string) => transactionStatus(txId),
 };

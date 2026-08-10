@@ -191,8 +191,12 @@ export interface Payment {
   /** Set when a payout couldn't land and the inbound crypto must be refunded — the
    *  sender still needs to supply a refund destination (the refund-claim flow). */
   refundNeedsDestination?: boolean;
-  /** IBEX outbound transaction id of the refund payment (set once the refund is submitted). */
+  /** Outbound transaction id of the refund payment (set once the refund is submitted).
+   *  For Lightning this is the invoice's payment hash — the rail-agnostic poll key. */
   refundTxId?: string;
+  /** Which rail paid the refund out (e.g. "ibex" | "blink") — so its status is
+   *  re-queried on the SAME rail. Set alongside refundTxId. */
+  refundProvider?: string;
   events: PaymentEvent[];
   createdAt: string;
   updatedAt: string;

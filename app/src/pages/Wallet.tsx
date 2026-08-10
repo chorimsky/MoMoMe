@@ -19,7 +19,7 @@ import {
   WavelengthProvider, useWallet, useWalletBalance, useWalletReceive,
   useWalletSend, useWalletCreate, useWalletUnlock, useWalletRestore, useWalletActivity,
 } from "@lightninglabs/wavelength-react";
-import { api } from "../api/client.js";
+import { api, getAdminToken } from "../api/client.js";
 import { useI18n } from "../lib/i18n.js";
 import type { Quote, Payment, ProviderId, NameSource, PaymentState } from "@shared/types.js";
 import { PROVIDERS, COUNTRIES, MIN_XAF, detectProvider } from "@shared/domain.js";
@@ -167,30 +167,184 @@ function PasswordInput({ value, onChange, placeholder, autoComplete, onEnter }: 
   );
 }
 
+type WalletMode = "self" | "blink";
+
 export function Wallet() {
   const { t } = useI18n();
   const isolated = typeof window === "undefined" || window.crossOriginIsolated;
+  // Two backends: the self-custodial embedded wallet (Wavelength, signet, keys on device)
+  // and "Real Lightning" — the platform's LIVE IBEX/Blink account as a mainnet wallet
+  // (operator-only). Mounting Wavelength downloads the wasm runtime, so we only mount it
+  // in self mode — Blink mode stays lightweight.
+  const [mode, setMode] = useState<WalletMode>("self");
   return (
     <div className="app-bg" style={{ background: "var(--paper)", minHeight: "100dvh" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "12px clamp(16px,4vw,24px) 48px" }}>
         {/* Full-nav header (plain <a>) so this stays an isolated island. */}
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 16px" }}>
           <a href="/" aria-label="MoMo›Me — home" style={{ textDecoration: "none", display: "inline-flex" }}><Logo size={30} /></a>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ {WALLET_NETWORK} · {t("wallet_beta")}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "4px 10px", borderRadius: 999 }}>⚡ {mode === "blink" ? "mainnet" : WALLET_NETWORK} · {t("wallet_beta")}</span>
         </header>
 
         <h1 style={{ fontSize: "clamp(24px,5vw,30px)", letterSpacing: "-0.02em" }}>{t("wallet_title")}</h1>
-        <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 18px", lineHeight: 1.55 }}>
+        <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 16px", lineHeight: 1.55 }}>
           {t("wallet_intro")}
         </p>
 
-        {WALLET_NETWORK === "mainnet" && !MAINNET_AVAILABLE ? <MainnetPending /> :
+        {/* Backend toggle */}
+        <div role="tablist" style={{ display: "flex", gap: 6, background: "var(--surface-2)", padding: 4, borderRadius: 12, marginBottom: 18 }}>
+          {([["self", t("wallet_mode_self")], ["blink", t("wallet_mode_blink")]] as [WalletMode, string][]).map(([m, label]) => (
+            <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
+              style={{ flex: 1, padding: "8px 10px", borderRadius: 9, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                background: mode === m ? "var(--accent)" : "transparent", color: mode === m ? "var(--accent-ink)" : "var(--ink-2)" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "blink" ? <BlinkWallet /> :
+          WALLET_NETWORK === "mainnet" && !MAINNET_AVAILABLE ? <MainnetPending /> :
           !isolated ? <IsolationHelp /> : (
           <WavelengthProvider engine={walletEngine()}>
             <WalletInner />
           </WavelengthProvider>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   "Real Lightning" — the platform's LIVE IBEX/Blink account as a mainnet Lightning
+   wallet. Operator-only (moves real money on the platform account): the money endpoints
+   are admin-gated server-side, and the UI is gated on an admin session token. Receiving
+   here produces a REAL invoice any wallet (Wallet of Satoshi, Phoenix…) can pay — the
+   thing the self-custodial signet wallet can't do.
+   ============================================================ */
+function BlinkWallet() {
+  const { t } = useI18n();
+  const isAdmin = !!getAdminToken();
+  if (!isAdmin) {
+    return (
+      <div style={{ ...card }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_mode_blink")}</div>
+        <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.55 }}>{t("wallet_ln_operator_only")}</p>
+        <a href="/admin" className="btn btn-primary" style={{ marginTop: 12, textDecoration: "none", display: "inline-flex" }}>{t("wallet_ln_signin")}</a>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div role="note" style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, lineHeight: 1.45, color: "var(--recv)", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 10, padding: "8px 10px" }}>
+        <span aria-hidden>⚡</span><span>{t("wallet_ln_real_note")}</span>
+      </div>
+      <BlinkBalance />
+      <BlinkReceive />
+      <BlinkSend />
+    </div>
+  );
+}
+
+function BlinkBalance() {
+  const { t } = useI18n();
+  const [data, setData] = useState<{ balances: Array<{ provider: string; currency: string; balanceSat?: number; balance?: number }>; live: boolean } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = () => { setErr(null); api.walletLnBalance().then(setData).catch((e) => setErr(errMsg(e))); };
+  useEffect(load, []);
+  return (
+    <div style={{ ...card }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span className="overline">{t("wallet_balance")}</span>
+        <button className="btn btn-ghost btn-sm" onClick={load} aria-label="refresh">↻</button>
+      </div>
+      {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div>
+        : !data ? <div style={{ marginTop: 8 }}><Spinner size={14} color="var(--accent)" /></div>
+        : !data.live ? <div style={{ fontSize: 13, color: "var(--warn-ink)", marginTop: 8, lineHeight: 1.5 }}>{t("wallet_ln_no_rail")}</div>
+        : (
+          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+            {data.balances.length === 0 ? <div style={{ fontSize: 13, color: "var(--ink-3)" }}>—</div>
+              : data.balances.map((w, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                  <span style={{ textTransform: "capitalize", color: "var(--ink-2)" }}>{w.provider} · {w.currency}</span>
+                  <span className="num" style={{ fontWeight: 700 }}>{w.balanceSat != null ? `${fmtSats(w.balanceSat)} sat` : `$${((w.balance ?? 0) / 100).toFixed(2)}`}</span>
+                </div>
+              ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+function BlinkReceive() {
+  const { t } = useI18n();
+  const [sats, setSats] = useState(""); const [memo, setMemo] = useState("");
+  const [inv, setInv] = useState<{ invoice: string; paymentHash: string; provider: string } | null>(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
+  const [paid, setPaid] = useState(false); const [copied, setCopied] = useState(false);
+  const amt = Number(sats.replace(/\D/g, "")) || 0;
+  const gen = async () => {
+    if (amt <= 0) return; setBusy(true); setErr(null); setPaid(false); setInv(null);
+    try { setInv(await api.walletLnReceive(amt, memo.trim() || undefined)); }
+    catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  useEffect(() => {
+    if (!inv || paid) return;
+    let live = true;
+    const iv = setInterval(() => {
+      api.walletLnStatus(inv.paymentHash, inv.provider).then((s) => { if (live && s.settled) setPaid(true); }).catch(() => { /* keep polling */ });
+    }, 2500);
+    return () => { live = false; clearInterval(iv); };
+  }, [inv, paid]);
+  const copy = () => { if (!inv) return; void navigator.clipboard?.writeText(inv.invoice); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  return (
+    <div style={{ ...card }}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("wallet_receive")}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_sats_ph")} aria-label={t("wallet_amount_sats_ph")} style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
+        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t("wallet_note_ph")} aria-label={t("wallet_note_ph")} maxLength={64} style={{ ...input, flex: "1 1 150px" }} />
+      </div>
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={busy || amt <= 0} onClick={() => { void gen(); }}>
+        {busy ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_generate_invoice")}
+      </button>
+      {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
+      {inv && (
+        <div style={{ display: "grid", placeItems: "center", marginTop: 16, gap: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("wallet_ln_via")} {inv.provider}</div>
+          <div style={{ background: "#fff", padding: 12, borderRadius: 14, opacity: paid ? 0.5 : 1, transition: "opacity .3s" }}><QR value={`lightning:${inv.invoice}`} size={200} /></div>
+          {paid
+            ? <div style={{ fontSize: 14.5, fontWeight: 750, color: "var(--recv)" }}>✓ {t("wallet_paid")}</div>
+            : <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--ink-3)" }}><Spinner size={12} color="var(--accent)" /> {t("wallet_waiting_payment")}</div>}
+          <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? t("wallet_copied") : t("wallet_copy_invoice")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlinkSend() {
+  const { t } = useI18n();
+  const [bolt11, setBolt11] = useState(""); const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null); const [done, setDone] = useState(false);
+  const pay = async () => {
+    const inv = bolt11.trim().replace(/^lightning:/i, ""); if (!inv) return;
+    setBusy(true); setErr(null); setDone(false);
+    try { await api.walletLnSend(inv); setDone(true); setBolt11(""); }
+    catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  const paste = async () => { try { const txt = await navigator.clipboard?.readText(); if (txt) setBolt11(txt.trim()); } catch { /* blocked */ } };
+  return (
+    <div style={{ ...card }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_send")}</span>
+        <button className="btn btn-ghost btn-sm" onClick={() => { void paste(); }}>{t("wallet_paste")}</button>
+      </div>
+      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder={t("wallet_bolt11_ph")} aria-label={t("wallet_bolt11_ph")} rows={3}
+        style={{ ...input, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 12.5 }} />
+      <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={busy || !bolt11.trim()} onClick={() => { void pay(); }}>
+        {busy ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_pay_invoice")}
+      </button>
+      {err ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{err}</div> : null}
+      {done ? <div style={{ fontSize: 13, color: "var(--recv)", fontWeight: 650, marginTop: 8 }}>{t("wallet_payment_sent")}</div> : null}
     </div>
   );
 }

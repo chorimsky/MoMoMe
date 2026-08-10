@@ -10,7 +10,10 @@ import {
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
-import { createInstruction, adapterFor, adapterByName } from "../adapters/index.js";
+import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRefund } from "../adapters/index.js";
+import { blinkBalances } from "../adapters/blink.js";
+import { accountBalances } from "../adapters/ibex.js";
+import { bolt11AmountMsat } from "../core/bolt11.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
 import { entriesFor, balance } from "../core/ledger.js";
 import { id, nextRef } from "../core/ids.js";
@@ -422,6 +425,71 @@ api.get("/config", (_req, res) => {
       ? "Demo mode — payouts run on sandbox rails. For a successful payout use an MTN number ending in 789 (e.g. 677000789). Orange routes to a sandbox with no success number yet."
       : "",
   });
+});
+
+/* ---------- Operator "Real Lightning" wallet — Blink/IBEX-backed, ADMIN ONLY ----------
+   Exposes the platform's LIVE crypto rail as a usable Lightning wallet: receive a REAL
+   (mainnet) invoice any wallet can pay (incl. Wallet of Satoshi), send a bolt11, read the
+   balance. Moves real money on the PLATFORM account → admin-gated (no per-user ledger; it
+   IS the platform account). Distinct from the self-custodial /wallet (embedded Wavelength).
+   Only functions when a live crypto rail (IBEX/Blink production) is configured. */
+const LN_SEND_MAX_SAT = Number(process.env.WALLET_LN_SEND_MAX_SAT || "1000000"); // per-send drain guard
+
+api.post("/wallet/ln/receive", async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only", message: "Operator sign-in required." });
+  const amountSat = Math.round(Number((req.body ?? {}).amountSat));
+  if (!Number.isFinite(amountSat) || amountSat <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a positive sats amount." });
+  const rail = adapterFor("LIGHTNING");
+  if (!rail.trusted()) return res.status(503).json({ error: "no_live_rail", message: "No live crypto rail is configured — activate IBEX or Blink first." });
+  const memo = String((req.body ?? {}).memo ?? "").slice(0, 64);
+  try {
+    const inst = await createInstruction({ method: "LIGHTNING", ref: memo || `wallet-${nextRef()}`, amount: amountSat / 1e8 });
+    return res.json({ invoice: inst.code, paymentHash: inst.providerRef, provider: inst.provider, expiresAt: inst.expiresAt, amountSat });
+  } catch (e) {
+    console.error("[wallet-ln] receive:", e instanceof Error ? e.message : e);
+    return res.status(502).json({ error: "receive_failed", message: "Couldn't create the invoice." });
+  }
+});
+
+api.get("/wallet/ln/status", async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only" });
+  const hash = String(req.query.hash ?? ""), provider = String(req.query.provider ?? "");
+  if (!hash) return res.status(400).json({ error: "bad_hash" });
+  const s = await confirmSettlement(provider || undefined, hash).catch(() => null);
+  return res.json({ settled: !!s?.settled, failed: !!s?.failed });
+});
+
+api.post("/wallet/ln/send", async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only", message: "Operator sign-in required." });
+  const bolt11 = String((req.body ?? {}).bolt11 ?? "").trim().replace(/^lightning:/i, "");
+  const amtMsat = bolt11 ? bolt11AmountMsat(bolt11) : null;
+  if (amtMsat === null) return res.status(400).json({ error: "bad_invoice", message: "Not a valid Lightning invoice." });
+  if (amtMsat === 0) return res.status(400).json({ error: "amountless_invoice", message: "Use an invoice with a fixed amount." });
+  if (amtMsat > LN_SEND_MAX_SAT * 1000) return res.status(400).json({ error: "amount_too_high", message: `Max ${LN_SEND_MAX_SAT.toLocaleString()} sats per send.` });
+  try {
+    const r = await payRefund(bolt11); // routes to the live outbound rail (Blink/IBEX)
+    return res.json({ settled: r.settled, txId: r.transactionId, provider: r.provider });
+  } catch (e) {
+    console.error("[wallet-ln] send:", e instanceof Error ? e.message : e);
+    return res.status(502).json({ error: "send_failed", message: "Payment couldn't be sent." });
+  }
+});
+
+api.get("/wallet/ln/balance", async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only" });
+  const balances: Array<{ provider: string; currency: string; balanceSat?: number; balance?: number }> = [];
+  try {
+    const b = await blinkBalances();
+    if (b) for (const w of b) balances.push({ provider: "blink", currency: w.currency, ...(w.currency === "BTC" ? { balanceSat: w.balance } : { balance: w.balance }) });
+  } catch { /* ignore */ }
+  try {
+    if (ibexConfigured()) {
+      const bals = await accountBalances();
+      const acct = bals[config.ibex.accountId];
+      if (acct) balances.push({ provider: "ibex", currency: "BTC", balanceSat: Math.round(acct.balance / 1000) }); // msat→sat
+    }
+  } catch { /* ignore */ }
+  return res.json({ balances, live: adapterFor("LIGHTNING").trusted() });
 });
 
 /* ---------- developer API: machine-readable spec (public) ---------- */

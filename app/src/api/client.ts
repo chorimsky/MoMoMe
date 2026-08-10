@@ -196,6 +196,18 @@ export class ApiError extends Error {
 export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
+  // Operator "Real Lightning" wallet (Blink/IBEX-backed, admin-only — the Bearer token
+  // is auto-attached by req()). Receives a REAL invoice / sends a bolt11 / reads balance
+  // on the platform's live crypto rail.
+  walletLnReceive: (amountSat: number, memo?: string) =>
+    req<{ invoice: string; paymentHash: string; provider: string; expiresAt: string; amountSat: number }>("/wallet/ln/receive", { method: "POST", body: JSON.stringify({ amountSat, memo }) }),
+  walletLnStatus: (hash: string, provider: string) =>
+    req<{ settled: boolean; failed: boolean }>(`/wallet/ln/status?hash=${encodeURIComponent(hash)}&provider=${encodeURIComponent(provider)}`),
+  walletLnSend: (bolt11: string) =>
+    req<{ settled: boolean; txId: string; provider: string }>("/wallet/ln/send", { method: "POST", body: JSON.stringify({ bolt11 }) }),
+  walletLnBalance: () =>
+    req<{ balances: Array<{ provider: string; currency: string; balanceSat?: number; balance?: number }>; live: boolean }>("/wallet/ln/balance"),
+
   // Admin auth. login stores the session token; session checks the current one.
   adminLogin: async (username: string, password: string) => {
     const r = await req<{ token: string; expiresAt: string; user: AdminSessionUser }>("/admin/login", { method: "POST", body: JSON.stringify({ username, password }) });

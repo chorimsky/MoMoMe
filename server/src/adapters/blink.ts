@@ -91,8 +91,12 @@ const Q_TX_BY_HASH = `query TxByHash($walletId: WalletId!, $paymentHash: Payment
 /** Was this Lightning invoice actually PAID? Re-queries Blink by payment hash.
  *  settled = a RECEIVE transaction with status SUCCESS; failed = a FAILURE tx and
  *  nothing settled. null when the lookup itself fails (network) — indeterminate, so
- *  the caller falls back to the (secret-gated) webhook and never over-settles. */
+ *  the caller falls back to the (secret-gated) webhook and never over-settles.
+ *  ON-CHAIN: an address isn't a payment hash and isn't pollable here → null
+ *  (indeterminate), so the on-chain callback settles via the secret + amount re-check
+ *  in confirmInbound instead of being wrongly reported "not settled" and dropped. */
 export async function transactionStatus(paymentHash: string): Promise<SettlementStatus | null> {
+  if (!/^[0-9a-fA-F]{64}$/.test(paymentHash)) return null; // not an LN payment hash (e.g. an on-chain address)
   try {
     const d = await gql<{ me?: { defaultAccount?: { walletById?: { transactionsByPaymentHash?: Array<{ status?: string; direction?: string }> } } } }>(
       Q_TX_BY_HASH, { walletId: config.blink.walletId, paymentHash },

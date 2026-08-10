@@ -88,6 +88,12 @@ async function main() {
   ok("tampered body rejected", !blinkAdapter.verifyWebhook(body + " ", { "svix-id": id, "svix-timestamp": ts, "svix-signature": `v1,${sig}` }));
   ok("missing signature header rejected", !blinkAdapter.verifyWebhook(body, { "svix-id": id, "svix-timestamp": ts }));
 
+  console.log("\nBlink adapter — confirmSettlement guard (on-chain safety)");
+  // A non-64-hex providerRef (an on-chain address) is not a payment hash → null
+  // (indeterminate, no network call), so the on-chain callback isn't wrongly dropped.
+  ok("on-chain address → null", (await blinkAdapter.confirmSettlement!("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")) === null);
+  ok("garbage ref → null", (await blinkAdapter.confirmSettlement!("not-a-hash")) === null);
+
   console.log(`\n✅ ${passed} assertions passed`);
 }
 

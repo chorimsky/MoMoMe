@@ -125,7 +125,11 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
   // try). Sandbox is excluded so a real inbound is never simulated on failover.
   const sameClass = supporting.filter((r) => r.name !== "sandbox" && r.trusted() === primary.trusted());
   const eligible = sameClass.filter((r) => health.eligible(r.name));
-  const pool = eligible.length ? eligible : sameClass;
+  // With no eligible real rail: a TRUSTED (real-money) primary still retries all its real
+  // rails (never silently simulate). A NON-trusted (demo) primary skips straight to the
+  // sandbox fallback below — no point re-hammering a known-down rail (e.g. IBEX with dead
+  // creds) on every receive and eating its 401 latency each time.
+  const pool = eligible.length ? eligible : (primary.trusted() ? sameClass : []);
 
   let lastErr: unknown;
   for (const rail of pool) {

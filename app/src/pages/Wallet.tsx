@@ -100,6 +100,39 @@ function hasBackedUp(): boolean { try { return localStorage.getItem(BACKED_UP_KE
 // worker error (see WalletInner). sessionStorage so it resets on a new tab/session.
 const AUTO_RELOAD_KEY = "mm_wallet_autoreload";
 
+/** A LOCKED / corrupt wallet-database error — recoverable by resetting the on-device
+ *  wallet. The wasm daemon stores its wallet as an OPFS SQLite DB; a stale lock (another
+ *  tab, or a session that didn't close cleanly) makes "probe wallet database: open" fail.
+ *  A plain reload usually can't clear it, so we surface a Reset action. */
+function isLockError(error: Error | null): boolean {
+  const m = String(error?.message ?? error ?? "").toLowerCase();
+  return ["probe wallet database", "wallet database", "create lwwallet", "locked", "opfs", "sqlite", "access handle", "readiness"].some((s) => m.includes(s));
+}
+
+/** Erase the wallet stored on THIS device (OPFS SQLite DB + IndexedDB + our flags),
+ *  then reload. DESTRUCTIVE and USER-INITIATED ONLY — funds are recoverable only via the
+ *  seed phrase. Keeps the cached wasm runtime (that lives in Cache Storage, not OPFS),
+ *  so recovery doesn't re-download it. Recovers from a locked/corrupt wallet database. */
+async function resetLocalWallet(): Promise<void> {
+  try {
+    const root = await navigator.storage?.getDirectory?.();
+    // FileSystemDirectoryHandle is async-iterable; remove every top-level entry.
+    if (root) {
+      const names: string[] = [];
+      for await (const [name] of (root as unknown as AsyncIterable<[string, unknown]>)) names.push(name);
+      for (const name of names) { try { await root.removeEntry(name, { recursive: true }); } catch { /* ignore */ } }
+    }
+  } catch { /* OPFS unavailable */ }
+  try {
+    const dbs = (await indexedDB.databases?.()) ?? [];
+    await Promise.all(dbs.map((d) => d?.name
+      ? new Promise<void>((res) => { const r = indexedDB.deleteDatabase(d.name!); r.onsuccess = r.onerror = r.onblocked = () => res(); })
+      : Promise.resolve()));
+  } catch { /* ignore */ }
+  try { localStorage.removeItem(BACKED_UP_KEY); sessionStorage.removeItem(AUTO_RELOAD_KEY); } catch { /* ignore */ }
+  window.location.assign("/wallet");
+}
+
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: 18 };
 const input: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontSize: 15, color: "var(--ink)", outline: "none" };
 
@@ -339,13 +372,29 @@ function BootingCard({ phase }: { phase: string }) {
  *  actually works — a full reload — instead of stranding the user on a dead screen. */
 function ErrorCard({ error }: { error: Error | null }) {
   const { t } = useI18n();
+  const [resetting, setResetting] = useState(false);
+  const locked = isLockError(error);
+  const doReset = () => {
+    if (!window.confirm(t("wallet_reset_confirm"))) return; // explicit consent — destructive
+    setResetting(true);
+    void resetLocalWallet();
+  };
   return (
     <div style={{ ...card, borderColor: "var(--bad)" }}>
       <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_error_title")}</div>
       <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>
-        {error ? String(error.message ?? error).slice(0, 140) : t("wallet_error_stopped")}{t("wallet_error_reload_hint")}
+        {locked
+          ? t("wallet_error_locked_body")
+          : `${error ? String(error.message ?? error).slice(0, 140) : t("wallet_error_stopped")}${t("wallet_error_reload_hint")}`}
       </p>
-      <a href="/wallet" className="btn btn-primary" style={{ marginTop: 12, textDecoration: "none", display: "inline-flex" }}>{t("wallet_reload")}</a>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        <a href="/wallet" className="btn btn-primary" style={{ textDecoration: "none", display: "inline-flex" }}>{t("wallet_reload")}</a>
+        {locked && (
+          <button className="btn btn-ghost" style={{ borderColor: "var(--bad)", color: "var(--bad)" }} disabled={resetting} onClick={doReset}>
+            {resetting ? t("wallet_resetting") : t("wallet_reset")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

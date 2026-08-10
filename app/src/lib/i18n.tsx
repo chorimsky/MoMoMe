@@ -177,6 +177,16 @@ export const STRINGS: Dict = {
   wallet_error_title: ["Wallet couldn't start", "Le portefeuille n'a pas pu démarrer"],
   wallet_error_stopped: ["The in-browser wallet runtime stopped.", "L'environnement du portefeuille s'est arrêté."],
   wallet_error_reload_hint: [" Reloading the page usually fixes it.", " Recharger la page résout généralement le problème."],
+  wallet_error_locked_body: [
+    "The wallet database is locked — usually because it’s open in another tab, or a previous session didn’t close cleanly. Close any other MoMo wallet tabs and reload. If that doesn’t help, reset the on-device wallet and restore from your recovery phrase.",
+    "La base de données du portefeuille est verrouillée — généralement parce qu’elle est ouverte dans un autre onglet, ou qu’une session précédente ne s’est pas fermée correctement. Fermez les autres onglets du portefeuille MoMo et rechargez. Si cela ne suffit pas, réinitialisez le portefeuille local et restaurez-le avec votre phrase de récupération.",
+  ],
+  wallet_reset: ["Reset local wallet", "Réinitialiser le portefeuille local"],
+  wallet_reset_confirm: [
+    "This erases the wallet stored on THIS device. You can only get its funds back with your recovery phrase. Continue?",
+    "Ceci efface le portefeuille stocké sur CET appareil. Vous ne pourrez récupérer ses fonds qu’avec votre phrase de récupération. Continuer ?",
+  ],
+  wallet_resetting: ["Resetting…", "Réinitialisation…"],
   wallet_activity: ["Activity", "Activité"],
   wallet_backup_warn_title: ["⚠ Recovery phrase not backed up", "⚠ Phrase de récupération non sauvegardée"],
   wallet_backup_warn_body: ["The recovery phrase can only be shown when a wallet is created and can't be retrieved later. If you didn't save it, don't add real funds — create a fresh wallet and back up its phrase first.", "La phrase de récupération n'est affichée qu'à la création du portefeuille et ne peut être récupérée ensuite. Si vous ne l'avez pas notée, n'ajoutez pas de fonds réels — créez un nouveau portefeuille et sauvegardez sa phrase d'abord."],

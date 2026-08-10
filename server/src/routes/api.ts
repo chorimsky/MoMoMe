@@ -648,8 +648,9 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
   // 2) Corridor payout ceiling for this Mobile Money provider.
   if (quote.xaf > PROVIDER_PAYOUT_MAX[recipient.provider]) return block(400, "amount_too_high", `The maximum payout to ${recipient.provider} Mobile Money is ${PROVIDER_PAYOUT_MAX[recipient.provider].toLocaleString()} XAF.`);
   // 3) Internal XAF treasury float must cover this payout.
-  if (availableFloatXaf() < quote.xaf) {
-    console.warn(`[payout-gate] BLOCKED float: treasury ${availableFloatXaf()} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country})`);
+  const floatXaf = await availableFloatXaf();
+  if (floatXaf < quote.xaf) {
+    console.warn(`[payout-gate] BLOCKED float: treasury ${floatXaf} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country})`);
     return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
   }
   // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
@@ -1855,7 +1856,7 @@ api.post("/admin/payments/:id/retry", async (req, res) => {
   const ok = await adminRetry(p);
   res.json({ ok, payment: p });
 });
-api.post("/admin/payments/:id/refund", (req, res) => {
+api.post("/admin/payments/:id/refund", async (req, res) => {
   const p = store.getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   // A settled Lightning inbound must be refunded via the sender's Lightning-invoice
@@ -1864,7 +1865,7 @@ api.post("/admin/payments/:id/refund", (req, res) => {
   if (p.payInstruction.method === "LIGHTNING" && p.events.some((e) => e.state === "INBOUND_CONFIRMED")) {
     return res.status(400).json({ error: "use_refund_claim", message: "Refund a Lightning payment through the sender's refund-claim flow (a Lightning invoice), not admin ledger reversal." });
   }
-  const ok = adminRefund(p);
+  const ok = await adminRefund(p);
   res.json({ ok, payment: p });
 });
 

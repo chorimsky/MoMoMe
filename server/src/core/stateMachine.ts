@@ -9,8 +9,7 @@
    Both converge on confirmInbound(), which is idempotent.
    ============================================================ */
 import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types.js";
-import { putPayment, listPayments, findPaymentByRef } from "./store.js";
-import { recordTxn, reversePayment, balance } from "./ledger.js";
+import { store } from "../db/store.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
@@ -27,8 +26,9 @@ import { bolt11AmountMsat } from "./bolt11.js";
  *  on refund). Both balances are negative (credits). Because each payment
  *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
  *  the full float and over-commit the treasury. */
-export function availableFloatXaf(): number {
-  return XAF_FLOAT_BASE + balance("external_recipient", "XAF") + balance("payout_float_XAF", "XAF");
+export async function availableFloatXaf(): Promise<number> {
+  const s = store();
+  return XAF_FLOAT_BASE + (await s.balance("external_recipient", "XAF")) + (await s.balance("payout_float_XAF", "XAF"));
 }
 
 /** True once the inbound has been booked to the ledger (the INBOUND_CONFIRMED
@@ -52,12 +52,12 @@ const DISPLAY: Partial<Record<PaymentState, DisplayStatus>> = {
   MANUAL_REVIEW: "Pending",
 };
 
-function transition(p: Payment, state: PaymentState, note?: string) {
+async function transition(p: Payment, state: PaymentState, note?: string): Promise<void> {
   p.state = state;
   p.displayStatus = DISPLAY[state] ?? "Pending";
   p.updatedAt = new Date().toISOString();
   p.events.push({ at: p.updatedAt, state, note });
-  putPayment(p);
+  await store().putPayment(p);
   // Observability: the settlement happy path is otherwise silent, which makes a
   // held/stuck payout impossible to diagnose from logs. Surface the money-critical
   // transitions (every reason a payout holds is carried in `note`).
@@ -94,27 +94,27 @@ async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Paym
  *  is held until refunded. Replaces the old MANUAL_REVIEW limbo with a clear "we owe a
  *  refund" state. (Ledger is NOT reversed here — we still hold the inbound asset; it's
  *  unwound when the refund is actually paid out — the refund-claim flow.) */
-function beginRefund(p: Payment, note: string): void {
+async function beginRefund(p: Payment, note: string): Promise<void> {
   // Only Lightning has an automated refund-claim path (the sender supplies a bolt11
   // and we pay it). On-chain BTC / ERC-20 stablecoin inbounds have NO auto path —
   // completeRefund rejects them (refund_lightning_only), so they used to strand
   // permanently in REFUND_PENDING. Route them to MANUAL_REVIEW so an operator returns
   // the crypto out-of-band and then adminRefund reverses the ledger.
   if (p.payInstruction.method !== "LIGHTNING") {
-    transition(p, "MANUAL_REVIEW", `${note} — ${p.payInstruction.method} inbound needs a manual crypto refund`);
+    await transition(p, "MANUAL_REVIEW", `${note} — ${p.payInstruction.method} inbound needs a manual crypto refund`);
     return;
   }
   p.refundNeedsDestination = true;
-  transition(p, "REFUND_PENDING", note);
+  await transition(p, "REFUND_PENDING", note);
 }
 
 /** Inbound seen in mempool / HTLC held. Idempotent, only moves forward. Only an
  *  as-yet-unseen inbound (still AWAITING_INBOUND) advances to DETECTED — guarding by
  *  state, not rank(), so a stray "detected" webhook can't resurrect a held/terminal
  *  payment (whose rank is -1) back to INBOUND_DETECTED. */
-export function markDetected(p: Payment) {
+export async function markDetected(p: Payment): Promise<void> {
   if (p.state !== "AWAITING_INBOUND") return;
-  transition(p, "INBOUND_DETECTED");
+  await await transition(p, "INBOUND_DETECTED");
 }
 
 /**
@@ -140,30 +140,30 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   } else {
     // A confirmed inbound with no verified amount is untrusted — hold for review.
     if (actualAmount == null) {
-      transition(p, "MANUAL_REVIEW", "inbound amount unverified");
+      await transition(p, "MANUAL_REVIEW", "inbound amount unverified");
       return;
     }
     received = actualAmount;
     // Underpayment guard: never auto-pay a short inbound (BACKEND_DESIGN §1).
     if (received < expected * 0.999) {
-      transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
+      await transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
       return;
     }
   }
 
-  transition(p, "INBOUND_CONFIRMED");
-  recordTxn(p.id, [
+  await transition(p, "INBOUND_CONFIRMED");
+  await store().recordTxn(p.id, [
     { account: "inbound_clearing", direction: "debit", amount: received, currency: asset },
     { account: "customer_wallet", direction: "credit", amount: received, currency: asset },
   ]);
 
   // FX lock: asset → XAF, reserve float, take fee.
-  transition(p, "FX_LOCKED");
-  recordTxn(p.id, [
+  await transition(p, "FX_LOCKED");
+  await store().recordTxn(p.id, [
     { account: "customer_wallet", direction: "debit", amount: received, currency: asset },
     { account: "fx_position", direction: "credit", amount: received, currency: asset },
   ]);
-  recordTxn(p.id, [
+  await store().recordTxn(p.id, [
     { account: "fx_position", direction: "debit", amount: p.totalXaf, currency: "XAF" },
     { account: "payout_float_XAF", direction: "credit", amount: p.xaf, currency: "XAF" },
     { account: "fee_revenue", direction: "credit", amount: p.feeXaf, currency: "XAF" },
@@ -171,24 +171,24 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
 
   // Pre-payout guards: corridor limit + available float.
   if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) {
-    transition(p, "MANUAL_REVIEW", `exceeds ${p.recipient.provider} payout limit`);
+    await transition(p, "MANUAL_REVIEW", `exceeds ${p.recipient.provider} payout limit`);
     return;
   }
   // availableFloatXaf() already includes THIS payment's FX-lock reservation, so a
   // negative result means the treasury is over-committed across all delivered +
   // in-flight payouts — hold this marginal payment rather than over-draw real money.
-  if (availableFloatXaf() < 0) {
-    transition(p, "MANUAL_REVIEW", "insufficient XAF float");
+  if ((await availableFloatXaf()) < 0) {
+    await transition(p, "MANUAL_REVIEW", "insufficient XAF float");
     return;
   }
   // Operator approval threshold: large payouts hold for manual sign-off.
   if (p.xaf >= getSettings().ops.payoutApprovalXaf) {
-    transition(p, "MANUAL_REVIEW", `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
+    await transition(p, "MANUAL_REVIEW", `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
     return;
   }
   // Trust gate: a flagged / very-low-trust merchant needs manual confirmation.
   if (payoutBlocked(p.recipient.phone)) {
-    transition(p, "MANUAL_REVIEW", "low-trust merchant — manual confirmation required");
+    await transition(p, "MANUAL_REVIEW", "low-trust merchant — manual confirmation required");
     return;
   }
 
@@ -203,7 +203,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   // aggregator can never simulate a payout and falsely "deliver" a real payment.
   const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal);
   if (!agg) {
-    transition(p, "MANUAL_REVIEW", cryptoReal
+    await transition(p, "MANUAL_REVIEW", cryptoReal
       ? "no funded LIVE payout rail — real settlement held for review"
       : "no payout aggregator with sufficient balance");
     return;
@@ -212,7 +212,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   // paired with non-real crypto). The selection above already guarantees the
   // converse — real crypto only ever routes to a live rail.
   if (aggregatorLive(agg.name) && !cryptoReal) {
-    transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not real");
+    await transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not real");
     return;
   }
   p.aggregator = agg.name;
@@ -220,22 +220,22 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   // SUBMIT the payout — exactly once, keyed on the payment ref. Transient failures
   // auto-retry; a HARD provider block (e.g. PAYOUTS_NOT_ALLOWED) takes the rail out
   // of rotation and goes straight to refund — retrying a config block is futile.
-  transition(p, "PAYOUT_REQUESTED");
+  await transition(p, "PAYOUT_REQUESTED");
   let res;
   try {
     res = await submitWithRetry(agg, p);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "error";
     if (HARD_PAYOUT_FAIL.test(msg)) markRailHardDown(agg.name, msg);
-    beginRefund(p, `payout failed${HARD_PAYOUT_FAIL.test(msg) ? " (rail blocked)" : ""}: ${msg}`);
+    await beginRefund(p, `payout failed${HARD_PAYOUT_FAIL.test(msg) ? " (rail blocked)" : ""}: ${msg}`);
     return;
   }
   if (res.status === "duplicate") {
-    transition(p, "MANUAL_REVIEW", "duplicate payout key");
+    await transition(p, "MANUAL_REVIEW", "duplicate payout key");
     return;
   }
   p.payoutRef = res.providerRef;
-  putPayment(p);
+  await store().putPayment(p);
 
   // CONFIRMATION is async. Real payout: settle on the FIRST of — the provider's
   // /webhooks/{aggregator} callback, this active status poll, or the slower
@@ -251,7 +251,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
 async function pollPayout(ref: string): Promise<void> {
   for (const delay of [3000, 5000, 8000, 15000, 30000]) {
     await wait(delay);
-    const p = findPaymentByRef(ref);
+    const p = await store().findPaymentByRef(ref);
     if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved
     try {
       const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(ref);
@@ -266,7 +266,7 @@ async function pollPayout(ref: string): Promise<void> {
  * Idempotent: only acts on a payment still awaiting its payout result.
  */
 export async function onPayoutResult(ref: string, status: PayoutStatus, providerRef?: string): Promise<void> {
-  const p = findPaymentByRef(ref);
+  const p = await store().findPaymentByRef(ref);
   if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved / unknown
 
   // Feed the route-selection engine: success rate, latency, availability.
@@ -279,12 +279,12 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
   }
 
   if (status === "COMPLETED") {
-    transition(p, "PAYOUT_CONFIRMED", providerRef ?? p.payoutRef);
-    recordTxn(p.id, [
+    await transition(p, "PAYOUT_CONFIRMED", providerRef ?? p.payoutRef);
+    await store().recordTxn(p.id, [
       { account: "payout_float_XAF", direction: "debit", amount: p.xaf, currency: "XAF" },
       { account: "external_recipient", direction: "credit", amount: p.xaf, currency: "XAF" },
     ]);
-    transition(p, "DELIVERED");
+    await transition(p, "DELIVERED");
     // First successful delivery → the number becomes an account: provision the
     // recipient's custodial identity + phone-derived Lightning address. Idempotent.
     ensureIdentity(p.recipient, p.ref);
@@ -297,7 +297,7 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
     // The provider rejected the payout after accepting it → the inbound crypto must go
     // back to the sender. Enter the refund-claim flow (sender supplies an invoice); the
     // ledger is unwound only when the refund actually pays out (finalizeRefund).
-    beginRefund(p, "payout failed at provider");
+    await beginRefund(p, "payout failed at provider");
   }
   // PENDING → leave as-is; reconciliation will re-check.
 }
@@ -305,7 +305,7 @@ export async function onPayoutResult(ref: string, status: PayoutStatus, provider
 /** Backstop for lost callbacks: re-query payouts stuck in PAYOUT_REQUESTED. */
 export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
-  for (const p of listPayments()) {
+  for (const p of await store().listPayments()) {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
     const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(p.ref);
     if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
@@ -319,7 +319,7 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
  *  it isn't pollable by transaction id here.) */
 export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
-  for (const p of listPayments()) {
+  for (const p of await store().listPayments()) {
     // Only Lightning on a rail that supports authoritative re-query is pollable here.
     const adapter = adapterByName(p.payInstruction.provider ?? "");
     if (!adapter?.confirmSettlement || p.payInstruction.method !== "LIGHTNING") continue;
@@ -336,7 +336,7 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
       // forever. Only when NOT paid (settled check above ran first). No funds moved.
       const expiredAt = Date.parse(p.payInstruction.expiresAt);
       if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
-        transition(p, "FAILED", "invoice expired — not paid");
+        await transition(p, "FAILED", "invoice expired — not paid");
       }
     } catch (e) { console.error("reconcile inbound", p.id, e); }
   }
@@ -349,13 +349,13 @@ export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
  *  Idempotent (finalizeRefund no-ops once REFUNDED). */
 export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
-  for (const p of listPayments()) {
+  for (const p of await store().listPayments()) {
     if (p.state !== "REFUND_PENDING" || !p.refundTxId || p.refundNeedsDestination) continue;
     if (Date.parse(p.updatedAt) > cutoff) continue;
     try {
       const s = await refundStatus(p.refundProvider, p.refundTxId);
-      if (s?.settled) finalizeRefund(p);
-      else if (s?.failed) reopenRefund(p); // failed outbound → reopen for a new invoice
+      if (s?.settled) await finalizeRefund(p);
+      else if (s?.failed) await reopenRefund(p); // failed outbound → reopen for a new invoice
     } catch (e) { console.error("reconcile refund", p.id, e); }
   }
 }
@@ -367,12 +367,12 @@ export async function reconcileStuckRefunds(maxAgeMs = 60_000): Promise<void> {
  *  Lightning refunds (refundNeedsDestination still true → no refund has gone out). */
 export async function reconcileFailedPayouts(maxAgeMs = 120_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
-  for (const p of listPayments()) {
+  for (const p of await store().listPayments()) {
     if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination || !p.aggregator) continue;
     if (Date.parse(p.updatedAt) > cutoff) continue;
     try {
       const status = await aggregatorByName(p.aggregator).queryStatus(p.ref);
-      if (status === "COMPLETED") transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED after a FAILED verdict — do NOT refund");
+      if (status === "COMPLETED") await transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED after a FAILED verdict — do NOT refund");
     } catch (e) { console.error("reconcile failed-payout", p.id, e); }
   }
 }
@@ -402,7 +402,7 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   // operator OVERRIDE of the approval-threshold hold, but it must NOT be able to
   // breach the corridor cap or over-draw the treasury float — those aren't approvals).
   if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) return false;
-  if (availableFloatXaf() < 0) return false;
+  if ((await availableFloatXaf()) < 0) return false;
 
   // Is THIS payment's crypto inbound real money? (Same test as confirmInbound.)
   const cryptoReal = railTrusted(p.payInstruction.provider);
@@ -426,13 +426,13 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   // would blindly overwrite payoutRef and re-arm confirmation on an existing payout).
   // Mirror confirmInbound: hold for review so an operator confirms the original.
   if (res.status === "duplicate") {
-    transition(p, "MANUAL_REVIEW", "duplicate payout key on retry");
+    await transition(p, "MANUAL_REVIEW", "duplicate payout key on retry");
     return false;
   }
   p.payoutRef = res.providerRef;
   // Hand off to the confirmation path: onPayoutResult posts the delivery legs and
   // transitions to DELIVERED — only once the payout actually COMPLETED.
-  transition(p, "PAYOUT_REQUESTED", "retried by admin");
+  await transition(p, "PAYOUT_REQUESTED", "retried by admin");
   if (res.simulated) { await onPayoutResult(p.ref, "COMPLETED", res.providerRef); return true; }
   // Real rail: confirm via status query; settle on COMPLETED/FAILED, else keep polling.
   let status: PayoutStatus = "PENDING";
@@ -444,7 +444,7 @@ export async function adminRetry(p: Payment): Promise<boolean> {
 
 /** Admin: refund a payment that did not deliver — reverses its ledger entries so
  *  the books stay balanced and the customer's inbound is returned. */
-export function adminRefund(p: Payment): boolean {
+export async function adminRefund(p: Payment): Promise<boolean> {
   if (p.displayStatus === "Completed") return false;
   // Idempotent: never reverse an already-refunded payment again — reversePayment
   // posts the inverse of EVERY existing entry, so a second refund would double-
@@ -457,9 +457,9 @@ export function adminRefund(p: Payment): boolean {
   // ledger here would mark it REFUNDED while the sats stay put, converting them into
   // sweepable treasury without ever returning them. Force the claim flow instead.
   if (p.payInstruction.method === "LIGHTNING" && inboundBooked(p)) return false;
-  reversePayment(p.id);
-  transition(p, "REFUND_PENDING", "refund initiated by admin");
-  transition(p, "REFUNDED", "refunded by admin");
+  await store().reversePayment(p.id);
+  await transition(p, "REFUND_PENDING", "refund initiated by admin");
+  await transition(p, "REFUNDED", "refunded by admin");
   return true;
 }
 
@@ -489,19 +489,19 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
     let payoutStatus: PayoutStatus | null = null;
     try { payoutStatus = await aggregatorByName(p.aggregator).queryStatus(p.ref); } catch { /* unverifiable → fall through; a genuine FAILED still refunds */ }
     if (payoutStatus === "COMPLETED") {
-      transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED at refund-claim — do NOT refund");
+      await transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED at refund-claim — do NOT refund");
       return { ok: false, error: "payout_completed" };
     }
   }
   // Claim the refund — idempotent: a second submit while in flight is rejected above.
   p.refundNeedsDestination = false;
-  putPayment(p);
+  await store().putPayment(p);
   try {
     const r = await payRefund(bolt11, invMsat === 0 ? inboundMsat : undefined);
     p.refundTxId = r.transactionId;
     p.refundProvider = r.provider; // re-query the SAME rail that paid it
-    putPayment(p);
-    if (r.settled) finalizeRefund(p);
+    await store().putPayment(p);
+    if (r.settled) await finalizeRefund(p);
     else void pollRefund(p.ref);
     return { ok: true };
   } catch (e) {
@@ -510,38 +510,38 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
     // timeout can throw AFTER the payment began). Reopening would let the sender submit
     // a SECOND invoice → double refund / real loss. Hold for an operator to verify
     // whether the outbound actually went out (refundNeedsDestination stays false).
-    transition(p, "MANUAL_REVIEW", `refund payout ambiguous — verify before retry: ${e instanceof Error ? e.message : "error"}`);
+    await transition(p, "MANUAL_REVIEW", `refund payout ambiguous — verify before retry: ${e instanceof Error ? e.message : "error"}`);
     return { ok: false, error: "refund_needs_review" };
   }
 }
 
 /** The outbound refund settled — unwind the ledger (we no longer hold the inbound) and
  *  mark REFUNDED. Idempotent. */
-function finalizeRefund(p: Payment): void {
+async function finalizeRefund(p: Payment): Promise<void> {
   if (p.state === "REFUNDED") return;
-  reversePayment(p.id);
-  transition(p, "REFUNDED", "crypto refunded to sender");
+  await store().reversePayment(p.id);
+  await transition(p, "REFUNDED", "crypto refunded to sender");
 }
 
 /** The outbound refund Lightning payment DEFINITIVELY failed (no route / expired) —
  *  the sats did NOT leave, so we still hold the inbound. Reopen the claim so the
  *  sender can supply a fresh invoice. Safe (no double-pay: the prior attempt failed). */
-function reopenRefund(p: Payment): void {
+async function reopenRefund(p: Payment): Promise<void> {
   if (p.state !== "REFUND_PENDING") return;
   p.refundNeedsDestination = true;
   p.refundTxId = undefined; // void the failed attempt — a new invoice starts clean
-  transition(p, "REFUND_PENDING", "refund payout failed — awaiting a new invoice");
+  await transition(p, "REFUND_PENDING", "refund payout failed — awaiting a new invoice");
 }
 
 /** Poll the outbound refund payment to settlement (Lightning settles in seconds). */
 async function pollRefund(ref: string): Promise<void> {
   for (const delay of [3000, 5000, 8000, 15000, 30000]) {
     await wait(delay);
-    const p = findPaymentByRef(ref);
+    const p = await store().findPaymentByRef(ref);
     if (!p || p.state !== "REFUND_PENDING" || !p.refundTxId) return; // resolved / unknown
     const s = await refundStatus(p.refundProvider, p.refundTxId).catch(() => null);
-    if (s?.settled) { finalizeRefund(p); return; }
-    if (s?.failed) { reopenRefund(p); return; } // failed → let the sender retry (was: stranded)
+    if (s?.settled) { await finalizeRefund(p); return; }
+    if (s?.failed) { await reopenRefund(p); return; } // failed → let the sender retry (was: stranded)
   }
 }
 
@@ -549,7 +549,7 @@ async function pollRefund(ref: string): Promise<void> {
 export async function settle(p: Payment): Promise<void> {
   if (p.state !== "AWAITING_INBOUND") return;
   const confirmMs = p.method === "ONCHAIN" ? 2600 : 1400;
-  markDetected(p);
+  await markDetected(p);
   await wait(confirmMs);
   // Sandbox: the simulated inbound matches the locked invoice amount.
   await confirmInbound(p, p.payInstruction.amount);

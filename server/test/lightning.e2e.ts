@@ -451,7 +451,7 @@ async function main() {
     seedPayment("pay_refund", "h_refund", BTC_IN, "ONCHAIN");
     await confirmInbound(storeMod.findByProviderRef("h_refund")!, BTC_IN);
     storeMod.getPayment("pay_refund")!.displayStatus = "Pending"; // make it refundable
-    ok("adminRefund reverses an on-chain payment", adminRefund(storeMod.getPayment("pay_refund")!) === true);
+    ok("adminRefund reverses an on-chain payment", await adminRefund(storeMod.getPayment("pay_refund")!) === true);
     const rn = nets("pay_refund");
     ok("refund reverses ledger to zero (no float overstatement)", Math.abs(rn.BTC ?? 0) < 1e-9 && Math.abs(rn.XAF ?? 0) < 1e-9);
     ok("refunded payment is REFUNDED", storeMod.getPayment("pay_refund")!.state === "REFUNDED");
@@ -463,9 +463,9 @@ async function main() {
     await confirmInbound(storeMod.findByProviderRef("h_ln_norefund")!, BTC_IN);
     storeMod.getPayment("pay_ln_norefund")!.displayStatus = "Pending";
     ok("adminRefund refuses a settled Lightning inbound (use the claim flow)",
-      adminRefund(storeMod.getPayment("pay_ln_norefund")!) === false && storeMod.getPayment("pay_ln_norefund")!.state !== "REFUNDED");
+      await adminRefund(storeMod.getPayment("pay_ln_norefund")!) === false && storeMod.getPayment("pay_ln_norefund")!.state !== "REFUNDED");
     // Idempotent: a second refund must be a no-op (never double-reverse the ledger).
-    const secondRefund = adminRefund(storeMod.getPayment("pay_refund")!);
+    const secondRefund = await adminRefund(storeMod.getPayment("pay_refund")!);
     const rn2 = nets("pay_refund");
     ok("second refund is a no-op (idempotent, ledger stays balanced)", secondRefund === false && Math.abs(rn2.BTC ?? 0) < 1e-9 && Math.abs(rn2.XAF ?? 0) < 1e-9);
 
@@ -481,7 +481,7 @@ async function main() {
     overP.xaf = availFloat + 100_000; overP.totalXaf = overP.xaf + overP.feeXaf; storeMod.putPayment(overP);
     await confirmInbound(storeMod.findByProviderRef("h_float_over")!, BTC_IN);
     ok("over-committing payout is held for float (MANUAL_REVIEW)", storeMod.getPayment("pay_float_over")!.state === "MANUAL_REVIEW");
-    ok("adminRefund releases the held on-chain reservation", adminRefund(storeMod.getPayment("pay_float_over")!) === true); // release its ledger reservation so later tests have float
+    ok("adminRefund releases the held on-chain reservation", await adminRefund(storeMod.getPayment("pay_float_over")!) === true); // release its ledger reservation so later tests have float
 
     // Retry a MANUAL_REVIEW payment that had reached FX-lock (a LATE hold) → delivered,
     // ledger balanced, NO double-pay. (adminRetry refuses a pre-FX-lock hold.)

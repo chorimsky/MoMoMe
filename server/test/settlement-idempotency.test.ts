@@ -44,11 +44,11 @@ async function main() {
     return p;
   }
 
-  const snapshot = () => ({
+  const snapshot = async () => ({
     float: balance("payout_float_XAF", "XAF"),
     fee: balance("fee_revenue", "XAF"),
     inbound: balance("inbound_clearing", "BTC"),
-    avail: availableFloatXaf(),
+    avail: await availableFloatXaf(),
   });
 
   console.log("\nSettlement idempotency — duplicate confirmInbound on a held payment");
@@ -58,13 +58,13 @@ async function main() {
   await confirmInbound(p, p.payInstruction.amount);
   ok("held at MANUAL_REVIEW (above corridor limit)", p.state === "MANUAL_REVIEW", p.state);
   ok("booked exactly one INBOUND_CONFIRMED event", p.events.filter((e) => e.state === "INBOUND_CONFIRMED").length === 1);
-  const before = snapshot();
+  const before = await snapshot();
   ok("float reserved", before.float !== 0, String(before.float));
   ok("fee booked", before.fee !== 0, String(before.fee));
 
   // 2. A duplicate settled webhook re-posts confirmInbound → MUST be a no-op.
   await confirmInbound(p, p.payInstruction.amount);
-  const after = snapshot();
+  const after = await snapshot();
   ok("dup confirm did NOT re-reserve float", after.float === before.float, `${after.float} vs ${before.float}`);
   ok("dup confirm did NOT re-book fee", after.fee === before.fee, `${after.fee} vs ${before.fee}`);
   ok("dup confirm did NOT re-post inbound", after.inbound === before.inbound, `${after.inbound} vs ${before.inbound}`);
@@ -76,12 +76,12 @@ async function main() {
   console.log("\nmarkDetected — no resurrection of a terminal payment");
   const term = makePayment("term1");
   term.state = "FAILED"; putPayment(term);
-  markDetected(term);
+  await markDetected(term);
   ok("FAILED payment is NOT dragged back to INBOUND_DETECTED", term.state === "FAILED", term.state);
 
   // 4. …but still advances a genuinely fresh AWAITING_INBOUND payment.
   const fresh = makePayment("fresh1");
-  markDetected(fresh);
+  await markDetected(fresh);
   ok("AWAITING_INBOUND advances to INBOUND_DETECTED", fresh.state === "INBOUND_DETECTED", fresh.state);
 
   console.log(`\n✅ ${passed} assertions passed`);

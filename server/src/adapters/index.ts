@@ -139,6 +139,18 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
       console.error(`[rail] ${rail.name} createInstruction failed (${req.method}) — failing over:`, e instanceof Error ? e.message : e);
     }
   }
+  // DEMO resilience: a NON-trusted primary (this inbound would NOT be real money —
+  // sandbox/staging/misconfigured rail) that fails everything falls back to the sandbox
+  // simulator so the demo flow still completes. A TRUSTED (real-money) primary NEVER
+  // simulates — it rethrows and the API surfaces method_unavailable. This is what lets a
+  // broken configured rail (e.g. IBEX with dead creds) not dead-end a demo deployment.
+  if (!primary.trusted() && primary.name !== "sandbox") {
+    try {
+      const inst = await callRail(sandboxAdapter, req);
+      console.warn(`[rail] ${primary.name} failed — served ${req.method} via sandbox simulator (demo, non-trusted)`);
+      return inst;
+    } catch (e) { lastErr = e; }
+  }
   throw lastErr instanceof Error ? lastErr : new Error(`All rails failed for method ${req.method}`);
 }
 

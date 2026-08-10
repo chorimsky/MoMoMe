@@ -66,12 +66,21 @@ setInterval(() => { try { pruneExpiredQuotes(); } catch (e) { console.error("pru
 if (ibexConfigured() || blinkConfigured() || liveMoney()) {
   const refreshFxRates = async () => {
     if (ibexConfigured()) {
-      const [btc, usdt, usdc, eur] = await Promise.all([
-        ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
-      ]);
-      if (btc != null) { setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur }, "IBEX"); return; }
+      // Guard the IBEX pull: if it THROWS (401/403/network), fall through to the public
+      // source instead of aborting the whole refresh — otherwise a degraded IBEX FX
+      // endpoint blocks pricing forever (liveMoney quotes → rates_unavailable), even
+      // when Blink/another rail is the one actually settling.
+      try {
+        const [btc, usdt, usdc, eur] = await Promise.all([
+          ibexRate(CCY.BTC, CCY.USD), ibexRate(CCY.USDT, CCY.USD), ibexRate(CCY.USDC, CCY.USD), ibexRate(CCY.EUR, CCY.USD),
+        ]);
+        if (btc != null) { setRates({ btcUsd: btc, usdtUsd: usdt, usdcUsd: usdc, eurUsd: eur }, "IBEX"); return; }
+      } catch (e) {
+        console.warn("IBEX FX pull failed — falling back to public rates:", e instanceof Error ? e.message : e);
+      }
     }
-    // No IBEX (or IBEX returned no BTC price) → public source, so a non-IBEX rail prices.
+    // No IBEX (or IBEX pull returned no BTC price / threw) → public source, so a
+    // non-IBEX rail (or a degraded IBEX) still prices live quotes.
     const pub = await fetchPublicRates();
     if (pub) setRates(pub, "public");
   };

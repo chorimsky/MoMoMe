@@ -12,6 +12,10 @@ export interface InstructionRequest {
   ref: string;
   /** Inbound amount in asset units (BTC or USDT). */
   amount: number;
+  /** Quote value in USD — used by rails that can receive into a USD-denominated
+   *  wallet (e.g. Blink Stablesats) to hedge crypto-price risk. Optional; a rail
+   *  that only receives in the native asset ignores it. */
+  usd?: number;
   /** Provider webhook callback URL for this rail. */
   callbackUrl: string;
 }

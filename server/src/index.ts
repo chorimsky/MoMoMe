@@ -6,7 +6,7 @@ import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, r
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { registerAccountWebhook, rate as ibexRate } from "./adapters/ibex.js";
-import { registerBlinkCallback } from "./adapters/blink.js";
+import { registerBlinkCallback, blinkBalances } from "./adapters/blink.js";
 import { setRates, CCY } from "./core/rates.js";
 import { fetchPublicRates } from "./core/publicRates.js";
 
@@ -94,6 +94,12 @@ if (blinkConfigured() && config.publicUrl.startsWith("https://")) {
   void registerBlinkCallback()
     .then((ok) => { if (ok) console.log(`Blink callback → ${config.publicUrl}/webhooks/blink`); })
     .catch((e) => console.error("Blink register callback failed", e));
+  // Log receive routing + both wallet balances so ops can confirm the hedge is wired.
+  const usd = config.blink.usdWalletId ? "USD wallet set" : "no USD wallet (BTC-only)";
+  console.log(`Blink receive policy: ${config.blink.receivePolicy} (${usd})`);
+  void blinkBalances().then((bals) => {
+    if (bals?.length) console.log(`Blink balances: ${bals.map((b) => `${b.currency} ${b.balance}${b.currency === "BTC" ? " sat" : b.currency === "USD" ? "¢" : ""}`).join(", ")}`);
+  });
 }
 
 const server = app.listen(config.port, () => {

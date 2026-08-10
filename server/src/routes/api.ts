@@ -615,6 +615,7 @@ api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, r
       method: quote.method,
       ref,
       amount: quote.inboundAmount,
+      usd: quote.usd, // for USD-wallet (Stablesats) hedging rails
     });
   } catch (e) {
     // Couldn't mint the inbound address (e.g. a stablecoin whose IBEX receive combo

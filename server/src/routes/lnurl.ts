@@ -81,6 +81,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
       method: "LIGHTNING",
       ref,
       amount: btc,
+      usd: totalXaf / rq.usdXaf, // for USD-wallet (Stablesats) hedging rails
     });
   } catch (e) {
     return res.json(lnErr(e instanceof Error ? e.message : "Could not create the invoice."));

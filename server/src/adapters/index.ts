@@ -75,6 +75,8 @@ export interface CreateInboundRequest {
   ref: string;
   /** Inbound amount in asset units (BTC / USDT). */
   amount: number;
+  /** Quote value in USD (optional) — for rails that receive into a USD wallet. */
+  usd?: number;
 }
 
 /** Create the inbound pay instruction, routing to the primary rail for the method
@@ -115,7 +117,7 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
 
 function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInstruction> {
   const callbackUrl = `${config.publicUrl}/webhooks/${rail.name}`;
-  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, callbackUrl };
+  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl };
   return rail.createInstruction(full);
 }
 

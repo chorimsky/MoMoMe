@@ -13,7 +13,8 @@ import crypto from "node:crypto";
 // Configure Blink BEFORE importing config/adapter (config reads env at load). The
 // webhook secret is a Svix `whsec_<base64>` endpoint signing secret (as Blink issues).
 process.env.BLINK_API_KEY = "blink_test_key";
-process.env.BLINK_WALLET_ID = "wallet_test";
+process.env.BLINK_WALLET_ID = "wallet_btc_test";
+process.env.BLINK_USD_WALLET_ID = "wallet_usd_test"; // Stablesats wallet → enables the hedge (default policy = split)
 process.env.BLINK_WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
 // BLINK_ENV unset → sandbox → not trusted (verifyWebhook still enforces the signature).
 
@@ -35,8 +36,8 @@ function svixSign(secret: string, id: string, ts: string, body: string): string 
 }
 
 async function main() {
-  const { blinkAdapter } = await import("../src/adapters/blink.js");
-  const { blinkConfigured, blinkLive } = await import("../src/config.js");
+  const { blinkAdapter, receiveTarget } = await import("../src/adapters/blink.js");
+  const { blinkConfigured, blinkLive, config } = await import("../src/config.js");
   const SECRET = process.env.BLINK_WEBHOOK_SECRET!;
 
   console.log("\nBlink adapter — config + capabilities");
@@ -46,6 +47,12 @@ async function main() {
   ok("supports LIGHTNING + ONCHAIN", blinkAdapter.supports("LIGHTNING") && blinkAdapter.supports("ONCHAIN"));
   ok("does NOT support USDT/USDC (Blink USD wallet is fiat, not ERC-20)", !blinkAdapter.supports("USDT") && !blinkAdapter.supports("USDC"));
   ok("priority is after IBEX (0)", blinkAdapter.priority > 0);
+
+  console.log("\nBlink adapter — receive routing (BLINK_RECEIVE_POLICY)");
+  // USD wallet is set → default policy = split: LIGHTNING → BTC, ONCHAIN → USD.
+  ok("default policy is 'split' (USD wallet present)", config.blink.receivePolicy === "split", config.blink.receivePolicy);
+  ok("split: LIGHTNING → BTC wallet", receiveTarget("LIGHTNING").currency === "BTC" && receiveTarget("LIGHTNING").walletId === "wallet_btc_test");
+  ok("split: ONCHAIN → USD (Stablesats) wallet", receiveTarget("ONCHAIN").currency === "USD" && receiveTarget("ONCHAIN").walletId === "wallet_usd_test");
 
   console.log("\nBlink adapter — parseEvent (real receive.* shape)");
   // receive.lightning, settled. 25,000 sats = 0.00025 BTC.
@@ -76,6 +83,12 @@ async function main() {
     ok("receive.* + positive amount, no status → confirmed", ev?.kind === "confirmed" && ev.amount === 0.00005);
   }
   ok("no providerRef → null", blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "SUCCESS" } }) === null);
+  // USD (Stablesats) receive: settlementAmount is CENTS, not sats → confirmed but no
+  // BTC amount (the under/overpayment check is skipped; confirmSettlement is authoritative).
+  {
+    const ev = blinkAdapter.parseEvent({ eventType: "receive.lightning", transaction: { status: "SUCCESS", settlementCurrency: "USD", settlementAmount: 1500, initiationVia: { paymentHash: "hUsd" } } });
+    ok("USD receive → confirmed, amount undefined (cents≠sats)", ev?.kind === "confirmed" && ev.providerRef === "hUsd" && ev.amount === undefined);
+  }
 
   console.log("\nBlink adapter — verifyWebhook (Svix)");
   const body = JSON.stringify({ eventType: "receive.lightning", transaction: { status: "SUCCESS", initiationVia: { paymentHash: "x" } } });

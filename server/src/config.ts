@@ -101,19 +101,37 @@ export const config = {
    *  when BLINK_API_KEY + BLINK_WALLET_ID are set (independent of RAILS_MODE,
    *  like IBEX). URL derives from BLINK_ENV: production = mainnet, else the
    *  staging (signet/testnet) endpoint. See server/src/adapters/blink.ts. */
-  blink: ((sandbox: boolean) => ({
-    env: sandbox ? "sandbox" : "production",
-    apiUrl: env("BLINK_API_URL", sandbox ? "https://api.staging.galoy.io/graphql" : "https://api.blink.sv/graphql"),
-    apiKey: secret("BLINK_API_KEY"),
-    // The BTC wallet that receives inbound sats. Get it from the Blink dashboard or
-    // `query me { defaultAccount { wallets { id walletCurrency } } }` (the BTC wallet).
-    walletId: secret("BLINK_WALLET_ID"),
-    // Blink signs callbacks via Svix. This is the endpoint's Svix SIGNING SECRET
-    // (`whsec_…`, shown by Blink when the callback endpoint is registered) — NOT a
-    // value we invent. Unset → callbacks are rejected whenever a real payout could
-    // result (fail closed). See verifyWebhook in adapters/blink.ts.
-    webhookSecret: secret("BLINK_WEBHOOK_SECRET"),
-  }))(!isProdEnv("BLINK_ENV")),
+  blink: ((sandbox: boolean) => {
+    // The USD (Stablesats) wallet is OPTIONAL — set it to hedge crypto-price risk by
+    // receiving value as synthetic USD instead of volatile BTC (we owe XAF, which is
+    // EUR-pegged, so USD tracks the liability far better than BTC over the settlement
+    // window). NOT an ERC-20 USDT rail. Get both ids from the Blink dashboard or
+    // `query me { defaultAccount { wallets { id walletCurrency } } }`.
+    const usdWalletId = secret("BLINK_USD_WALLET_ID");
+    // Which wallet receives inbound crypto:
+    //   split (default when a USD wallet is set) — Lightning → BTC (settles in seconds,
+    //     no Stablesats spread), on-chain → USD (10–60 min window = real price risk → hedge).
+    //   hedge — everything → USD (max protection, pays the Stablesats spread on every receive).
+    //   btc   — everything → BTC (hold Bitcoin; the only option when no USD wallet is set).
+    const rawPolicy = env("BLINK_RECEIVE_POLICY", usdWalletId ? "split" : "btc").trim().toLowerCase();
+    const receivePolicy = (["btc", "hedge", "split"].includes(rawPolicy) ? rawPolicy : (usdWalletId ? "split" : "btc")) as "btc" | "hedge" | "split";
+    return {
+      env: sandbox ? "sandbox" : "production",
+      apiUrl: env("BLINK_API_URL", sandbox ? "https://api.staging.galoy.io/graphql" : "https://api.blink.sv/graphql"),
+      apiKey: secret("BLINK_API_KEY"),
+      // The BTC wallet that receives inbound sats (the base wallet — always required).
+      walletId: secret("BLINK_WALLET_ID"),
+      // The USD/Stablesats wallet (optional; enables the hedge). Empty → BTC-only.
+      usdWalletId,
+      // Effective receive routing (falls back to BTC for any USD leg if usdWalletId is empty).
+      receivePolicy,
+      // Blink signs callbacks via Svix. This is the endpoint's Svix SIGNING SECRET
+      // (`whsec_…`, shown by Blink when the callback endpoint is registered) — NOT a
+      // value we invent. Unset → callbacks are rejected whenever a real payout could
+      // result (fail closed). See verifyWebhook in adapters/blink.ts.
+      webhookSecret: secret("BLINK_WEBHOOK_SECRET"),
+    };
+  })(!isProdEnv("BLINK_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
    *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted
@@ -224,6 +242,11 @@ export function assertBlinkConfig(): void {
     if (!config.blink.webhookSecret) missing.push("BLINK_WEBHOOK_SECRET");
     if (!config.publicUrl.startsWith("https://")) missing.push("PUBLIC_URL (must be https)");
     if (missing.length) throw new Error(`Blink inbound can authorize a real payout — set: ${missing.join(", ")}.`);
+  }
+  // A USD receive policy with no Stablesats wallet silently receives as BTC — warn so
+  // the hedge isn't assumed active when it isn't (don't crash; BTC receive is safe).
+  if (blinkConfigured() && config.blink.receivePolicy !== "btc" && !config.blink.usdWalletId) {
+    console.warn(`⚠️  BLINK_RECEIVE_POLICY=${config.blink.receivePolicy} needs BLINK_USD_WALLET_ID — none set, so all receives go to the BTC wallet (no hedge).`);
   }
 }
 

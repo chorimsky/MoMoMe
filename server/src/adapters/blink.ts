@@ -82,29 +82,58 @@ export async function registerBlinkCallback(): Promise<boolean> {
 }
 
 /* ---------- settlement re-query (authoritative) ---------- */
-const Q_TX_BY_HASH = `query TxByHash($walletId: WalletId!, $paymentHash: PaymentHash!) {
-  me { defaultAccount { walletById(walletId: $walletId) {
-    transactionsByPaymentHash(paymentHash: $paymentHash) { status direction }
-  } } }
+type WalletTx = { status?: string; direction?: string };
+/** Look the payment hash up in EVERY receiving wallet (BTC + USD/Stablesats), since a
+ *  LN invoice may have been minted on either under BLINK_RECEIVE_POLICY. One aliased
+ *  request; the USD wallet leg is included only when configured. */
+function txByHashQuery(): string {
+  const usd = config.blink.usdWalletId
+    ? `usd: walletById(walletId: "${config.blink.usdWalletId}") { transactionsByPaymentHash(paymentHash: $paymentHash) { status direction } }`
+    : "";
+  return `query TxByHash($btc: WalletId!, $paymentHash: PaymentHash!) {
+  me { defaultAccount {
+    btc: walletById(walletId: $btc) { transactionsByPaymentHash(paymentHash: $paymentHash) { status direction } }
+    ${usd}
+  } }
 }`;
+}
 
-/** Was this Lightning invoice actually PAID? Re-queries Blink by payment hash.
- *  settled = a RECEIVE transaction with status SUCCESS; failed = a FAILURE tx and
- *  nothing settled. null when the lookup itself fails (network) — indeterminate, so
- *  the caller falls back to the (secret-gated) webhook and never over-settles.
- *  ON-CHAIN: an address isn't a payment hash and isn't pollable here → null
- *  (indeterminate), so the on-chain callback settles via the secret + amount re-check
- *  in confirmInbound instead of being wrongly reported "not settled" and dropped. */
+/** Was this Lightning invoice actually PAID? Re-queries Blink by payment hash across
+ *  both wallets. settled = a RECEIVE transaction with status SUCCESS; failed = a
+ *  FAILURE tx and nothing settled. null when the lookup itself fails (network) —
+ *  indeterminate, so the caller falls back to the (secret-gated) webhook and never
+ *  over-settles. ON-CHAIN: an address isn't a payment hash and isn't pollable here →
+ *  null (indeterminate), so the on-chain callback settles via the secret + amount
+ *  re-check in confirmInbound instead of being wrongly reported "not settled". */
 export async function transactionStatus(paymentHash: string): Promise<SettlementStatus | null> {
   if (!/^[0-9a-fA-F]{64}$/.test(paymentHash)) return null; // not an LN payment hash (e.g. an on-chain address)
   try {
-    const d = await gql<{ me?: { defaultAccount?: { walletById?: { transactionsByPaymentHash?: Array<{ status?: string; direction?: string }> } } } }>(
-      Q_TX_BY_HASH, { walletId: config.blink.walletId, paymentHash },
+    const d = await gql<{ me?: { defaultAccount?: { btc?: { transactionsByPaymentHash?: WalletTx[] }; usd?: { transactionsByPaymentHash?: WalletTx[] } } } }>(
+      txByHashQuery(), { btc: config.blink.walletId, paymentHash },
     );
-    const txs = d.me?.defaultAccount?.walletById?.transactionsByPaymentHash ?? [];
+    const acct = d.me?.defaultAccount;
+    const txs: WalletTx[] = [...(acct?.btc?.transactionsByPaymentHash ?? []), ...(acct?.usd?.transactionsByPaymentHash ?? [])];
     const settled = txs.some((t) => (t.direction ?? "").toUpperCase() === "RECEIVE" && (t.status ?? "").toUpperCase() === "SUCCESS");
     const failed = !settled && txs.some((t) => (t.status ?? "").toUpperCase() === "FAILURE");
     return { settled, failed };
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- balances (both wallets) — treasury / ops visibility ---------- */
+const Q_BALANCES = `query Balances {
+  me { defaultAccount { wallets { id walletCurrency balance } } }
+}`;
+
+export interface BlinkBalance { walletId: string; currency: string; balance: number; }
+/** Both wallet balances (BTC in sats, USD in cents) for treasury/ops. null on error. */
+export async function blinkBalances(): Promise<BlinkBalance[] | null> {
+  try {
+    const d = await gql<{ me?: { defaultAccount?: { wallets?: Array<{ id?: string; walletCurrency?: string; balance?: number }> } } }>(Q_BALANCES, {});
+    return (d.me?.defaultAccount?.wallets ?? [])
+      .filter((w) => w.id)
+      .map((w) => ({ walletId: w.id!, currency: (w.walletCurrency ?? "").toUpperCase(), balance: Number(w.balance ?? 0) }));
   } catch {
     return null;
   }
@@ -118,9 +147,41 @@ const M_LN_INVOICE = `mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
   }
 }`;
 
+// Stablesats: an LN invoice against the USD wallet. Payer still pays SATS; the
+// USD-equivalent at creation is credited to the USD wallet (no BTC price exposure).
+// `amount` is USD CENTS (CentAmount!). Expiry is capped at 5 min by Blink (price lock).
+const M_LN_USD_INVOICE = `mutation LnUsdInvoiceCreate($input: LnUsdInvoiceCreateInput!) {
+  lnUsdInvoiceCreate(input: $input) {
+    invoice { paymentRequest paymentHash }
+    errors { message }
+  }
+}`;
+
 const M_ONCHAIN_ADDR = `mutation OnChainAddressCreate($input: OnChainAddressCreateInput!) {
   onChainAddressCreate(input: $input) { address errors { message } }
 }`;
+
+/* ---------- wallet routing (BTC vs USD/Stablesats) ---------- */
+type ReceiveTarget = { walletId: string; currency: "BTC" | "USD" };
+
+/** Which Blink wallet receives this inbound, per BLINK_RECEIVE_POLICY:
+ *   split — LIGHTNING → BTC (seconds; no Stablesats spread), ONCHAIN → USD (long
+ *           confirmation window → hedge the BTC price move).
+ *   hedge — everything → USD (max protection; pays the Stablesats spread each time).
+ *   btc   — everything → BTC (hold Bitcoin).
+ *  Any USD target with no usdWalletId configured falls back to BTC (never crashes). */
+export function receiveTarget(method: Method): ReceiveTarget {
+  const btc: ReceiveTarget = { walletId: config.blink.walletId, currency: "BTC" };
+  const usdId = config.blink.usdWalletId;
+  if (!usdId) return btc; // no Stablesats wallet → BTC only
+  const usd: ReceiveTarget = { walletId: usdId, currency: "USD" };
+  switch (config.blink.receivePolicy) {
+    case "hedge": return usd;
+    case "btc": return btc;
+    case "split": return method === "ONCHAIN" ? usd : btc;
+    default: return btc;
+  }
+}
 
 /* ---------- webhook (callback) auth — Svix ---------- */
 // Blink delivers callbacks via Svix (confirmed in dev.blink.sv/api/webhooks). Svix signs
@@ -184,8 +245,38 @@ export const blinkAdapter: RailAdapter = {
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
+    const target = receiveTarget(req.method);
+    // The customer always PAYS Bitcoin (LN sats / on-chain BTC); asset/amount labels
+    // stay BTC. `target.currency` only decides which Blink wallet is credited (USD =
+    // Stablesats hedge). USD receive needs a USD figure — fall back to BTC if absent.
+    const cents = Math.round((req.usd ?? 0) * 100);
+    const wantUsd = target.currency === "USD" && cents >= 1;
+    if (target.currency === "USD" && !wantUsd) {
+      console.warn(`[blink] USD receive requested but no usable USD amount (usd=${req.usd}) — falling back to BTC wallet`);
+    }
 
     if (req.method === "LIGHTNING") {
+      if (wantUsd) {
+        // Stablesats LN invoice — credited to the USD wallet as synthetic USD.
+        const d = await gql<{ lnUsdInvoiceCreate: { invoice?: { paymentRequest?: string; paymentHash?: string }; errors?: Array<{ message?: string }> } }>(
+          M_LN_USD_INVOICE, {
+            input: {
+              walletId: target.walletId,
+              amount: cents, // USD cents (CentAmount!)
+              memo: req.ref.slice(0, 64),
+              expiresIn: Math.min(5, Math.max(1, Math.round(QUOTE_TTL_SEC.LIGHTNING / 60))), // Blink caps USD invoices at 5 min
+            },
+          },
+        );
+        throwUserErrors(d.lnUsdInvoiceCreate?.errors, "lnUsdInvoiceCreate");
+        const inv = d.lnUsdInvoiceCreate?.invoice;
+        if (!inv?.paymentRequest || !inv.paymentHash) throw new Error("Blink lnUsdInvoiceCreate returned no invoice");
+        return {
+          method: "LIGHTNING", code: inv.paymentRequest, qr: `lightning:${inv.paymentRequest}`, asset: "BTC",
+          amount: req.amount, amountLabel: formatAmount(req.amount, "BTC"), expiresAt,
+          providerRef: inv.paymentHash, provider: "blink",
+        };
+      }
       const d = await gql<{ lnInvoiceCreate: { invoice?: { paymentRequest?: string; paymentHash?: string }; errors?: Array<{ message?: string }> } }>(
         M_LN_INVOICE, {
           input: {
@@ -206,11 +297,11 @@ export const blinkAdapter: RailAdapter = {
       };
     }
 
-    // ONCHAIN — a fresh on-chain BTC receive address on the BTC wallet. Settles via
-    // the callback matched on the address (provisional: confirm Blink echoes the
-    // address in its on-chain receive callback).
+    // ONCHAIN — a fresh receive address on the target wallet (BTC, or the USD wallet
+    // which auto-converts incoming on-chain BTC to Stablesats). Settles via the callback
+    // matched on the address (provisional: confirm Blink echoes the address on-chain).
     const d = await gql<{ onChainAddressCreate: { address?: string; errors?: Array<{ message?: string }> } }>(
-      M_ONCHAIN_ADDR, { input: { walletId: config.blink.walletId } },
+      M_ONCHAIN_ADDR, { input: { walletId: wantUsd ? target.walletId : config.blink.walletId } },
     );
     throwUserErrors(d.onChainAddressCreate?.errors, "onChainAddressCreate");
     const addr = d.onChainAddressCreate?.address;
@@ -235,7 +326,7 @@ export const blinkAdapter: RailAdapter = {
     const b = body as {
       eventType?: string;
       transaction?: {
-        status?: string; settlementAmount?: number;
+        status?: string; settlementAmount?: number; settlementCurrency?: string;
         initiationVia?: { paymentHash?: string; address?: string; type?: string };
       };
       paymentHash?: string; address?: string; status?: string; amount?: number;
@@ -256,7 +347,12 @@ export const blinkAdapter: RailAdapter = {
     const confirmed = status === "SUCCESS" || (eventType.startsWith("receive.") && typeof rawAmt === "number" && rawAmt > 0 && status === "");
     const detected = status === "PENDING";
     if (!confirmed && !detected) return null;
-    const amount = typeof rawAmt === "number" && rawAmt !== 0 ? satToBtc(Math.abs(rawAmt)) : undefined;
+    // settlementAmount is in the CREDITED wallet's minor unit: sats for the BTC wallet,
+    // USD cents for the Stablesats wallet. Only the BTC leg maps to an asset (BTC) amount
+    // for the under/overpayment check; for a USD receive we leave amount undefined (the
+    // authoritative confirmSettlement + the fixed invoice already gate it).
+    const currency = (t.settlementCurrency ?? "").toUpperCase();
+    const amount = currency !== "USD" && typeof rawAmt === "number" && rawAmt !== 0 ? satToBtc(Math.abs(rawAmt)) : undefined;
     return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
   },
 

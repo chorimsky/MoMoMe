@@ -3,6 +3,7 @@ import cors from "cors";
 import { api } from "./routes/api.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
+import { cron } from "./routes/cron.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
 import { store } from "./db/store.js";
@@ -67,6 +68,7 @@ export function createApp() {
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).
   app.use("/", lnurl);
+  app.use("/api/cron", cron); // Vercel Cron drives the background jobs here (before /api)
   app.use("/api", api);
 
   // Unmatched route → JSON 404 (not Express's default HTML).

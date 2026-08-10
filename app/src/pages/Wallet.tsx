@@ -849,6 +849,12 @@ function Receive() {
   return (
     <div style={{ ...card }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("wallet_receive")}</div>
+      {WALLET_NETWORK === "signet" && (
+        <div role="note" style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, lineHeight: 1.45, color: "var(--warn-ink)", background: "var(--send-wash)", border: "1px solid var(--warn)", borderRadius: 10, padding: "8px 10px", marginBottom: 12 }}>
+          <span aria-hidden style={{ flex: "0 0 auto" }}>⚠️</span>
+          <span>{t("wallet_signet_notice")}</span>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_sats_ph")} aria-label={t("wallet_amount_sats_ph")} style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
         <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t("wallet_note_ph")} aria-label={t("wallet_note_ph")} maxLength={80} style={{ ...input, flex: "1 1 150px" }} />

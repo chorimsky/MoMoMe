@@ -248,6 +248,10 @@ export const STRINGS: Dict = {
   wallet_show_pw: ["Show password", "Afficher le mot de passe"],
   wallet_hide_pw: ["Hide password", "Masquer le mot de passe"],
   wallet_receiving: ["Receiving", "Réception de"],
+  wallet_signet_notice: [
+    "Test network (signet). Pay this invoice from a signet wallet only — mainnet apps like Wallet of Satoshi, Phoenix or Cash App can’t pay a signet invoice.",
+    "Réseau de test (signet). Payez cette facture uniquement depuis un portefeuille signet — les applis mainnet comme Wallet of Satoshi, Phoenix ou Cash App ne peuvent pas payer une facture signet.",
+  ],
   wallet_pay_momo: ["Mobile Money", "Mobile Money"],
   wallet_bolt11_ph: ["Paste a Lightning invoice (lnbc…)", "Collez une facture Lightning (lnbc…)"],
   wallet_pay_invoice: ["Pay invoice", "Payer la facture"],

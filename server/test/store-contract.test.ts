@@ -32,6 +32,8 @@ const payment = (id: string, ref: string): Payment => ({
 // legs this test posts — robust even if the memory backend loaded a non-empty dev DB.
 const TREASURY = "test_credit_acct" as unknown as LedgerAccount;
 const RECIP = "test_debit_acct" as unknown as LedgerAccount;
+const THIRD = "test_third_acct" as unknown as LedgerAccount;
+const RECIPIENT = "external_recipient" as unknown as LedgerAccount; // hasDelivered checks this account
 
 /** The behaviour every backend must satisfy — identical assertions. */
 async function contract(s: Store, tag: string) {
@@ -57,6 +59,17 @@ async function contract(s: Store, tag: string) {
   ]);
   ok(`${tag}: balance credited = -5000`, (await s.balance(TREASURY, "XAF")) === -5000);
   ok(`${tag}: balance debited = +5000`, (await s.balance(RECIP, "XAF")) === 5000);
+
+  ok(`${tag}: entriesFor pay1 has 2 legs`, (await s.entriesFor("pay1")).length === 2);
+  ok(`${tag}: hasDelivered(pay1) = false (no recipient leg)`, (await s.hasDelivered("pay1")) === false);
+  await s.recordTxn("payDeliv", [
+    { account: RECIPIENT, direction: "debit", amount: 100, currency: "XAF" },
+    { account: THIRD, direction: "credit", amount: 100, currency: "XAF" },
+  ]);
+  ok(`${tag}: hasDelivered(payDeliv) = true (recipient leg posted)`, (await s.hasDelivered("payDeliv")) === true);
+  await s.reversePayment("pay1");
+  ok(`${tag}: reversePayment nets credit acct to 0`, (await s.balance(TREASURY, "XAF")) === 0);
+  ok(`${tag}: reversePayment nets debit acct to 0`, (await s.balance(RECIP, "XAF")) === 0);
 }
 
 async function main() {

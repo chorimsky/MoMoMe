@@ -99,9 +99,33 @@ export async function balance(account: LedgerAccount, currency: LedgerEntry["cur
   );
   return Number(rows[0]?.sum ?? 0);
 }
-export async function entriesFor(paymentId: string): Promise<Array<{ account: string; direction: string; amount: number; currency: string }>> {
+interface LedgerRow { seq: number; at: Date | string; payment_id: string; body: { txnId: string; account: LedgerAccount; direction: "debit" | "credit"; amount: number; currency: LedgerEntry["currency"] } }
+const toEntry = (r: LedgerRow): LedgerEntry => ({
+  id: `le_${r.seq}`, txnId: r.body.txnId, paymentId: r.payment_id, account: r.body.account,
+  direction: r.body.direction, amount: r.body.amount, currency: r.body.currency, at: new Date(r.at).toISOString(),
+});
+/** Full journal entries for a payment (the /ledger view) — reconstructed from the JSONB body. */
+export async function entriesFor(paymentId: string): Promise<LedgerEntry[]> {
+  const rows = await q<LedgerRow>(`SELECT seq, at, payment_id, body FROM ledger WHERE payment_id=$1 ORDER BY seq`, [paymentId]);
+  return rows.map(toEntry);
+}
+export async function allEntries(): Promise<LedgerEntry[]> {
+  const rows = await q<LedgerRow>(`SELECT seq, at, payment_id, body FROM ledger ORDER BY seq`);
+  return rows.map(toEntry);
+}
+
+/** Has this payment's payout hit the recipient (a delivery leg to external_recipient)? */
+export async function hasDelivered(paymentId: string): Promise<boolean> {
+  const rows = await q(`SELECT 1 FROM ledger WHERE payment_id=$1 AND account='external_recipient' LIMIT 1`, [paymentId]);
+  return rows.length > 0;
+}
+
+/** Post the inverse of every entry for a payment — nets its ledger contribution to zero
+ *  (refund unwind). Inverting the SIGNED amount flips direction while keeping magnitude. */
+export async function reversePayment(paymentId: string): Promise<void> {
   const rows = await q<{ account: string; currency: string; amount: string }>(
-    `SELECT account, currency, amount FROM ledger WHERE payment_id=$1 ORDER BY seq`, [paymentId],
-  );
-  return rows.map((r) => { const a = Number(r.amount); return { account: r.account, currency: r.currency, direction: a >= 0 ? "debit" : "credit", amount: Math.abs(a) }; });
+    `SELECT account, currency, amount FROM ledger WHERE payment_id=$1 ORDER BY seq`, [paymentId]);
+  if (!rows.length) return;
+  const inverse: Leg[] = rows.map((r) => { const a = Number(r.amount); return { account: r.account as LedgerAccount, currency: r.currency as LedgerEntry["currency"], direction: a >= 0 ? "credit" : "debit", amount: Math.abs(a) }; });
+  await recordTxn(paymentId, inverse);
 }

@@ -32,6 +32,10 @@ export interface Store {
   // ledger
   recordTxn(paymentId: string, legs: Leg[]): Promise<void>;
   balance(account: LedgerAccount, currency: LedgerEntry["currency"]): Promise<number>;
+  reversePayment(paymentId: string): Promise<void>;
+  hasDelivered(paymentId: string): Promise<boolean>;
+  entriesFor(paymentId: string): Promise<LedgerEntry[]>;
+  allEntries(): Promise<LedgerEntry[]>;
 }
 
 /** Memory backend — async facade over the existing synchronous core (identical behaviour). */
@@ -49,6 +53,10 @@ const memoryStore: Store = {
   listPayments: async () => mem.listPayments(),
   recordTxn: async (pid, legs) => memLedger.recordTxn(pid, legs),
   balance: async (account, currency) => memLedger.balance(account, currency),
+  reversePayment: async (pid) => memLedger.reversePayment(pid),
+  hasDelivered: async (pid) => memLedger.hasDelivered(pid),
+  entriesFor: async (pid) => memLedger.entriesFor(pid),
+  allEntries: async () => memLedger.allEntries(),
 };
 
 /** Postgres backend — the transactional repos. */
@@ -66,6 +74,10 @@ const pgStore: Store = {
   listPayments: pg.listPayments,
   recordTxn: pg.recordTxn,
   balance: pg.balance,
+  reversePayment: pg.reversePayment,
+  hasDelivered: pg.hasDelivered,
+  entriesFor: pg.entriesFor,
+  allEntries: pg.allEntries,
 };
 
 /** True when the Postgres backend is selected (STORE_BACKEND=postgres). */

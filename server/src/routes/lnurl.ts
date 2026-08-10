@@ -15,7 +15,7 @@ import { resolveRecipient } from "../core/nameResolver.js";
 import { rateFor, formatAmount } from "../core/fx.js";
 import { createInstruction } from "../adapters/index.js";
 import { id, nextRef } from "../core/ids.js";
-import * as store from "../core/store.js";
+import { store } from "../db/store.js";
 import * as peex from "../integrations/peex/service.js";
 import {
   parseLnUser, quoteFromMsat, sendableRangeMsat, lnurlMetadata, lnAddress,
@@ -95,7 +95,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
     rate: rq.customerXafPerUnit, usd: totalXaf / rq.usdXaf, spreadBps: rq.spreadBps,
     issuedAt: now, expiresAt: instruction.expiresAt, estimateOnly: false,
   };
-  store.putQuote(quote);
+  await store().putQuote(quote);
 
   const payment: Payment = {
     id: id("pay"), ref, quoteId: quote.id,
@@ -112,9 +112,9 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
     events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],
     createdAt: now, updatedAt: now,
   };
-  store.putPayment(payment);
-  store.consumeQuote(quote.id);
-  if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
+  await store().putPayment(payment);
+  await store().consumeQuote(quote.id);
+  if (instruction.providerRef) await store().indexProviderRef(instruction.providerRef, payment.id);
   void peex.enrich(payment);
 
   res.json({ pr: instruction.code, routes: [] });

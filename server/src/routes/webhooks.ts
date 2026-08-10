@@ -6,7 +6,7 @@
 import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
-import { findByProviderRef } from "../core/store.js";
+import { store } from "../db/store.js";
 import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
@@ -56,7 +56,7 @@ webhooks.post("/peex", express.raw({ type: "*/*" }), (req, res) => {
 });
 
 // Raw body so the signature is computed over the exact bytes the provider signed.
-webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
+webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   const adapter = adapterByName(req.params.provider);
   if (!adapter) return res.status(404).json({ error: "unknown_provider" });
 
@@ -75,12 +75,12 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
   const event = adapter.parseEvent(parsed);
   if (!event) return res.json({ ok: true, ignored: true });
 
-  const payment = findByProviderRef(event.providerRef);
+  const payment = await store().findByProviderRef(event.providerRef);
   if (!payment) return res.json({ ok: true, unmatched: true });
 
   // Ack now; settle asynchronously.
   if (event.kind === "detected") {
-    markDetected(payment);
+    await markDetected(payment);
     return res.json({ ok: true });
   }
   res.json({ ok: true });

@@ -8,9 +8,7 @@
    ============================================================ */
 import pkg from "pg";
 import type { Pool as PoolType, PoolClient } from "pg";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { SCHEMA_SQL } from "./schema.js";
 
 const { Pool } = pkg;
 
@@ -20,7 +18,15 @@ export function pgPool(): PoolType {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error("DATABASE_URL is not set — Postgres store unavailable");
-    pool = new Pool({ connectionString, max: Number(process.env.PG_POOL_MAX || "10") });
+    // Managed serverless Postgres (Neon/Supabase/RDS/…) requires TLS; a plain local
+    // Postgres does not (and would REJECT an SSL handshake). Enable TLS only when the URL
+    // signals it, and don't verify the chain (Neon's pooler cert isn't in Node's default CA).
+    const needsSsl = /sslmode=(require|verify)|channel_binding|neon\.tech|supabase\.co|amazonaws\.com|render\.com|\.tech\//.test(connectionString);
+    pool = new Pool({
+      connectionString,
+      max: Number(process.env.PG_POOL_MAX || "10"),
+      ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+    });
   }
   return pool;
 }
@@ -47,10 +53,10 @@ export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise
   }
 }
 
-/** Apply schema.sql (idempotent — all CREATE ... IF NOT EXISTS). Run at setup/migrate. */
+/** Apply the schema (idempotent — all CREATE ... IF NOT EXISTS). Uses the inlined DDL
+ *  (SCHEMA_SQL) so it works in a serverless bundle with no schema.sql file on disk. */
 export async function applySchema(): Promise<void> {
-  const sql = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
-  await pgPool().query(sql);
+  await pgPool().query(SCHEMA_SQL);
 }
 
 /** Close the pool (tests / graceful shutdown). */

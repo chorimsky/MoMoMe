@@ -103,6 +103,37 @@ const AUTO_RELOAD_KEY = "mm_wallet_autoreload";
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: 18 };
 const input: React.CSSProperties = { width: "100%", padding: "12px 13px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontSize: 15, color: "var(--ink)", outline: "none" };
 
+/* ---- shared small UI ---- */
+const EyeIcon = ({ off }: { off: boolean }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {off
+      ? <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>
+      : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>}
+  </svg>
+);
+
+/** Password field with a show/hide toggle — standard for a wallet password that's
+ *  typed carefully and only once. Icon-only toggle keeps it compact; aria-labels
+ *  are localized so the whole flow stays FR/EN. */
+function PasswordInput({ value, onChange, placeholder, autoComplete, onEnter }: {
+  value: string; onChange: (v: string) => void; placeholder: string; autoComplete: string; onEnter?: () => void;
+}) {
+  const { t } = useI18n();
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <input type={show ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder} aria-label={placeholder} autoComplete={autoComplete}
+        onKeyDown={onEnter ? (e) => { if (e.key === "Enter") onEnter(); } : undefined}
+        style={{ ...input, paddingRight: 42 }} />
+      <button type="button" onClick={() => setShow((s) => !s)} aria-label={t(show ? "wallet_hide_pw" : "wallet_show_pw")} aria-pressed={show}
+        style={{ position: "absolute", right: 4, top: 0, bottom: 0, width: 38, display: "grid", placeItems: "center", background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: 0 }}>
+        <EyeIcon off={show} />
+      </button>
+    </div>
+  );
+}
+
 export function Wallet() {
   const { t } = useI18n();
   const isolated = typeof window === "undefined" || window.crossOriginIsolated;
@@ -361,8 +392,8 @@ function CreateForm({ onCreated }: { onCreated: (mnemonic: string[]) => void }) 
       <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_create_title")}</div>
       <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_create_body_a")}{WALLET_NETWORK}{t("wallet_create_body_b")}</p>
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_pw_ph")} autoComplete="new-password" style={input} />
-        <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder={t("wallet_pw_confirm_ph")} autoComplete="new-password" style={input} />
+        <PasswordInput value={pw} onChange={setPw} placeholder={t("wallet_pw_ph")} autoComplete="new-password" />
+        <PasswordInput value={pw2} onChange={setPw2} placeholder={t("wallet_pw_confirm_ph")} autoComplete="new-password" onEnter={() => { if (canCreate) void submit(); }} />
       </div>
       {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{t("wallet_pw_mismatch")}</div> : null}
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canCreate} onClick={() => { void submit(); }}>
@@ -389,15 +420,21 @@ function RestoreForm({ onRestored }: { onRestored: () => void }) {
     await restore({ mnemonic: words, password: pw, recoverState: true });
     onRestored();
   };
+  const pastePhrase = async () => { try { const txt = await navigator.clipboard?.readText(); if (txt) setPhrase(txt.trim().replace(/\s+/g, " ")); } catch { /* clipboard blocked */ } };
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_restore_title")}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_restore_title")}</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { void pastePhrase(); }}>{t("wallet_paste")}</button>
+      </div>
       <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_restore_body")}</p>
       <textarea value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder={t("wallet_phrase_ph")} rows={3}
-        autoComplete="off" autoCapitalize="none" spellCheck={false}
+        autoComplete="off" autoCapitalize="none" spellCheck={false} aria-label={t("wallet_phrase_ph")}
         style={{ ...input, marginTop: 12, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 13.5 }} />
       {phrase.trim() && !validLen ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>{words.length} {t("wallet_words_hint")}</div> : null}
-      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_pw_new_ph")} autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
+      <div style={{ marginTop: 8 }}>
+        <PasswordInput value={pw} onChange={setPw} placeholder={t("wallet_pw_new_ph")} autoComplete="new-password" onEnter={() => { if (canRestore) void submit(); }} />
+      </div>
       <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder={t("wallet_pw_confirm_ph")} autoComplete="new-password" style={{ ...input, marginTop: 8 }} />
       {mismatch ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{t("wallet_pw_mismatch")}</div> : null}
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!canRestore} onClick={() => { void submit(); }}>
@@ -475,8 +512,9 @@ function UnlockWallet() {
     <div style={{ ...card }}>
       <div style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_unlock_title")}</div>
       <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.5 }}>{t("wallet_unlock_body")}</p>
-      <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={t("wallet_password_ph")} autoComplete="current-password" style={{ ...input, marginTop: 12 }}
-        onKeyDown={(e) => { if (e.key === "Enter" && pw && !unlockPending) void unlock({ password: pw }); }} />
+      <div style={{ marginTop: 12 }}>
+        <PasswordInput value={pw} onChange={setPw} placeholder={t("wallet_password_ph")} autoComplete="current-password" onEnter={() => { if (pw && !unlockPending) void unlock({ password: pw }); }} />
+      </div>
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={!pw || unlockPending} onClick={() => { void unlock({ password: pw }); }}>
         {unlockPending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_unlock_btn")}
       </button>
@@ -704,7 +742,7 @@ function MobileMoneyPayout() {
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
           <span style={{ display: "inline-flex", alignItems: "center", padding: "0 11px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--ink-2)" }}>{COUNTRIES.CM.dial}</span>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="6 XX XX XX XX" style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="6 XX XX XX XX" aria-label={t("recipient")} style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
         </div>
         {digits.length >= 8 && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--ink-2)" }}>
@@ -722,7 +760,7 @@ function MobileMoneyPayout() {
           ))}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
-          <input value={xaf ? fmtXaf(amt) : ""} onChange={(e) => setXaf(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_ph")} style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
+          <input value={xaf ? fmtXaf(amt) : ""} onChange={(e) => setXaf(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_ph")} aria-label={t("wallet_amount_ph")} style={{ ...input, flex: 1, fontFamily: "var(--font-mono)" }} />
           <span style={{ display: "inline-flex", alignItems: "center", padding: "0 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--ink-2)" }}>XAF</span>
         </div>
         {amt > 0 && amt < MIN_XAF ? <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("wallet_minimum")} {fmtXaf(MIN_XAF)} XAF.</div> : null}
@@ -753,13 +791,15 @@ function Receive() {
   const [sats, setSats] = useState("");
   const [memo, setMemo] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
+  const [invoiceInfo, setInvoiceInfo] = useState<{ amt: number; memo: string }>({ amt: 0, memo: "" });
   const [copied, setCopied] = useState(false);
   const amt = Number(sats.replace(/\D/g, "")) || 0;
 
   const gen = async () => {
     if (amt <= 0) return;
-    const r = await receive({ amountSat: amt, memo: memo.trim() || undefined });
-    setInvoice(r.invoice || null); setCopied(false);
+    const m = memo.trim();
+    const r = await receive({ amountSat: amt, memo: m || undefined });
+    setInvoice(r.invoice || null); setInvoiceInfo({ amt, memo: m }); setCopied(false);
   };
   // The daemon marks the matching receive Entry 'complete' once the invoice settles.
   const paid = invoice ? activity.some((e) => e.kind === "receive" && e.request?.lightningInvoice === invoice && e.status === "complete") : false;
@@ -769,8 +809,8 @@ function Receive() {
     <div style={{ ...card }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("wallet_receive")}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_sats_ph")} style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
-        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t("wallet_note_ph")} maxLength={80} style={{ ...input, flex: "1 1 150px" }} />
+        <input value={sats} onChange={(e) => setSats(e.target.value)} inputMode="numeric" placeholder={t("wallet_amount_sats_ph")} aria-label={t("wallet_amount_sats_ph")} style={{ ...input, flex: "1 1 130px", fontFamily: "var(--font-mono)" }} />
+        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t("wallet_note_ph")} aria-label={t("wallet_note_ph")} maxLength={80} style={{ ...input, flex: "1 1 150px" }} />
       </div>
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={receivePending || amt <= 0} onClick={() => { void gen(); }}>
         {receivePending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_generate_invoice")}
@@ -778,10 +818,14 @@ function Receive() {
       {receiveError ? <div style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{String(receiveError.message ?? receiveError).slice(0, 120)}</div> : null}
       {invoice && (
         <div style={{ display: "grid", placeItems: "center", marginTop: 16, gap: 10 }}>
-          <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={`lightning:${invoice}`} size={200} /></div>
+          <div style={{ textAlign: "center" }}>
+            <div className="num" style={{ fontSize: 15, fontWeight: 750 }}>{t("wallet_receiving")} {fmtSats(invoiceInfo.amt)} <span style={{ fontSize: 12, color: "var(--ink-3)" }}>sats</span></div>
+            {invoiceInfo.memo ? <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{invoiceInfo.memo}</div> : null}
+          </div>
+          <div style={{ background: "#fff", padding: 12, borderRadius: 14, opacity: paid ? 0.5 : 1, transition: "opacity .3s" }}><QR value={`lightning:${invoice}`} size={200} /></div>
           {paid
-            ? <div style={{ fontSize: 14, fontWeight: 750, color: "var(--recv)" }}>{t("wallet_paid")}</div>
-            : <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{t("wallet_waiting_payment")}</div>}
+            ? <div style={{ fontSize: 14.5, fontWeight: 750, color: "var(--recv)", display: "inline-flex", alignItems: "center", gap: 6 }}><span>✓</span> {t("wallet_paid")}</div>
+            : <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--ink-3)" }}><Spinner size={12} color="var(--accent)" /> {t("wallet_waiting_payment")}</div>}
           <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? t("wallet_copied") : t("wallet_copy_invoice")}</button>
         </div>
       )}
@@ -806,7 +850,7 @@ function Send() {
         <span style={{ fontSize: 15, fontWeight: 700 }}>{t("wallet_send")}</span>
         <button className="btn btn-ghost btn-sm" onClick={() => { void paste(); }}>{t("wallet_paste")}</button>
       </div>
-      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder={t("wallet_bolt11_ph")} rows={3}
+      <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder={t("wallet_bolt11_ph")} aria-label={t("wallet_bolt11_ph")} rows={3}
         style={{ ...input, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 12.5 }} />
       <button className="btn btn-primary" style={{ marginTop: 12, width: "100%" }} disabled={sendPending || !bolt11.trim()} onClick={() => { void pay(); }}>
         {sendPending ? <Spinner size={15} color="var(--accent-ink)" /> : t("wallet_pay_invoice")}

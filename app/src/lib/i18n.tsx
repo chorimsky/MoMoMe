@@ -248,6 +248,7 @@ export const STRINGS: Dict = {
   wallet_show_pw: ["Show password", "Afficher le mot de passe"],
   wallet_hide_pw: ["Hide password", "Masquer le mot de passe"],
   wallet_receiving: ["Receiving", "Réception de"],
+  wallet_pay_momo: ["Mobile Money", "Mobile Money"],
   wallet_bolt11_ph: ["Paste a Lightning invoice (lnbc…)", "Collez une facture Lightning (lnbc…)"],
   wallet_pay_invoice: ["Pay invoice", "Payer la facture"],
   wallet_payment_sent: ["✓ Payment sent", "✓ Paiement envoyé"],

@@ -194,7 +194,6 @@ function IsolationHelp() {
 function WalletInner() {
   const { t } = useI18n();
   const { phase, error } = useWallet();
-  const balance = useWalletBalance();
   // The one-time recovery phrase to back up, captured from a fresh create(). The SDK
   // can never show it again, so while it's set we block the wallet behind BackupSeed.
   const [pendingBackup, setPendingBackup] = useState<string[] | null>(null);
@@ -208,7 +207,6 @@ function WalletInner() {
   const locked = phase === "locked";
   const errored = phase === "error";
   const booting = !open && !needsWallet && !locked && !errored;
-  const sats = balance ? spendableSats(balance) : null;
 
   // Self-heal the transient first-load "Wavelength worker error": the wasm worker
   // occasionally fails to start on a COLD load (asset warm-up race) and a reload
@@ -247,35 +245,78 @@ function WalletInner() {
         <BackupSeed mnemonic={pendingBackup} onConfirmed={() => { markBackedUp(); setBackedUp(true); setPendingBackup(null); }} />
       )}
 
-      {open && !pendingBackup && (
-        <>
-          {/* Balance (hero) with an inline ready/syncing chip. */}
-          <div style={{ ...card }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span className="overline">{t("wallet_balance")}</span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: phase === "syncing" ? "var(--warn)" : "var(--recv)", flex: "none" }} />
-                {phase === "syncing" ? t("wallet_syncing_short") : t("wallet_ready_short")}
-              </span>
-            </div>
-            <div className="num" style={{ fontSize: 32, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 4 }}>
-              {sats != null ? fmtSats(sats) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
-            </div>
-            {balance && balance.pendingInSat > 0
-              ? <div style={{ fontSize: 12.5, color: "var(--recv)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} {t("wallet_sats_incoming")}</div>
-              : sats === 0
-              ? <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>{t("wallet_empty_pre")}<b>{t("wallet_receive")}</b>{t("wallet_empty_post")}</div>
-              : null}
-          </div>
-
-          {!backedUp && <BackupWarning />}
-          <MobileMoneyPayout />
-          <Receive />
-          <Send />
-          <Activity />
-        </>
-      )}
+      {open && !pendingBackup && <WalletHome phase={phase} backedUp={backedUp} />}
     </div>
+  );
+}
+
+type WalletView = "home" | "receive" | "send" | "momo";
+
+/** Minimal, one-task-at-a-time home: a balance hero + three action tiles. Picking an
+ *  action swaps to just that flow (with a Back) instead of stacking every form on one
+ *  screen — so the wallet reads as a clean home, not a wall of cards. A light pop-in
+ *  keeps view changes smooth. */
+function WalletHome({ phase, backedUp }: { phase: string; backedUp: boolean }) {
+  const { t } = useI18n();
+  const [view, setView] = useState<WalletView>("home");
+  const balance = useWalletBalance();
+  const sats = balance ? spendableSats(balance) : null;
+
+  if (view !== "home") {
+    return (
+      <div style={{ display: "grid", gap: 14, animation: "pop .18s ease" }}>
+        <button className="btn btn-ghost btn-sm" onClick={() => setView("home")} style={{ justifySelf: "start" }}>← {t("wallet_back")}</button>
+        {view === "receive" && <Receive />}
+        {view === "send" && <Send />}
+        {view === "momo" && <MobileMoneyPayout onDone={() => setView("home")} />}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14, animation: "pop .18s ease" }}>
+      {/* Balance hero with an inline ready/syncing chip. */}
+      <div style={{ ...card }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="overline">{t("wallet_balance")}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: phase === "syncing" ? "var(--warn)" : "var(--recv)", flex: "none" }} />
+            {phase === "syncing" ? t("wallet_syncing_short") : t("wallet_ready_short")}
+          </span>
+        </div>
+        <div className="num" style={{ fontSize: 34, fontWeight: 750, letterSpacing: "-0.02em", marginTop: 6 }}>
+          {sats != null ? fmtSats(sats) : "—"} <span style={{ fontSize: 15, color: "var(--ink-3)" }}>sats</span>
+        </div>
+        {balance && balance.pendingInSat > 0
+          ? <div style={{ fontSize: 12.5, color: "var(--recv)", marginTop: 4 }}>+{fmtSats(balance.pendingInSat)} {t("wallet_sats_incoming")}</div>
+          : null}
+      </div>
+
+      {!backedUp && <BackupWarning />}
+
+      {/* Action tiles — one tap into a focused flow. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <ActionTile label={t("wallet_receive")} glyph="↓" onClick={() => setView("receive")} />
+        <ActionTile label={t("wallet_send")} glyph="↑" onClick={() => setView("send")} />
+        <ActionTile label={t("wallet_pay_momo")} glyph="⚡" onClick={() => setView("momo")} />
+      </div>
+
+      <Activity />
+    </div>
+  );
+}
+
+/** A single tappable action on the wallet home. */
+function ActionTile({ label, glyph, onClick }: { label: string; glyph: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: "grid", gap: 8, placeItems: "center", padding: "15px 6px", borderRadius: "var(--r-lg)", border: "1px solid var(--line)", background: "var(--surface)", boxShadow: "var(--shadow-sm)", cursor: "pointer", color: "var(--ink)", transition: "transform .1s ease, border-color .15s ease" }}
+      onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.97)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "none"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; }}>
+      <span style={{ width: 42, height: 42, borderRadius: "50%", background: "var(--send-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontSize: 20, fontWeight: 800 }}>{glyph}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 650 }}>{label}</span>
+    </button>
   );
 }
 
@@ -534,7 +575,7 @@ function UnlockWallet() {
 const FAIL_STATES: PaymentState[] = ["FAILED", "MANUAL_REVIEW", "REFUND_PENDING", "REFUNDED"];
 const POLL_CAP_MS = 4 * 60_000;
 
-function MobileMoneyPayout() {
+function MobileMoneyPayout({ onDone }: { onDone?: () => void }) {
   const { t } = useI18n();
   const balance = useWalletBalance();
   const { send } = useWalletSend();
@@ -687,7 +728,7 @@ function MobileMoneyPayout() {
               {busy ? <Spinner size={14} color="var(--accent-ink)" /> : t("wallet_try_again")}
             </button>
           )}
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={reset}>{delivered || failed ? t("wallet_done") : t("wallet_close")}</button>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { reset(); if (delivered || failed) onDone?.(); }}>{delivered || failed ? t("wallet_done") : t("wallet_close")}</button>
         </div>
       </div>
     );

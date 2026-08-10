@@ -33,6 +33,9 @@ export async function pruneExpiredQuotes(): Promise<number> {
   const rows = await q(`DELETE FROM quotes WHERE expires_at < now() RETURNING id`);
   return rows.length;
 }
+export async function consumeQuote(id: string): Promise<void> {
+  await q(`DELETE FROM quotes WHERE id=$1`, [id]);
+}
 
 /* ---------------- payments ---------------- */
 export async function putPayment(p: Payment): Promise<void> {
@@ -61,6 +64,12 @@ export async function findByProviderRef(providerRef: string): Promise<Payment | 
 export async function listPayments(): Promise<Payment[]> {
   const rows = await q<{ body: Payment }>(`SELECT body FROM payments ORDER BY created_at DESC`);
   return rows.map((r) => r.body);
+}
+/** Point a providerRef at a payment (when the instruction is minted after the row).
+ *  The provider_ref UNIQUE index makes a second payment claiming the same ref throw —
+ *  the same "no webhook fan-out" guarantee putPayment gives. */
+export async function indexProviderRef(providerRef: string, paymentId: string): Promise<void> {
+  await q(`UPDATE payments SET provider_ref=$1, updated_at=now() WHERE id=$2`, [providerRef, paymentId]);
 }
 
 /* ---------------- ledger (append-only, double-entry) ---------------- */

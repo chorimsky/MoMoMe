@@ -4,6 +4,6 @@
     { "source": "/(.*)", "destination": "/api" }
   ],
   "crons": [
-    { "path": "/api/cron/tick", "schedule": "* * * * *" }
+    { "path": "/api/cron/tick", "schedule": "0 0 * * *" }
   ]
 }

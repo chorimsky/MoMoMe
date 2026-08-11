@@ -16,6 +16,7 @@ import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { setSnapshot, allSnapshots } from "../db/repo.js";
+import { background } from "./background.js";
 
 const DB_PATH = process.env.DB_PATH ?? "data/momome.db";
 /** Postgres snapshot backend (serverless): non-money collections persist to the
@@ -92,7 +93,8 @@ export function touch(key: string): void {
   const dump = dumpers.get(key);
   if (!dump) return;
   if (PG) {
-    void setSnapshot(key, JSON.stringify(dump())).catch((e) => console.error("persist pg write", key, e));
+    // waitUntil-backed so the write survives the serverless freeze after the response.
+    background(setSnapshot(key, JSON.stringify(dump())));
     return;
   }
   if (!up) return;

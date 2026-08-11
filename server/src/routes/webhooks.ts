@@ -10,6 +10,7 @@ import { store } from "../db/store.js";
 import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
+import { background } from "../core/background.js";
 
 export const webhooks = Router();
 
@@ -32,11 +33,11 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   res.json({ ok: true }); // ack fast; settle in background
   for (const ev of events) {
     if (!adapter.statusByKey(ev.ref)) continue; // not one of ours
-    void (async () => {
+    background((async () => {
       const status = await adapter.queryStatus(ev.ref); // AUTHORITATIVE re-query
       if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status, ev.providerRef);
       // else: inconclusive → leave it; the reconcile backstop settles it.
-    })().catch((e) => console.error(`${name} payout result`, ev.ref, e));
+    })());
   }
 }
 
@@ -91,11 +92,11 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   // on-chain address) or the rail has no re-query, in which case we fall back to the
   // verified webhook (still secret-gated, amount re-checked in confirmInbound); only
   // an EXPLICIT not-settled result is rejected.
-  void (async () => {
+  background((async () => {
     if (adapter.confirmSettlement) {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
       if (s && !s.settled) return; // the rail says this inbound is not paid — ignore
     }
     await confirmInbound(payment, event.amount);
-  })().catch((e) => console.error("settle error", payment.id, e));
+  })());
 });

@@ -15,6 +15,7 @@ import { blinkBalances } from "../adapters/blink.js";
 import { accountBalances } from "../adapters/ibex.js";
 import { bolt11AmountMsat } from "../core/bolt11.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
+import { background } from "../core/background.js";
 import { store } from "../db/store.js";
 import { id, nextRef } from "../core/ids.js";
 import {
@@ -783,7 +784,7 @@ api.post("/payments/:id/confirm", async (req, res) => {
     } else if (!adapter?.trusted()) {
       // Simulated / untrusted rail (sandbox demo) — no real on-chain payment exists,
       // so drive the simulated settlement. Never do this for a trusted rail.
-      void settle(p);
+      background(settle(p));
     }
   }
   res.json(await store().getPayment(p.id) ?? p);
@@ -798,7 +799,7 @@ api.post("/payments/:id/simulate", async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   if (liveMoney()) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled when a real-money rail is live." });
-  if (p.state === "AWAITING_INBOUND") void settle(p);
+  if (p.state === "AWAITING_INBOUND") background(settle(p));
   res.json(p);
 });
 

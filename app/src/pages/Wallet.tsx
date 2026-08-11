@@ -14,7 +14,10 @@
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
 import { createWebWalletEngine, defaultConfig } from "@lightninglabs/wavelength-web";
-import type { Balance, RuntimeConfig, Entry } from "@lightninglabs/wavelength-core";
+// Source these types from -web (which `export * from '@lightninglabs/wavelength-core'`)
+// rather than -core directly: on a fresh pnpm install (Vercel) the transitive -core
+// isn't always resolvable as a DIRECT import, but -web always is. Same types, robust path.
+import type { Balance, RuntimeConfig, Entry } from "@lightninglabs/wavelength-web";
 import {
   WavelengthProvider, useWallet, useWalletBalance, useWalletReceive,
   useWalletSend, useWalletCreate, useWalletUnlock, useWalletRestore, useWalletActivity,

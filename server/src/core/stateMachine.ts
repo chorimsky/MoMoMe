@@ -16,7 +16,7 @@ import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus 
 import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
-import { getSettings } from "./settings.js";
+import { getSettings, refreshSettingsIfStale } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { bolt11AmountMsat } from "./bolt11.js";
 
@@ -131,6 +131,7 @@ export async function confirmInbound(pIn: Payment, actualAmount?: number): Promi
   return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount));
 }
 async function confirmInboundLocked(paymentId: string, actualAmount?: number): Promise<void> {
+  await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p || inboundBooked(p)) return; // already settling/settled/held — never re-book (see inboundBooked)
   // Compare against the amount LOCKED at quote time (carried on the instruction),

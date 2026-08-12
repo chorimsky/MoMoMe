@@ -15,7 +15,7 @@
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { setSnapshot, allSnapshots } from "../db/repo.js";
+import { setSnapshot, allSnapshots, getSnapshot } from "../db/repo.js";
 import { background } from "./background.js";
 
 const DB_PATH = process.env.DB_PATH ?? "data/momome.db";
@@ -112,6 +112,19 @@ export async function hydrateSnapshots(): Promise<void> {
       if (restore) { try { restore(json); } catch (e) { console.error("persist hydrate", key, e); } }
     }
   } catch (e) { console.error("persist hydrate all", e); }
+}
+
+/** Postgres only: re-read ONE snapshot key from the durable store and restore it into its
+ *  registered collection. For CROSS-INSTANCE freshness of config-critical state (settings
+ *  kill-switch / payout-approval threshold / watchlist) that a warm serverless instance
+ *  would otherwise serve stale from its boot-time hydrate. No-op on SQLite/memory (a single
+ *  process is always current). Callers throttle this (short TTL) at money-critical paths. */
+export async function rehydrate(key: string): Promise<void> {
+  if (!PG) return;
+  const restore = restorers.get(key);
+  if (!restore) return;
+  const json = await getSnapshot(key);
+  if (json !== undefined) { try { restore(json); } catch (e) { console.error("persist rehydrate", key, e); } }
 }
 
 /** Flush every collection (graceful shutdown / end of a serverless invocation). */

@@ -160,3 +160,10 @@ export async function allComplianceEvents(): Promise<unknown[]> {
   const rows = await q<{ body: unknown }>(`SELECT body FROM compliance_chain ORDER BY seq ASC`);
   return rows.map((r) => r.body);
 }
+
+/** Read ONE snapshot key (for cross-instance freshness re-reads — e.g. the settings
+ *  kill-switch a warm serverless instance would otherwise serve stale). undefined if absent. */
+export async function getSnapshot(key: string): Promise<unknown | undefined> {
+  const rows = await q<{ json: unknown }>(`SELECT json FROM snapshots WHERE key = $1`, [key]);
+  return rows.length ? rows[0].json : undefined;
+}

@@ -24,7 +24,7 @@ import {
   blinkConfigured, blinkLive,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
-import { getSettings, updateSettings } from "../core/settings.js";
+import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/settings.js";
 import * as treasury from "../core/treasury.js";
 import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
@@ -338,6 +338,7 @@ async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promi
 
 /* ---------- quotes ---------- */
 api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), async (req, res) => {
+  await refreshSettingsIfStale(); // pick up a cross-instance kill-switch / settings change
   // Operator kill-switch — refuse new business when payments are paused.
   if (!getSettings().ops.acceptingPayments) {
     return res.status(503).json({ error: "paused", message: "Payments are temporarily paused. Please try again shortly." });
@@ -605,6 +606,7 @@ api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_
 
 /* ---------- payments ---------- */
 api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, res) => {
+  await refreshSettingsIfStale(); // kill-switch / approval threshold must reflect a cross-instance change
   const { quoteId, recipient } = (req.body ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes
   // and arbitrary payout targets).

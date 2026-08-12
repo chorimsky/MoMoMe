@@ -5,7 +5,7 @@
    ============================================================ */
 import type { AdminSettings } from "../../../shared/types.js";
 import { FEE_PCT, RAIL_SPREAD_BPS, MAX_XAF } from "../../../shared/domain.js";
-import { register, touch } from "./persist.js";
+import { register, touch, rehydrate } from "./persist.js";
 
 const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
@@ -60,6 +60,22 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
 
 export function getSettings(): AdminSettings {
   return settings;
+}
+
+let lastSettingsRefresh = 0;
+const SETTINGS_TTL_MS = 5_000;
+/** Cross-instance freshness for the KILL-SWITCH + settings. A warm serverless instance
+ *  holds `settings` in module memory hydrated at boot, so an admin toggling
+ *  `ops.acceptingPayments=false` (or the payout-approval threshold) on ANOTHER instance
+ *  wouldn't be seen until this one cold-starts. Re-read the durable snapshot on a short TTL
+ *  (deduped by the throttle) so getSettings() stays synchronous everywhere but reflects a
+ *  change within ~5s. Awaited at the money-critical async paths (quote / payment / settle).
+ *  No-op on the memory/SQLite backend (single process is always current). */
+export async function refreshSettingsIfStale(): Promise<void> {
+  const now = Date.now();
+  if (now - lastSettingsRefresh < SETTINGS_TTL_MS) return;
+  lastSettingsRefresh = now; // throttle regardless of outcome (avoid hammering on a slow DB)
+  await rehydrate("settings").catch(() => { /* keep last-known settings on a transient DB error */ });
 }
 
 /** Shallow-merge each top-level section; callers send complete sections. */

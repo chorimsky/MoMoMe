@@ -317,28 +317,37 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
  *  exposing confirmSettlement (IBEX, Blink, …). Idempotent — only ever advances a
  *  genuinely-settled payment. (On-chain settles by address via the account webhook;
  *  it isn't pollable by transaction id here.) */
+/** Authoritative re-query + settle/expire for ONE Lightning inbound. Shared by the
+ *  reconcile backstop loop AND the on-demand poll path (GET /payments/:id), so a paid
+ *  invoice settles in seconds even when the webhook is missed — WITHOUT depending on
+ *  the reconcile cron cadence (which on Vercel Hobby is only daily). Idempotent:
+ *  confirmInbound no-ops once booked; a non-pollable/settled/ancient payment returns fast. */
+export async function reconcileOneInbound(p: Payment): Promise<void> {
+  // Only Lightning on a rail that supports authoritative re-query is pollable here.
+  const adapter = adapterByName(p.payInstruction.provider ?? "");
+  if (!adapter?.confirmSettlement || p.payInstruction.method !== "LIGHTNING") return;
+  // AWAITING/DETECTED settle; FAILED is re-checked to RECOVER an invoice that
+  // was really paid but wrongly expired (a lost webhook we couldn't reconcile).
+  const recoverable = p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED" || p.state === "FAILED";
+  if (!recoverable || !p.payInstruction.providerRef) return;
+  if (p.state === "FAILED" && Date.now() - Date.parse(p.createdAt) > 72 * 3600_000) return; // don't re-check ancient failures
+  try {
+    const s = await confirmSettlement(p.payInstruction.provider, p.payInstruction.providerRef);
+    if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); return; } // settle / recover (LN = full lock)
+    // Genuinely unpaid + past expiry → expire so it doesn't sit on "Waiting…"
+    // forever. Only when NOT paid (settled check above ran first). No funds moved.
+    const expiredAt = Date.parse(p.payInstruction.expiresAt);
+    if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
+      await transition(p, "FAILED", "invoice expired — not paid");
+    }
+  } catch (e) { console.error("reconcile inbound", p.id, e); }
+}
+
 export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of await store().listPayments()) {
-    // Only Lightning on a rail that supports authoritative re-query is pollable here.
-    const adapter = adapterByName(p.payInstruction.provider ?? "");
-    if (!adapter?.confirmSettlement || p.payInstruction.method !== "LIGHTNING") continue;
-    // AWAITING/DETECTED settle; FAILED is re-checked to RECOVER an invoice that
-    // was really paid but wrongly expired (a lost webhook we couldn't reconcile).
-    const recoverable = p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED" || p.state === "FAILED";
-    if (!recoverable || !p.payInstruction.providerRef) continue;
-    if (Date.parse(p.updatedAt) > cutoff) continue;
-    if (p.state === "FAILED" && Date.now() - Date.parse(p.createdAt) > 72 * 3600_000) continue; // don't re-check ancient failures
-    try {
-      const s = await confirmSettlement(p.payInstruction.provider, p.payInstruction.providerRef);
-      if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); continue; } // settle / recover (LN = full lock)
-      // Genuinely unpaid + past expiry → expire so it doesn't sit on "Waiting…"
-      // forever. Only when NOT paid (settled check above ran first). No funds moved.
-      const expiredAt = Date.parse(p.payInstruction.expiresAt);
-      if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
-        await transition(p, "FAILED", "invoice expired — not paid");
-      }
-    } catch (e) { console.error("reconcile inbound", p.id, e); }
+    if (Date.parse(p.updatedAt) > cutoff) continue; // only payments idle for maxAgeMs
+    await reconcileOneInbound(p);
   }
 }
 

@@ -10,7 +10,7 @@ import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured, blinkConfigured } from "./config.js";
 import { rate as ibexRate } from "./adapters/ibex.js";
-import { setRates, CCY } from "./core/rates.js";
+import { setRates, CCY, ratesFresh } from "./core/rates.js";
 import { fetchPublicRates } from "./core/publicRates.js";
 
 /** Reconcile backstops (payouts / cashins / inbounds / refunds / failed-payouts) +
@@ -46,4 +46,15 @@ export async function fxTick(): Promise<void> {
   }
   const pub = await fetchPublicRates();
   if (pub) setRates(pub, "public");
+}
+
+let fxEnsureInflight: Promise<void> | null = null;
+/** Ensure the FX cache is fresh enough to price a LIVE quote. Serverless has no
+ *  long-lived FX poller, so refresh ON-MISS here (deduped) — called from the quote
+ *  path. A warm/fresh cache returns instantly; only a stale/empty cache triggers one
+ *  pull even under a burst of concurrent quotes. */
+export async function ensureFreshRates(): Promise<void> {
+  if (ratesFresh()) return;
+  if (!fxEnsureInflight) fxEnsureInflight = fxTick().finally(() => { fxEnsureInflight = null; });
+  await fxEnsureInflight;
 }

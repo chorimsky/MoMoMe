@@ -14,8 +14,9 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRef
 import { blinkBalances } from "../adapters/blink.js";
 import { accountBalances } from "../adapters/ibex.js";
 import { bolt11AmountMsat } from "../core/bolt11.js";
-import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
+import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
 import { id, nextRef } from "../core/ids.js";
 import {
@@ -364,6 +365,10 @@ api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), async (req, res) 
   // IBEX outage) the cache falls back to a hardcoded BTC price, which would over- or
   // under-charge the customer. Refuse when real value can move and rates aren't fresh.
   // (Sandbox/demo has no real money, so a fallback rate is harmless there.)
+  // Serverless has no long-lived FX poller, so the per-instance cache can be cold/stale
+  // on a request-serving instance — refresh ON-MISS here (deduped) so a live quote isn't
+  // falsely refused. A warm/fresh cache returns instantly; only a miss awaits a pull.
+  if (liveMoney()) await ensureFreshRates().catch(() => {});
   if (liveMoney() && !ratesFresh()) {
     return res.status(503).json({ error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." });
   }
@@ -826,10 +831,26 @@ api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 
   res.json(await store().getPayment(p.id) ?? p);
 });
 
+// Per-instance throttle for the poll-driven inbound re-query below (caps IBEX/Blink
+// calls to ~once/4s per payment even under rapid frontend polling). Pruned lazily.
+const pollReQueryAt = new Map<string, number>();
 api.get("/payments/:id", async (req, res) => {
   const p = await store().getPayment(req.params.id);
   // 404 (not 403) on a non-owned payment too, so the id space can't be probed.
   if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // On-demand settlement backstop: while the customer's client polls a PENDING Lightning
+  // payment, re-query the rail (throttled, in the background) so a paid invoice settles in
+  // seconds even if the webhook was missed — WITHOUT depending on the reconcile cron
+  // (daily on Vercel Hobby). Only pending LN; confirmInbound is idempotent + only settles
+  // on the rail's authoritative confirmation, so this can't fake a payment.
+  if ((p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED") && p.payInstruction.method === "LIGHTNING") {
+    const now = Date.now();
+    if (now - (pollReQueryAt.get(p.id) ?? 0) > 4000) {
+      pollReQueryAt.set(p.id, now);
+      if (pollReQueryAt.size > 500) for (const [k, t] of pollReQueryAt) if (now - t > 600_000) pollReQueryAt.delete(k);
+      background(reconcileOneInbound(p)); // waitUntil-backed; the next poll reflects the settled state
+    }
+  }
   res.json(p);
 });
 

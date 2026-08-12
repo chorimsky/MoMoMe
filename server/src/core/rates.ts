@@ -5,6 +5,7 @@
    IBEX's live EUR/USD. Falls back to last-known / defaults if IBEX is unreachable.
    ============================================================ */
 import { EUR_XAF_PEG } from "../../../shared/domain.js";
+import { register, touch } from "./persist.js";
 
 /** IBEX Hub currency ids (GET /currency/all). */
 export const CCY = { MSAT: 0, SATS: 1, BTC: 2, USD: 3, EUR: 8, USDT: 29, USDC: 30 } as const;
@@ -15,6 +16,19 @@ let cache: { btcUsd: number; usdtUsd: number; usdcUsd: number; eurUsd: number; a
 // Which feed last supplied a REAL number ("IBEX" | "public" | "fallback"). Surfaced
 // via ratesMeta() for the admin health view — the rate source is no longer IBEX-only.
 let sourceLabel: "IBEX" | "public" | "fallback" = "fallback";
+
+// Persist the last real pull so a fresh (serverless) instance starts PRIMED. Cold
+// instances have no long-lived FX poller; without this, the first live quote on a new
+// instance would refuse (ratesFresh() false) until a pull lands. Last-writer-wins is
+// safe for a price cache. On Postgres this write-throughs to the snapshots table and
+// is restored by hydrateSnapshots() at boot.
+register(
+  "rates",
+  () => (cache ? { c: cache, s: sourceLabel } : null),
+  (d: { c: NonNullable<typeof cache>; s: typeof sourceLabel } | null) => {
+    if (d?.c) { cache = d.c; sourceLabel = d.s ?? "IBEX"; }
+  },
+);
 
 /** Merge a fresh pull into the cache (keep last-known for any null). `source` names the
  *  feed the numbers came from (IBEX preferred; a vendor-neutral public source is the
@@ -37,6 +51,7 @@ export function setRates(
     eurUsd: r.eurUsd ?? cache?.eurUsd ?? FALLBACK.eurUsd,
     at: hasReal ? Date.now() : (cache?.at ?? 0), // degraded pull keeps the last real timestamp so it ages out
   };
+  touch("rates"); // persist so a cold serverless instance starts primed
 }
 
 /** True only when we hold a real IBEX pull that's recent enough to price on.

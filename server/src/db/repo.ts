@@ -143,3 +143,20 @@ export async function setSnapshot(key: string, json: string): Promise<void> {
 export async function allSnapshots(): Promise<Array<{ key: string; json: unknown }>> {
   return q<{ key: string; json: unknown }>(`SELECT key, json FROM snapshots`);
 }
+
+/* ---------------- compliance chain (append-only, tamper-evident legal log) ----------------
+   Each event is its OWN row (unlike the coarse snapshot, which is last-writer-wins and can
+   drop a concurrently-appended STR/CTR event across serverless instances). Keyed by the
+   event hash so a re-delivered append is idempotent (ON CONFLICT DO NOTHING). Append-only:
+   no UPDATE/DELETE — the retained legal record is exported/verified from here. */
+export async function appendComplianceEvent(ev: { id: string; kind: string; prevHash: string; hash: string; body: unknown }): Promise<void> {
+  await q(
+    `INSERT INTO compliance_chain(id, kind, prev_hash, hash, body) VALUES($1, $2, $3, $4, $5::jsonb)
+     ON CONFLICT(id) DO NOTHING`,
+    [ev.id, ev.kind, ev.prevHash, ev.hash, JSON.stringify(ev.body)],
+  );
+}
+export async function allComplianceEvents(): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM compliance_chain ORDER BY seq ASC`);
+  return rows.map((r) => r.body);
+}

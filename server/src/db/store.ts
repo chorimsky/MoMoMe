@@ -43,6 +43,13 @@ export interface Store {
   // memory: an in-process per-key mutex. Re-read the payment INSIDE `fn` — a second
   // caller must see the first's committed result and abort. Not re-entrant per payment.
   lockPayment<T>(paymentId: string, fn: () => Promise<T>): Promise<T>;
+  // Compliance chain — durable APPEND-ONLY log (Postgres compliance_chain table). The
+  // coarse key→JSON snapshot is last-writer-wins and can silently lose a concurrently
+  // appended STR/CTR event across instances; this table cannot (each event is its own row,
+  // keyed by hash for idempotency), so the 10-year legal record is retained. No-op on memory
+  // (the in-memory array + snapshot already hold it in a single process).
+  appendComplianceEvent(ev: { id: string; kind: string; prevHash: string; hash: string; body: unknown }): Promise<void>;
+  allComplianceEvents(): Promise<unknown[]>;
 }
 
 /** In-process per-key mutex for the memory backend (single process): chains callers
@@ -77,6 +84,8 @@ const memoryStore: Store = {
   entriesFor: async (pid) => memLedger.entriesFor(pid),
   allEntries: async () => memLedger.allEntries(),
   lockPayment: <T>(paymentId: string, fn: () => Promise<T>) => lockMem(paymentId, fn),
+  appendComplianceEvent: async () => {}, // memory keeps the chain in-process (array + snapshot)
+  allComplianceEvents: async () => [],
 };
 
 /** Postgres backend — the transactional repos. */
@@ -107,6 +116,8 @@ const pgStore: Store = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), 42)", [paymentId]);
       return fn();
     }),
+  appendComplianceEvent: pg.appendComplianceEvent,
+  allComplianceEvents: pg.allComplianceEvents,
 };
 
 /** True when the Postgres backend is selected (STORE_BACKEND=postgres). */

@@ -6,7 +6,7 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, liveMoney, peexitLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertComplianceConfig, liveMoney, peexitLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
@@ -16,6 +16,7 @@ export function runBootChecks(): void {
   assertIbexConfig();
   assertBlinkConfig();
   assertAdminSecurity(); // fail closed on a default admin password in production
+  assertComplianceConfig(); // fail closed on an UNKEYED (forgeable) compliance chain in production
 
   // Never run a real-money rail on a non-durable store — payments, ledger and the
   // 10-year compliance chain would be silently lost. On serverless this is the guard

@@ -20,6 +20,7 @@ import { createApp } from "../src/app.js";
 import { usingPostgres } from "../src/db/store.js";
 import { applySchema } from "../src/db/pg.js";
 import { hydrateSnapshots } from "../src/core/persist.js";
+import { hydrateComplianceChain } from "../src/core/compliance.js";
 import { config, ibexConfigured, blinkConfigured } from "../src/config.js";
 import { registerAccountWebhook } from "../src/adapters/ibex.js";
 import { registerBlinkCallback } from "../src/adapters/blink.js";
@@ -30,7 +31,7 @@ runBootChecks();
 // Wrapped so a transient DB hiccup logs instead of failing module load (which would 500
 // EVERY request incl. /health); a later cold-start or the cron retries the schema.
 if (usingPostgres()) {
-  try { await applySchema(); await hydrateSnapshots(); }
+  try { await applySchema(); await hydrateSnapshots(); await hydrateComplianceChain(); }
   catch (e) { console.error("[boot] Postgres init failed — serving anyway:", e instanceof Error ? e.message : e); }
 }
 // Register the rail webhooks on this cold start (both are idempotent — "already exists"

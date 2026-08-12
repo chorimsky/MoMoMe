@@ -79,6 +79,14 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   const payment = await store().findByProviderRef(event.providerRef);
   if (!payment) return res.json({ ok: true, unmatched: true });
 
+  // Bind the webhook to the payment's ISSUING rail. Matching by providerRef ALONE would let
+  // a webhook verified by rail X settle a payment minted on rail Y — so a forged webhook to a
+  // fail-open / unconfigured rail (whose verifyWebhook can't reject) could settle a real IBEX
+  // payment for crypto never received. Require the URL rail == the rail that minted the invoice.
+  if ((payment.payInstruction.provider ?? "") !== req.params.provider) {
+    return res.json({ ok: true, ignored: true }); // not this rail's payment — refuse to settle it
+  }
+
   // Ack now; settle asynchronously.
   if (event.kind === "detected") {
     await markDetected(payment);
@@ -95,7 +103,16 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   background((async () => {
     if (adapter.confirmSettlement) {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
-      if (s && !s.settled) return; // the rail says this inbound is not paid — ignore
+      if (s) { if (!s.settled) return; } // explicit verdict: not paid → ignore
+      // Indeterminate re-query (null: network failure / a rail that can't re-query this ref).
+      // For a REAL-money LIGHTNING inbound do NOT settle on the webhook body — hold; the
+      // poll/reconcile backstop re-queries and settles the moment the rail can confirm. This
+      // stops a transient re-query failure from downgrading "never settle on the body alone"
+      // to "settle on a secret-gated body". On-chain can't be re-queried (providerRef is an
+      // address), so its secret-gated + IP-allowlisted webhook body stays authoritative
+      // (amount is re-checked against the lock in confirmInbound); non-real inbounds move no
+      // real money either way.
+      else if (adapter.trusted() && payment.payInstruction.method === "LIGHTNING") return;
     }
     await confirmInbound(payment, event.amount);
   })());

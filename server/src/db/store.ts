@@ -12,6 +12,7 @@ import type { Payment, Quote, LedgerAccount, LedgerEntry } from "../../../shared
 import * as mem from "../core/store.js";
 import * as memLedger from "../core/ledger.js";
 import * as pg from "./repo.js";
+import { withTx } from "./pg.js";
 
 export type Leg = pg.Leg;
 
@@ -36,6 +37,24 @@ export interface Store {
   hasDelivered(paymentId: string): Promise<boolean>;
   entriesFor(paymentId: string): Promise<LedgerEntry[]>;
   allEntries(): Promise<LedgerEntry[]>;
+  // Mutual exclusion — run `fn` while holding a per-payment lock so a money-moving
+  // critical section (confirmInbound / onPayoutResult / refund) is serialized across
+  // CONCURRENT serverless instances. Postgres: a transaction-scoped advisory lock;
+  // memory: an in-process per-key mutex. Re-read the payment INSIDE `fn` — a second
+  // caller must see the first's committed result and abort. Not re-entrant per payment.
+  lockPayment<T>(paymentId: string, fn: () => Promise<T>): Promise<T>;
+}
+
+/** In-process per-key mutex for the memory backend (single process): chains callers
+ *  for a given key so they run one-at-a-time, matching the Postgres advisory lock. */
+const _memLocks = new Map<string, Promise<unknown>>();
+function lockMem<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = _memLocks.get(key) ?? Promise.resolve();
+  const result = prev.then(fn, fn);               // run after the prior holder settles
+  const tail = result.then(() => {}, () => {});   // never-rejecting tail for the next waiter
+  _memLocks.set(key, tail);
+  void tail.then(() => { if (_memLocks.get(key) === tail) _memLocks.delete(key); });
+  return result;
 }
 
 /** Memory backend — async facade over the existing synchronous core (identical behaviour). */
@@ -57,6 +76,7 @@ const memoryStore: Store = {
   hasDelivered: async (pid) => memLedger.hasDelivered(pid),
   entriesFor: async (pid) => memLedger.entriesFor(pid),
   allEntries: async () => memLedger.allEntries(),
+  lockPayment: <T>(paymentId: string, fn: () => Promise<T>) => lockMem(paymentId, fn),
 };
 
 /** Postgres backend — the transactional repos. */
@@ -78,6 +98,15 @@ const pgStore: Store = {
   hasDelivered: pg.hasDelivered,
   entriesFor: pg.entriesFor,
   allEntries: pg.allEntries,
+  lockPayment: <T>(paymentId: string, fn: () => Promise<T>): Promise<T> =>
+    withTx(async (client) => {
+      // Serialize all callers for this payment across instances until this txn commits.
+      // hashtext($1) → int4; the constant namespace (42) avoids clashing with other
+      // advisory-lock users. `fn`'s own reads/writes use pooled connections and see the
+      // prior holder's committed state (it committed before releasing this lock).
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1), 42)", [paymentId]);
+      return fn();
+    }),
 };
 
 /** True when the Postgres backend is selected (STORE_BACKEND=postgres). */

@@ -21,8 +21,8 @@
     "test:payouts": "tsx test/payouts.test.ts",
     "test:pg": "tsx test/pg-store.test.ts",
     "test:store": "DB_PATH=:memory: tsx test/store-contract.test.ts",
-    "test:rates": "tsx test/public-rates.test.ts",
-    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts"
+    "test:rates": "DB_PATH=:memory: tsx test/public-rates.test.ts",
+    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && DB_PATH=:memory: tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts"
   },
   "dependencies": {
     "@vercel/functions": "^3.9.2",

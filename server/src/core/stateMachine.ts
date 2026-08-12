@@ -122,8 +122,17 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
-export async function confirmInbound(p: Payment, actualAmount?: number): Promise<void> {
-  if (inboundBooked(p)) return; // already settling/settled/held — never re-book (see inboundBooked)
+export async function confirmInbound(pIn: Payment, actualAmount?: number): Promise<void> {
+  // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
+  // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
+  // webhooks) re-reads inside the lock, sees the booking below, and aborts — closing the
+  // double-settle → double real-payout hole (memory's shared-object serialization the tests
+  // rely on does NOT hold on Postgres, where each call gets an independent copy).
+  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount));
+}
+async function confirmInboundLocked(paymentId: string, actualAmount?: number): Promise<void> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock
+  if (!p || inboundBooked(p)) return; // already settling/settled/held — never re-book (see inboundBooked)
   // Compare against the amount LOCKED at quote time (carried on the instruction),
   // never a freshly-recomputed rate — spot drifts, and the customer paid the locked
   // invoice amount. Recomputing here would falsely trip the guard on a good payment.
@@ -242,7 +251,7 @@ export async function confirmInbound(p: Payment, actualAmount?: number): Promise
   // reconcile backstop. All idempotent. Simulated: fake the callback inline.
   if (!res.simulated) { void pollPayout(p.ref); return; }
   await wait(900);
-  await onPayoutResult(p.ref, "COMPLETED", res.providerRef);
+  await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); // lock already held
 }
 
 /** Actively poll a real payout's status for fast settlement when the dashboard
@@ -266,7 +275,14 @@ async function pollPayout(ref: string): Promise<void> {
  * Idempotent: only acts on a payment still awaiting its payout result.
  */
 export async function onPayoutResult(ref: string, status: PayoutStatus, providerRef?: string): Promise<void> {
-  const p = await store().findPaymentByRef(ref);
+  const p0 = await store().findPaymentByRef(ref);
+  if (!p0) return;
+  // Per-payment lock: the callback, the status poll AND the reconcile backstop can all
+  // fire for one payout — serialize so the delivery leg + identity provisioning run once.
+  return store().lockPayment(p0.id, () => onPayoutResultLocked(ref, status, providerRef));
+}
+async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerRef?: string): Promise<void> {
+  const p = await store().findPaymentByRef(ref); // fresh read under the lock
   if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved / unknown
 
   // Feed the route-selection engine: success rate, latency, availability.
@@ -453,7 +469,12 @@ export async function adminRetry(p: Payment): Promise<boolean> {
 
 /** Admin: refund a payment that did not deliver — reverses its ledger entries so
  *  the books stay balanced and the customer's inbound is returned. */
-export async function adminRefund(p: Payment): Promise<boolean> {
+export async function adminRefund(pIn: Payment): Promise<boolean> {
+  return store().lockPayment(pIn.id, () => adminRefundLocked(pIn.id));
+}
+async function adminRefundLocked(paymentId: string): Promise<boolean> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock
+  if (!p) return false;
   if (p.displayStatus === "Completed") return false;
   // Idempotent: never reverse an already-refunded payment again — reversePayment
   // posts the inverse of EVERY existing entry, so a second refund would double-
@@ -478,8 +499,14 @@ export async function adminRefund(p: Payment): Promise<boolean> {
    Lightning-only, amount-bounded (never over-pay), idempotent (the needs-destination
    flag claims it). Settlement is confirmed by polling the pay transaction.
    ============================================================ */
-export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: boolean; error?: string }> {
-  if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
+export async function completeRefund(pIn: Payment, bolt11: string): Promise<{ ok: boolean; error?: string }> {
+  // Lock so two racing claims can't both pass the refundNeedsDestination gate below and
+  // both pay the sender (double refund if they carry different invoices).
+  return store().lockPayment(pIn.id, () => completeRefundLocked(pIn.id, bolt11));
+}
+async function completeRefundLocked(paymentId: string, bolt11: string): Promise<{ ok: boolean; error?: string }> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock
+  if (!p || p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
   if (p.payInstruction.method !== "LIGHTNING") return { ok: false, error: "refund_lightning_only" };
   const inboundMsat = Math.round(p.payInstruction.amount * 1e11);
   const invMsat = bolt11AmountMsat(bolt11);
@@ -510,7 +537,7 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
     p.refundTxId = r.transactionId;
     p.refundProvider = r.provider; // re-query the SAME rail that paid it
     await store().putPayment(p);
-    if (r.settled) await finalizeRefund(p);
+    if (r.settled) await finalizeRefundLocked(p.id); // lock already held
     else void pollRefund(p.ref);
     return { ok: true };
   } catch (e) {
@@ -527,7 +554,11 @@ export async function completeRefund(p: Payment, bolt11: string): Promise<{ ok: 
 /** The outbound refund settled — unwind the ledger (we no longer hold the inbound) and
  *  mark REFUNDED. Idempotent. */
 async function finalizeRefund(p: Payment): Promise<void> {
-  if (p.state === "REFUNDED") return;
+  return store().lockPayment(p.id, () => finalizeRefundLocked(p.id));
+}
+async function finalizeRefundLocked(paymentId: string): Promise<void> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock
+  if (!p || p.state === "REFUNDED") return; // already reversed — never double-reverse (inverts the ledger)
   await store().reversePayment(p.id);
   await transition(p, "REFUNDED", "crypto refunded to sender");
 }

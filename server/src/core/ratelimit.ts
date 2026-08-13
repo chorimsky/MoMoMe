@@ -4,6 +4,9 @@
    Buckets self-expire and a periodic sweep bounds memory under attack.
    ============================================================ */
 
+import { usingPostgres } from "../db/store.js";
+import { bumpRateLimit as pgBump, resetRateLimit as pgReset } from "../db/repo.js";
+
 interface Bucket { count: number; resetAt: number; }
 const buckets = new Map<string, Bucket>();
 let lastSweep = Date.now();
@@ -26,6 +29,27 @@ export function rateLimit(key: string, max: number, windowMs: number): RateResul
 
 /** Clear a key — e.g. on a successful login so a legit user isn't penalised. */
 export function rateLimitReset(key: string): void { buckets.delete(key); }
+
+/** DURABLE, cross-instance rate limit (Postgres) for AUTH-sensitive endpoints. The
+ *  in-memory limiter is per-instance, so an attacker could spread brute-force of the
+ *  admin password / recovery key across concurrent serverless invocations and never hit
+ *  the throttle. Falls back to the in-memory limiter on the memory backend or a transient
+ *  DB error — that still bounds per-instance, so it NEVER fails open to unlimited. */
+export async function rateLimitDurable(key: string, max: number, windowMs: number): Promise<RateResult> {
+  if (!usingPostgres()) return rateLimit(key, max, windowMs);
+  try {
+    const { count, resetInMs } = await pgBump(key, windowMs);
+    const ok = count <= max;
+    return { ok, retryAfterSec: ok ? 0 : Math.ceil(resetInMs / 1000), remaining: Math.max(0, max - count) };
+  } catch {
+    return rateLimit(key, max, windowMs); // DB hiccup → per-instance limit (still bounded)
+  }
+}
+/** Clear a durable counter (e.g. on a successful login). Best-effort. */
+export async function rateLimitResetDurable(key: string): Promise<void> {
+  if (!usingPostgres()) { rateLimitReset(key); return; }
+  try { await pgReset(key); } catch { /* best-effort — a lingering counter self-expires */ }
+}
 
 /** Real client IP — relies on app.set("trust proxy", …) so req.ip is trustworthy
  *  (not a raw, spoofable X-Forwarded-For). */

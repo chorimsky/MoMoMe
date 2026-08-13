@@ -108,3 +108,12 @@ CREATE TABLE IF NOT EXISTS momo_ops (
 );
 CREATE INDEX IF NOT EXISTS momo_ops_status ON momo_ops (status);
 CREATE INDEX IF NOT EXISTS momo_ops_transfer ON momo_ops (transfer_id) WHERE transfer_id IS NOT NULL;
+
+-- Durable fixed-window rate-limit counters, shared across serverless instances (the
+-- in-memory limiter is per-instance → brute-force throttles were bypassable).
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key         TEXT PRIMARY KEY,
+  count       INTEGER NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_limits_expires ON rate_limits (expires_at);

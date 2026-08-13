@@ -184,3 +184,27 @@ export async function allMomoOps(): Promise<unknown[]> {
   const rows = await q<{ body: unknown }>(`SELECT body FROM momo_ops ORDER BY at DESC`);
   return rows.map((r) => r.body);
 }
+
+/* ---------------- rate limits (durable fixed-window counters, shared across instances) ----------------
+   Atomic bump in a single statement so concurrent serverless instances share one counter —
+   the in-memory limiter is per-instance and lets an attacker spread brute-force across them. */
+export async function bumpRateLimit(key: string, windowMs: number): Promise<{ count: number; resetInMs: number }> {
+  const secs = windowMs / 1000;
+  const rows = await q<{ count: number; reset_in_ms: number }>(
+    `INSERT INTO rate_limits(key, count, expires_at)
+       VALUES($1, 1, now() + make_interval(secs => $2))
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN rate_limits.expires_at <= now() THEN 1 ELSE rate_limits.count + 1 END,
+       expires_at = CASE WHEN rate_limits.expires_at <= now() THEN now() + make_interval(secs => $2) ELSE rate_limits.expires_at END
+     RETURNING count, GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now())) * 1000)::bigint AS reset_in_ms`,
+    [key, secs],
+  );
+  const r = rows[0];
+  return { count: Number(r?.count ?? 1), resetInMs: Number(r?.reset_in_ms ?? windowMs) };
+}
+export async function resetRateLimit(key: string): Promise<void> {
+  await q(`DELETE FROM rate_limits WHERE key = $1`, [key]);
+}
+export async function pruneRateLimits(): Promise<void> {
+  await q(`DELETE FROM rate_limits WHERE expires_at < now()`);
+}

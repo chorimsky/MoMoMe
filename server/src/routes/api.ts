@@ -49,7 +49,7 @@ import {
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
-import { rateLimit, rateLimitReset, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
+import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
 
@@ -66,8 +66,11 @@ api.post("/admin/login", async (req, res) => {
   const ip = clientIp(req);
   const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
   const uname = (typeof username === "string" ? username : "").toLowerCase().slice(0, 64);
-  const ipRl = rateLimit(`login:ip:${ip}`, 20, 15 * 60_000);
-  const userRl = rateLimit(`login:user:${uname}`, 8, 15 * 60_000);
+  // DURABLE (cross-instance) so brute-force can't be spread across serverless instances.
+  const [ipRl, userRl] = await Promise.all([
+    rateLimitDurable(`login:ip:${ip}`, 20, 15 * 60_000),
+    rateLimitDurable(`login:user:${uname}`, 8, 15 * 60_000),
+  ]);
   if (!ipRl.ok || !userRl.ok) {
     res.setHeader("Retry-After", String(Math.max(ipRl.retryAfterSec, userRl.retryAfterSec)));
     return res.status(429).json({ error: "rate_limited", message: "Too many sign-in attempts. Please wait a few minutes and try again." });
@@ -75,7 +78,7 @@ api.post("/admin/login", async (req, res) => {
   const user = typeof username === "string" && typeof password === "string" ? verifyCredentials(username, password) : null;
   if (!user) return res.status(401).json({ error: "bad_credentials", message: "Incorrect username or password." });
   // Successful auth — clear this user's counter so a legit operator isn't locked.
-  rateLimitReset(`login:user:${uname}`);
+  await rateLimitResetDurable(`login:user:${uname}`);
   const { token, expiresAt } = issueToken({ uid: user.id, role: user.role });
   res.json({ token, expiresAt, user: { id: user.id, username: user.username, role: user.role } });
 });
@@ -93,7 +96,7 @@ api.get("/admin/session", async (req, res) => {
 api.post("/admin/forgot", async (req, res) => {
   // The recovery key gates resetting ANY account — throttle hard against
   // online brute force of the master key.
-  const rl = rateLimit(`forgot:${clientIp(req)}`, 5, 15 * 60_000);
+  const rl = await rateLimitDurable(`forgot:${clientIp(req)}`, 5, 15 * 60_000); // durable — brute-force of the master key
   if (!rl.ok) {
     res.setHeader("Retry-After", String(rl.retryAfterSec));
     return res.status(429).json({ error: "rate_limited", message: "Too many attempts. Please wait and try again." });

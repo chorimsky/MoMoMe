@@ -167,3 +167,20 @@ export async function getSnapshot(key: string): Promise<unknown | undefined> {
   const rows = await q<{ json: unknown }>(`SELECT json FROM snapshots WHERE key = $1`, [key]);
   return rows.length ? rows[0].json : undefined;
 }
+
+/* ---------------- momo_ops (admin Mobile-Money ops — real money, one row per op) ----------------
+   Per-row upsert (keyed by op id) so a concurrent op's audit record is never clobbered by the
+   coarse snapshot, and reconcile/AML-screen can read the COMPLETE cross-instance set. */
+export async function upsertMomoOp(op: { id: string; kind: string; status: string; transferId?: string; at: string }): Promise<void> {
+  await q(
+    `INSERT INTO momo_ops(id, kind, status, transfer_id, at, body, updated_at)
+     VALUES($1, $2, $3, $4, $5, $6::jsonb, now())
+     ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, status = excluded.status,
+       transfer_id = excluded.transfer_id, body = excluded.body, updated_at = now()`,
+    [op.id, op.kind, op.status, op.transferId ?? null, op.at, JSON.stringify(op)],
+  );
+}
+export async function allMomoOps(): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM momo_ops ORDER BY at DESC`);
+  return rows.map((r) => r.body);
+}

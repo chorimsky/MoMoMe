@@ -50,6 +50,11 @@ export interface Store {
   // (the in-memory array + snapshot already hold it in a single process).
   appendComplianceEvent(ev: { id: string; kind: string; prevHash: string; hash: string; body: unknown }): Promise<void>;
   allComplianceEvents(): Promise<unknown[]>;
+  // Admin Mobile-Money ops — durable per-row (Postgres momo_ops table). Upsert by op id so a
+  // concurrent op's audit record isn't clobbered by the snapshot, and reconcile/AML-screen can
+  // read the COMPLETE cross-instance set (leg-2 fires + full screening). No-op on memory.
+  upsertMomoOp(op: { id: string; kind: string; status: string; transferId?: string; at: string }): Promise<void>;
+  allMomoOps(): Promise<unknown[]>;
 }
 
 /** In-process per-key mutex for the memory backend (single process): chains callers
@@ -86,6 +91,8 @@ const memoryStore: Store = {
   lockPayment: <T>(paymentId: string, fn: () => Promise<T>) => lockMem(paymentId, fn),
   appendComplianceEvent: async () => {}, // memory keeps the chain in-process (array + snapshot)
   allComplianceEvents: async () => [],
+  upsertMomoOp: async () => {}, // memory keeps ops in-process (array + snapshot)
+  allMomoOps: async () => [],
 };
 
 /** Postgres backend — the transactional repos. */
@@ -118,6 +125,8 @@ const pgStore: Store = {
     }),
   appendComplianceEvent: pg.appendComplianceEvent,
   allComplianceEvents: pg.allComplianceEvents,
+  upsertMomoOp: pg.upsertMomoOp,
+  allMomoOps: pg.allMomoOps,
 };
 
 /** True when the Postgres backend is selected (STORE_BACKEND=postgres). */

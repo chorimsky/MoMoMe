@@ -236,7 +236,7 @@ export async function scanCompliance(now: string = new Date().toISOString()): Pr
 
   // Admin cash-in/out are transactions too — screen + threshold ALL retained ops
   // (not just the 50 most recent, which let large older disbursements escape screening).
-  for (const o of momoOps.forCompliance()) {
+  for (const o of await momoOps.forCompliance()) {
     const hit = sanctionsHit(o.phone, undefined, s.sanctionsList);
     if (hit) openCase(keys, now, "sanctions", o.phone, o.amount, `Cash ${o.kind} counterparty matches watchlist "${hit}"`, { ref: o.id });
     if (o.amount >= s.ctrThresholdXaf) openCase(keys, now, "ctr_threshold", o.phone, o.amount, `Admin ${o.kind} ≥ reporting threshold`, { ref: o.id });

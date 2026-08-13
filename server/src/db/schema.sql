@@ -94,3 +94,17 @@ CREATE TABLE IF NOT EXISTS snapshots (
   version     BIGINT NOT NULL DEFAULT 1,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Admin Mobile-Money ops (cash-in/out + treasury rebalance legs) — REAL money, one row
+-- per op so a concurrent op's audit record can't be clobbered by the coarse snapshot.
+CREATE TABLE IF NOT EXISTS momo_ops (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  status      TEXT NOT NULL,
+  transfer_id TEXT,
+  at          TIMESTAMPTZ NOT NULL,
+  body        JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS momo_ops_status ON momo_ops (status);
+CREATE INDEX IF NOT EXISTS momo_ops_transfer ON momo_ops (transfer_id) WHERE transfer_id IS NOT NULL;

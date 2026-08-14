@@ -15,9 +15,16 @@
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview",
-      "ios": { "simulator": false },
+      "credentialsSource": "local",
       "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "ios-sim": {
+      "distribution": "internal",
+      "ios": { "simulator": true },
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"

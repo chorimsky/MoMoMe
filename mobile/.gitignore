@@ -47,3 +47,7 @@ example
 *.log
 .*.log
 .*.sh
+
+# EAS signing credentials (secret — never commit)
+credentials/
+credentials.json

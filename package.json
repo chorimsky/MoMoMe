@@ -9,7 +9,14 @@
     "dev:app": "pnpm --filter @momome/app dev",
     "dev:server": "pnpm --filter @momome/server dev",
     "build": "pnpm --filter @momome/server build && pnpm --filter @momome/app build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm test",
+    "mobile": "npm --prefix mobile run",
+    "mobile:start": "cd mobile && npx expo start",
+    "mobile:doctor": "cd mobile && npx expo-doctor",
+    "mobile:ios": "cd mobile && npx expo start --ios",
+    "mobile:android": "cd mobile && npx expo start --android"
   },
   "engines": {
     "node": ">=22.5.0"

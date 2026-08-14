@@ -14,8 +14,8 @@ function ok(label: string, cond: boolean, detail = "") {
 }
 
 async function main() {
-  const { parsePublicRates } = await import("../src/core/publicRates.js");
-  const { setRates, ratesFresh, ratesMeta, btcUsd } = await import("../src/core/rates.js");
+  const { parsePublicRates, parseKrakenBtc } = await import("../src/core/publicRates.js");
+  const { setRates, setDualBtc, ratesFresh, ratesMeta, btcUsd } = await import("../src/core/rates.js");
 
   console.log("\nPublic rates — parsePublicRates (Coinbase shapes)");
   {
@@ -45,6 +45,31 @@ async function main() {
   // A degraded pull (all null) must NOT re-stamp — but keeps the last real values.
   setRates({ btcUsd: null, usdtUsd: null, usdcUsd: null, eurUsd: null }, "public");
   ok("degraded pull keeps last btcUsd", btcUsd() === 100000);
+
+  console.log("\nPublic rates — parseKrakenBtc (Kraken ticker shape)");
+  {
+    const r = parseKrakenBtc({ result: { XXBTZUSD: { c: ["65000.0", "0.01"] } } });
+    ok("kraken close parsed", r === 65000, String(r));
+    ok("kraken missing → null", parseKrakenBtc({ result: {} }) === null);
+    ok("kraken malformed → null", parseKrakenBtc(null) === null);
+  }
+
+  console.log("\nPublic rates — dual-source divergence guard (F4)");
+  // Two venues that AGREE → cache the mean, feed stays fresh.
+  setDualBtc(100000, 100400);
+  ok("agree → mean cached", btcUsd() === 100200, String(btcUsd()));
+  ok("agree → fresh", ratesFresh());
+  ok("agree → not divergent", ratesMeta().divergent === false);
+  // Two venues 9% apart → REFUSE: cache unchanged, feed marked divergent, quoting stops.
+  setDualBtc(65000, 71200);
+  ok("diverge → cache NOT updated", btcUsd() === 100200, String(btcUsd()));
+  ok("diverge → ratesFresh() false", !ratesFresh());
+  ok("diverge → meta.divergent true", ratesMeta().divergent === true);
+  // One venue down is not a divergence → single-source fallback, feed recovers.
+  setDualBtc(99000, null);
+  ok("one venue down → single-source", btcUsd() === 99000, String(btcUsd()));
+  ok("one venue down → fresh again", ratesFresh());
+  ok("one venue down → not divergent", ratesMeta().divergent === false);
 
   console.log(`\n✅ ${passed} assertions passed`);
 }

@@ -78,8 +78,12 @@ export const PROVIDER_PAYOUT_MAX: Record<ProviderId, number> = {
   AIRTEL: 500_000,
 };
 
-/** Available XAF payout float (treasury). Payouts are blocked below this. */
-export const XAF_FLOAT_BASE = 200_000_000;
+/** CEILING on XAF payout capacity — a conservative cap, not a measurement. The real
+ *  figure comes from live aggregator balances (core/routing aggregatorFloatXaf); this
+ *  bounds it so a wrong or spoofed balance response can't authorize unlimited payout,
+ *  and stands in when no rail can be queried. Keep it at or below the treasury's actual
+ *  funded position. */
+export const XAF_FLOAT_MAX = 200_000_000;
 
 /** Quote TTL per rail, in seconds. */
 export const QUOTE_TTL_SEC: Record<Method, number> = {

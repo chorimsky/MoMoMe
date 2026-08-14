@@ -29,7 +29,7 @@ import type {
   ComplianceCase, ComplianceCaseStatus, ComplianceCaseType, ComplianceEvent,
   ComplianceReport, ComplianceSeverity, Payment, SuspiciousTransactionReport,
 } from "../../../shared/types.js";
-import { listPayments } from "./store.js";
+import { store, usingPostgres } from "../db/store.js";
 import { getSettings } from "./settings.js";
 import { payoutBlocked } from "./merchant.js";
 import { listIdentities } from "./identity.js";
@@ -37,6 +37,7 @@ import * as peex from "../integrations/peex/service.js";
 import * as momoOps from "./momoOps.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
+import { background } from "./background.js";
 
 const cases: ComplianceCase[] = [];
 const strs: SuspiciousTransactionReport[] = [];
@@ -122,8 +123,31 @@ function appendEvent(at: string, actor: string, action: string, extra?: { caseId
   touch("compliance");        // write-ahead: persist the event BEFORE the anchor, so a
   setAnchor(ev.seq, ev.hash); // crash leaves the anchor one-behind a valid chain (re-healed
                               // at boot), never a false "truncation" tamper verdict.
+  // Durable append-only write-through (Postgres): the coarse snapshot above is
+  // last-writer-wins and can silently drop this event if another instance snapshots
+  // concurrently — the compliance_chain table cannot (each event is its own row, keyed by
+  // hash). This guarantees the 10-year legal record is RETAINED even when the in-memory
+  // snapshot diverges across serverless instances. waitUntil-backed; no-op on memory.
+  background(store().appendComplianceEvent({ id: ev.hash, kind: ev.action, prevHash: ev.prevHash, hash: ev.hash, body: ev }));
   return ev;
 }
+/** Postgres: load the compliance chain from the durable APPEND-ONLY table (the no-loss
+ *  source of truth) and re-anchor to its head. Runs at boot AFTER hydrateSnapshots (which
+ *  restored cases/strs) and BEFORE serving — it overrides the lossy snapshot's `events`,
+ *  and fixes the old anchor re-heal that ran at import before the PG restore had populated
+ *  events (a false "truncation" verdict). No-op on memory (single process holds the chain). */
+export async function hydrateComplianceChain(): Promise<void> {
+  if (!usingPostgres()) return;
+  try {
+    const rows = await store().allComplianceEvents();
+    if (!rows.length) return;
+    events.length = 0;
+    events.push(...(rows as ComplianceEvent[]));
+    const head = events[events.length - 1];
+    setAnchor(events.length, head.hash); // re-anchor to the durable head, post-hydrate
+  } catch (e) { console.error("compliance chain hydrate", e); }
+}
+
 /** Recompute the whole chain AND check it against the signed anchor — true only
  *  when nothing was altered, re-ordered, or truncated. */
 export function verifyIntegrity(): boolean {
@@ -186,11 +210,11 @@ function openCase(keys: Set<string>, at: string, type: ComplianceCaseType, subje
 /** Run the rule set over the current transaction stream and open any new cases.
  *  `now` is passed in (ISO) so the module never reads the clock itself. Idempotent:
  *  a case is opened at most once per (type, subject/ref). */
-export function scanCompliance(now: string = new Date().toISOString()): void {
+export async function scanCompliance(now: string = new Date().toISOString()): Promise<void> {
   const s = getSettings().compliance;
   const before = cases.length;
   const keys = caseKeys(); // live dedup set for this scan (O(1) checks → linear scan)
-  const pays = listPayments();
+  const pays = await store().listPayments();
 
   // Sanctions screening runs on EVERY counterparty (even a mere quote) — screening
   // the party is always appropriate. Everything else needs an actual transaction.
@@ -212,7 +236,7 @@ export function scanCompliance(now: string = new Date().toISOString()): void {
 
   // Admin cash-in/out are transactions too — screen + threshold ALL retained ops
   // (not just the 50 most recent, which let large older disbursements escape screening).
-  for (const o of momoOps.forCompliance()) {
+  for (const o of await momoOps.forCompliance()) {
     const hit = sanctionsHit(o.phone, undefined, s.sanctionsList);
     if (hit) openCase(keys, now, "sanctions", o.phone, o.amount, `Cash ${o.kind} counterparty matches watchlist "${hit}"`, { ref: o.id });
     if (o.amount >= s.ctrThresholdXaf) openCase(keys, now, "ctr_threshold", o.phone, o.amount, `Admin ${o.kind} ≥ reporting threshold`, { ref: o.id });

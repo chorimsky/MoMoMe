@@ -23,5 +23,10 @@ data/
 # Misc
 .thumbnail
 
-# Hostinger build artifact
-momome-hostinger.zip
+# Deployment artifacts
+*.zip
+
+# Local mobile build/tooling scratch (mobile/ has its own node_modules; see mobile/README)
+mobile/.*.sh
+mobile/.*.log
+mobile/.cfgerr.txt

@@ -6,10 +6,11 @@
 import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
-import { findByProviderRef } from "../core/store.js";
+import { store } from "../db/store.js";
 import { markDetected, confirmInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
+import { background } from "../core/background.js";
 
 export const webhooks = Router();
 
@@ -32,11 +33,11 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   res.json({ ok: true }); // ack fast; settle in background
   for (const ev of events) {
     if (!adapter.statusByKey(ev.ref)) continue; // not one of ours
-    void (async () => {
+    background((async () => {
       const status = await adapter.queryStatus(ev.ref); // AUTHORITATIVE re-query
       if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status, ev.providerRef);
       // else: inconclusive → leave it; the reconcile backstop settles it.
-    })().catch((e) => console.error(`${name} payout result`, ev.ref, e));
+    })());
   }
 }
 
@@ -56,7 +57,7 @@ webhooks.post("/peex", express.raw({ type: "*/*" }), (req, res) => {
 });
 
 // Raw body so the signature is computed over the exact bytes the provider signed.
-webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
+webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   const adapter = adapterByName(req.params.provider);
   if (!adapter) return res.status(404).json({ error: "unknown_provider" });
 
@@ -75,12 +76,20 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
   const event = adapter.parseEvent(parsed);
   if (!event) return res.json({ ok: true, ignored: true });
 
-  const payment = findByProviderRef(event.providerRef);
+  const payment = await store().findByProviderRef(event.providerRef);
   if (!payment) return res.json({ ok: true, unmatched: true });
+
+  // Bind the webhook to the payment's ISSUING rail. Matching by providerRef ALONE would let
+  // a webhook verified by rail X settle a payment minted on rail Y — so a forged webhook to a
+  // fail-open / unconfigured rail (whose verifyWebhook can't reject) could settle a real IBEX
+  // payment for crypto never received. Require the URL rail == the rail that minted the invoice.
+  if ((payment.payInstruction.provider ?? "") !== req.params.provider) {
+    return res.json({ ok: true, ignored: true }); // not this rail's payment — refuse to settle it
+  }
 
   // Ack now; settle asynchronously.
   if (event.kind === "detected") {
-    markDetected(payment);
+    await markDetected(payment);
     return res.json({ ok: true });
   }
   res.json({ ok: true });
@@ -91,11 +100,20 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), (req, res) => {
   // on-chain address) or the rail has no re-query, in which case we fall back to the
   // verified webhook (still secret-gated, amount re-checked in confirmInbound); only
   // an EXPLICIT not-settled result is rejected.
-  void (async () => {
+  background((async () => {
     if (adapter.confirmSettlement) {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
-      if (s && !s.settled) return; // the rail says this inbound is not paid — ignore
+      if (s) { if (!s.settled) return; } // explicit verdict: not paid → ignore
+      // Indeterminate re-query (null: network failure / a rail that can't re-query this ref).
+      // For a REAL-money LIGHTNING inbound do NOT settle on the webhook body — hold; the
+      // poll/reconcile backstop re-queries and settles the moment the rail can confirm. This
+      // stops a transient re-query failure from downgrading "never settle on the body alone"
+      // to "settle on a secret-gated body". On-chain can't be re-queried (providerRef is an
+      // address), so its secret-gated + IP-allowlisted webhook body stays authoritative
+      // (amount is re-checked against the lock in confirmInbound); non-real inbounds move no
+      // real money either way.
+      else if (adapter.trusted() && payment.payInstruction.method === "LIGHTNING") return;
     }
     await confirmInbound(payment, event.amount);
-  })().catch((e) => console.error("settle error", payment.id, e));
+  })());
 });

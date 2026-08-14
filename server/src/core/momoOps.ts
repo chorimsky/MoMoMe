@@ -11,6 +11,8 @@ import type { CountryCode, MomoFeeInfo, MomoOp, MomoRail, MomoRailBalance, Provi
 import { detectProvider } from "../../../shared/domain.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
+import { store, usingPostgres } from "../db/store.js";
+import { background } from "./background.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
 import type { DisburseRequest, PayoutStatus } from "../adapters/pawapay.js";
@@ -20,9 +22,18 @@ const ops: MomoOp[] = [];
 // movements (was 200 — beyond that, large disbursements escaped CTR/sanctions checks).
 const OP_CAP = 5000;
 register("momoops", () => ops.slice(0, OP_CAP), (d: MomoOp[]) => { ops.push(...d); });
-export function history(): MomoOp[] { return ops.slice(0, 50); }        // recent, for the admin UI
-export function forCompliance(): MomoOp[] { return ops; }               // ALL retained ops, for screening
-function record(o: MomoOp): void { ops.unshift(o); if (ops.length > OP_CAP) ops.pop(); touch("momoops"); }
+export function history(): MomoOp[] { return ops.slice(0, 50); }        // recent, for the admin UI (in-instance)
+/** ALL retained ops for AML screening. On Postgres read the durable per-row table so a real
+ *  money movement recorded on ANOTHER serverless instance is still screened (the snapshot is
+ *  last-writer-wins and can drop it). Falls back to in-memory on the memory backend / a DB error. */
+export async function forCompliance(): Promise<MomoOp[]> {
+  if (usingPostgres()) { try { return (await store().allMomoOps()) as MomoOp[]; } catch { /* fall back */ } }
+  return ops;
+}
+/** Persist an op: the coarse snapshot (in-process cache) AND — on Postgres — a durable
+ *  per-ROW upsert so a concurrent op's audit record can't be clobbered by last-writer-wins. */
+function persistOp(o: MomoOp): void { touch("momoops"); background(store().upsertMomoOp(o)); }
+function record(o: MomoOp): void { ops.unshift(o); if (ops.length > OP_CAP) ops.pop(); persistOp(o); }
 
 /* ---- concurrency + idempotency guards for manual money ops ----
    Node is single-threaded but async, so two requests can interleave at an `await`.
@@ -39,9 +50,16 @@ function withMomoLock<T>(fn: () => Promise<T>): Promise<T> {
 /** An exact prior op — same (kind, phone, amount, actor), not failed, within the
  *  window — means this is a double-click / client-retry / replay. Returning it
  *  instead of submitting again prevents a second REAL disbursement. */
-function recentDuplicate(kind: MomoOp["kind"], phone: string, amount: number, by: string, windowMs = 90_000): MomoOp | undefined {
+async function recentDuplicate(kind: MomoOp["kind"], phone: string, amount: number, by: string, windowMs = 90_000): Promise<MomoOp | undefined> {
   const now = Date.now();
-  return ops.find((o) => o.kind === kind && o.phone === phone && o.amount === amount && o.by === by && o.status !== "failed" && now - Date.parse(o.at) < windowMs);
+  const match = (o: MomoOp) => o.kind === kind && o.phone === phone && o.amount === amount && o.by === by && o.status !== "failed" && now - Date.parse(o.at) < windowMs;
+  const local = ops.find(match);
+  if (local || !usingPostgres()) return local;
+  // Cross-instance: a double-click / retry may have hit another instance, whose op isn't in
+  // local memory. Check the durable table so we don't submit a SECOND real disbursement.
+  // (Residual race — two instances checking before either's op persists — still needs a
+  // durable lock like the payment path's lockPayment; this closes the common case.)
+  return ((await store().allMomoOps().catch(() => [])) as MomoOp[]).find(match);
 }
 
 /** Reconcile async admin Mobile Money ops (called on the reconcile loop):
@@ -52,7 +70,11 @@ function recentDuplicate(kind: MomoOp["kind"], phone: string, amount: number, by
  *    payout has actually landed there. Idempotent. */
 export async function reconcilePendingCashins(): Promise<void> {
   const now = Date.now();
-  for (const o of ops) {
+  // On Postgres read the COMPLETE cross-instance set from the durable table — a rebalance's
+  // disburse leg (transfer_out) may have been initiated on ANOTHER instance, and its collect
+  // leg (leg 2) must still fire from here rather than strand funds on the treasury phone.
+  const pending = usingPostgres() ? ((await store().allMomoOps().catch(() => [])) as MomoOp[]) : ops;
+  for (const o of pending) {
     // Rebalance legs get a wider window (72h): if leg-1's disburse only completes
     // after a rail delay / restart gap, leg-2 must still fire rather than strand the
     // funds on the treasury phone. Plain cash-ins settle fast → keep the 24h scan.
@@ -60,13 +82,13 @@ export async function reconcilePendingCashins(): Promise<void> {
     if (o.rail !== "peexit" || now - Date.parse(o.at) > maxAge * 3600_000) continue;
     if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
       const s = await peexit.collectStatus(o.id).catch(() => null);
-      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); }
-      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; touch("momoops"); }
+      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; persistOp(o); }
+      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "collection rejected by payer/rail"; persistOp(o); }
     } else if (o.kind === "transfer_out") {
       if (o.status === "accepted") {
         const s = await peexit.queryStatus(o.id).catch(() => null);
-        if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); await fireCollectLeg(o); }
-        else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); touch("momoops"); }
+        if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; persistOp(o); await fireCollectLeg(o); }
+        else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); persistOp(o); }
       } else if (o.status === "completed") {
         await fireCollectLeg(o); // idempotent backstop: ensure leg 2 exists
       }
@@ -75,8 +97,8 @@ export async function reconcilePendingCashins(): Promise<void> {
       // (completed/failed) instead of a stuck "accepted" that tempts a resubmit
       // (which — past the dedup window — would be a second real disbursement).
       const s = await peexit.queryStatus(o.id).catch(() => null);
-      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; touch("momoops"); }
-      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); touch("momoops"); }
+      if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; persistOp(o); }
+      else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? (peexit.failReason(o.id) ?? "rejected by the rail"); persistOp(o); }
     }
   }
 }
@@ -139,7 +161,7 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   // fresh id per call, so this app-level guard is the main defense against an
   // operator resubmitting a payout they believe stalled. Cash-out reconcile
   // (above) terminalizes pending rows so a resubmit is rarely needed.
-  const dup = recentDuplicate("cashout", phone, amount, by, 5 * 60_000);
+  const dup = await recentDuplicate("cashout", phone, amount, by, 5 * 60_000);
   if (dup) return { ok: false, error: "duplicate", op: dup };
   const rail = railFor(provider);
   // Rail must be live + funded ≥ amount (mirrors the send-flow pre-flight gate).
@@ -179,7 +201,7 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   const provider = detectProvider(phone, country);
   if (!provider) return { ok: false, error: "bad_number" };
   return withMomoLock(async () => {
-  const dup = recentDuplicate("cashin", phone, amount, by);
+  const dup = await recentDuplicate("cashin", phone, amount, by);
   if (dup) return { ok: false, error: "duplicate", op: dup };
   const rail = railFor(provider);
   const opId = id("mmo");
@@ -228,7 +250,13 @@ async function fireCollectLeg(outOp: MomoOp): Promise<void> {
   // (reuse the row) so there's never a duplicate id, and a non-failed row means
   // "already fired" → no-op.
   const inId = `collect_${outOp.transferId}`;
-  const existing = ops.find((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId);
+  let existing = ops.find((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId);
+  // Cross-instance: the collect leg may have been fired on ANOTHER instance (not in local
+  // memory). Check the durable table too so we don't redundantly re-collect. (The rail
+  // idempotency key `collect_<transferId>` already prevents a double PULL either way.)
+  if (!existing && usingPostgres()) {
+    existing = ((await store().allMomoOps().catch(() => [])) as MomoOp[]).find((o) => o.kind === "transfer_in" && o.transferId === outOp.transferId);
+  }
   if (existing && existing.status !== "failed") return;
   const inOp: MomoOp = existing ?? { id: inId, at: new Date().toISOString(), kind: "transfer_in", provider: outOp.provider, rail: "peexit", phone: outOp.phone, amount: outOp.amount, by: outOp.by, status: "accepted", transferId: outOp.transferId };
   inOp.at = new Date().toISOString(); inOp.status = "accepted"; inOp.error = undefined; // reset for a retry
@@ -238,7 +266,7 @@ async function fireCollectLeg(outOp: MomoOp): Promise<void> {
   } catch (e) {
     inOp.status = "failed"; inOp.error = e instanceof Error ? e.message : "collect_failed";
   }
-  if (existing) touch("momoops"); else record(inOp);
+  if (existing) persistOp(inOp); else record(inOp);
   console.log(`[momo] rebalance leg 2/2 (collect) ${outOp.amount} XAF ← ${outOp.phone} (transfer ${outOp.transferId}, ${inOp.status})`);
 }
 
@@ -250,7 +278,7 @@ export async function transferToCollection(treasuryPhone: string, amount: number
   const provider = detectProvider(treasuryPhone, "CM");
   if (!provider) return { ok: false, error: "bad_number" };
   return withMomoLock(async () => {
-  const dup = recentDuplicate("transfer_out", treasuryPhone, amount, by);
+  const dup = await recentDuplicate("transfer_out", treasuryPhone, amount, by);
   if (dup) return { ok: false, error: "duplicate", op: dup };
   const payoutBal = await peexit.availableBalanceXaf("CM").catch(() => null);
   if (payoutBal == null) return { ok: false, error: "rail_unavailable" };

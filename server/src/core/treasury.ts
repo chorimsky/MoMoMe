@@ -8,7 +8,7 @@
 import type { PaymentState, TreasuryPool, TreasuryRail, TreasuryWithdrawal } from "../../../shared/types.js";
 import { config } from "../config.js";
 import { getSettings } from "./settings.js";
-import { listPayments } from "./store.js";
+import { store } from "../db/store.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 import { accountBalances, sendOnchain, payLightningAddress } from "../adapters/ibex.js";
@@ -62,9 +62,9 @@ function toDisplay(currencyId: number, bal: number): number {
 
 /** Crypto owed to senders whose payment is still held (received-but-not-delivered),
  *  per asset, in display units. */
-export function cryptoLiabilities(): Record<Asset, number> {
+export async function cryptoLiabilities(): Promise<Record<Asset, number>> {
   const out: Record<Asset, number> = { BTC: 0, USDT: 0, USDC: 0 };
-  for (const p of listPayments()) {
+  for (const p of await store().listPayments()) {
     if (!HELD.includes(p.state)) continue;
     const a = p.payInstruction.asset as Asset;
     if (a in out) out[a] += p.payInstruction.amount;
@@ -76,7 +76,7 @@ export function cryptoLiabilities(): Record<Asset, number> {
  *  come from IBEX; if that fetch fails, balanceKnown=false and withdrawable=0 (fail
  *  safe — never offer a sweep against an unknown balance). */
 export async function treasuryPools(): Promise<TreasuryPool[]> {
-  const liab = cryptoLiabilities();
+  const liab = await cryptoLiabilities();
   let balances: Record<string, { currencyId: number; balance: number }> | null = null;
   try { balances = await accountBalances(); } catch { balances = null; }
   return (["BTC", "USDT", "USDC"] as Asset[]).map((asset) => {

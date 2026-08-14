@@ -1,0 +1,49 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "credentialsSource": "local",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "ios-sim": {
+      "distribution": "internal",
+      "ios": { "simulator": true },
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}

@@ -14,5 +14,5 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*", "../shared/**/*"]
+  "include": ["src/**/*", "api/**/*", "../shared/**/*"]
 }

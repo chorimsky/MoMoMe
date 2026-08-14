@@ -51,6 +51,17 @@ npx expo-doctor
 
 ---
 
+## Local native-build prerequisites (iOS/Android on THIS machine)
+
+`eas build` (cloud, step 4) needs none of this — Expo's build images already have the
+right toolchain. These only matter for local `npx expo run:ios` / `run:android`:
+
+- **iOS:** Expo SDK 57's core (`ExpoModulesJSI`) requires **Swift 6.2 → Xcode 26+**.
+  On older Xcode (e.g. 16.4 / Swift 6.1) the build fails with
+  *"package 'apple' is using Swift tools version 6.2.0"*. Update Xcode, or use `eas build`.
+- **Android:** the Gradle 9.3.1 distribution (~150 MB) downloads on first build; a slow
+  link makes this impractical. Pre-warm `~/.gradle` on a fast connection, or use `eas build`.
+
 ## 2. Run it locally (fastest feedback)
 
 ```bash

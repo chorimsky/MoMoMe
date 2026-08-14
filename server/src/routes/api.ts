@@ -1652,7 +1652,7 @@ api.get("/admin/revenue", async (req, res) => {
 // AML/CFT compliance console — runs detection then returns the full report
 // (cases, STRs, CTR register, tamper-evident event log, posture metrics).
 api.get("/admin/compliance", async (req, res) => {
-  compliance.scanCompliance();
+  await compliance.scanCompliance(); // async (reads payments + momo_ops) — await so report() sees this scan's cases
   const rep = compliance.report();
   // The STR register is officer-confidential (tipping-off risk) — hide it from
   // non-filing roles (e.g. Read Only) who can still see the dashboard/cases.

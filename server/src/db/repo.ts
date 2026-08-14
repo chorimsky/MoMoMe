@@ -180,8 +180,12 @@ export async function upsertMomoOp(op: { id: string; kind: string; status: strin
     [op.id, op.kind, op.status, op.transferId ?? null, op.at, JSON.stringify(op)],
   );
 }
-export async function allMomoOps(): Promise<unknown[]> {
-  const rows = await q<{ body: unknown }>(`SELECT body FROM momo_ops ORDER BY at DESC`);
+/** Most-recent momo_ops, newest first. Bounded to mirror the in-memory OP_CAP (5000) so
+ *  dedup checks / reconcile / AML scans don't load and deserialize the entire table as
+ *  money-op history accumulates over months. Recency covers every caller: recent-duplicate
+ *  detection, pending-cashin reconcile, and the compliance window all look back, not forward. */
+export async function allMomoOps(limit = 5000): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM momo_ops ORDER BY at DESC LIMIT $1`, [limit]);
   return rows.map((r) => r.body);
 }
 

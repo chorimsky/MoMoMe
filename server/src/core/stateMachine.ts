@@ -22,31 +22,43 @@ import { bolt11AmountMsat } from "./bolt11.js";
 import { rateFor } from "./fx.js";
 import { ratesFresh } from "./rates.js";
 
-/** Available XAF payout float = base treasury − everything already paid out
- *  (external_recipient) − everything RESERVED for an in-flight/held payout
- *  (payout_float_XAF, credited at FX-lock and released on delivery→external or
- *  on refund). Both balances are negative (credits). Because each payment
- *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
- *  the full float and over-commit the treasury. */
-/** The REAL XAF payout capacity: the sum of live balances across funded aggregators,
- *  which is the money that can actually leave today. Falls back to the static ceiling
- *  only when no aggregator can be queried — and then takes the LOWER of the two, so a
- *  stale constant can never authorize more than the rails can fund. */
-async function treasuryBaseXaf(): Promise<number> {
+/** Live queryable XAF across funded aggregators, briefly cached so the payment hot
+ *  path (every /payments pre-flight + every confirmInbound) doesn't issue a balance
+ *  RPC to each provider on every call. NaN when no rail can be queried. */
+let floatCache: { xaf: number; at: number } | null = null;
+const FLOAT_CACHE_MS = Number(process.env.FLOAT_CACHE_MS ?? 8_000);
+async function liveAggregatorXaf(): Promise<number> {
+  if (floatCache && Date.now() - floatCache.at < FLOAT_CACHE_MS) return floatCache.xaf;
+  let live = NaN;
   try {
-    const live = await aggregatorFloatXaf(); // sum of funded-aggregator balances (NaN = none queryable)
-    if (Number.isFinite(live) && live > 0) return Math.min(live, XAF_FLOAT_MAX);
+    live = await aggregatorFloatXaf(); // sum of funded-aggregator balances (NaN = none queryable)
   } catch (e) {
     console.error("[treasury] balance query failed — falling back to XAF_FLOAT_MAX", e);
   }
-  return XAF_FLOAT_MAX;
+  floatCache = { xaf: live, at: Date.now() };
+  return live;
 }
 
+/** Available XAF payout float. Two accounting regimes:
+ *   • LIVE rails queryable → the aggregator wallet balance is TODAY's real capacity and
+ *     ALREADY nets out every delivered payout (money that left the rail). So we subtract
+ *     only what's currently RESERVED in-flight (payout_float_XAF, ≤ 0) — NOT the all-time
+ *     external_recipient delta, which would double-count deliveries and drift the float
+ *     permanently negative. Capped by XAF_FLOAT_MAX so a spoofed/oversized balance can't
+ *     authorize unlimited payout.
+ *   • No queryable rail (sandbox/tests, or a total balance-API outage) → the original
+ *     constant-treasury model: static ceiling − all-time delivered (external_recipient)
+ *     − in-flight reserved (payout_float_XAF). Both ledger balances are negative credits.
+ *  Each payment reserves at FX-lock BEFORE this is read, so concurrent settlements can't
+ *  all see the full float and over-commit the treasury. */
 export async function availableFloatXaf(): Promise<number> {
   const s = store();
-  return (await treasuryBaseXaf())
-    + (await s.balance("external_recipient", "XAF"))
-    + (await s.balance("payout_float_XAF", "XAF"));
+  const reserved = await s.balance("payout_float_XAF", "XAF"); // in-flight reservation (≤ 0)
+  const live = await liveAggregatorXaf();
+  if (Number.isFinite(live) && live > 0) {
+    return Math.min(live, XAF_FLOAT_MAX) + reserved;
+  }
+  return XAF_FLOAT_MAX + (await s.balance("external_recipient", "XAF")) + reserved;
 }
 
 /** True once the inbound has been booked to the ledger (the INBOUND_CONFIRMED

@@ -45,6 +45,13 @@ export function parseKrakenBtc(t: unknown): number | null {
   return num(first?.c?.[0]);
 }
 
+/** Fetch ONLY EUR/USD from Coinbase (used alongside the dual-venue BTC pull so the FX
+ *  tick doesn't fetch Coinbase's BTC spot twice). Stablecoins stay pegged to 1. */
+export async function fetchEurUsd(): Promise<number | null> {
+  const r = await get<CbRates>("https://api.coinbase.com/v2/exchange-rates?currency=EUR");
+  return num((r as CbRates)?.data?.rates?.USD);
+}
+
 /** Fetch BTC/USD from BOTH venues. Returns each leg separately — the caller decides
  *  whether they agree. Merging here would defeat the divergence guard. */
 export async function fetchDualBtcUsd(): Promise<{ a: number | null; b: number | null }> {

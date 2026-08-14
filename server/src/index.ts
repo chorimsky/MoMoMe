@@ -8,10 +8,14 @@ import { reconcileTick, fxTick } from "./jobs.js";
 import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
+import { hydrateComplianceChain } from "./core/compliance.js";
 
 runBootChecks(); // asserts + fail-closed durability/admin/peexit checks (shared with the Vercel handler)
-// Postgres backend: ensure the schema exists + rehydrate the non-money snapshots before serving.
-if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); }
+// Postgres backend: ensure the schema exists + rehydrate the non-money snapshots AND the
+// durable compliance chain before serving — parity with the Vercel handler (api/index.ts).
+// Without hydrateComplianceChain, the import-time anchor re-heal runs on an empty chain and
+// verifyIntegrity() reads as truncated/invalid on a Postgres-backed Railway deploy.
+if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); await hydrateComplianceChain(); }
 const app = createApp();
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME
@@ -62,11 +66,14 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err instanceof Error ? err.stack : err);
 });
 
-// Flush any pending state to SQLite on graceful shutdown.
+// Flush any pending state on graceful shutdown. flushAll() is async on the Postgres
+// backend (network snapshot writes), so AWAIT it before closing the server / exiting —
+// otherwise the final snapshot can be lost to the 500ms exit timer.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
-    flushAll();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 500).unref();
+    void flushAll()
+      .catch((e) => console.error("[shutdown] flushAll failed", e))
+      .finally(() => server.close(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 2_000).unref();
   });
 }

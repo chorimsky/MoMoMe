@@ -21,6 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'MoMo›Me',
   slug: 'momome',
+  owner: 'rimskycho',
   scheme: 'momome',
   version: '1.0.0',
   orientation: 'portrait',
@@ -93,6 +94,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     apiBase: API_BASE,
     webOrigin: WEB_ORIGIN,
-    // eas: { projectId: '...' }  // written by `eas init`
+    eas: { projectId: '5b69824e-1b5c-4871-98de-4fe889de8c98' },
   },
 });

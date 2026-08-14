@@ -1,0 +1,50 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": { "simulator": false },
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "//": "Fill from App Store Connect — see DEPLOY.md",
+        "appleId": "REPLACE_WITH_APPLE_ID_EMAIL",
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID"
+      },
+      "android": {
+        "//": "Path to a Google Play service-account JSON key — see DEPLOY.md",
+        "serviceAccountKeyPath": "./play-service-account.json",
+        "track": "internal"
+      }
+    }
+  }
+}

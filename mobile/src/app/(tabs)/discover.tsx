@@ -60,7 +60,11 @@ export default function DiscoverScreen() {
         style={{ marginBottom: Spacing.three }}
       />
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cats}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.catsScroll}
+        contentContainerStyle={styles.cats}>
         <CatChip label="All" active={!cat} onPress={() => setCat(null)} />
         {CATEGORIES.map((c) => (
           <CatChip key={c} label={c} active={cat === c} onPress={() => setCat(cat === c ? null : c)} />
@@ -132,7 +136,8 @@ function CatChip({ label, active, onPress }: { label: string; active: boolean; o
 
 const styles = StyleSheet.create({
   head: { paddingTop: Spacing.four, gap: Spacing.two, marginBottom: Spacing.four },
-  cats: { gap: Spacing.two, paddingRight: Spacing.four },
+  catsScroll: { flexGrow: 0, marginBottom: Spacing.four },
+  cats: { gap: Spacing.two, paddingRight: Spacing.four, alignItems: 'center' },
   center: { alignItems: 'center', justifyContent: 'center', gap: Spacing.three, paddingTop: Spacing.seven },
   row: {
     flexDirection: 'row',

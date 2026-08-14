@@ -197,6 +197,10 @@ export interface Payment {
   /** Which rail paid the refund out (e.g. "ibex" | "blink") — so its status is
    *  re-queried on the SAME rail. Set alongside refundTxId. */
   refundProvider?: string;
+  /** On-chain only: the originally-quoted XAF, set when the payment was re-priced at
+   *  confirmation (the current xaf is the delivered figure). Lets the success screen +
+   *  receipt show "Quoted X · Delivered Y" so a moved on-chain rate isn't a surprise. */
+  repricedFromXaf?: number;
   events: PaymentEvent[];
   createdAt: string;
   updatedAt: string;

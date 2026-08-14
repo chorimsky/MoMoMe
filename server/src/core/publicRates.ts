@@ -18,11 +18,42 @@ export interface RatePull { btcUsd: number | null; usdtUsd: number | null; usdcU
 interface CbSpot { data?: { amount?: string } }
 /** Coinbase FX: GET /v2/exchange-rates?currency=EUR → { data: { rates: { USD: "1.08" } } }. */
 interface CbRates { data?: { rates?: Record<string, string> } }
+/** Kraken public ticker: GET /0/public/Ticker?pair=XBTUSD
+ *  → { result: { XXBTZUSD: { c: ["65000.0", "0.01"] } } }. Independent of Coinbase
+ *  (different venue, different operator) — that independence is the whole point. */
+interface KrakenTicker { result?: Record<string, { c?: string[] }> }
 
 const num = (s: unknown): number | null => {
   const n = typeof s === "string" ? Number(s) : typeof s === "number" ? s : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+
+/** GET a JSON body, or null on any failure. Module-scoped so both the single-source
+ *  and dual-source fetchers share one implementation. */
+async function get<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetchT(url, { method: "GET", headers: { accept: "application/json" } });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch { return null; }
+}
+
+/** PURE: extract BTC/USD from a Kraken ticker response. Exported for testing. */
+export function parseKrakenBtc(t: unknown): number | null {
+  const result = (t as KrakenTicker)?.result;
+  const first = result ? Object.values(result)[0] : undefined;
+  return num(first?.c?.[0]);
+}
+
+/** Fetch BTC/USD from BOTH venues. Returns each leg separately — the caller decides
+ *  whether they agree. Merging here would defeat the divergence guard. */
+export async function fetchDualBtcUsd(): Promise<{ a: number | null; b: number | null }> {
+  const [cb, kr] = await Promise.all([
+    get<CbSpot>("https://api.coinbase.com/v2/prices/BTC-USD/spot"),
+    get<KrakenTicker>("https://api.kraken.com/0/public/Ticker?pair=XBTUSD"),
+  ]);
+  return { a: num((cb as CbSpot)?.data?.amount), b: parseKrakenBtc(kr) };
+}
 
 /** PURE: turn the two Coinbase responses into a RatePull. Stablecoins are pegged →
  *  1 (the app's existing default); a real depeg is negligible for XAF pricing and the
@@ -37,13 +68,6 @@ export function parsePublicRates(btcSpot: unknown, eurRates: unknown): RatePull 
  *  that fails comes back null → setRates() keeps the last-known value for it. Returns
  *  null only if BOTH legs fail (nothing real to stamp). */
 export async function fetchPublicRates(): Promise<RatePull | null> {
-  const get = async <T>(url: string): Promise<T | null> => {
-    try {
-      const res = await fetchT(url, { method: "GET", headers: { accept: "application/json" } });
-      if (!res.ok) return null;
-      return (await res.json()) as T;
-    } catch { return null; }
-  };
   const [btcSpot, eurRates] = await Promise.all([
     get<CbSpot>("https://api.coinbase.com/v2/prices/BTC-USD/spot"),
     get<CbRates>("https://api.coinbase.com/v2/exchange-rates?currency=EUR"),

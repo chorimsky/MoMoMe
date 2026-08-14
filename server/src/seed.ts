@@ -5,6 +5,11 @@ import { ensureIdentity, claimIdentity } from "./core/identity.js";
 import { seedMerchants } from "./core/merchant.js";
 import * as peex from "./integrations/peex/service.js";
 
+/** Owner id stamped on every seeded payment so the demo set is reachable by the
+ *  seeded device without needing mayViewPayment to fail open (see F3). Ownerless
+ *  payments are refused by default; seed rows carry this explicit, non-guessable id. */
+export const SEED_OWNER = "seed:demo";
+
 interface Seed {
   name: string; phone: string; country: CountryCode; provider: ProviderId;
   xaf: number; status: DisplayStatus; method: Method; ref: string; daysAgo: number;
@@ -37,6 +42,7 @@ export async function seed(): Promise<void> {
       state: STATE[s.status],
       displayStatus: s.status,
       method: s.method,
+      senderId: SEED_OWNER,
       recipient: { phone: s.phone, country: s.country, provider: s.provider, name: s.name, nameSource: "provider" },
       xaf: s.xaf,
       feeXaf: fee,

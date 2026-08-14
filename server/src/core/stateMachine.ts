@@ -10,15 +10,17 @@
    ============================================================ */
 import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types.js";
 import { store } from "../db/store.js";
-import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_BASE } from "../../../shared/domain.js";
+import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
-import { selectAggregator, selectFundedAggregator, aggregatorByName, recordExecution, markRailHardDown } from "./routing.js";
+import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings, refreshSettingsIfStale } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { bolt11AmountMsat } from "./bolt11.js";
+import { rateFor } from "./fx.js";
+import { ratesFresh } from "./rates.js";
 
 /** Available XAF payout float = base treasury − everything already paid out
  *  (external_recipient) − everything RESERVED for an in-flight/held payout
@@ -26,9 +28,25 @@ import { bolt11AmountMsat } from "./bolt11.js";
  *  on refund). Both balances are negative (credits). Because each payment
  *  reserves at FX-lock BEFORE this is read, concurrent settlements can't all see
  *  the full float and over-commit the treasury. */
+/** The REAL XAF payout capacity: the sum of live balances across funded aggregators,
+ *  which is the money that can actually leave today. Falls back to the static ceiling
+ *  only when no aggregator can be queried — and then takes the LOWER of the two, so a
+ *  stale constant can never authorize more than the rails can fund. */
+async function treasuryBaseXaf(): Promise<number> {
+  try {
+    const live = await aggregatorFloatXaf(); // sum of funded-aggregator balances (NaN = none queryable)
+    if (Number.isFinite(live) && live > 0) return Math.min(live, XAF_FLOAT_MAX);
+  } catch (e) {
+    console.error("[treasury] balance query failed — falling back to XAF_FLOAT_MAX", e);
+  }
+  return XAF_FLOAT_MAX;
+}
+
 export async function availableFloatXaf(): Promise<number> {
   const s = store();
-  return XAF_FLOAT_BASE + (await s.balance("external_recipient", "XAF")) + (await s.balance("payout_float_XAF", "XAF"));
+  return (await treasuryBaseXaf())
+    + (await s.balance("external_recipient", "XAF"))
+    + (await s.balance("payout_float_XAF", "XAF"));
 }
 
 /** True once the inbound has been booked to the ledger (the INBOUND_CONFIRMED
@@ -114,7 +132,7 @@ async function beginRefund(p: Payment, note: string): Promise<void> {
  *  payment (whose rank is -1) back to INBOUND_DETECTED. */
 export async function markDetected(p: Payment): Promise<void> {
   if (p.state !== "AWAITING_INBOUND") return;
-  await await transition(p, "INBOUND_DETECTED");
+  await transition(p, "INBOUND_DETECTED");
 }
 
 /**
@@ -166,6 +184,39 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number): P
     { account: "inbound_clearing", direction: "debit", amount: received, currency: asset },
     { account: "customer_wallet", direction: "credit", amount: received, currency: asset },
   ]);
+
+  // RE-PRICE (on-chain only). The quote was issued `estimateOnly` precisely because a
+  // 10–60 minute confirmation window can't honour a locked rate — BACKEND_DESIGN §3's
+  // re-quote model. Convert what ACTUALLY arrived at the CURRENT rate, and keep the
+  // fee as the same proportion of the total the customer agreed to. Fast rails
+  // (Lightning / USDT) keep their lock: their exposure is seconds, which is what the
+  // tighter 150bp spread already pays for.
+  if (p.payInstruction.method === "ONCHAIN") {
+    // No fresh rate = no honest price. Holding is the only safe move: booking the
+    // stale lock is the bug we're fixing, and guessing is worse. (ratesFresh() is also
+    // false on a divergent two-source feed — see F4 — so a manipulated feed holds too.)
+    if (!ratesFresh()) {
+      await transition(p, "MANUAL_REVIEW", "on-chain re-price blocked — FX feed not fresh");
+      return;
+    }
+    const rq = rateFor(p.method);
+    const grossXaf = Math.round(received * rq.customerXafPerUnit);
+    // Preserve the agreed fee RATIO rather than re-deriving from settings — the
+    // customer accepted this proportion at quote time, and settings may have moved.
+    const feeRatio = p.totalXaf > 0 ? p.feeXaf / p.totalXaf : 0;
+    const feeXaf = Math.round(grossXaf * feeRatio);
+    const xaf = grossXaf - feeXaf;
+    if (xaf <= 0) {
+      await transition(p, "MANUAL_REVIEW", `re-price left nothing deliverable (gross ${grossXaf} XAF)`);
+      return;
+    }
+    if (xaf !== p.xaf) {
+      await transition(p, "FX_LOCKED", `re-priced on confirmation: ${p.xaf} → ${xaf} XAF (rate ${Math.round(rq.customerXafPerUnit)})`);
+      p.repricedFromXaf = p.xaf; // the originally-quoted amount, for a "Quoted → Delivered" receipt line
+      p.xaf = xaf; p.feeXaf = feeXaf; p.totalXaf = grossXaf;
+      await store().putPayment(p);
+    }
+  }
 
   // FX lock: asset → XAF, reserve float, take fee.
   await transition(p, "FX_LOCKED");

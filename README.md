@@ -5,13 +5,13 @@ settlement network that takes crypto in (Lightning / on-chain BTC / USDT-TRON), 
 to XAF, and pays out to MTN / Orange / Airtel across the CEMAC franc zone via PawaPay.
 
 This repo is a **full-stack TypeScript implementation** built from the original
-design-tool prototypes (preserved in [`project/`](project/)).
+design-tool prototypes (archived in [`docs/archive/prototypes/`](docs/archive/prototypes/)).
 
 ```
-app/      Vite + React + TypeScript frontend  (@momome/app)
+app/      Vite + React + TypeScript frontend  (@momome/app) — the canonical UI
 server/   Express + TypeScript settlement engine  (@momome/server)
 shared/   Domain types + constants shared by both (the API contract)
-project/  Original HTML/CSS/JSX design prototypes (visual source of truth)
+mobile/   Expo (React Native) app — isolated project, not a workspace member
 BACKEND_DESIGN.md   The settlement architecture this backend implements
 ```
 
@@ -84,5 +84,6 @@ deliver it. Numbers ending in `8`/`9` come back unverified (manual-name path); e
 
 ---
 
-_Original design handoff note (from claude.ai/design) is preserved in [`project/`](project/);
-the prototypes there remain the visual source of truth._
+_[`docs/archive/prototypes/`](docs/archive/prototypes/) holds the original design prototypes,
+archived as of the initial build. They are historical reference only — `app/` is the canonical
+UI, and `app/src/styles/momome.css` is the design system of record._

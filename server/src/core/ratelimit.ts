@@ -57,10 +57,32 @@ export function clientIp(req: { ip?: string; socket?: { remoteAddress?: string }
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
-/** Express middleware: rate-limit by client IP under a route label. 429 on excess. */
+type RlReq = { ip?: string; socket?: { remoteAddress?: string } };
+type RlRes = { status: (c: number) => { json: (b: unknown) => void }; setHeader: (k: string, v: string) => void };
+
+/** Express middleware: rate-limit by client IP under a route label. 429 on excess.
+ *  In-memory / per-instance — fine for cheap, non-money, non-enumeration routes. */
 export function rateLimitMiddleware(label: string, max: number, windowMs: number) {
-  return (req: { ip?: string; socket?: { remoteAddress?: string } }, res: { status: (c: number) => { json: (b: unknown) => void }; setHeader: (k: string, v: string) => void }, next: () => void): void => {
+  return (req: RlReq, res: RlRes, next: () => void): void => {
     const r = rateLimit(`${label}:${clientIp(req)}`, max, windowMs);
+    if (!r.ok) {
+      res.setHeader("Retry-After", String(r.retryAfterSec));
+      res.status(429).json({ error: "rate_limited", message: "Too many requests. Please slow down and try again shortly." });
+      return;
+    }
+    next();
+  };
+}
+
+/** DURABLE variant — the same contract, but counted in Postgres so the limit holds
+ *  ACROSS serverless instances (in-memory is per-instance, so an attacker spreads the
+ *  attempts across concurrent invocations and never hits the throttle). Use for anything
+ *  that moves money, mints an instruction, or answers a question an attacker would want
+ *  to enumerate. Falls back to the per-instance limiter on the memory backend or a DB
+ *  hiccup, so it never fails open to unlimited. */
+export function rateLimitDurableMiddleware(label: string, max: number, windowMs: number) {
+  return async (req: RlReq, res: RlRes, next: () => void): Promise<void> => {
+    const r = await rateLimitDurable(`${label}:${clientIp(req)}`, max, windowMs);
     if (!r.ok) {
       res.setHeader("Retry-After", String(r.retryAfterSec));
       res.status(429).json({ error: "rate_limited", message: "Too many requests. Please slow down and try again shortly." });

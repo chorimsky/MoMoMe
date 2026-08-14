@@ -54,6 +54,38 @@ export function setRates(
   touch("rates"); // persist so a cold serverless instance starts primed
 }
 
+/** Max tolerated disagreement between two independent BTC/USD sources, in basis
+ *  points. 200bp (2%) is comfortably wider than normal cross-venue spread and
+ *  comfortably tighter than the 280bp on-chain rail spread — so a divergence that
+ *  could eat the margin refuses instead of quoting. */
+const MAX_DIVERGENCE_BPS = Number(process.env.FX_MAX_DIVERGENCE_BPS ?? 200);
+let divergent = false;
+/** The two most recent raw legs, surfaced on the admin health/rails view so an
+ *  operator diagnoses a divergence ("Coinbase 64,900 / Kraken 71,200") in seconds. */
+let lastLegs: { a: number | null; b: number | null; bps: number } | null = null;
+
+/** Record a two-source pull. Agreement → the MEDIAN (here, the mean of two) is
+ *  cached and the feed is healthy. Disagreement → the cache is NOT updated and the
+ *  feed is marked divergent, so ratesFresh() goes false and live quoting refuses
+ *  rather than pricing real crypto off a possibly-manipulated number. */
+export function setDualBtc(a: number | null, b: number | null): void {
+  if (a == null || b == null) {
+    // One venue down is not a divergence — fall back to the single live leg.
+    divergent = false;
+    lastLegs = { a, b, bps: 0 };
+    setRates({ btcUsd: a ?? b }, "public");
+    return;
+  }
+  const spreadBps = Math.abs(a - b) / ((a + b) / 2) * 10_000;
+  lastLegs = { a, b, bps: Math.round(spreadBps) };
+  divergent = spreadBps > MAX_DIVERGENCE_BPS;
+  if (divergent) {
+    console.error(`[fx] BTC/USD sources diverge by ${Math.round(spreadBps)}bp (${a} vs ${b}) — refusing to price`);
+    return; // keep the last agreed price; it ages out via ratesFresh()
+  }
+  setRates({ btcUsd: (a + b) / 2 }, "public");
+}
+
 /** True only when we hold a real IBEX pull that's recent enough to price on.
  *  The background refresh runs every 30s, so anything older than a few minutes
  *  means the feed is dead (or never populated) — and pricing real crypto on a
@@ -61,7 +93,7 @@ export function setRates(
  *  refuse when this is false AND real money can move. */
 const MAX_RATE_AGE_MS = 5 * 60_000;
 export function ratesFresh(maxAgeMs: number = MAX_RATE_AGE_MS): boolean {
-  return !!cache && Date.now() - cache.at < maxAgeMs;
+  return !divergent && !!cache && Date.now() - cache.at < maxAgeMs;
 }
 
 export function btcUsd(): number { return cache?.btcUsd ?? FALLBACK.btcUsd; }
@@ -73,6 +105,9 @@ export function usdXaf(): number { return EUR_XAF_PEG / (cache?.eurUsd ?? FALLBA
 export function ratesMeta() {
   return {
     source: cache ? sourceLabel : "fallback",
+    divergent, // surfaced on the admin health view — a silent refusal is worse than none
+    divergenceBps: lastLegs?.bps ?? 0,
+    legs: lastLegs ? { a: lastLegs.a, b: lastLegs.b } : null, // e.g. Coinbase / Kraken raw BTC/USD
     updatedAt: cache ? new Date(cache.at).toISOString() : null,
     btcUsd: btcUsd(), usdtUsd: usdtUsd(), eurUsd: cache?.eurUsd ?? FALLBACK.eurUsd, usdXaf: usdXaf(),
   };

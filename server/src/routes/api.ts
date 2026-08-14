@@ -49,7 +49,7 @@ import {
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
-import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware } from "../core/ratelimit.js";
+import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
 
@@ -305,6 +305,14 @@ function partnerOf(req: ReqLike): string | undefined {
   return verifyApiKey(bearer ?? hdr(req, "x-api-key")) ?? undefined;
 }
 
+/** After this instant, an un-enrolled sender id is no longer accepted as a bearer
+ *  credential for owner-scoped reads/writes. Devices enroll automatically on first
+ *  load (POST /me/devices), so the grace window only covers installs that never
+ *  return. Set LEGACY_SENDER_UNTIL in the env to move it; past the date, unset means
+ *  closed. */
+const LEGACY_SENDER_UNTIL = Date.parse(process.env.LEGACY_SENDER_UNTIL ?? "2026-11-01T00:00:00Z");
+const legacyBearerAllowed = () => Number.isFinite(LEGACY_SENDER_UNTIL) && Date.now() < LEGACY_SENDER_UNTIL;
+
 async function ownerOf(req: ReqLike): Promise<string | undefined> {
   // Developer/partner requests authenticate with an API key, not a device signature.
   const partner = partnerOf(req);
@@ -312,7 +320,10 @@ async function ownerOf(req: ReqLike): Promise<string | undefined> {
   const id = senderOf(req);
   if (!id) return undefined;
   const dev = getDevice(id);
-  if (!dev) return id; // not enrolled yet → legacy path
+  // Un-enrolled id: accepted as a plain bearer only during the migration window.
+  // After it, an id with no enrolled key proves nothing and is refused — the client
+  // enrolls (POST /me/devices) and retries signed.
+  if (!dev) return legacyBearerAllowed() ? id : undefined;
   return (await verifyDeviceSig(req, dev.authPub)) ? id : undefined;
 }
 
@@ -334,13 +345,20 @@ function isAdminRequest(req: { headers: Record<string, string | string[] | undef
  *  AUTHENTICATED owner (signed, for enrolled devices) must match the payment's.
  *  Prevents enumerating other people's payments/ledgers by id. */
 async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promise<boolean> {
-  if (!senderId) return true;          // legacy/seed payments with no owner
   if (isAdminRequest(req)) return true; // admin console (e.g. ledger drawer)
+  // DENY BY DEFAULT. An ownerless payment is a data bug, not an access tier — it used
+  // to return true here, which made any such row world-readable by id (and, via the
+  // same predicate, its ledger). Seed rows are stamped with SEED_OWNER at seed time;
+  // anything else ownerless is refused and logged so the gap is visible.
+  if (!senderId) {
+    console.warn("[access] refused: payment has no senderId — backfill or stamp it");
+    return false;
+  }
   return (await ownerOf(req)) === senderId;
 }
 
 /* ---------- quotes ---------- */
-api.post("/quotes", rateLimitMiddleware("quotes", 60, 60_000), async (req, res) => {
+api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req, res) => {
   await refreshSettingsIfStale(); // pick up a cross-instance kill-switch / settings change
   // Operator kill-switch — refuse new business when payments are paused.
   if (!getSettings().ops.acceptingPayments) {
@@ -523,7 +541,7 @@ api.delete("/admin/apikeys/:id", async (req, res) => {
 });
 
 /* ---------- recipient name resolution ---------- */
-api.get("/recipients/resolve", rateLimitMiddleware("resolve", 60, 60_000), async (req, res) => {
+api.get("/recipients/resolve", rateLimitDurableMiddleware("resolve", 60, 60_000), async (req, res) => {
   // Tie resolution to an identified device — it discloses names (the internal identity
   // graph aggregates other users' confirmations), so it must not be a fully-anonymous
   // enumeration oracle. The send flow always carries a device id, so no UX impact.
@@ -583,7 +601,7 @@ api.post("/admin/merchants/merge", async (req, res) => {
 });
 
 /* ---------- consumer account claim (Phase 2) ---------- */
-api.post("/identities/claim/request", rateLimitMiddleware("claim_req", 6, 60_000), async (req, res) => {
+api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6, 60_000), async (req, res) => {
   const r = requestClaim(String((req.body ?? {}).phone ?? ""));
   if (!r.found) {
     return res.status(404).json({ error: "no_account", message: "No account for this number yet. You'll have one the moment you receive a Mobile Money payment." });
@@ -595,7 +613,7 @@ api.post("/identities/claim/request", rateLimitMiddleware("claim_req", 6, 60_000
   res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
 });
 
-api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_000), async (req, res) => {
+api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 20, 60_000), async (req, res) => {
   const { phone, code } = (req.body ?? {}) as { phone?: string; code?: string };
   const r = verifyClaim(String(phone ?? ""), String(code ?? ""));
   if (!r.ok) {
@@ -608,7 +626,7 @@ api.post("/identities/claim/verify", rateLimitMiddleware("claim_verify", 20, 60_
 });
 
 /* ---------- payments ---------- */
-api.post("/payments", rateLimitMiddleware("payments", 30, 60_000), async (req, res) => {
+api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async (req, res) => {
   await refreshSettingsIfStale(); // kill-switch / approval threshold must reflect a cross-instance change
   const { quoteId, recipient } = (req.body ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes
@@ -817,7 +835,7 @@ api.post("/payments/:id/simulate", async (req, res) => {
  * Refund-claim: a payment whose payout couldn't land is REFUND_PENDING; the sender
  * submits a Lightning invoice here to receive their crypto back (paid outbound via IBEX).
  */
-api.post("/payments/:id/refund-destination", rateLimitMiddleware("refund_dest", 10, 60_000), async (req, res) => {
+api.post("/payments/:id/refund-destination", rateLimitDurableMiddleware("refund_dest", 10, 60_000), async (req, res) => {
   const p = await store().getPayment(req.params.id);
   // Ownership: only the original sender (matching device id) may direct the refund —
   // otherwise anyone with a payment id could divert the refund to their own invoice.
@@ -924,7 +942,7 @@ api.delete("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000
    call is intentionally UNSIGNED (it establishes the key); afterwards every
    request for that id must be signed. Re-enrolling a different key → 409, and
    the client rotates to a fresh id. */
-api.post("/me/devices", rateLimitMiddleware("device_enroll", 20, 60_000), async (req, res) => {
+api.post("/me/devices", rateLimitDurableMiddleware("device_enroll", 20, 60_000), async (req, res) => {
   const id = senderOf(req);
   if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
   const body = (req.body ?? {}) as { authPub?: JsonWebKey; wrapPub?: JsonWebKey };
@@ -946,14 +964,14 @@ function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number;
     && typeof o.iv === "string" && o.iv.length <= 128 && typeof o.ct === "string" && o.ct.length <= 4096;
 }
 
-api.post("/me/anchor/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+api.post("/me/anchor/request", rateLimitDurableMiddleware("anchor_req", 6, 60_000), async (req, res) => {
   if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const r = requestAnchor(String((req.body ?? {}).phone ?? ""));
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
   res.json({ sent: true, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
 });
 
-api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+api.post("/me/anchor/verify", rateLimitDurableMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
   const dev = await ownerOf(req);
   if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const { phone, code, recovery } = (req.body ?? {}) as { phone?: string; code?: string; recovery?: unknown };
@@ -979,7 +997,7 @@ api.post("/me/anchor/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), 
   res.json({ ok: true, accountId });
 });
 
-api.post("/me/anchor/restore", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+api.post("/me/anchor/restore", rateLimitDurableMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
   const dev = await ownerOf(req);
   if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const { phone, code } = (req.body ?? {}) as { phone?: string; code?: string };
@@ -1043,7 +1061,7 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
 });
 
 /** Send an OTP to the settlement number to prove ownership. */
-api.post("/merchant/verify/request", rateLimitMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6, 60_000), async (req, res) => {
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
@@ -1054,7 +1072,7 @@ api.post("/merchant/verify/request", rateLimitMiddleware("anchor_req", 6, 60_000
 });
 
 /** Verify the OTP → the merchant account goes live. */
-api.post("/merchant/verify", rateLimitMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
+api.post("/merchant/verify", rateLimitDurableMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
@@ -1130,7 +1148,7 @@ api.delete("/merchant/links/:code", async (req, res) => {
 });
 
 /** PUBLIC — resolve a payment link for the /pay/:code page (enough to run the send flow). */
-api.get("/merchant/pay/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), async (req, res) => {
+api.get("/merchant/pay/:code", rateLimitDurableMiddleware("merchant_pay", 120, 60_000), async (req, res) => {
   const link = getLink(String(req.params.code));
   if (!link || link.disabledAt) return res.status(404).json({ error: "not_found", message: "This payment link isn't active." });
   const m = merchantById(link.merchantId);
@@ -1176,7 +1194,7 @@ api.get("/discover", rateLimitMiddleware("discover", 120, 60_000), async (req, r
 });
 
 /** PUBLIC — resolve a merchant by its public code for an open-amount checkout (/m/:code). */
-api.get("/merchant/by-code/:code", rateLimitMiddleware("merchant_pay", 120, 60_000), async (req, res) => {
+api.get("/merchant/by-code/:code", rateLimitDurableMiddleware("merchant_pay", 120, 60_000), async (req, res) => {
   if (!getSettings().features.scanToPay) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
   const m = merchantByCode(String(req.params.code));
   if (!m || m.status !== "active" || !m.verifiedPhone) return res.status(404).json({ error: "not_found", message: "Merchant not found." });

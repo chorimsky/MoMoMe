@@ -14,11 +14,22 @@
    ============================================================ */
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setSnapshot, allSnapshots, getSnapshot } from "../db/repo.js";
 import { background } from "./background.js";
 
-const DB_PATH = process.env.DB_PATH ?? "data/momome.db";
+/** Resolve DB_PATH to an ABSOLUTE path off the server package root, not the cwd.
+ *  A relative default resolved differently under `pnpm dev` (cwd = repo root) vs
+ *  `pnpm --filter @momome/server dev` (cwd = server/), which silently created a
+ *  SECOND database — a stray ledger in a settlement system. Anchoring to the package
+ *  root (persist.ts is server/src/core/ → ../../.. = server/) makes the path stable
+ *  regardless of where the process was launched. `:memory:` passes through untouched. */
+const PKG_ROOT = fileURLToPath(new URL("../../", import.meta.url)); // → server/
+const RAW_DB_PATH = process.env.DB_PATH ?? "data/momome.db";
+const DB_PATH = RAW_DB_PATH === ":memory:" || isAbsolute(RAW_DB_PATH)
+  ? RAW_DB_PATH
+  : resolve(PKG_ROOT, RAW_DB_PATH);
 /** Postgres snapshot backend (serverless): non-money collections persist to the
  *  `snapshots` table instead of local SQLite. Selected by STORE_BACKEND=postgres. */
 const PG = (process.env.STORE_BACKEND ?? "").toLowerCase() === "postgres";

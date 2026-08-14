@@ -10,8 +10,8 @@ import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured, blinkConfigured } from "./config.js";
 import { rate as ibexRate } from "./adapters/ibex.js";
-import { setRates, CCY, ratesFresh } from "./core/rates.js";
-import { fetchPublicRates } from "./core/publicRates.js";
+import { setRates, setDualBtc, CCY, ratesFresh } from "./core/rates.js";
+import { fetchPublicRates, fetchDualBtcUsd } from "./core/publicRates.js";
 
 /** Reconcile backstops (payouts / cashins / inbounds / refunds / failed-payouts) +
  *  the AML compliance scan + quote pruning. One idempotent tick. */
@@ -45,8 +45,13 @@ export async function fxTick(): Promise<void> {
       if (!fxIbexDegraded) { console.warn("IBEX FX pull failed — falling back to public rates:", e instanceof Error ? e.message : e); fxIbexDegraded = true; }
     }
   }
-  const pub = await fetchPublicRates();
-  if (pub) setRates(pub, "public");
+  // Public path (no IBEX, or IBEX degraded): price BTC from TWO independent venues with a
+  // divergence guard (BACKEND_DESIGN §3), and take EUR/stables from Coinbase. setDualBtc
+  // caches the mean when the venues agree and REFUSES (marks the feed divergent, so
+  // ratesFresh() → false) when they don't, rather than pricing off one possibly-bad number.
+  const [dual, pub] = await Promise.all([fetchDualBtcUsd(), fetchPublicRates()]);
+  if (pub) setRates({ usdtUsd: pub.usdtUsd, usdcUsd: pub.usdcUsd, eurUsd: pub.eurUsd }, "public");
+  setDualBtc(dual.a, dual.b);
 }
 
 let fxEnsureInflight: Promise<void> | null = null;

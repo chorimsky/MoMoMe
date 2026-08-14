@@ -421,6 +421,12 @@ async function main() {
     ok("LN settles in full despite a low webhook amount", storeMod.getPayment("pay_ln_lock")!.state === "DELIVERED");
     ok("LN ledger uses the locked amount (balanced)", Math.abs(lockNets.BTC) < 1e-9 && Math.abs(lockNets.XAF) < 1e-9);
 
+    // Prime a FRESH FX rate so the on-chain RE-PRICE (F1) can run — on-chain payments
+    // are re-priced at confirmation from the amount actually received at the CURRENT
+    // rate, and a stale/absent feed (ratesFresh() false) correctly holds for review.
+    const ratesMod = await import("../src/core/rates.js");
+    ratesMod.setRates({ btcUsd: 65000, usdtUsd: 1, usdcUsd: 1, eurUsd: 1.08 }, "public");
+
     // 5. ON-CHAIN underpayment guard (on-chain CAN be partial, unlike LN)
     seedPayment("pay_oc_short", "oc_short", BTC_IN, "ONCHAIN");
     await confirmInbound(storeMod.findByProviderRef("oc_short")!, BTC_IN * 0.7);
@@ -474,12 +480,20 @@ async function main() {
     // current available float, then seed a payment whose xaf exceeds it.
     const ledgerMod2 = await import("../src/core/ledger.js");
     const domainMod = await import("../../shared/domain.js");
-    const availFloat = domainMod.XAF_FLOAT_BASE + ledgerMod2.balance("external_recipient", "XAF") + ledgerMod2.balance("payout_float_XAF", "XAF");
+    // Sandbox has no configured/live aggregator, so aggregatorFloatXaf() is unqueryable
+    // (NaN) and treasuryBaseXaf() falls back to the static ceiling — the base here.
+    const availFloat = domainMod.XAF_FLOAT_MAX + ledgerMod2.balance("external_recipient", "XAF") + ledgerMod2.balance("payout_float_XAF", "XAF");
     // On-chain so the cleanup adminRefund below is legitimate (a Lightning inbound would
     // — correctly — refuse adminRefund and use the claim flow instead).
-    const overP = seedPayment("pay_float_over", "h_float_over", BTC_IN, "ONCHAIN");
-    overP.xaf = availFloat + 100_000; overP.totalXaf = overP.xaf + overP.feeXaf; storeMod.putPayment(overP);
-    await confirmInbound(storeMod.findByProviderRef("h_float_over")!, BTC_IN);
+    seedPayment("pay_float_over", "h_float_over", BTC_IN, "ONCHAIN"); // seeded fee ratio 1250/51250
+    // On-chain re-prices from the RECEIVED amount, so drive the delivered xaf via the
+    // amount actually received: pick a received BTC whose re-price lands just over the
+    // remaining float (but under the 1M corridor cap so it's the FLOAT guard that holds).
+    const { rateFor } = await import("../src/core/fx.js");
+    const cxu = rateFor("ONCHAIN").customerXafPerUnit;
+    const targetXaf = availFloat + 100_000;               // just past the treasury's remaining float
+    const overRecv = (targetXaf / (1 - 1250 / 51250)) / cxu; // reprice(received) → xaf ≈ targetXaf
+    await confirmInbound(storeMod.findByProviderRef("h_float_over")!, overRecv);
     ok("over-committing payout is held for float (MANUAL_REVIEW)", storeMod.getPayment("pay_float_over")!.state === "MANUAL_REVIEW");
     ok("adminRefund releases the held on-chain reservation", await adminRefund(storeMod.getPayment("pay_float_over")!) === true); // release its ledger reservation so later tests have float
 

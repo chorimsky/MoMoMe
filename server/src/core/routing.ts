@@ -90,6 +90,25 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
   return supporting[0];
 }
 
+/** Total queryable XAF across aggregators that are funded and not hard-down. This is
+ *  the treasury's true payout ceiling; selectFundedAggregator already reads these
+ *  per-rail balances, so this is a fold over the same data, not a new dependency. Each
+ *  aggregator holds a single XAF payout wallet, so we query it once (provider-agnostic)
+ *  and dedupe by name. Returns NaN when NO rail can be queried, so the caller falls back
+ *  to the static ceiling rather than treating "unknown" as "zero float". */
+export async function aggregatorFloatXaf(): Promise<number> {
+  let sum = 0;
+  let any = false;
+  const seen = new Set<string>();
+  for (const p of PAYOUTS) {
+    if (seen.has(p.name) || !p.configured() || !eligible(p.name)) continue;
+    seen.add(p.name);
+    const bal = await p.balance("CM");
+    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; }
+  }
+  return any ? sum : NaN;
+}
+
 /** PRE-FLIGHT (no side effects): can a payout for this provider/amount land RIGHT NOW?
  *  Gates crypto-address generation — we never mint an inbound address unless a funded,
  *  healthy, (live when required) rail exists, so a paid invoice can never strand. */

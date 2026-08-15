@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { api, errMessage } from '@/api/client';
@@ -33,11 +33,23 @@ import type {
   Method,
   NameSource,
   Payment,
+  PaymentState,
   ProviderId,
   Quote,
 } from '@shared/types';
 
 type Step = 'details' | 'method' | 'review' | 'pay' | 'success';
+// Once the sender has paid the crypto invoice, the payment walks these states
+// server-side; we show a staged Processing view for them.
+const AWAITING_STATES: PaymentState[] = ['QUOTED', 'AWAITING_INBOUND'];
+const STAGE_ORDER: PaymentState[] = [
+  'INBOUND_DETECTED',
+  'INBOUND_CONFIRMED',
+  'FX_LOCKED',
+  'PAYOUT_REQUESTED',
+  'PAYOUT_CONFIRMED',
+  'DELIVERED',
+];
 const ALL_METHODS: Method[] = ['LIGHTNING', 'USDT', 'ONCHAIN', 'USDC'];
 const QUICK = [1000, 2000, 5000, 10000];
 // CEMAC customer due-diligence: above this single-transfer value the operator
@@ -462,6 +474,10 @@ export default function SendScreen() {
               <Body style={{ color: t.textSecondary }}>{recipientName || phone}</Body>
               {provider ? <Pill label={PROVIDERS[provider].short} tone={providerTone(provider)} /> : null}
             </View>
+            <Body muted center style={{ fontSize: 11.5, marginTop: Spacing.two, lineHeight: 16, paddingHorizontal: Spacing.four }}>
+              Credited in full to their Mobile Money wallet. Standard cash-out fees (operator + government levy)
+              apply only if they withdraw — never charged by MoMo›Me.
+            </Body>
           </View>
 
           <Card padded>
@@ -525,20 +541,28 @@ export default function SendScreen() {
       )}
 
       {/* ---------------- PAY ---------------- */}
-      {step === 'pay' && payment && (
-        <PayStep
-          payment={payment}
-          demoMode={demoMode}
-          onSimulate={async () => {
-            try {
-              const p = await api.simulatePayment(payment.id);
-              setPayment(p);
-            } catch (e) {
-              setError(errMessage(e));
-            }
-          }}
-        />
-      )}
+      {step === 'pay' && payment ? (
+        AWAITING_STATES.includes(payment.state) ? (
+          <PayStep
+            payment={payment}
+            recipientLabel={recipientName || phone}
+            providerShort={provider ? PROVIDERS[provider].short : ''}
+            demoMode={demoMode}
+            onSimulate={async () => {
+              try {
+                const p = await api.simulatePayment(payment.id);
+                setPayment(p);
+              } catch (e) {
+                setError(errMessage(e));
+              }
+            }}
+          />
+        ) : STAGE_ORDER.includes(payment.state) ? (
+          <ProcessingView payment={payment} />
+        ) : (
+          <OutcomeView payment={payment} onReset={reset} />
+        )
+      ) : null}
 
       {/* ---------------- SUCCESS ---------------- */}
       {step === 'success' && payment && (
@@ -595,10 +619,14 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 
 function PayStep({
   payment,
+  recipientLabel,
+  providerShort,
   demoMode,
   onSimulate,
 }: {
   payment: Payment;
+  recipientLabel: string;
+  providerShort: string;
   demoMode: boolean;
   onSimulate: () => void;
 }) {
@@ -646,9 +674,136 @@ function PayStep({
       </View>
       <Body muted center>Waiting for your payment — this updates automatically.</Body>
 
+      {/* recipient / reference context */}
+      <View style={[styles.payRecipCard, { backgroundColor: t.surface, borderColor: t.line }]}>
+        <View style={styles.kv}>
+          <Body muted>To</Body>
+          <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{recipientLabel}</Text>
+        </View>
+        <View style={styles.kv}>
+          <Body muted>Mobile Money</Body>
+          <Body style={{ color: t.textSecondary }}>
+            {providerShort ? `${providerShort} · ` : ''}{payment.recipient.phone}
+          </Body>
+        </View>
+        <View style={styles.kv}>
+          <Body muted>Reference</Body>
+          <Mono style={{ fontSize: 12 }}>{payment.ref}</Mono>
+        </View>
+      </View>
+
       {demoMode ? (
         <Button title="Simulate payment (demo)" variant="outline" icon="flask" onPress={onSimulate} style={{ alignSelf: 'stretch' }} />
       ) : null}
+    </View>
+  );
+}
+
+/** Staged progress once the sender's crypto is in — Receiving → Confirming →
+ *  Converting → Sending, mirroring the web ProcessingStep. */
+function ProcessingView({ payment }: { payment: Payment }) {
+  const t = useTheme();
+  const pos = STAGE_ORDER.indexOf(payment.state);
+  const stages = [
+    { label: 'Receiving payment', at: 1 },
+    { label: 'Confirming payment', at: 2 },
+    { label: 'Converting funds', at: 3 },
+    { label: 'Sending to Mobile Money', at: 5 },
+  ];
+  const activeIdx = stages.findIndex((s) => pos < s.at);
+  return (
+    <View style={{ gap: Spacing.four, alignItems: 'center', paddingTop: Spacing.five }}>
+      <ActivityIndicator size="large" color={t.accent} />
+      <View style={{ alignItems: 'center', gap: Spacing.two }}>
+        <H1 style={{ textAlign: 'center' }}>Processing payment</H1>
+        <Body center muted>This only takes a few seconds. You can keep this page open.</Body>
+      </View>
+      <View style={[styles.stageCard, { backgroundColor: t.surface, borderColor: t.line }]}>
+        {stages.map((s, i) => {
+          const complete = pos >= s.at;
+          const active = i === activeIdx;
+          return (
+            <View key={s.label} style={styles.stageRow}>
+              {complete ? (
+                <Ionicons name="checkmark-circle" size={24} color={t.recv} />
+              ) : active ? (
+                <ActivityIndicator size="small" color={t.accent} />
+              ) : (
+                <Ionicons name="ellipse-outline" size={24} color={t.line} />
+              )}
+              <Body
+                style={{
+                  color: complete || active ? t.text : t.muted,
+                  fontFamily: active ? Fonts.bodyBold : Fonts.body,
+                }}>
+                {s.label}
+              </Body>
+            </View>
+          );
+        })}
+      </View>
+      <Pressable onPress={() => router.push('/activity')} hitSlop={8}>
+        <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>View activity</Body>
+      </Pressable>
+    </View>
+  );
+}
+
+/** Terminal, non-delivered outcomes — manual review, failure/auto-refund, or a
+ *  refund awaiting a destination (claim). Mirrors the web ProcessingStep tail. */
+function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => void }) {
+  const t = useTheme();
+  const s = payment.state;
+  const needsClaim = !!payment.refundNeedsDestination;
+
+  const cfg =
+    s === 'MANUAL_REVIEW'
+      ? {
+          icon: 'hourglass' as const,
+          color: t.accent,
+          wash: t.accentWash,
+          title: 'Payment needs a quick review',
+          sub: "We couldn't complete this one automatically. Our team is reviewing it and no funds are lost — check Activity for updates.",
+        }
+      : s === 'REFUNDED'
+        ? {
+            icon: 'checkmark-circle' as const,
+            color: t.recv,
+            wash: t.recvWash,
+            title: 'Refunded',
+            sub: 'This payment could not be delivered, so your crypto has been returned.',
+          }
+        : needsClaim
+          ? {
+              icon: 'cash' as const,
+              color: t.accent,
+              wash: t.accentWash,
+              title: "We'll refund your crypto",
+              sub: "This payment couldn't be delivered. Add a Lightning invoice and we'll send your crypto back to you.",
+            }
+          : {
+              icon: 'close-circle' as const,
+              color: t.bad,
+              wash: t.badWash,
+              title: "Payment couldn't be completed",
+              sub: 'This payment was not delivered and is being refunded to you automatically.',
+            };
+
+  return (
+    <View style={{ gap: Spacing.four, alignItems: 'center', paddingTop: Spacing.six }}>
+      <IconCircle name={cfg.icon} color={cfg.color} bg={cfg.wash} size={72} />
+      <View style={{ alignItems: 'center', gap: Spacing.two }}>
+        <H1 style={{ textAlign: 'center' }}>{cfg.title}</H1>
+        <Body center>{cfg.sub}</Body>
+      </View>
+      <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
+        <Mono>Ref {payment.ref}</Mono>
+      </View>
+      {needsClaim ? (
+        <Button title="Claim your refund" icon="cash" onPress={() => router.push('/claim')} style={{ alignSelf: 'stretch' }} />
+      ) : null}
+      <Button title="View activity" variant="outline" icon="time" onPress={() => router.push('/activity')} style={{ alignSelf: 'stretch' }} />
+      <Button title="Send another" icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />
     </View>
   );
 }
@@ -747,4 +902,7 @@ const styles = StyleSheet.create({
   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four, paddingTop: Spacing.seven },
   successCircle: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center' },
   refChip: { paddingHorizontal: Spacing.four, paddingVertical: Spacing.two, borderRadius: Radius.pill },
+  payRecipCard: { alignSelf: 'stretch', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four },
+  stageCard: { alignSelf: 'stretch', gap: Spacing.four, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four },
+  stageRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
 });

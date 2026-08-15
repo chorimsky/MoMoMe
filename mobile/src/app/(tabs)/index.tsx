@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { api, errMessage } from '@/api/client';
@@ -61,7 +61,9 @@ export default function SendScreen() {
   const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string }>();
 
   const [step, setStep] = useState<Step>('details');
-  const [country] = useState<CountryCode>('CM');
+  const [country, setCountry] = useState<CountryCode>('CM');
+  const [pickCountry, setPickCountry] = useState(false);
+  const [recents, setRecents] = useState<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>([]);
   const [phone, setPhone] = useState('');
   const [amount, setAmount] = useState('');
   const [recipientName, setRecipientName] = useState('');
@@ -99,6 +101,19 @@ export default function SendScreen() {
       })
       .catch(() => {});
   }, []);
+
+  // "Send again" — people this device has paid before.
+  useEffect(() => {
+    api.recentRecipients().then(setRecents).catch(() => {});
+  }, []);
+
+  const pickRecent = (r: { phone: string; country: CountryCode; provider: ProviderId; name: string }) => {
+    setCountry(r.country);
+    setPhone(r.phone);
+    setRecipientName(r.name);
+    setNameSource('internal');
+    setResolvedProvider(r.provider);
+  };
 
   const xafNum = useMemo(() => parseInt(amount.replace(/\D/g, ''), 10) || 0, [amount]);
   const detected = useMemo(() => detectProvider(phone, country), [phone, country]);
@@ -270,6 +285,36 @@ export default function SendScreen() {
       {/* ---------------- DETAILS ---------------- */}
       {step === 'details' && (
         <View style={{ gap: Spacing.four }}>
+          {/* Send again — recent recipients */}
+          {recents.length && !merchantCode ? (
+            <View style={{ gap: Spacing.two }}>
+              <Label>Send again</Label>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: Spacing.two, paddingRight: Spacing.four }}>
+                {recents.slice(0, 12).map((r) => (
+                  <Pressable
+                    key={`${r.country}${r.phone}`}
+                    onPress={() => pickRecent(r)}
+                    style={[styles.recentChip, { backgroundColor: t.surface, borderColor: t.line }]}>
+                    <View style={[styles.recentAvatar, { backgroundColor: t.accentWash }]}>
+                      <Text style={[styles.recentInitials, { color: t.accent }]}>
+                        {(r.name || '?').trim().slice(0, 1).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text numberOfLines={1} style={[styles.recentName, { color: t.text }]}>
+                      {r.name || r.phone}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.recentSub, { color: t.muted }]}>
+                      {FLAG[r.country]} {PROVIDERS[r.provider].short}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
           <Card padded>
             <View style={styles.cardHead}>
               <Label>Recipient</Label>
@@ -278,8 +323,11 @@ export default function SendScreen() {
               ) : null}
             </View>
             <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
-              <Text style={styles.flag}>{FLAG[country]}</Text>
-              <Text style={[styles.dial, { color: t.muted }]}>{COUNTRIES[country].dial}</Text>
+              <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
+                <Text style={styles.flag}>{FLAG[country]}</Text>
+                <Text style={[styles.dial, { color: t.muted }]}>{COUNTRIES[country].dial}</Text>
+                <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
+              </Pressable>
               <TextInput
                 value={phone}
                 onChangeText={setPhone}
@@ -289,6 +337,25 @@ export default function SendScreen() {
                 style={[styles.phoneInput, { color: t.text }]}
               />
             </View>
+            {pickCountry ? (
+              <View style={styles.countryRow}>
+                {(Object.keys(COUNTRIES) as CountryCode[]).map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() => {
+                      setCountry(c);
+                      setPickCountry(false);
+                    }}
+                    style={[
+                      styles.countryChip,
+                      { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
+                    ]}>
+                    <Text style={{ fontSize: 16 }}>{FLAG[c]}</Text>
+                    <Text style={[styles.countryChipText, { color: t.text }]}>{COUNTRIES[c].dial}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             {recipientName ? (
               <View style={styles.nameRow}>
                 <Ionicons name="checkmark-circle" size={18} color={t.recv} />
@@ -608,6 +675,23 @@ const styles = StyleSheet.create({
   },
   flag: { fontSize: 20 },
   dial: { fontFamily: Fonts.bodyBold, fontSize: 16 },
+  countryBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.half },
+  countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
+  countryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  countryChipText: { fontFamily: Fonts.bodyBold, fontSize: 13 },
+  recentChip: { width: 108, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.three, gap: Spacing.one },
+  recentAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  recentInitials: { fontFamily: Fonts.bodyBold, fontSize: 16 },
+  recentName: { fontFamily: Fonts.bodyBold, fontSize: 14 },
+  recentSub: { fontSize: 11 },
   phoneInput: { flex: 1, fontFamily: Fonts.bodyBold, fontSize: 18, paddingVertical: Spacing.three, letterSpacing: 0.5 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },

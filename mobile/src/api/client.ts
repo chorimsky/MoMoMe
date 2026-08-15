@@ -218,6 +218,18 @@ export const api = {
   // refund-claim: supply a Lightning invoice to get crypto back when a payout couldn't land
   refundDestination: (id: string, bolt11: string) =>
     req<Payment>(`/payments/${id}/refund-destination`, { method: 'POST', body: JSON.stringify({ bolt11 }) }),
+
+  // account claim: own your Mobile Money number via OTP (identity provisioned on first payment)
+  requestClaim: (phone: string) =>
+    req<{ sent: boolean; devCode?: string }>('/identities/claim/request', {
+      method: 'POST',
+      body: JSON.stringify({ phone }),
+    }),
+  verifyClaim: (phone: string, code: string) =>
+    req<{ claimed: boolean; identity: { digits: string; lightningAddress?: string } }>(
+      '/identities/claim/verify',
+      { method: 'POST', body: JSON.stringify({ phone, code }) },
+    ),
 };
 
 /* ---------- this device's own Mobile Money number (for the Receive screen) ----------

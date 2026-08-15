@@ -91,6 +91,7 @@ export default function RootLayout() {
           <Stack.Screen name="ambassador" options={{ title: 'Ambassador' }} />
           <Stack.Screen name="developers" options={{ title: 'Developers' }} />
           <Stack.Screen name="claim" options={{ title: 'Refund' }} />
+          <Stack.Screen name="claim-account" options={{ title: 'Your number' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
           <Stack.Screen name="legal/[doc]" options={{ title: 'Legal' }} />
           <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />

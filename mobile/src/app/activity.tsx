@@ -1,8 +1,9 @@
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
+import { ReceiptModal } from '@/components/receipt';
 import { Body, Card, IconCircle, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -15,6 +16,7 @@ export default function ActivityScreen() {
   const [items, setItems] = useState<Payment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [receipt, setReceipt] = useState<Payment | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,8 +64,15 @@ export default function ActivityScreen() {
         ) : (
           items.map((p) => {
             const s = statusLabel(p.state);
+            const delivered = s.tone === 'done';
             return (
-              <View key={p.id} style={[styles.row, { backgroundColor: t.surface, borderColor: t.line }]}>
+              <Pressable
+                key={p.id}
+                onPress={delivered ? () => setReceipt(p) : undefined}
+                style={({ pressed }) => [
+                  styles.row,
+                  { backgroundColor: t.surface, borderColor: t.line, opacity: pressed && delivered ? 0.9 : 1 },
+                ]}>
                 <IconCircle
                   name={s.tone === 'done' ? 'checkmark' : s.tone === 'fail' ? 'close' : 'time'}
                   color={s.tone === 'done' ? t.recv : s.tone === 'fail' ? t.bad : t.accent}
@@ -82,11 +91,14 @@ export default function ActivityScreen() {
                   <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 15 }}>{xaf(p.xaf)}</Body>
                   <Pill label={s.text} tone={toneFor(s.tone)} />
                 </View>
-              </View>
+              </Pressable>
             );
           })
         )}
       </ScrollView>
+      {receipt ? (
+        <ReceiptModal visible={!!receipt} payment={receipt} onClose={() => setReceipt(null)} />
+      ) : null}
     </Screen>
   );
 }

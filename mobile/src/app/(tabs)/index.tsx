@@ -7,6 +7,7 @@ import QRCode from 'react-native-qrcode-svg';
 
 import { api, errMessage } from '@/api/client';
 import { MomoMark } from '@/components/brand';
+import { ReceiptModal } from '@/components/receipt';
 import {
   Body,
   Button,
@@ -69,6 +70,7 @@ export default function SendScreen() {
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [quoteExpired, setQuoteExpired] = useState(false);
+  const [receiptOpen, setReceiptOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [enabledMethods, setEnabledMethods] = useState<Method[]>(ALL_METHODS);
@@ -432,7 +434,15 @@ export default function SendScreen() {
           <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
             <Mono>Ref {payment.ref}</Mono>
           </View>
+          <Button
+            title="View receipt"
+            icon="receipt-outline"
+            variant="outline"
+            onPress={() => setReceiptOpen(true)}
+            style={{ alignSelf: 'stretch' }}
+          />
           <Button title="Send another" icon="add" onPress={reset} style={{ alignSelf: 'stretch' }} />
+          <ReceiptModal visible={receiptOpen} payment={payment} onClose={() => setReceiptOpen(false)} />
         </View>
       )}
     </Screen>

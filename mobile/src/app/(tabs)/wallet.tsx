@@ -45,16 +45,16 @@ export default function ReceiveScreen() {
   return (
     <Screen scroll>
       <View style={styles.head}>
-        <H1>Receive</H1>
-        <Body muted>Get paid in Bitcoin — it lands in your Mobile Money.</Body>
+        <H1>Get paid</H1>
+        <Body muted>Get paid from anywhere — it lands in your Mobile Money.</Body>
       </View>
 
       {editing || !number ? (
         <Card padded elevated>
           <IconCircle name="arrow-down" color={t.recv} bg={t.recvWash} size={56} />
           <Body>
-            Enter your MTN or Orange Money number. We'll turn it into a Lightning Address anyone
-            can pay — the sats are converted and delivered to that number.
+            Enter your MTN or Orange Money number. We'll create a payment link anyone can use to
+            pay you — the money is converted and delivered straight to that number.
           </Body>
           <Field
             label="Your Mobile Money number"
@@ -65,8 +65,8 @@ export default function ReceiveScreen() {
             left={<Text style={{ fontSize: 18 }}>🇨🇲</Text>}
           />
           <Button
-            title="Create my Lightning Address"
-            icon="flash"
+            title="Create my payment link"
+            icon="link"
             onPress={save}
             disabled={localDigits(draft, 'CM').length < 8}
             style={{ alignSelf: 'stretch' }}
@@ -77,9 +77,9 @@ export default function ReceiveScreen() {
         </Card>
       ) : (
         <Card padded elevated style={{ alignItems: 'center', gap: Spacing.four }}>
-          <Label>Your Lightning Address</Label>
+          <Label>Your payment link</Label>
           <View style={styles.addrRow}>
-            <Ionicons name="flash" size={16} color={t.brandInk} style={{ backgroundColor: t.brand, borderRadius: 6, padding: 3 }} />
+            <Ionicons name="link" size={16} color={t.brandInk} style={{ backgroundColor: t.brand, borderRadius: 6, padding: 3 }} />
             <Text style={[styles.addr, { color: t.text }]}>{address}</Text>
           </View>
           <View style={[styles.qrCard, Shadow.md]}>
@@ -95,7 +95,7 @@ export default function ReceiveScreen() {
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
           </Pressable>
           <Body muted center style={{ fontSize: 13 }}>
-            Any Lightning wallet can pay this. Funds are converted to XAF and sent to your
+            Share this to get paid from anywhere in the world. The money arrives as XAF in your
             Mobile Money automatically.
           </Body>
           <Button

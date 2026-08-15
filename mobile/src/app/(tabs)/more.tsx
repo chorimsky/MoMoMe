@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Href, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Wordmark } from '@/components/brand';
 import { Body, Card, H1, IconCircle, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,9 +21,9 @@ const GROUPS: { title: string; items: Item[] }[] = [
   {
     title: 'Grow',
     items: [
-      { icon: 'storefront', label: 'For merchants', sub: 'Accept crypto payouts to MoMo', tone: 'accent', route: '/merchant' },
+      { icon: 'storefront', label: 'For merchants', sub: 'Accept payments, settle to Mobile Money', tone: 'accent', route: '/merchant' },
       { icon: 'people', label: 'Become an ambassador', sub: 'Refer friends and earn', tone: 'recv', route: '/ambassador' },
-      { icon: 'code-slash', label: 'Developers', sub: 'API & Lightning Address', tone: 'brand', route: '/developers' },
+      { icon: 'code-slash', label: 'Developers', sub: 'API & payment links', tone: 'brand', route: '/developers' },
     ],
   },
   {
@@ -80,9 +81,12 @@ export default function MoreScreen() {
         </View>
       ))}
 
-      <Body muted center style={{ marginTop: Spacing.two, marginBottom: Spacing.five }}>
-        MoMo›Me · Pay Mobile Money with crypto
-      </Body>
+      <View style={{ alignItems: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five }}>
+        <Wordmark size={20} />
+        <Body muted center style={{ fontSize: 13 }}>
+          Mobile Money, made simple
+        </Body>
+      </View>
     </Screen>
   );
 }

@@ -49,7 +49,7 @@ export default function DiscoverScreen() {
     <Screen scroll>
       <View style={styles.head}>
         <H1>Discover</H1>
-        <Body muted>Businesses that accept MoMo›Me — pay them with crypto.</Body>
+        <Body muted>Businesses that accept MoMo›Me — pay them in seconds.</Body>
       </View>
 
       <Field

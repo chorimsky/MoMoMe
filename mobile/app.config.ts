@@ -38,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     associatedDomains: [`applinks:${WEB_HOST}`],
     infoPlist: {
       NSCameraUsageDescription:
-        'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant or Lightning invoice.',
+        'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -82,7 +82,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-camera',
       {
         cameraPermission:
-          'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant or Lightning invoice.',
+          'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant.',
         recordAudioAndroid: false,
       },
     ],

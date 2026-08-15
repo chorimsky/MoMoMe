@@ -5,18 +5,21 @@ export function xaf(n: number): string {
   return `${Math.round(n).toLocaleString('fr-FR').replace(/ |,/g, ' ')} XAF`;
 }
 
+// User-facing funding labels are deliberately mobile-money-first: we lead with
+// speed/outcome, not crypto jargon. The asset ("Bitcoin", "US Dollars") is named
+// only where the payer must know what they're sending.
 export const METHOD_LABEL: Record<Method, string> = {
-  LIGHTNING: 'Lightning',
-  ONCHAIN: 'Bitcoin (on-chain)',
-  USDT: 'USDT',
-  USDC: 'USDC',
+  LIGHTNING: 'Instant',
+  ONCHAIN: 'Bitcoin',
+  USDT: 'US Dollars',
+  USDC: 'US Dollars',
 };
 
 export const METHOD_BLURB: Record<Method, string> = {
-  LIGHTNING: 'Instant · lowest fee',
-  ONCHAIN: 'On-chain BTC · 10–60 min',
-  USDT: 'Stablecoin · instant',
-  USDC: 'Stablecoin · instant',
+  LIGHTNING: 'Arrives in seconds · lowest fee',
+  ONCHAIN: 'Best for large amounts · 10–60 min',
+  USDT: 'Stable value · arrives in seconds',
+  USDC: 'Stable value · arrives in seconds',
 };
 
 /** Sender-facing coarse status for a payment state. */

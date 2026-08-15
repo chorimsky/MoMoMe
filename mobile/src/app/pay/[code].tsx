@@ -82,7 +82,7 @@ export default function PayLinkScreen() {
             <Body muted>You'll enter an amount next</Body>
           )}
         </View>
-        <Button title="Pay with crypto" icon="flash" onPress={payInApp} style={{ alignSelf: 'stretch' }} />
+        <Button title="Pay now" icon="flash" onPress={payInApp} style={{ alignSelf: 'stretch' }} />
         <Body muted center style={{ fontSize: 12.5 }}>
           <Ionicons name="lock-closed" size={11} color={t.muted} /> Settles to the merchant's Mobile Money instantly
         </Body>

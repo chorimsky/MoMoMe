@@ -1,3 +1,4 @@
+import { BagelFatOne_400Regular } from '@expo-google-fonts/bagel-fat-one';
 import {
   Fredoka_500Medium,
   Fredoka_600SemiBold,
@@ -19,6 +20,7 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ensureSenderId } from '@/api/client';
+import { BrandSplash } from '@/components/brand-splash';
 import { Colors } from '@/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -44,6 +46,7 @@ function navTheme(scheme: 'light' | 'dark') {
 export default function RootLayout() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const [fontsLoaded, fontError] = useFonts({
+    BagelFatOne_400Regular,
     Fredoka_500Medium,
     Fredoka_600SemiBold,
     Fredoka_700Bold,
@@ -92,6 +95,7 @@ export default function RootLayout() {
           <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />
         </Stack>
         <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+        <BrandSplash />
       </ThemeProvider>
     </SafeAreaProvider>
   );

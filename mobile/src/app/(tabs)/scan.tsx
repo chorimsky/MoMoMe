@@ -51,7 +51,7 @@ export default function ScanScreen() {
         <View style={styles.center}>
           <IconCircle name="camera" color={t.accent} bg={t.accentWash} size={72} />
           <H3 style={{ textAlign: 'center' }}>Scan to pay</H3>
-          <Body center>Allow camera access to scan a merchant QR code or a Lightning invoice.</Body>
+          <Body center>Allow camera access to scan a merchant QR code or payment code.</Body>
           <Button title="Enable camera" icon="camera" onPress={requestPermission} style={{ alignSelf: 'stretch' }} />
         </View>
       </Screen>
@@ -62,7 +62,7 @@ export default function ScanScreen() {
     <Screen edges={['top']}>
       <View style={styles.header}>
         <H1>Scan to pay</H1>
-        <Body muted>Point at a MoMo›Me QR, merchant code or Lightning invoice.</Body>
+        <Body muted>Point at a MoMo›Me QR or merchant code.</Body>
       </View>
       <View style={[styles.cameraWrap, { borderColor: t.line, backgroundColor: '#000' }]}>
         <CameraView

@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { api, errMessage } from '@/api/client';
+import { MomoMark } from '@/components/brand';
 import {
   Body,
   Button,
@@ -41,10 +42,10 @@ const QUICK = [1000, 2000, 5000, 10000];
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
 const METHOD_META: Record<Method, { icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent'; blurb: string }> = {
-  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'Instant · lowest fee' },
-  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'Stablecoin · instant' },
-  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'On-chain BTC · 10–60 min' },
-  USDC: { icon: 'logo-usd', tone: 'recv', blurb: 'Stablecoin · instant' },
+  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'Arrives in seconds · lowest fee' },
+  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'Stable value · arrives in seconds' },
+  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'Best for large amounts · 10–60 min' },
+  USDC: { icon: 'logo-usd', tone: 'recv', blurb: 'Stable value · arrives in seconds' },
 };
 const providerTone = (p: ProviderId | null): 'brand' | 'accent' | 'neutral' =>
   p === 'MTN' ? 'brand' : p === 'ORANGE' ? 'accent' : 'neutral';
@@ -226,9 +227,7 @@ export default function SendScreen() {
     <Screen scroll>
       {step === 'details' ? (
         <View style={styles.brandRow}>
-          <View style={[styles.logo, { backgroundColor: t.brand }]}>
-            <Ionicons name="flash" size={18} color={t.brandInk} />
-          </View>
+          <MomoMark size={36} />
           <H1>Send money</H1>
         </View>
       ) : (
@@ -318,8 +317,8 @@ export default function SendScreen() {
       {step === 'method' && (
         <View style={{ gap: Spacing.four }}>
           <View>
-            <H2>How are you paying?</H2>
-            <Body muted>Send {group(String(xafNum))} XAF to {recipientName || phone}</Body>
+            <H2>How would you like to pay?</H2>
+            <Body muted>They receive {group(String(xafNum))} XAF as Mobile Money either way.</Body>
           </View>
           <View style={{ gap: Spacing.three }}>
             {enabledMethods.map((m) => {
@@ -370,16 +369,16 @@ export default function SendScreen() {
             <Row label="Amount" value={xaf(quote.xaf)} />
             <Row label="Fee" value={xaf(quote.feeXaf)} />
             <Divider />
-            <Row label="You pay" value={quote.inboundAmountLabel} strong />
+            <Row label="Total to pay" value={xaf(quote.xaf + quote.feeXaf)} strong />
             <View style={styles.rateRow}>
               <Body muted>≈ ${quote.usd.toFixed(2)} · {method ? METHOD_LABEL[method] : ''}</Body>
-              <Countdown to={quote.expiresAt} prefix="Rate locks " />
+              <Countdown to={quote.expiresAt} prefix="Price locked · " />
             </View>
             {quote.estimateOnly ? (
               <Pill label="Estimate — re-priced at confirmation" tone="accent" icon="information-circle" />
             ) : null}
             {quoteExpired ? (
-              <Pill label="Rate lock expired — refresh to get today's price" tone="bad" icon="time" />
+              <Pill label="Price expired — refresh for today's rate" tone="bad" icon="time" />
             ) : null}
           </Card>
 
@@ -425,7 +424,7 @@ export default function SendScreen() {
           </Body>
           {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
             <Pill
-              label={`Quoted ${xaf(payment.repricedFromXaf)} · final on-chain rate`}
+              label={`Quoted ${xaf(payment.repricedFromXaf)} · settled at final rate`}
               tone="accent"
               icon="information-circle"
             />
@@ -479,13 +478,15 @@ function PayStep({
   return (
     <View style={{ gap: Spacing.four, alignItems: 'center' }}>
       <View style={{ alignItems: 'center', gap: 2 }}>
-        <Label>Pay exactly</Label>
-        <Text style={[styles.payAmount, { color: t.text }]}>{pi.amountLabel}</Text>
+        <Label>Total to pay</Label>
+        <Text style={[styles.payAmount, { color: t.text }]}>{xaf(payment.totalXaf)}</Text>
+        <Body muted center>Send exactly {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
       </View>
 
       <View style={[styles.qrCard, Shadow.md]}>
         <QRCode value={pi.qr} size={214} backgroundColor="#fff" color="#111" />
       </View>
+      <Body muted center>Scan this code to pay, or copy it below.</Body>
 
       <Pressable
         onPress={copy}

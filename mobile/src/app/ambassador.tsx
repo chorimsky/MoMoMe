@@ -29,7 +29,7 @@ export default function AmbassadorScreen() {
 
   const link = data ? `${WEB_ORIGIN}/?ref=${data.code}` : '';
   const share = () =>
-    Share.share({ message: `Pay any Mobile Money number with crypto on MoMo›Me — ${link}` });
+    Share.share({ message: `Send money to any Mobile Money number, instantly, with MoMo›Me — ${link}` });
   const copy = async () => {
     await Clipboard.setStringAsync(link);
     setCopied(true);

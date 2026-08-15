@@ -59,7 +59,7 @@ export default function ClaimScreen() {
           <Card padded style={{ alignItems: 'center', gap: Spacing.three }}>
             <IconCircle name="checkmark" color="#fff" bg={t.recv} size={60} />
             <H3>Refund on its way</H3>
-            <Body center>Your crypto is being sent to the invoice you provided.</Body>
+            <Body center>Your money is being sent back to the destination you provided.</Body>
           </Card>
         ) : items === null ? (
           <View style={styles.center}><ActivityIndicator color={t.accent} /></View>
@@ -69,15 +69,15 @@ export default function ClaimScreen() {
             <H3>No refunds pending</H3>
             <Body center>
               If a Mobile Money payout can't be delivered, it'll show up here so you can get your
-              crypto back to a Lightning invoice.
+              money back.
             </Body>
           </Card>
         ) : selected ? (
           <Card padded>
             <Label>Refund {xaf(selected.xaf)} · {selected.ref}</Label>
-            <Body>Paste a Lightning invoice from your wallet for the equivalent amount. We'll pay your crypto back to it.</Body>
+            <Body>Paste a payment request (Lightning invoice) for the same amount and we'll send your money straight back to it.</Body>
             <Field
-              label="Lightning invoice (BOLT11)"
+              label="Refund destination"
               placeholder="lnbc…"
               autoCapitalize="none"
               value={invoice}

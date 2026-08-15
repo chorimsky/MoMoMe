@@ -118,8 +118,8 @@ function Onboard({
     <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
       <View style={{ alignItems: 'center', gap: Spacing.two }}>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={60} />
-        <H2 style={{ textAlign: 'center' }}>Accept crypto, get MoMo</H2>
-        <Body center>Create a free merchant account. Customers pay in Bitcoin/USDT; you receive XAF in Mobile Money.</Body>
+        <H2 style={{ textAlign: 'center' }}>Accept payments, get Mobile Money</H2>
+        <Body center>Create a free merchant account. Customers pay however they like; you receive XAF instantly in your Mobile Money.</Body>
       </View>
 
       <Card padded>

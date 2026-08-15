@@ -3,20 +3,59 @@ import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Body, Button, Card, H1, H3, IconCircle, Mono, Screen } from '@/components/ui';
+import { api } from '@/api/client';
+import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/components/ui';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-/** Extract a merchant pay code or a phone number from a scanned QR payload. */
-function routeForPayload(data: string): { kind: 'pay' | 'send' | 'unknown'; value: string } {
+/** Resolve a scanned QR / typed value to an action — matching the web app's
+ *  `payPathFromScan`: /pay & /m links, referral links, bare MOM-CC-###### codes,
+ *  and phone numbers. */
+function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknown'; value: string } {
   const s = data.trim();
-  const m = s.match(/\/(?:pay|m)\/([A-Za-z0-9_-]+)/);
-  if (m) return { kind: 'pay', value: m[1] };
+  const link = s.match(/\/(?:pay|m)\/([A-Za-z0-9_-]+)/);
+  if (link) return { kind: 'pay', value: link[1] };
+  const ref = s.match(/[?&]ref=([A-Za-z0-9_-]+)/);
+  if (ref) return { kind: 'ref', value: ref[1] };
+  if (/^MOM-[A-Za-z]{2}-\d{4,8}$/i.test(s)) return { kind: 'pay', value: s.toUpperCase() };
   const digits = s.replace(/[^\d]/g, '');
   if (/^\+?\d{8,15}$/.test(s) || (digits.length >= 8 && digits.length <= 12)) {
     return { kind: 'send', value: digits };
   }
   return { kind: 'unknown', value: s };
+}
+
+/** A manual merchant-code / link entry — the web parity fallback for when the
+ *  camera can't scan (denied, or the code was shared as text). */
+function ManualEntry() {
+  const [code, setCode] = useState('');
+  const go = () => {
+    const r = routeForPayload(code);
+    if (r.kind === 'send') {
+      router.push({ pathname: '/', params: { scanned: r.value } });
+    } else if (r.kind === 'ref') {
+      api.claimReferral(r.value).catch(() => {});
+      router.push('/');
+    } else {
+      // A /pay or /m link resolves to its code; a bare code is used as-is.
+      const c = r.kind === 'pay' ? r.value : code.trim();
+      if (c) router.push({ pathname: '/pay/[code]', params: { code: c } });
+    }
+  };
+  return (
+    <View style={{ gap: Spacing.two }}>
+      <Field
+        label="Or enter a merchant code"
+        placeholder="MOM-CM-004522"
+        autoCapitalize="characters"
+        value={code}
+        onChangeText={setCode}
+        onSubmitEditing={go}
+        returnKeyType="go"
+      />
+      <Button title="Pay" icon="arrow-forward" onPress={go} disabled={code.trim().length < 3} />
+    </View>
+  );
 }
 
 export default function ScanScreen() {
@@ -47,12 +86,14 @@ export default function ScanScreen() {
 
   if (!permission.granted) {
     return (
-      <Screen>
-        <View style={styles.center}>
+      <Screen scroll>
+        <View style={styles.deniedWrap}>
           <IconCircle name="camera" color={t.accent} bg={t.accentWash} size={72} />
           <H3 style={{ textAlign: 'center' }}>Scan to pay</H3>
-          <Body center>Allow camera access to scan a merchant QR code or payment code.</Body>
+          <Body center>Allow camera access to scan a merchant QR code — or enter the merchant code below.</Body>
           <Button title="Enable camera" icon="camera" onPress={requestPermission} style={{ alignSelf: 'stretch' }} />
+          <View style={{ height: Spacing.two }} />
+          <ManualEntry />
         </View>
       </Screen>
     );
@@ -86,6 +127,9 @@ export default function ScanScreen() {
           <Button title="Scan again" variant="ghost" onPress={() => setPayload(null)} />
         </Card>
       ) : null}
+      <View style={{ marginTop: Spacing.four }}>
+        <ManualEntry />
+      </View>
     </Screen>
   );
 }
@@ -93,6 +137,7 @@ export default function ScanScreen() {
 const C = 34;
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four, padding: Spacing.four },
+  deniedWrap: { alignItems: 'center', gap: Spacing.three, paddingTop: Spacing.six, paddingHorizontal: Spacing.one },
   header: { gap: Spacing.two, paddingTop: Spacing.four, marginBottom: Spacing.four },
   cameraWrap: {
     aspectRatio: 1,

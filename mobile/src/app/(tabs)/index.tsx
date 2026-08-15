@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
@@ -27,7 +27,7 @@ import {
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
-import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDERS } from '@shared/domain';
+import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -40,6 +40,10 @@ import type {
 type Step = 'details' | 'method' | 'review' | 'pay' | 'success';
 const ALL_METHODS: Method[] = ['LIGHTNING', 'USDT', 'ONCHAIN', 'USDC'];
 const QUICK = [1000, 2000, 5000, 10000];
+// CEMAC customer due-diligence: above this single-transfer value the operator
+// must be able to identify the customer (Règlement 02/24). We surface it as an
+// up-front notice rather than a silent post-hoc flag.
+const CDD_XAF = 1_000_000;
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
 const METHOD_META: Record<Method, { icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent'; blurb: string }> = {
@@ -70,6 +74,7 @@ export default function SendScreen() {
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [quoteExpired, setQuoteExpired] = useState(false);
+  const [ack, setAck] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +103,15 @@ export default function SendScreen() {
   const xafNum = useMemo(() => parseInt(amount.replace(/\D/g, ''), 10) || 0, [amount]);
   const detected = useMemo(() => detectProvider(phone, country), [phone, country]);
   const shownProvider = resolvedProvider ?? detected;
-  const detailsValid = phone.replace(/\D/g, '').length >= 8 && xafNum >= MIN_XAF && xafNum <= MAX_XAF;
+  // Operator payout ceiling (MTN/Orange 1,000,000 XAF) — surfaced proactively so
+  // the user isn't rejected only after confirming (CEMAC compliance-by-design).
+  const payoutCap = shownProvider ? PROVIDER_PAYOUT_MAX[shownProvider] : MAX_XAF;
+  const overCap = xafNum > payoutCap;
+  // "Verified" = name came from the operator or our own prior record. Anything
+  // else (typed manually / unknown) requires an irreversibility acknowledgment.
+  const nameVerified = nameSource === 'provider' || nameSource === 'internal';
+  const detailsValid =
+    phone.replace(/\D/g, '').length >= 8 && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap;
 
   // Best-effort recipient-name resolve (debounced, non-blocking).
   useEffect(() => {
@@ -220,6 +233,7 @@ export default function SendScreen() {
     setQuote(null);
     setPayment(null);
     setMerchantCode(undefined);
+    setAck(false);
     setError(null);
   };
 
@@ -309,7 +323,23 @@ export default function SendScreen() {
             {xafNum > 0 && xafNum < MIN_XAF ? (
               <Body style={{ color: t.warn }}>Minimum {group(String(MIN_XAF))} XAF</Body>
             ) : null}
+            {overCap ? (
+              <Body style={{ color: t.warn }}>
+                The most you can send to {shownProvider ? PROVIDERS[shownProvider].short : 'Mobile Money'} at
+                once is {group(String(payoutCap))} XAF.
+              </Body>
+            ) : null}
           </Card>
+
+          {xafNum >= CDD_XAF && !overCap ? (
+            <View style={[styles.notice, { backgroundColor: t.brandWash }]}>
+              <Ionicons name="shield-checkmark" size={18} color={t.warn} />
+              <Body style={{ flex: 1, fontSize: 13 }}>
+                For transfers of {group(String(CDD_XAF))} XAF or more, we may ask you to confirm your
+                identity — a legal requirement for larger payments.
+              </Body>
+            </View>
+          ) : null}
 
           <Button title="Continue" icon="arrow-forward" onPress={goMethod} disabled={!detailsValid} />
         </View>
@@ -384,6 +414,19 @@ export default function SendScreen() {
             ) : null}
           </Card>
 
+          {!nameVerified ? (
+            <Pressable onPress={() => setAck((v) => !v)} style={[styles.ackRow, { borderColor: t.line }]}>
+              <Ionicons
+                name={ack ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={ack ? t.recv : t.muted}
+              />
+              <Body style={{ flex: 1, fontSize: 13.5 }}>
+                I've checked this number is correct — Mobile Money payments can't be reversed.
+              </Body>
+            </Pressable>
+          ) : null}
+
           {quoteExpired ? (
             <Button
               title="Refresh quote"
@@ -392,8 +435,25 @@ export default function SendScreen() {
               loading={busy}
             />
           ) : (
-            <Button title="Confirm & pay" icon="lock-closed" onPress={confirm} loading={busy} />
+            <Button
+              title="Confirm & pay"
+              icon="lock-closed"
+              onPress={confirm}
+              loading={busy}
+              disabled={!nameVerified && !ack}
+            />
           )}
+          <Body muted center style={{ fontSize: 12 }}>
+            By paying, you agree to our{' '}
+            <Text style={{ color: t.accent }} onPress={() => router.push('/legal/terms')}>
+              Terms
+            </Text>{' '}
+            and{' '}
+            <Text style={{ color: t.accent }} onPress={() => router.push('/legal/privacy')}>
+              Privacy Policy
+            </Text>
+            .
+          </Body>
         </View>
       )}
 
@@ -570,6 +630,8 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
   },
   methodName: { fontFamily: Fonts.displayBold, fontSize: 17 },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, padding: Spacing.three, borderRadius: Radius.md },
+  ackRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, padding: Spacing.three, borderWidth: 1, borderRadius: Radius.md },
   receiveHero: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.three },
   receiveBig: { fontFamily: Fonts.displayBold, fontSize: 40, letterSpacing: -0.5 },
   recipInline: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },

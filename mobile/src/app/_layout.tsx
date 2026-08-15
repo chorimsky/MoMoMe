@@ -76,6 +76,9 @@ export default function RootLayout() {
             headerTintColor: c.text,
             headerTitleStyle: { fontFamily: 'Fredoka_600SemiBold' },
             headerShadowVisible: false,
+            // Parent route is the tab group (no title), so iOS would otherwise
+            // print "(tabs)" as the back label — show just the chevron instead.
+            headerBackButtonDisplayMode: 'minimal',
             contentStyle: { backgroundColor: c.background },
           }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

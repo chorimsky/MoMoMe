@@ -1,7 +1,7 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
 /**
- * MoMo›Me — native app config (Expo SDK 57).
+ * MoMo›Me — native app config (Expo SDK 54).
  * Values that change per environment come from EXPO_PUBLIC_* env vars so the same
  * source builds dev / preview / production without edits (see .env.example, eas.json).
  *

@@ -67,6 +67,7 @@ export default function SendScreen() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [quoteExpired, setQuoteExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [enabledMethods, setEnabledMethods] = useState<Method[]>(ALL_METHODS);
@@ -137,6 +138,7 @@ export default function SendScreen() {
       try {
         const q = await api.createQuote({ xaf: xafNum, method: m, country });
         setQuote(q);
+        setQuoteExpired(false);
         setStep('review');
       } catch (e) {
         setError(errMessage(e));
@@ -147,8 +149,20 @@ export default function SendScreen() {
     [xafNum, country],
   );
 
+  // Guard against confirming a stale rate-lock: once the quote passes its
+  // expiry the backend will reject the quoteId, so flip a flag that disables
+  // "Confirm & pay" and offers a re-quote instead.
+  useEffect(() => {
+    if (step !== 'review' || !quote) return;
+    const deadline = new Date(quote.expiresAt).getTime();
+    const check = () => setQuoteExpired(Date.now() >= deadline);
+    check();
+    const id = setInterval(check, 1000);
+    return () => clearInterval(id);
+  }, [step, quote]);
+
   const confirm = async () => {
-    if (!quote || !provider) return;
+    if (!quote || !provider || quoteExpired) return;
     setBusy(true);
     setError(null);
     try {
@@ -364,9 +378,21 @@ export default function SendScreen() {
             {quote.estimateOnly ? (
               <Pill label="Estimate — re-priced at confirmation" tone="accent" icon="information-circle" />
             ) : null}
+            {quoteExpired ? (
+              <Pill label="Rate lock expired — refresh to get today's price" tone="bad" icon="time" />
+            ) : null}
           </Card>
 
-          <Button title="Confirm & pay" icon="lock-closed" onPress={confirm} loading={busy} />
+          {quoteExpired ? (
+            <Button
+              title="Refresh quote"
+              icon="refresh"
+              onPress={() => method && pickMethod(method)}
+              loading={busy}
+            />
+          ) : (
+            <Button title="Confirm & pay" icon="lock-closed" onPress={confirm} loading={busy} />
+          )}
         </View>
       )}
 

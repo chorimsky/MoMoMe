@@ -44,6 +44,8 @@ example
 
 # Local build/verification scratch (MoMoMe)
 .export-check/
+.easbuilds/
+/*.png
 *.log
 .*.log
 .*.sh

@@ -253,7 +253,7 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
           <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderTop: "1px solid var(--line-2)" }}>
             <div style={{ minWidth: 0 }}>
               <div className="num" style={{ fontSize: 13.5, fontWeight: 700 }}>{fmt(p.xaf)} XAF</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{p.method === "LIGHTNING" ? "Lightning" : p.method === "ONCHAIN" ? "Bitcoin" : "USDT"} · {new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{p.method === "LIGHTNING" ? "Instant" : p.method === "ONCHAIN" ? "Bitcoin" : "US Dollars"} · {new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
             </div>
             <span style={{ fontSize: 11.5, fontWeight: 700, color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--warn-ink)" }}>{p.displayStatus === "Completed" ? t("completed") : p.displayStatus === "Failed" ? t("failed") : t("pending")}</span>
           </div>
@@ -409,11 +409,11 @@ function Poster({ merchant, onClose }: { merchant: MerchantAccount; onClose: () 
           <QR value={url} size={230} />
         </div>
 
-        {/* Accepted crypto — subtle brand marks so a customer knows what they can pay with. */}
+        {/* Accepted payment options — soft marks so a customer knows how they can pay. */}
         <div style={{ marginTop: 18 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: INK2, textTransform: "uppercase" }}>{t("mrc_ps_accept")}</div>
           <div style={{ marginTop: 10, display: "flex", justifyContent: "center", gap: 22 }}>
-            {[["₿", "Bitcoin", "#f7931a"], ["⚡", "Lightning", "#7b61ff"], ["₮", "USDT", "#26a17b"]].map(([g, label, col]) => (
+            {[["⚡", "Instant", "#f5b800"], ["₿", "Bitcoin", "#f7931a"], ["₮", "Dollars", "#26a17b"]].map(([g, label, col]) => (
               <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
                 <span style={{ width: 34, height: 34, borderRadius: "50%", background: col, color: "#fff", display: "grid", placeItems: "center", fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{g}</span>
                 <span style={{ fontSize: 10.5, fontWeight: 600, color: INK2 }}>{label}</span>

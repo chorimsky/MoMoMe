@@ -16,6 +16,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
     items: [
       { icon: 'time', label: 'Activity', sub: 'Your payment history', tone: 'accent', route: '/activity' },
       { icon: 'cash', label: 'Claim a refund', sub: 'A payout that could not land', tone: 'recv', route: '/claim' },
+      { icon: 'settings-outline', label: 'Settings', sub: 'Appearance and app info', tone: 'neutral', route: '/settings' as Href },
     ],
   },
   {

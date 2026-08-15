@@ -16,12 +16,12 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ensureSenderId } from '@/api/client';
 import { BrandSplash } from '@/components/brand-splash';
 import { Colors } from '@/constants/theme';
+import { useResolvedScheme } from '@/hooks/use-theme';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,7 +44,7 @@ function navTheme(scheme: 'light' | 'dark') {
 }
 
 export default function RootLayout() {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const scheme = useResolvedScheme();
   const [fontsLoaded, fontError] = useFonts({
     BagelFatOne_400Regular,
     Fredoka_500Medium,
@@ -91,6 +91,7 @@ export default function RootLayout() {
           <Stack.Screen name="ambassador" options={{ title: 'Ambassador' }} />
           <Stack.Screen name="developers" options={{ title: 'Developers' }} />
           <Stack.Screen name="claim" options={{ title: 'Refund' }} />
+          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
           <Stack.Screen name="legal/[doc]" options={{ title: 'Legal' }} />
           <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />
         </Stack>

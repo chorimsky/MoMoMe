@@ -7,6 +7,7 @@ import { api, errMessage } from '@/api/client';
 import { Body, Card, Field, H1, IconCircle, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 import { CATEGORIES } from '@/lib/categories';
 import type { MerchantDirectoryEntry } from '@shared/types';
 
@@ -26,6 +27,7 @@ const CAT_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export default function DiscoverScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string | null>(null);
   const [list, setList] = useState<MerchantDirectoryEntry[] | null>(null);
@@ -48,12 +50,12 @@ export default function DiscoverScreen() {
   return (
     <Screen scroll>
       <View style={styles.head}>
-        <H1>Discover</H1>
-        <Body muted>Businesses that accept MoMo›Me — pay them in seconds.</Body>
+        <H1>{tr('tab_discover')}</H1>
+        <Body muted>{tr('discover_sub')}</Body>
       </View>
 
       <Field
-        placeholder="Search a business…"
+        placeholder={tr('search_business')}
         value={q}
         onChangeText={setQ}
         left={<Ionicons name="search" size={18} color={t.muted} />}
@@ -65,7 +67,7 @@ export default function DiscoverScreen() {
         showsHorizontalScrollIndicator={false}
         style={styles.catsScroll}
         contentContainerStyle={styles.cats}>
-        <CatChip label="All" active={!cat} onPress={() => setCat(null)} />
+        <CatChip label={tr('cat_all')} active={!cat} onPress={() => setCat(null)} />
         {CATEGORIES.map((c) => (
           <CatChip key={c} label={c} active={cat === c} onPress={() => setCat(cat === c ? null : c)} />
         ))}
@@ -82,7 +84,7 @@ export default function DiscoverScreen() {
       ) : list.length === 0 ? (
         <View style={styles.center}>
           <IconCircle name="storefront" color={t.muted} bg={t.surface2} size={56} />
-          <Body muted center>No businesses found{cat ? ` in ${cat}` : ''}.</Body>
+          <Body muted center>{tr('no_merchants')}</Body>
         </View>
       ) : (
         <View style={{ gap: Spacing.three, marginTop: Spacing.four }}>
@@ -105,7 +107,7 @@ export default function DiscoverScreen() {
                   {m.location?.label ? ` · ${m.location.label}` : ''}
                 </Body>
               </View>
-              {m.verifiedPhone ? <Pill label="Verified" tone="recv" icon="shield-checkmark" /> : null}
+              {m.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" /> : null}
             </Pressable>
           ))}
         </View>

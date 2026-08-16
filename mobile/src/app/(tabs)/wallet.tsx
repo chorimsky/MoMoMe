@@ -8,6 +8,7 @@ import { getMyNumber, setMyNumber } from '@/api/client';
 import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
 import { localDigits } from '@shared/domain';
 
@@ -15,6 +16,7 @@ const LN_DOMAIN = WEB_ORIGIN.replace(/^https?:\/\//, '');
 
 export default function ReceiveScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [number, setNumber] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
@@ -45,19 +47,16 @@ export default function ReceiveScreen() {
   return (
     <Screen scroll>
       <View style={styles.head}>
-        <H1>Get paid</H1>
-        <Body muted>Get paid from anywhere — it lands in your Mobile Money.</Body>
+        <H1>{tr('get_paid')}</H1>
+        <Body muted>{tr('get_paid_sub')}</Body>
       </View>
 
       {editing || !number ? (
         <Card padded elevated>
           <IconCircle name="arrow-down" color={t.recv} bg={t.recvWash} size={56} />
-          <Body>
-            Enter your MTN or Orange Money number. We'll create a payment link anyone can use to
-            pay you — the money is converted and delivered straight to that number.
-          </Body>
+          <Body>{tr('receive_intro')}</Body>
           <Field
-            label="Your Mobile Money number"
+            label={tr('your_mm_number')}
             placeholder="6 7X XX XX XX"
             keyboardType="phone-pad"
             value={draft}
@@ -65,19 +64,19 @@ export default function ReceiveScreen() {
             left={<Text style={{ fontSize: 18 }}>🇨🇲</Text>}
           />
           <Button
-            title="Create my payment link"
+            title={tr('create_pay_link')}
             icon="link"
             onPress={save}
             disabled={localDigits(draft, 'CM').length < 8}
             style={{ alignSelf: 'stretch' }}
           />
           {number ? (
-            <Button title="Cancel" variant="ghost" size="md" onPress={() => setEditing(false)} />
+            <Button title={tr('cancel')} variant="ghost" size="md" onPress={() => setEditing(false)} />
           ) : null}
         </Card>
       ) : (
         <Card padded elevated style={{ alignItems: 'center', gap: Spacing.four }}>
-          <Label>Your payment link</Label>
+          <Label>{tr('your_pay_link')}</Label>
           <View style={styles.addrRow}>
             <Ionicons name="link" size={16} color={t.brandInk} style={{ backgroundColor: t.brand, borderRadius: 6, padding: 3 }} />
             <Text style={[styles.addr, { color: t.text }]}>{address}</Text>
@@ -94,12 +93,9 @@ export default function ReceiveScreen() {
             <Mono style={{ flex: 1 }} numberOfLines={1}>{address}</Mono>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
           </Pressable>
-          <Body muted center style={{ fontSize: 13 }}>
-            Share this to get paid from anywhere in the world. The money arrives as XAF in your
-            Mobile Money automatically.
-          </Body>
+          <Body muted center style={{ fontSize: 13 }}>{tr('share_get_paid')}</Body>
           <Button
-            title="Change number"
+            title={tr('change_number')}
             variant="ghost"
             size="md"
             onPress={() => {

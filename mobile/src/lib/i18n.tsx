@@ -12,6 +12,8 @@
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 
+import type { PaymentState } from '@shared/types';
+
 export type Lang = 'en' | 'fr';
 type Pair = [string, string];
 
@@ -167,6 +169,56 @@ export const STRINGS = {
   contact_support: ['Contact & support', 'Contact et assistance'],
   tagline: ['Mobile Money, made simple', 'Le Mobile Money, tout simplement'],
 
+  // receive
+  get_paid: ['Get paid', 'Recevez des paiements'],
+  get_paid_sub: ['Get paid from anywhere — it lands in your Mobile Money.', 'Recevez de l’argent de partout — il arrive sur votre Mobile Money.'],
+  receive_intro: [
+    'Enter your MTN or Orange Money number. We’ll create a payment link anyone can use to pay you — the money is converted and delivered straight to that number.',
+    'Saisissez votre numéro MTN ou Orange Money. Nous créons un lien de paiement que tout le monde peut utiliser — l’argent est converti et envoyé directement sur ce numéro.',
+  ],
+  your_mm_number: ['Your Mobile Money number', 'Votre numéro Mobile Money'],
+  create_pay_link: ['Create my payment link', 'Créer mon lien de paiement'],
+  your_pay_link: ['Your payment link', 'Votre lien de paiement'],
+  share_get_paid: [
+    'Share this to get paid from anywhere in the world. The money arrives as XAF in your Mobile Money automatically.',
+    'Partagez-le pour être payé depuis le monde entier. L’argent arrive en XAF sur votre Mobile Money automatiquement.',
+  ],
+  change_number: ['Change number', 'Changer de numéro'],
+
+  // discover
+  discover_sub: ['Businesses that accept MoMo›Me — pay them in seconds.', 'Les commerces qui acceptent MoMo›Me — payez-les en quelques secondes.'],
+  search_business: ['Search a business…', 'Rechercher un commerce…'],
+  cat_all: ['All', 'Tout'],
+  verified: ['Verified', 'Vérifié'],
+  no_merchants: ['No businesses found.', 'Aucun commerce trouvé.'],
+
+  // claim account
+  your_number: ['Your number', 'Votre numéro'],
+  claim_title: ['Make your number yours', 'Faites de votre numéro le vôtre'],
+  claim_sub: [
+    'Confirm you own your Mobile Money number so payments to you show as verified. Money still arrives straight to your Mobile Money — nothing to install.',
+    'Confirmez que vous possédez votre numéro Mobile Money pour que les paiements vers vous soient vérifiés. L’argent arrive toujours directement sur votre Mobile Money — rien à installer.',
+  ],
+  send_code: ['Send code', 'Envoyer le code'],
+  enter_your_code: ['Enter your code', 'Saisissez votre code'],
+  code_sent_to: ['We sent a 6-digit code to ', 'Nous avons envoyé un code à 6 chiffres au '],
+  demo_code: ['Demo code', 'Code démo'],
+  six_digit_code: ['6-digit code', 'Code à 6 chiffres'],
+  use_diff_number: ['Use a different number', 'Utiliser un autre numéro'],
+  number_yours_title: ['Your number is yours', 'Votre numéro est à vous'],
+  number_yours_sub: ['Payments to your number now show as verified. You’re all set.', 'Les paiements vers votre numéro sont désormais vérifiés. Tout est prêt.'],
+  your_pay_address: ['Your payment address', 'Votre adresse de paiement'],
+  start_sending: ['Start sending', 'Commencer à envoyer'],
+
+  // payment status
+  st_delivered: ['Delivered', 'Livré'],
+  st_refunded: ['Refunded', 'Remboursé'],
+  st_failed: ['Failed', 'Échoué'],
+  st_refund_pending: ['Refund pending', 'Remboursement en attente'],
+  st_review: ['In review', 'En vérification'],
+  st_waiting: ['Waiting for payment', 'En attente du paiement'],
+  st_processing: ['Processing', 'En cours'],
+
   // settings
   appearance: ['Appearance', 'Apparence'],
   mode_system: ['System', 'Système'],
@@ -225,4 +277,25 @@ export function useI18n() {
   const l = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const t = (key: StringKey, vars?: Record<string, string | number>) => translate(l, key, vars);
   return { t, lang: l, setLang };
+}
+
+/** Localized label for a payment state (pairs with statusLabel's tone). */
+export function statusKey(s: PaymentState): StringKey {
+  switch (s) {
+    case 'DELIVERED':
+      return 'st_delivered';
+    case 'REFUNDED':
+      return 'st_refunded';
+    case 'FAILED':
+      return 'st_failed';
+    case 'REFUND_PENDING':
+      return 'st_refund_pending';
+    case 'MANUAL_REVIEW':
+      return 'st_review';
+    case 'QUOTED':
+    case 'AWAITING_INBOUND':
+      return 'st_waiting';
+    default:
+      return 'st_processing';
+  }
 }

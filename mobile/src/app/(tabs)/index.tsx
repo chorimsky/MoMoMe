@@ -26,7 +26,7 @@ import {
 } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { StringKey, useI18n } from '@/lib/i18n';
+import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
@@ -661,7 +661,7 @@ function PayStep({
         <View style={styles.pulseWrap}>
           <View style={[styles.pulse, { backgroundColor: tone === 'recv' ? t.recv : tone === 'bad' ? t.bad : t.accent }]} />
         </View>
-        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{status.text}</Body>
+        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{tr(statusKey(payment.state))}</Body>
         {pi.expiresAt ? <Countdown to={pi.expiresAt} /> : null}
       </View>
       <Body muted center>{tr('waiting_auto')}</Body>

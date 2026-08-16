@@ -7,7 +7,7 @@ import { ReceiptModal } from '@/components/receipt';
 import { Body, Card, IconCircle, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { StringKey, useI18n } from '@/lib/i18n';
+import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, xaf } from '@/lib/format';
 import { PROVIDERS } from '@shared/domain';
 import type { Payment } from '@shared/types';
@@ -138,7 +138,7 @@ export default function ActivityScreen() {
                   {refundNeeded ? (
                     <Text style={[styles.refundCta, { color: t.bad }]}>{tr('refund_needed')}</Text>
                   ) : (
-                    <Pill label={s.text} tone={toneFor(s.tone)} />
+                    <Pill label={tr(statusKey(p.state))} tone={toneFor(s.tone)} />
                   )}
                 </View>
               </Pressable>

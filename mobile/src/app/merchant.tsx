@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { WEB_ORIGIN } from '@/lib/config';
 import { CATEGORIES } from '@/lib/categories';
 import { METHOD_LABEL, statusLabel } from '@/lib/format';
+import { statusKey, useI18n } from '@/lib/i18n';
 import { detectProvider, localDigits, PROVIDERS } from '@shared/domain';
 import type { MerchantAccount, MerchantLink, MerchantSummary } from '@shared/types';
 
@@ -181,6 +182,7 @@ function Dashboard({
   setError: (s: string | null) => void;
 }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [code, setCode] = useState('');
   const [amount, setAmount] = useState('');
   const [linkKind, setLinkKind] = useState<'link' | 'invoice'>('link');
@@ -340,7 +342,7 @@ function Dashboard({
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 2 }}>
                   <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{group(p.xaf)}</Body>
-                  <Pill label={s.text} tone={s.tone === 'done' ? 'recv' : s.tone === 'fail' ? 'bad' : 'accent'} />
+                  <Pill label={tr(statusKey(p.state))} tone={s.tone === 'done' ? 'recv' : s.tone === 'fail' ? 'bad' : 'accent'} />
                 </View>
               </View>
             );

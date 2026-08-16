@@ -7,6 +7,7 @@ import { api, errMessage } from '@/api/client';
 import { Body, Button, Card, Field, H2, IconCircle, Label, Mono, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 import { COUNTRIES, localDigits } from '@shared/domain';
 import type { CountryCode } from '@shared/types';
 
@@ -15,6 +16,7 @@ type Step = 'number' | 'otp' | 'done';
 
 export default function ClaimAccountScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [step, setStep] = useState<Step>('number');
   const [country, setCountry] = useState<CountryCode>('CM');
   const [pickCountry, setPickCountry] = useState(false);
@@ -58,7 +60,7 @@ export default function ClaimAccountScreen() {
 
   return (
     <Screen scroll>
-      <Stack.Screen options={{ title: 'Your number' }} />
+      <Stack.Screen options={{ title: tr('your_number') }} />
 
       {error ? (
         <View style={[styles.errorBar, { backgroundColor: t.badWash }]}>
@@ -71,14 +73,11 @@ export default function ClaimAccountScreen() {
         <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
           <View style={{ alignItems: 'center', gap: Spacing.two }}>
             <IconCircle name="shield-checkmark" color={t.accent} bg={t.accentWash} size={60} />
-            <H2 style={{ textAlign: 'center' }}>Make your number yours</H2>
-            <Body center>
-              Confirm you own your Mobile Money number so payments to you show as verified. Money still arrives
-              straight to your Mobile Money — nothing to install.
-            </Body>
+            <H2 style={{ textAlign: 'center' }}>{tr('claim_title')}</H2>
+            <Body center>{tr('claim_sub')}</Body>
           </View>
           <Card padded>
-            <Label>Your Mobile Money number</Label>
+            <Label>{tr('your_mm_number')}</Label>
             <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
               <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
                 <Body style={{ fontSize: 20 }}>{FLAG[country]}</Body>
@@ -113,7 +112,7 @@ export default function ClaimAccountScreen() {
                 ))}
               </View>
             ) : null}
-            <Button title="Send code" icon="send" onPress={sendCode} loading={busy} disabled={!validNumber} style={{ marginTop: Spacing.three }} />
+            <Button title={tr('send_code')} icon="send" onPress={sendCode} loading={busy} disabled={!validNumber} style={{ marginTop: Spacing.three }} />
           </Card>
         </View>
       ) : null}
@@ -122,9 +121,9 @@ export default function ClaimAccountScreen() {
         <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
           <View style={{ alignItems: 'center', gap: Spacing.two }}>
             <IconCircle name="keypad" color={t.accent} bg={t.accentWash} size={60} />
-            <H2 style={{ textAlign: 'center' }}>Enter your code</H2>
+            <H2 style={{ textAlign: 'center' }}>{tr('enter_your_code')}</H2>
             <Body center>
-              We sent a 6-digit code to{' '}
+              {tr('code_sent_to')}
               <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>
                 {COUNTRIES[country].dial} {phone}
               </Body>
@@ -133,20 +132,20 @@ export default function ClaimAccountScreen() {
           <Card padded>
             {devCode ? (
               <View style={{ marginBottom: Spacing.three }}>
-                <Pill label={`Demo code: ${devCode}`} tone="accent" icon="information-circle" />
+                <Pill label={`${tr('demo_code')}: ${devCode}`} tone="accent" icon="information-circle" />
               </View>
             ) : null}
             <Field
-              label="6-digit code"
+              label={tr('six_digit_code')}
               placeholder="000000"
               keyboardType="number-pad"
               value={code}
               onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}
               maxLength={6}
             />
-            <Button title="Verify" icon="checkmark" onPress={verify} loading={busy} disabled={code.length !== 6} style={{ marginTop: Spacing.three }} />
+            <Button title={tr('verify')} icon="checkmark" onPress={verify} loading={busy} disabled={code.length !== 6} style={{ marginTop: Spacing.three }} />
             <Button
-              title="Use a different number"
+              title={tr('use_diff_number')}
               variant="ghost"
               size="md"
               onPress={() => {
@@ -163,23 +162,23 @@ export default function ClaimAccountScreen() {
         <View style={{ gap: Spacing.four, paddingTop: Spacing.six }}>
           <View style={{ alignItems: 'center', gap: Spacing.three }}>
             <IconCircle name="checkmark-circle" color={t.recv} bg={t.recvWash} size={72} />
-            <H2 style={{ textAlign: 'center' }}>Your number is yours</H2>
-            <Body center>Payments to your number now show as verified. You’re all set.</Body>
+            <H2 style={{ textAlign: 'center' }}>{tr('number_yours_title')}</H2>
+            <Body center>{tr('number_yours_sub')}</Body>
           </View>
           <Card padded style={{ gap: Spacing.two }}>
-            <Label>Your number</Label>
+            <Label>{tr('your_number')}</Label>
             <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 16 }}>
               {COUNTRIES[country].dial} {phone}
             </Body>
             {address ? (
               <>
                 <View style={{ height: 1, backgroundColor: t.line2, marginVertical: Spacing.two }} />
-                <Label>Your payment address</Label>
+                <Label>{tr('your_pay_address')}</Label>
                 <Mono>{address}</Mono>
               </>
             ) : null}
           </Card>
-          <Button title="Start sending" icon="arrow-forward" onPress={() => router.replace('/')} />
+          <Button title={tr('start_sending')} icon="arrow-forward" onPress={() => router.replace('/')} />
         </View>
       ) : null}
     </Screen>

@@ -26,6 +26,7 @@ import {
 } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { StringKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
@@ -58,11 +59,11 @@ const QUICK = [1000, 2000, 5000, 10000];
 const CDD_XAF = 1_000_000;
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
-const METHOD_META: Record<Method, { icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent'; blurb: string }> = {
-  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'Arrives in seconds · lowest fee' },
-  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'Stable value · arrives in seconds' },
-  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'Best for large amounts · 10–60 min' },
-  USDC: { icon: 'logo-usd', tone: 'recv', blurb: 'Stable value · arrives in seconds' },
+const METHOD_META: Record<Method, { icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent'; blurb: StringKey }> = {
+  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'blurb_lightning' },
+  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'blurb_usdt' },
+  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'blurb_onchain' },
+  USDC: { icon: 'logo-usd', tone: 'recv', blurb: 'blurb_usdc' },
 };
 const providerTone = (p: ProviderId | null): 'brand' | 'accent' | 'neutral' =>
   p === 'MTN' ? 'brand' : p === 'ORANGE' ? 'accent' : 'neutral';
@@ -70,6 +71,7 @@ const group = (d: string) => d.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 export default function SendScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string }>();
 
   const [step, setStep] = useState<Step>('details');
@@ -271,7 +273,7 @@ export default function SendScreen() {
       {step === 'details' ? (
         <View style={styles.brandRow}>
           <MomoMark size={36} />
-          <H1>Send money</H1>
+          <H1>{tr('send_money')}</H1>
         </View>
       ) : (
         <StepHeader
@@ -300,7 +302,7 @@ export default function SendScreen() {
           {/* Send again — recent recipients */}
           {recents.length && !merchantCode ? (
             <View style={{ gap: Spacing.two }}>
-              <Label>Send again</Label>
+              <Label>{tr('send_again')}</Label>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -329,7 +331,7 @@ export default function SendScreen() {
 
           <Card padded>
             <View style={styles.cardHead}>
-              <Label>Recipient</Label>
+              <Label>{tr('recipient')}</Label>
               {shownProvider ? (
                 <Pill label={PROVIDERS[shownProvider].name} tone={providerTone(shownProvider)} />
               ) : null}
@@ -377,7 +379,7 @@ export default function SendScreen() {
           </Card>
 
           <Card padded>
-            <Label>Amount</Label>
+            <Label>{tr('amount')}</Label>
             <View style={styles.amountRow}>
               <TextInput
                 value={amount ? group(amount) : ''}
@@ -400,27 +402,21 @@ export default function SendScreen() {
               ))}
             </View>
             {xafNum > 0 && xafNum < MIN_XAF ? (
-              <Body style={{ color: t.warn }}>Minimum {group(String(MIN_XAF))} XAF</Body>
+              <Body style={{ color: t.warn }}>{tr('min_xaf', { n: group(String(MIN_XAF)) })}</Body>
             ) : null}
             {overCap ? (
-              <Body style={{ color: t.warn }}>
-                The most you can send to {shownProvider ? PROVIDERS[shownProvider].short : 'Mobile Money'} at
-                once is {group(String(payoutCap))} XAF.
-              </Body>
+              <Body style={{ color: t.warn }}>{tr('over_cap', { p: shownProvider ? PROVIDERS[shownProvider].short : tr('mobile_money'), n: group(String(payoutCap)) })}</Body>
             ) : null}
           </Card>
 
           {xafNum >= CDD_XAF && !overCap ? (
             <View style={[styles.notice, { backgroundColor: t.brandWash }]}>
               <Ionicons name="shield-checkmark" size={18} color={t.warn} />
-              <Body style={{ flex: 1, fontSize: 13 }}>
-                For transfers of {group(String(CDD_XAF))} XAF or more, we may ask you to confirm your
-                identity — a legal requirement for larger payments.
-              </Body>
+              <Body style={{ flex: 1, fontSize: 13 }}>{tr('cdd_notice', { n: group(String(CDD_XAF)) })}</Body>
             </View>
           ) : null}
 
-          <Button title="Continue" icon="arrow-forward" onPress={goMethod} disabled={!detailsValid} />
+          <Button title={tr('continue')} icon="arrow-forward" onPress={goMethod} disabled={!detailsValid} />
         </View>
       )}
 
@@ -428,8 +424,8 @@ export default function SendScreen() {
       {step === 'method' && (
         <View style={{ gap: Spacing.four }}>
           <View>
-            <H2>How would you like to pay?</H2>
-            <Body muted>They receive {group(String(xafNum))} XAF as Mobile Money either way.</Body>
+            <H2>{tr('how_pay')}</H2>
+            <Body muted>{tr('method_sub', { n: group(String(xafNum)) })}</Body>
           </View>
           <View style={{ gap: Spacing.three }}>
             {enabledMethods.map((m) => {
@@ -449,7 +445,7 @@ export default function SendScreen() {
                   <IconCircle name={meta.icon} color={c} bg={wash} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.methodName, { color: t.text }]}>{METHOD_LABEL[m]}</Text>
-                    <Body muted>{meta.blurb}</Body>
+                    <Body muted>{tr(meta.blurb)}</Body>
                   </View>
                   {busy && method === m ? (
                     <Ionicons name="ellipsis-horizontal" size={20} color={t.muted} />
@@ -467,33 +463,30 @@ export default function SendScreen() {
       {step === 'review' && quote && (
         <View style={{ gap: Spacing.four }}>
           <View style={styles.receiveHero}>
-            <Label>They receive</Label>
+            <Label>{tr('they_receive')}</Label>
             <Text style={[styles.receiveBig, { color: t.text }]}>{xaf(quote.xaf)}</Text>
             <View style={styles.recipInline}>
               <Text style={styles.flag}>{FLAG[country]}</Text>
               <Body style={{ color: t.textSecondary }}>{recipientName || phone}</Body>
               {provider ? <Pill label={PROVIDERS[provider].short} tone={providerTone(provider)} /> : null}
             </View>
-            <Body muted center style={{ fontSize: 11.5, marginTop: Spacing.two, lineHeight: 16, paddingHorizontal: Spacing.four }}>
-              Credited in full to their Mobile Money wallet. Standard cash-out fees (operator + government levy)
-              apply only if they withdraw — never charged by MoMo›Me.
-            </Body>
+            <Body muted center style={{ fontSize: 11.5, marginTop: Spacing.two, lineHeight: 16, paddingHorizontal: Spacing.four }}>{tr('cashout_note')}</Body>
           </View>
 
           <Card padded>
-            <Row label="Amount" value={xaf(quote.xaf)} />
-            <Row label="Fee" value={xaf(quote.feeXaf)} />
+            <Row label={tr('amount')} value={xaf(quote.xaf)} />
+            <Row label={tr('fee')} value={xaf(quote.feeXaf)} />
             <Divider />
-            <Row label="Total to pay" value={xaf(quote.xaf + quote.feeXaf)} strong />
+            <Row label={tr('total_to_pay')} value={xaf(quote.xaf + quote.feeXaf)} strong />
             <View style={styles.rateRow}>
               <Body muted>≈ ${quote.usd.toFixed(2)} · {method ? METHOD_LABEL[method] : ''}</Body>
-              <Countdown to={quote.expiresAt} prefix="Price locked · " />
+              <Countdown to={quote.expiresAt} prefix={tr('price_locked')} />
             </View>
             {quote.estimateOnly ? (
-              <Pill label="Estimate — re-priced at confirmation" tone="accent" icon="information-circle" />
+              <Pill label={tr('estimate_repriced')} tone="accent" icon="information-circle" />
             ) : null}
             {quoteExpired ? (
-              <Pill label="Price expired — refresh for today's rate" tone="bad" icon="time" />
+              <Pill label={tr('price_expired')} tone="bad" icon="time" />
             ) : null}
           </Card>
 
@@ -504,22 +497,20 @@ export default function SendScreen() {
                 size={22}
                 color={ack ? t.recv : t.muted}
               />
-              <Body style={{ flex: 1, fontSize: 13.5 }}>
-                I've checked this number is correct — Mobile Money payments can't be reversed.
-              </Body>
+              <Body style={{ flex: 1, fontSize: 13.5 }}>{tr('ack_irreversible')}</Body>
             </Pressable>
           ) : null}
 
           {quoteExpired ? (
             <Button
-              title="Refresh quote"
+              title={tr('refresh_quote')}
               icon="refresh"
               onPress={() => method && pickMethod(method)}
               loading={busy}
             />
           ) : (
             <Button
-              title="Confirm & pay"
+              title={tr('confirm_pay')}
               icon="lock-closed"
               onPress={confirm}
               loading={busy}
@@ -527,13 +518,13 @@ export default function SendScreen() {
             />
           )}
           <Body muted center style={{ fontSize: 12 }}>
-            By paying, you agree to our{' '}
+            {tr('by_paying')}
             <Text style={{ color: t.accent }} onPress={() => router.push('/legal/terms')}>
-              Terms
-            </Text>{' '}
-            and{' '}
+              {tr('terms')}
+            </Text>
+            {tr('and')}
             <Text style={{ color: t.accent }} onPress={() => router.push('/legal/privacy')}>
-              Privacy Policy
+              {tr('privacy')}
             </Text>
             .
           </Body>
@@ -570,14 +561,14 @@ export default function SendScreen() {
           <View style={[styles.successCircle, { backgroundColor: t.recv }, Shadow.md]}>
             <Ionicons name="checkmark" size={52} color="#fff" />
           </View>
-          <H1 style={{ textAlign: 'center' }}>Sent!</H1>
+          <H1 style={{ textAlign: 'center' }}>{tr('sent_excl')}</H1>
           <Body center style={{ fontSize: 17 }}>
-            {xaf(payment.xaf)} delivered to{'\n'}
+            {tr('delivered_to', { n: xaf(payment.xaf) })}{'\n'}
             <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName || phone}</Text>
           </Body>
           {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
             <Pill
-              label={`Quoted ${xaf(payment.repricedFromXaf)} · settled at final rate`}
+              label={tr('quoted_settled', { n: xaf(payment.repricedFromXaf) })}
               tone="accent"
               icon="information-circle"
             />
@@ -586,13 +577,13 @@ export default function SendScreen() {
             <Mono>Ref {payment.ref}</Mono>
           </View>
           <Button
-            title="View receipt"
+            title={tr('view_receipt')}
             icon="receipt-outline"
             variant="outline"
             onPress={() => setReceiptOpen(true)}
             style={{ alignSelf: 'stretch' }}
           />
-          <Button title="Send another" icon="add" onPress={reset} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('send_another')} icon="add" onPress={reset} style={{ alignSelf: 'stretch' }} />
           <ReceiptModal visible={receiptOpen} payment={payment} onClose={() => setReceiptOpen(false)} />
         </View>
       )}
@@ -631,6 +622,7 @@ function PayStep({
   onSimulate: () => void;
 }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const status = statusLabel(payment.state);
   const pi = payment.payInstruction;
   const [copied, setCopied] = useState(false);
@@ -643,15 +635,15 @@ function PayStep({
   return (
     <View style={{ gap: Spacing.four, alignItems: 'center' }}>
       <View style={{ alignItems: 'center', gap: 2 }}>
-        <Label>Total to pay</Label>
+        <Label>{tr('total_to_pay')}</Label>
         <Text style={[styles.payAmount, { color: t.text }]}>{xaf(payment.totalXaf)}</Text>
-        <Body muted center>Send exactly {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
+        <Body muted center>{tr('send_exactly')} {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
       </View>
 
       <View style={[styles.qrCard, Shadow.md]}>
         <QRCode value={pi.qr} size={214} backgroundColor="#fff" color="#111" />
       </View>
-      <Body muted center>Scan this code to pay, or copy it below.</Body>
+      <Body muted center>{tr('scan_or_copy')}</Body>
 
       <Pressable
         onPress={copy}
@@ -672,28 +664,28 @@ function PayStep({
         <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{status.text}</Body>
         {pi.expiresAt ? <Countdown to={pi.expiresAt} /> : null}
       </View>
-      <Body muted center>Waiting for your payment — this updates automatically.</Body>
+      <Body muted center>{tr('waiting_auto')}</Body>
 
       {/* recipient / reference context */}
       <View style={[styles.payRecipCard, { backgroundColor: t.surface, borderColor: t.line }]}>
         <View style={styles.kv}>
-          <Body muted>To</Body>
+          <Body muted>{tr('to')}</Body>
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{recipientLabel}</Text>
         </View>
         <View style={styles.kv}>
-          <Body muted>Mobile Money</Body>
+          <Body muted>{tr('mobile_money')}</Body>
           <Body style={{ color: t.textSecondary }}>
             {providerShort ? `${providerShort} · ` : ''}{payment.recipient.phone}
           </Body>
         </View>
         <View style={styles.kv}>
-          <Body muted>Reference</Body>
+          <Body muted>{tr('reference')}</Body>
           <Mono style={{ fontSize: 12 }}>{payment.ref}</Mono>
         </View>
       </View>
 
       {demoMode ? (
-        <Button title="Simulate payment (demo)" variant="outline" icon="flask" onPress={onSimulate} style={{ alignSelf: 'stretch' }} />
+        <Button title={tr('simulate_demo')} variant="outline" icon="flask" onPress={onSimulate} style={{ alignSelf: 'stretch' }} />
       ) : null}
     </View>
   );
@@ -703,20 +695,21 @@ function PayStep({
  *  Converting → Sending, mirroring the web ProcessingStep. */
 function ProcessingView({ payment }: { payment: Payment }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const pos = STAGE_ORDER.indexOf(payment.state);
   const stages = [
-    { label: 'Receiving payment', at: 1 },
-    { label: 'Confirming payment', at: 2 },
-    { label: 'Converting funds', at: 3 },
-    { label: 'Sending to Mobile Money', at: 5 },
+    { label: tr('s_receiving'), at: 1 },
+    { label: tr('s_confirming'), at: 2 },
+    { label: tr('s_converting'), at: 3 },
+    { label: tr('s_sending'), at: 5 },
   ];
   const activeIdx = stages.findIndex((s) => pos < s.at);
   return (
     <View style={{ gap: Spacing.four, alignItems: 'center', paddingTop: Spacing.five }}>
       <ActivityIndicator size="large" color={t.accent} />
       <View style={{ alignItems: 'center', gap: Spacing.two }}>
-        <H1 style={{ textAlign: 'center' }}>Processing payment</H1>
-        <Body center muted>This only takes a few seconds. You can keep this page open.</Body>
+        <H1 style={{ textAlign: 'center' }}>{tr('proc_title')}</H1>
+        <Body center muted>{tr('proc_sub')}</Body>
       </View>
       <View style={[styles.stageCard, { backgroundColor: t.surface, borderColor: t.line }]}>
         {stages.map((s, i) => {
@@ -743,7 +736,7 @@ function ProcessingView({ payment }: { payment: Payment }) {
         })}
       </View>
       <Pressable onPress={() => router.push('/activity')} hitSlop={8}>
-        <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>View activity</Body>
+        <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>{tr('view_activity')}</Body>
       </Pressable>
     </View>
   );
@@ -753,6 +746,7 @@ function ProcessingView({ payment }: { payment: Payment }) {
  *  refund awaiting a destination (claim). Mirrors the web ProcessingStep tail. */
 function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => void }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const s = payment.state;
   const needsClaim = !!payment.refundNeedsDestination;
 
@@ -762,31 +756,31 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
           icon: 'hourglass' as const,
           color: t.accent,
           wash: t.accentWash,
-          title: 'Payment needs a quick review',
-          sub: "We couldn't complete this one automatically. Our team is reviewing it and no funds are lost — check Activity for updates.",
+          title: tr('proc_review_title'),
+          sub: tr('proc_review_sub'),
         }
       : s === 'REFUNDED'
         ? {
             icon: 'checkmark-circle' as const,
             color: t.recv,
             wash: t.recvWash,
-            title: 'Refunded',
-            sub: 'This payment could not be delivered, so your crypto has been returned.',
+            title: tr('refunded_title'),
+            sub: tr('refunded_sub'),
           }
         : needsClaim
           ? {
               icon: 'cash' as const,
               color: t.accent,
               wash: t.accentWash,
-              title: "We'll refund your crypto",
-              sub: "This payment couldn't be delivered. Add a Lightning invoice and we'll send your crypto back to you.",
+              title: tr('refund_title'),
+              sub: tr('refund_sub'),
             }
           : {
               icon: 'close-circle' as const,
               color: t.bad,
               wash: t.badWash,
-              title: "Payment couldn't be completed",
-              sub: 'This payment was not delivered and is being refunded to you automatically.',
+              title: tr('proc_failed_title'),
+              sub: tr('proc_failed_sub'),
             };
 
   return (
@@ -800,10 +794,10 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
         <Mono>Ref {payment.ref}</Mono>
       </View>
       {needsClaim ? (
-        <Button title="Claim your refund" icon="cash" onPress={() => router.push('/claim')} style={{ alignSelf: 'stretch' }} />
+        <Button title={tr('claim_refund')} icon="cash" onPress={() => router.push('/claim')} style={{ alignSelf: 'stretch' }} />
       ) : null}
-      <Button title="View activity" variant="outline" icon="time" onPress={() => router.push('/activity')} style={{ alignSelf: 'stretch' }} />
-      <Button title="Send another" icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />
+      <Button title={tr('view_activity')} variant="outline" icon="time" onPress={() => router.push('/activity')} style={{ alignSelf: 'stretch' }} />
+      <Button title={tr('send_another')} icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />
     </View>
   );
 }

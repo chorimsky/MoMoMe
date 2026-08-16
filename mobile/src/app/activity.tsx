@@ -7,20 +7,22 @@ import { ReceiptModal } from '@/components/receipt';
 import { Body, Card, IconCircle, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { StringKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, xaf } from '@/lib/format';
 import { PROVIDERS } from '@shared/domain';
 import type { Payment } from '@shared/types';
 
 type Filter = 'all' | 'done' | 'pending' | 'fail';
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'done', label: 'Completed' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'fail', label: 'Failed' },
+const FILTERS: { key: Filter; labelKey: StringKey }[] = [
+  { key: 'all', labelKey: 'filter_all' },
+  { key: 'done', labelKey: 'filter_completed' },
+  { key: 'pending', labelKey: 'filter_pending' },
+  { key: 'fail', labelKey: 'filter_failed' },
 ];
 
 export default function ActivityScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [items, setItems] = useState<Payment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,7 +60,7 @@ export default function ActivityScreen() {
 
   return (
     <Screen edges={[]}>
-      <Stack.Screen options={{ title: 'Activity' }} />
+      <Stack.Screen options={{ title: tr('activity') }} />
       <ScrollView
         contentContainerStyle={{ paddingVertical: Spacing.four, gap: Spacing.three }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} />}>
@@ -71,7 +73,7 @@ export default function ActivityScreen() {
                   key={f.key}
                   onPress={() => setFilter(f.key)}
                   style={[styles.segItem, active && { backgroundColor: t.surface }]}>
-                  <Text style={[styles.segText, { color: active ? t.text : t.muted }]}>{f.label}</Text>
+                  <Text style={[styles.segText, { color: active ? t.text : t.muted }]}>{tr(f.labelKey)}</Text>
                 </Pressable>
               );
             })}
@@ -88,12 +90,12 @@ export default function ActivityScreen() {
         ) : items.length === 0 ? (
           <View style={styles.center}>
             <IconCircle name="receipt-outline" color={t.muted} bg={t.surface2} size={56} />
-            <Body muted center>No payments yet.{'\n'}Your sends will appear here.</Body>
+            <Body muted center>{tr('no_payments_yet')}</Body>
           </View>
         ) : shown.length === 0 ? (
           <View style={styles.center}>
             <IconCircle name="funnel-outline" color={t.muted} bg={t.surface2} size={56} />
-            <Body muted center>No {filter === 'all' ? '' : FILTERS.find((f) => f.key === filter)?.label.toLowerCase() + ' '}payments.</Body>
+            <Body muted center>{tr('no_filtered', { f: filter === 'all' ? '' : (tr(FILTERS.find((x) => x.key === filter)!.labelKey).toLowerCase() + ' ') })}</Body>
           </View>
         ) : (
           shown.map((p) => {
@@ -134,7 +136,7 @@ export default function ActivityScreen() {
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
                   <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 15 }}>{xaf(p.xaf)}</Body>
                   {refundNeeded ? (
-                    <Text style={[styles.refundCta, { color: t.bad }]}>Refund needed →</Text>
+                    <Text style={[styles.refundCta, { color: t.bad }]}>{tr('refund_needed')}</Text>
                   ) : (
                     <Pill label={s.text} tone={toneFor(s.tone)} />
                   )}

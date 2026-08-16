@@ -7,6 +7,7 @@ import { api } from '@/api/client';
 import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/components/ui';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 
 /** Resolve a scanned QR / typed value to an action — matching the web app's
  *  `payPathFromScan`: /pay & /m links, referral links, bare MOM-CC-###### codes,
@@ -28,6 +29,7 @@ function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknow
 /** A manual merchant-code / link entry — the web parity fallback for when the
  *  camera can't scan (denied, or the code was shared as text). */
 function ManualEntry() {
+  const { t: tr } = useI18n();
   const [code, setCode] = useState('');
   const go = () => {
     const r = routeForPayload(code);
@@ -45,7 +47,7 @@ function ManualEntry() {
   return (
     <View style={{ gap: Spacing.two }}>
       <Field
-        label="Or enter a merchant code"
+        label={tr('or_enter_code')}
         placeholder="MOM-CM-004522"
         autoCapitalize="characters"
         value={code}
@@ -53,13 +55,14 @@ function ManualEntry() {
         onSubmitEditing={go}
         returnKeyType="go"
       />
-      <Button title="Pay" icon="arrow-forward" onPress={go} disabled={code.trim().length < 3} />
+      <Button title={tr('pay')} icon="arrow-forward" onPress={go} disabled={code.trim().length < 3} />
     </View>
   );
 }
 
 export default function ScanScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
   const [payload, setPayload] = useState<string | null>(null);
   const locked = useRef(false);
@@ -78,7 +81,7 @@ export default function ScanScreen() {
     return (
       <Screen>
         <View style={styles.center}>
-          <Body muted>Preparing camera…</Body>
+          <Body muted>{tr('loading')}</Body>
         </View>
       </Screen>
     );
@@ -89,9 +92,9 @@ export default function ScanScreen() {
       <Screen scroll>
         <View style={styles.deniedWrap}>
           <IconCircle name="camera" color={t.accent} bg={t.accentWash} size={72} />
-          <H3 style={{ textAlign: 'center' }}>Scan to pay</H3>
-          <Body center>Allow camera access to scan a merchant QR code — or enter the merchant code below.</Body>
-          <Button title="Enable camera" icon="camera" onPress={requestPermission} style={{ alignSelf: 'stretch' }} />
+          <H3 style={{ textAlign: 'center' }}>{tr('scan_to_pay')}</H3>
+          <Body center>{tr('scan_enable_sub')}</Body>
+          <Button title={tr('enable_camera')} icon="camera" onPress={requestPermission} style={{ alignSelf: 'stretch' }} />
           <View style={{ height: Spacing.two }} />
           <ManualEntry />
         </View>
@@ -102,8 +105,8 @@ export default function ScanScreen() {
   return (
     <Screen edges={['top']}>
       <View style={styles.header}>
-        <H1>Scan to pay</H1>
-        <Body muted>Point at a MoMo›Me QR or merchant code.</Body>
+        <H1>{tr('scan_to_pay')}</H1>
+        <Body muted>{tr('scan_point')}</Body>
       </View>
       <View style={[styles.cameraWrap, { borderColor: t.line, backgroundColor: '#000' }]}>
         <CameraView
@@ -122,9 +125,9 @@ export default function ScanScreen() {
       </View>
       {payload ? (
         <Card style={{ marginTop: Spacing.four }} padded>
-          <Body muted>Scanned (not a MoMo›Me code):</Body>
+          <Body muted>{tr('scanned_not_momo')}</Body>
           <Mono numberOfLines={2}>{payload}</Mono>
-          <Button title="Scan again" variant="ghost" onPress={() => setPayload(null)} />
+          <Button title={tr('scan_again')} variant="ghost" onPress={() => setPayload(null)} />
         </Card>
       ) : null}
       <View style={{ marginTop: Spacing.four }}>

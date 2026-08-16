@@ -6,40 +6,42 @@ import { Wordmark } from '@/components/brand';
 import { Body, Card, H1, IconCircle, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { StringKey, useI18n } from '@/lib/i18n';
 
 type Tone = 'brand' | 'accent' | 'recv' | 'neutral';
-type Item = { icon: keyof typeof Ionicons.glyphMap; label: string; sub: string; tone: Tone; route: Href };
+type Item = { icon: keyof typeof Ionicons.glyphMap; labelKey: StringKey; subKey?: StringKey; label?: string; tone: Tone; route: Href };
 
-const GROUPS: { title: string; items: Item[] }[] = [
+const GROUPS: { titleKey: StringKey; items: Item[] }[] = [
   {
-    title: 'You',
+    titleKey: 'grp_you',
     items: [
-      { icon: 'shield-checkmark', label: 'Own your number', sub: 'Verify your Mobile Money number', tone: 'brand', route: '/claim-account' as Href },
-      { icon: 'time', label: 'Activity', sub: 'Your payment history', tone: 'accent', route: '/activity' },
-      { icon: 'cash', label: 'Claim a refund', sub: 'A payout that could not land', tone: 'recv', route: '/claim' },
-      { icon: 'settings-outline', label: 'Settings', sub: 'Appearance and app info', tone: 'neutral', route: '/settings' as Href },
+      { icon: 'shield-checkmark', labelKey: 'own_number', subKey: 'own_number_sub', tone: 'brand', route: '/claim-account' as Href },
+      { icon: 'time', labelKey: 'activity', subKey: 'activity_sub', tone: 'accent', route: '/activity' },
+      { icon: 'cash', labelKey: 'claim_refund_label', subKey: 'claim_refund_sub', tone: 'recv', route: '/claim' },
+      { icon: 'settings-outline', labelKey: 'settings_label', subKey: 'settings_sub', tone: 'neutral', route: '/settings' as Href },
     ],
   },
   {
-    title: 'Grow',
+    titleKey: 'grp_grow',
     items: [
-      { icon: 'storefront', label: 'For merchants', sub: 'Accept payments, settle to Mobile Money', tone: 'accent', route: '/merchant' },
-      { icon: 'people', label: 'Become an ambassador', sub: 'Refer friends and earn', tone: 'recv', route: '/ambassador' },
-      { icon: 'code-slash', label: 'Developers', sub: 'API & payment links', tone: 'brand', route: '/developers' },
+      { icon: 'storefront', labelKey: 'for_merchants', subKey: 'for_merchants_sub', tone: 'accent', route: '/merchant' },
+      { icon: 'people', labelKey: 'become_ambassador', subKey: 'become_ambassador_sub', tone: 'recv', route: '/ambassador' },
+      { icon: 'code-slash', labelKey: 'developers', subKey: 'developers_sub', tone: 'brand', route: '/developers' },
     ],
   },
   {
-    title: 'Legal',
+    titleKey: 'grp_legal',
     items: [
-      { icon: 'document-text', label: 'Terms of Service', sub: '', tone: 'neutral', route: '/legal/terms' },
-      { icon: 'lock-closed', label: 'Privacy Policy', sub: '', tone: 'neutral', route: '/legal/privacy' },
-      { icon: 'mail', label: 'Contact & support', sub: '', tone: 'neutral', route: '/legal/contact' },
+      { icon: 'document-text', labelKey: 'tos', tone: 'neutral', route: '/legal/terms' },
+      { icon: 'lock-closed', labelKey: 'privacy_policy', tone: 'neutral', route: '/legal/privacy' },
+      { icon: 'mail', labelKey: 'contact_support', tone: 'neutral', route: '/legal/contact' },
     ],
   },
 ];
 
 export default function MoreScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const toneColor: Record<Tone, { fg: string; bg: string }> = {
     brand: { fg: t.warn, bg: t.brandWash },
     accent: { fg: t.accent, bg: t.accentWash },
@@ -49,18 +51,18 @@ export default function MoreScreen() {
   return (
     <Screen scroll>
       <View style={styles.head}>
-        <H1>More</H1>
-        <Body muted>Your activity, merchant tools, and support.</Body>
+        <H1>{tr('tab_more')}</H1>
+        <Body muted>{tr('more_sub')}</Body>
       </View>
 
       {GROUPS.map((g) => (
-        <View key={g.title} style={{ marginBottom: Spacing.four }}>
-          <Body muted style={styles.group}>{g.title.toUpperCase()}</Body>
+        <View key={g.titleKey} style={{ marginBottom: Spacing.four }}>
+          <Body muted style={styles.group}>{tr(g.titleKey).toUpperCase()}</Body>
           <Card padded={false}>
             {g.items.map((item, i) => {
               const c = toneColor[item.tone];
               return (
-                <Pressable key={item.label} onPress={() => router.push(item.route)}>
+                <Pressable key={item.labelKey} onPress={() => router.push(item.route)}>
                   {({ pressed }) => (
                     <View
                       style={[
@@ -70,8 +72,8 @@ export default function MoreScreen() {
                       ]}>
                       <IconCircle name={item.icon} color={c.fg} bg={c.bg} size={40} />
                       <View style={{ flex: 1 }}>
-                        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 16 }}>{item.label}</Body>
-                        {item.sub ? <Body muted style={{ fontSize: 13 }}>{item.sub}</Body> : null}
+                        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 16 }}>{tr(item.labelKey)}</Body>
+                        {item.subKey ? <Body muted style={{ fontSize: 13 }}>{tr(item.subKey)}</Body> : null}
                       </View>
                       <Ionicons name="chevron-forward" size={18} color={t.muted} />
                     </View>
@@ -86,7 +88,7 @@ export default function MoreScreen() {
       <View style={{ alignItems: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five }}>
         <Wordmark size={20} />
         <Body muted center style={{ fontSize: 13 }}>
-          Mobile Money, made simple
+          {tr('tagline')}
         </Body>
       </View>
     </Screen>

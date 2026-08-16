@@ -8,6 +8,7 @@ import { API_BASE } from '@/api/client';
 import { Body, Card, H3, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
 
 const LN_DOMAIN = WEB_ORIGIN.replace(/^https?:\/\//, '');
@@ -39,9 +40,10 @@ function CopyRow({ value }: { value: string }) {
 
 export default function DevelopersScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   return (
     <Screen scroll edges={[]}>
-      <Stack.Screen options={{ title: 'Developers' }} />
+      <Stack.Screen options={{ title: tr('developers') }} />
       <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
         <Body>
           MoMo›Me is payment infrastructure. Accept Bitcoin, Lightning or USDT and settle to any
@@ -49,13 +51,13 @@ export default function DevelopersScreen() {
         </Body>
 
         <Card padded>
-          <Label>Base URL</Label>
+          <Label>{tr('base_url')}</Label>
           <CopyRow value={API_BASE} />
           <Body muted style={{ fontSize: 13 }}>All endpoints are JSON. XAF amounts are integers.</Body>
         </Card>
 
         <Card padded>
-          <Label>Lightning Address</Label>
+          <Label>{tr('lightning_address')}</Label>
           <Body>
             Every Mobile Money number is reachable as a Lightning Address. Paying it converts sats
             to XAF and delivers to that number.
@@ -64,7 +66,7 @@ export default function DevelopersScreen() {
         </Card>
 
         <Card padded style={{ gap: Spacing.three }}>
-          <Label>Core endpoints</Label>
+          <Label>{tr('core_endpoints')}</Label>
           {ENDPOINTS.map((e) => (
             <View key={e.path} style={styles.ep}>
               <View style={[styles.verb, { backgroundColor: e.method === 'GET' ? t.recvWash : t.accentWash }]}>
@@ -81,7 +83,7 @@ export default function DevelopersScreen() {
         </Card>
 
         <Card padded>
-          <H3>Get an API key</H3>
+          <H3>{tr('get_api_key')}</H3>
           <Body muted>
             Production API keys are issued from the operator console. Contact support to onboard
             your business or request access.

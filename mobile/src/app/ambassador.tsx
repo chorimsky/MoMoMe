@@ -8,6 +8,7 @@ import { api, errMessage } from '@/api/client';
 import { Body, Button, Card, H2, IconCircle, Label, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
 import type { AmbassadorSummary } from '@shared/types';
 
@@ -19,6 +20,7 @@ const TIER_LABEL: Record<AmbassadorSummary['tier'], string> = {
 
 export default function AmbassadorScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [data, setData] = useState<AmbassadorSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -38,7 +40,7 @@ export default function AmbassadorScreen() {
 
   return (
     <Screen scroll edges={[]}>
-      <Stack.Screen options={{ title: 'Ambassador' }} />
+      <Stack.Screen options={{ title: tr('ambassador') }} />
       {error ? (
         <Card padded style={{ marginTop: Spacing.four }}>
           <Body style={{ color: t.bad }}>{error}</Body>
@@ -51,16 +53,16 @@ export default function AmbassadorScreen() {
         <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
           <Card padded elevated style={{ alignItems: 'center', gap: Spacing.three }}>
             <IconCircle name="people" color={t.recv} bg={t.recvWash} size={60} />
-            <H2>Refer & earn</H2>
-            <Body center>Share your link. When a business you refer starts taking payments, you level up.</Body>
+            <H2>{tr('refer_earn')}</H2>
+            <Body center>{tr('refer_sub')}</Body>
             <Pill label={TIER_LABEL[data.tier]} tone="brand" icon="ribbon" />
             <View style={[styles.codeBox, { borderColor: t.line, backgroundColor: t.surface2 }]}>
               <Text style={[styles.code, { color: t.text }]}>{data.code}</Text>
             </View>
             <View style={{ flexDirection: 'row', gap: Spacing.three, alignSelf: 'stretch' }}>
-              <Button title="Share link" icon="share-social" onPress={share} style={{ flex: 1 }} />
+              <Button title={tr('share_link')} icon="share-social" onPress={share} style={{ flex: 1 }} />
               <Button
-                title={copied ? 'Copied' : 'Copy'}
+                title={copied ? tr('copied') : tr('copy')}
                 icon={copied ? 'checkmark' : 'copy-outline'}
                 variant="outline"
                 onPress={copy}
@@ -70,14 +72,14 @@ export default function AmbassadorScreen() {
           </Card>
 
           <View style={styles.stats}>
-            <Stat label="Referred" value={String(data.referredCount)} />
-            <Stat label="Merchants" value={String(data.merchants.length)} />
-            <Stat label="Active" value={String(data.activeMerchants)} />
+            <Stat label={tr('a_referred')} value={String(data.referredCount)} />
+            <Stat label={tr('a_merchants')} value={String(data.merchants.length)} />
+            <Stat label={tr('a_active')} value={String(data.activeMerchants)} />
           </View>
 
           {data.merchants.length > 0 ? (
             <Card padded style={{ gap: Spacing.three }}>
-              <Label>Your merchants</Label>
+              <Label>{tr('your_merchants')}</Label>
               {data.merchants.map((m) => (
                 <View key={m.code} style={styles.mrow}>
                   <Ionicons
@@ -86,7 +88,7 @@ export default function AmbassadorScreen() {
                     color={m.firstPayment ? t.recv : t.muted}
                   />
                   <Body style={{ color: t.text, flex: 1 }}>{m.businessName}</Body>
-                  <Body muted style={{ fontSize: 12 }}>{m.firstPayment ? 'Active' : 'Pending'}</Body>
+                  <Body muted style={{ fontSize: 12 }}>{m.firstPayment ? tr('a_active') : tr('a_pending')}</Body>
                 </View>
               ))}
             </Card>

@@ -20,6 +20,7 @@ const group = (n: number) => Math.round(n).toLocaleString('fr-FR').replace(/[\s,
 
 export default function MerchantScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [loading, setLoading] = useState(true);
   const [merchant, setMerchant] = useState<MerchantAccount | null>(null);
   const [summary, setSummary] = useState<MerchantSummary | null>(null);
@@ -48,7 +49,7 @@ export default function MerchantScreen() {
   if (loading) {
     return (
       <Screen>
-        <Stack.Screen options={{ title: 'Merchant' }} />
+        <Stack.Screen options={{ title: tr('merchant') }} />
         <View style={styles.center}><ActivityIndicator color={t.accent} /></View>
       </Screen>
     );
@@ -56,7 +57,7 @@ export default function MerchantScreen() {
 
   return (
     <Screen scroll edges={[]}>
-      <Stack.Screen options={{ title: merchant ? merchant.businessName : 'Become a merchant' }} />
+      <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
       {error ? (
         <Card padded style={{ marginTop: Spacing.four }}>
           <Body style={{ color: t.bad }}>{error}</Body>
@@ -91,6 +92,7 @@ function Onboard({
   setError: (s: string | null) => void;
 }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [name, setName] = useState('');
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [tier, setTier] = useState<'individual' | 'business'>('individual');
@@ -121,19 +123,19 @@ function Onboard({
     <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
       <View style={{ alignItems: 'center', gap: Spacing.two }}>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={60} />
-        <H2 style={{ textAlign: 'center' }}>Accept payments, get Mobile Money</H2>
-        <Body center>Create a free merchant account. Customers pay however they like; you receive XAF instantly in your Mobile Money.</Body>
+        <H2 style={{ textAlign: 'center' }}>{tr('onboard_title')}</H2>
+        <Body center>{tr('onboard_sub')}</Body>
       </View>
 
       <Card padded>
-        <Field label="Business name" placeholder="Chez Alain Restaurant" value={name} onChangeText={setName} maxLength={80} />
-        <Label>Category</Label>
+        <Field label={tr('business_name')} placeholder="Chez Alain Restaurant" value={name} onChangeText={setName} maxLength={80} />
+        <Label>{tr('category')}</Label>
         <View style={styles.wrapChips}>
           {CATEGORIES.map((c) => (
             <Chip key={c} label={c} active={category === c} onPress={() => setCategory(c)} />
           ))}
         </View>
-        <Label>Account type</Label>
+        <Label>{tr('account_type')}</Label>
         <View style={{ flexDirection: 'row', gap: Spacing.three }}>
           {(['individual', 'business'] as const).map((tv) => (
             <Pressable
@@ -143,21 +145,21 @@ function Onboard({
                 styles.seg,
                 { borderColor: tier === tv ? t.accent : t.line, backgroundColor: tier === tv ? t.accentWash : 'transparent' },
               ]}>
-              <Body style={{ color: tier === tv ? t.accent : t.textSecondary, fontFamily: Fonts.bodyBold, textTransform: 'capitalize' }}>
-                {tv}
+              <Body style={{ color: tier === tv ? t.accent : t.textSecondary, fontFamily: Fonts.bodyBold }}>
+                {tr(tv === 'individual' ? 'm_individual' : 'm_business')}
               </Body>
             </Pressable>
           ))}
         </View>
         <Field
-          label="Settlement Mobile Money number"
+          label={tr('settlement_number')}
           placeholder="6 7X XX XX XX"
           keyboardType="phone-pad"
           value={phone}
           onChangeText={setPhone}
           right={provider ? <Pill label={PROVIDERS[provider].short} tone={provider === 'MTN' ? 'brand' : 'accent'} /> : undefined}
         />
-        <Button title="Create merchant account" icon="checkmark" onPress={create} loading={busy} disabled={!valid} />
+        <Button title={tr('create_merchant')} icon="checkmark" onPress={create} loading={busy} disabled={!valid} />
       </Card>
     </View>
   );
@@ -248,30 +250,30 @@ function Dashboard({
             <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 17 }}>{merchant.businessName}</Body>
             <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
           </View>
-          {merchant.verifiedPhone ? <Pill label="Verified" tone="recv" icon="shield-checkmark" /> : <Pill label="Unverified" tone="bad" />}
+          {merchant.verifiedPhone ? <Pill label={tr('m_verified')} tone="recv" icon="shield-checkmark" /> : <Pill label={tr('m_unverified')} tone="bad" />}
         </View>
         <Body muted style={{ fontSize: 13 }}>
-          {merchant.category} · settles to {PROVIDERS[merchant.provider]?.short} {merchant.settlementPhone}
+          {merchant.category} · {tr('settles_to')} {PROVIDERS[merchant.provider]?.short} {merchant.settlementPhone}
         </Body>
       </Card>
 
       {!merchant.verifiedPhone ? (
         <Card padded style={{ borderColor: t.warn }}>
-          <Label>Verify your number</Label>
-          <Body>Confirm you own the settlement number to receive payouts.</Body>
+          <Label>{tr('verify_your_number')}</Label>
+          <Body>{tr('verify_own_sub')}</Body>
           <View style={{ flexDirection: 'row', gap: Spacing.two }}>
             <Field placeholder="6-digit code" keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
-            <Button title="Verify" size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
+            <Button title={tr('verify')} size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
           </View>
-          <Button title="Send me a code" variant="ghost" size="md" onPress={requestVerify} />
+          <Button title={tr('send_me_code')} variant="ghost" size="md" onPress={requestVerify} />
         </Card>
       ) : null}
 
       {summary ? (
         <View style={styles.stats}>
-          <Stat label="Today" value={group(summary.today.salesXaf)} sub={`${summary.today.count} sales`} />
-          <Stat label="Avg sale" value={group(summary.today.avgXaf)} sub="today" />
-          <Stat label="All time" value={group(summary.all.salesXaf)} sub={`${summary.all.count} sales`} />
+          <Stat label={tr('m_today')} value={group(summary.today.salesXaf)} sub={tr('m_sales', { n: summary.today.count })} />
+          <Stat label={tr('m_avg_sale')} value={group(summary.today.avgXaf)} sub={tr('m_today_lc')} />
+          <Stat label={tr('m_all_time')} value={group(summary.all.salesXaf)} sub={tr('m_sales', { n: summary.all.count })} />
         </View>
       ) : null}
 
@@ -280,7 +282,7 @@ function Dashboard({
       <Poster merchant={merchant} />
 
       <Card padded>
-        <Label>{linkKind === 'invoice' ? 'New invoice' : 'New payment link'}</Label>
+        <Label>{linkKind === 'invoice' ? tr('new_invoice') : tr('new_link')}</Label>
         <View style={styles.kindToggle}>
           {(['link', 'invoice'] as const).map((k) => (
             <Pressable
@@ -288,23 +290,23 @@ function Dashboard({
               onPress={() => setLinkKind(k)}
               style={[styles.kindSeg, linkKind === k && { backgroundColor: t.surface }]}>
               <Body style={{ color: linkKind === k ? t.text : t.muted, fontFamily: Fonts.bodyBold, fontSize: 13 }}>
-                {k === 'link' ? 'Payment link' : 'Invoice'}
+                {k === 'link' ? tr('payment_link') : tr('invoice')}
               </Body>
             </Pressable>
           ))}
         </View>
         <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two }}>
           <Field
-            placeholder={linkKind === 'invoice' ? 'Amount' : 'Amount (optional)'}
+            placeholder={linkKind === 'invoice' ? tr('amount_field') : tr('amount_optional')}
             keyboardType="number-pad"
             value={amount}
             onChangeText={setAmount}
             style={{ flex: 1 }}
           />
-          <Button title="Create" size="md" icon="add" onPress={newLink} loading={busy} disabled={linkKind === 'invoice' && !amount.trim()} />
+          <Button title={tr('create')} size="md" icon="add" onPress={newLink} loading={busy} disabled={linkKind === 'invoice' && !amount.trim()} />
         </View>
         <Field
-          label={linkKind === 'invoice' ? 'Reference' : 'Label (optional)'}
+          label={linkKind === 'invoice' ? tr('reference_field') : tr('label_optional')}
           placeholder={linkKind === 'invoice' ? 'Invoice #001' : 'Table 4'}
           value={label}
           onChangeText={setLabel}
@@ -312,12 +314,12 @@ function Dashboard({
         />
         {linkKind === 'invoice' ? (
           <>
-            <Field label="Bill to" placeholder="Client name" value={clientName} onChangeText={setClientName} style={{ marginTop: Spacing.two }} />
-            <Field label="Due date (optional)" placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} style={{ marginTop: Spacing.two }} />
+            <Field label={tr('bill_to')} placeholder={tr('client_name')} value={clientName} onChangeText={setClientName} style={{ marginTop: Spacing.two }} />
+            <Field label={tr('due_date_optional')} placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} style={{ marginTop: Spacing.two }} />
           </>
         ) : null}
         {links.length === 0 ? (
-          <Body muted style={{ marginTop: Spacing.three }}>No links yet. Create one to share or show as a QR.</Body>
+          <Body muted style={{ marginTop: Spacing.three }}>{tr('no_links')}</Body>
         ) : (
           <View style={{ marginTop: Spacing.two }}>
             {links.filter((l) => !l.disabledAt).map((l) => <LinkRow key={l.code} link={l} onChange={onChange} />)}
@@ -327,7 +329,7 @@ function Dashboard({
 
       {summary && summary.recent.length ? (
         <Card padded>
-          <Label>Recent payments</Label>
+          <Label>{tr('recent_payments')}</Label>
           {summary.recent.slice(0, 8).map((p) => {
             const s = statusLabel(p.state);
             return (
@@ -356,6 +358,7 @@ function Dashboard({
 /* ---------------- counter poster ---------------- */
 function Poster({ merchant }: { merchant: MerchantAccount }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [open, setOpen] = useState(false);
   const url = `${WEB_ORIGIN}/m/${merchant.code}`;
   return (
@@ -363,8 +366,8 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
       <Pressable onPress={() => setOpen((v) => !v)} style={styles.posterHead}>
         <Ionicons name="qr-code" size={20} color={t.accent} />
         <View style={{ flex: 1 }}>
-          <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>Counter poster</Body>
-          <Body muted style={{ fontSize: 12.5 }}>Show or screenshot a QR customers can scan to pay</Body>
+          <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('counter_poster')}</Body>
+          <Body muted style={{ fontSize: 12.5 }}>{tr('counter_poster_sub')}</Body>
         </View>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.muted} />
       </Pressable>
@@ -373,13 +376,13 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
           <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 18, textAlign: 'center' }}>
             {merchant.businessName}
           </Body>
-          <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>Pay here · Payez ici</Body>
+          <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>{tr('pay_here')}</Body>
           <View style={styles.posterQr}>
             <QRCode value={url} size={190} backgroundColor="#fff" color="#111" />
           </View>
           <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
           <Button
-            title="Share poster link"
+            title={tr('share_poster')}
             variant="ghost"
             size="md"
             icon="share-outline"
@@ -393,6 +396,7 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
 
 function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAccount; onChange: () => void; setError: (s: string | null) => void }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [on, setOn] = useState(!!merchant.listed);
   const toggle = async () => {
     const next = !on;
@@ -409,8 +413,8 @@ function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
     <Pressable onPress={toggle} style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
       <Ionicons name="map" size={20} color={t.accent} />
       <View style={{ flex: 1 }}>
-        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>List in Discover</Body>
-        <Body muted style={{ fontSize: 12.5 }}>Let nearby customers find you</Body>
+        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('list_in_discover')}</Body>
+        <Body muted style={{ fontSize: 12.5 }}>{tr('list_sub')}</Body>
       </View>
       <View style={[styles.switch, { backgroundColor: on ? t.recv : t.line }]}>
         <View style={[styles.knob, { alignSelf: on ? 'flex-end' : 'flex-start' }]} />
@@ -421,6 +425,7 @@ function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
 
 function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const url = `${WEB_ORIGIN}/pay/${link.code}`;
@@ -431,15 +436,15 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
             <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>
-              {link.amountXaf ? `${group(link.amountXaf)} XAF` : 'Open amount'}
+              {link.amountXaf ? `${group(link.amountXaf)} XAF` : tr('open_amount')}
             </Body>
-            {isInvoice ? <Pill label="Invoice" tone="accent" /> : null}
-            {link.paid?.count ? <Pill label={`Paid ×${link.paid.count}`} tone="recv" icon="checkmark" /> : null}
+            {isInvoice ? <Pill label={tr('invoice')} tone="accent" /> : null}
+            {link.paid?.count ? <Pill label={tr('paid_times', { n: link.paid.count })} tone="recv" icon="checkmark" /> : null}
           </View>
           {link.label ? <Body muted style={{ fontSize: 12 }}>{link.label}</Body> : null}
           {isInvoice && (link.clientName || link.dueDate) ? (
             <Body muted style={{ fontSize: 12 }}>
-              {link.clientName ?? ''}{link.clientName && link.dueDate ? ' · ' : ''}{link.dueDate ? `due ${link.dueDate}` : ''}
+              {link.clientName ?? ''}{link.clientName && link.dueDate ? ' · ' : ''}{link.dueDate ? tr('due_prefix', { d: link.dueDate }) : ''}
             </Body>
           ) : null}
           <Mono style={{ fontSize: 11 }} numberOfLines={1}>/pay/{link.code}</Mono>

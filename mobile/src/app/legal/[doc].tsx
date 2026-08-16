@@ -7,33 +7,29 @@ import { api } from '@/api/client';
 import { Body, Card, H3, IconCircle, Label, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { StringKey, useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
-
-const TITLES: Record<string, string> = {
-  terms: 'Terms of Service',
-  privacy: 'Privacy Policy',
-  contact: 'Contact & support',
-};
 
 /* ---------- Contact: fully native (config support → mail/call) ---------- */
 function Contact() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [support, setSupport] = useState<{ email: string; phone: string } | null>(null);
   useEffect(() => {
     api.getConfig().then((c) => setSupport(c.support)).catch(() => setSupport({ email: 'support@momome.xyz', phone: '' }));
   }, []);
   const rows = [
     support?.email
-      ? { icon: 'mail' as const, label: 'Email us', value: support.email, url: `mailto:${support.email}` }
+      ? { icon: 'mail' as const, label: tr('email_us'), value: support.email, url: `mailto:${support.email}` }
       : null,
     support?.phone
-      ? { icon: 'call' as const, label: 'Call support', value: support.phone, url: `tel:${support.phone}` }
+      ? { icon: 'call' as const, label: tr('call_support'), value: support.phone, url: `tel:${support.phone}` }
       : null,
   ].filter(Boolean) as { icon: 'mail' | 'call'; label: string; value: string; url: string }[];
 
   return (
     <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
-      <Body>We're here to help. Reach the MoMo›Me team any time.</Body>
+      <Body>{tr('legal_help')}</Body>
       {!support ? (
         <ActivityIndicator color={t.accent} />
       ) : (
@@ -92,12 +88,15 @@ function Doc({ slug }: { slug: string }) {
   );
 }
 
+const TITLE_KEYS: Record<string, StringKey> = { terms: 'tos', privacy: 'privacy_policy', contact: 'contact_support' };
+
 export default function LegalScreen() {
+  const { t: tr } = useI18n();
   const { doc } = useLocalSearchParams<{ doc: string }>();
   const key = (doc ?? 'terms').toLowerCase();
   return (
     <Screen scroll edges={[]}>
-      <Stack.Screen options={{ title: TITLES[key] ?? 'Legal' }} />
+      <Stack.Screen options={{ title: tr(TITLE_KEYS[key] ?? 'legal') }} />
       {key === 'contact' ? <Contact /> : <Doc slug={key} />}
     </Screen>
   );

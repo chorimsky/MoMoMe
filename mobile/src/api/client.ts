@@ -26,6 +26,7 @@ import type {
   Quote,
   QuoteRequest,
   ResolveResult,
+  VaultRecord,
 } from '@shared/types';
 
 /** API base: EAS/.env inlines EXPO_PUBLIC_API_BASE; fall back to app.config `extra`. */
@@ -218,6 +219,29 @@ export const api = {
   // refund-claim: supply a Lightning invoice to get crypto back when a payout couldn't land
   refundDestination: (id: string, bolt11: string) =>
     req<Payment>(`/payments/${id}/refund-destination`, { method: 'POST', body: JSON.stringify({ bolt11 }) }),
+
+  // encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts)
+  vaultList: (since?: string) =>
+    req<VaultRecord[]>(`/me/vault${since ? `?since=${encodeURIComponent(since)}` : ''}`),
+  vaultPut: (recordId: string, body: { ciphertext: string; iv: string; ver: number }) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  vaultDelete: (recordId: string) =>
+    req<VaultRecord>(`/me/vault/${encodeURIComponent(recordId)}`, { method: 'DELETE' }),
+
+  // phone-anchor + E2E recovery: `recovery` is the vault key wrapped by the user's
+  // recovery code (server-opaque). Restore returns the account's records + blob.
+  anchorRequest: (phone: string) =>
+    req<{ sent: boolean; devCode?: string }>('/me/anchor/request', { method: 'POST', body: JSON.stringify({ phone }) }),
+  anchorVerify: (phone: string, code: string, recovery: unknown) =>
+    req<{ ok: boolean; accountId: string }>('/me/anchor/verify', {
+      method: 'POST',
+      body: JSON.stringify({ phone, code, recovery }),
+    }),
+  anchorRestore: (phone: string, code: string) =>
+    req<{ accountId: string; records: VaultRecord[]; recovery: { salt: string; iterations: number; iv: string; ct: string } | null }>(
+      '/me/anchor/restore',
+      { method: 'POST', body: JSON.stringify({ phone, code }) },
+    ),
 
   // account claim: own your Mobile Money number via OTP (identity provisioned on first payment)
   requestClaim: (phone: string) =>

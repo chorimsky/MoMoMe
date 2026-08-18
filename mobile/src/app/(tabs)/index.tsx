@@ -28,6 +28,7 @@ import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
+import { rememberPaidContact } from '@/lib/vault';
 import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
   CountryCode,
@@ -72,7 +73,7 @@ const group = (d: string) => d.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 export default function SendScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
-  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string }>();
+  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string }>();
 
   const [step, setStep] = useState<Step>('details');
   const [country, setCountry] = useState<CountryCode>('CM');
@@ -101,7 +102,13 @@ export default function SendScreen() {
     if (typeof params.scanned === 'string' && params.scanned) setPhone(params.scanned.replace(/\D/g, ''));
     if (typeof params.amount === 'string' && params.amount) setAmount(params.amount.replace(/\D/g, ''));
     if (typeof params.merchantCode === 'string' && params.merchantCode) setMerchantCode(params.merchantCode);
-  }, [params.scanned, params.amount, params.merchantCode]);
+    if (params.country === 'CM' || params.country === 'GA' || params.country === 'TD' || params.country === 'CG' || params.country === 'CF')
+      setCountry(params.country);
+    if (typeof params.name === 'string' && params.name) {
+      setRecipientName(params.name);
+      setNameSource('internal');
+    }
+  }, [params.scanned, params.amount, params.merchantCode, params.country, params.name]);
 
   useEffect(() => {
     api
@@ -238,7 +245,13 @@ export default function SendScreen() {
       try {
         const p = await api.getPayment(payment.id);
         setPayment(p);
-        if (p.state === 'DELIVERED') setStep('success');
+        if (p.state === 'DELIVERED') {
+          setStep('success');
+          // Save/refresh this person in the encrypted contact book (best-effort).
+          if (provider) {
+            void rememberPaidContact({ name: recipientName || phone, phone: p.recipient.phone, country, provider });
+          }
+        }
         if (TERMINAL_STATES.includes(p.state) && pollRef.current) clearInterval(pollRef.current);
       } catch {
         /* keep polling */
@@ -273,7 +286,13 @@ export default function SendScreen() {
       {step === 'details' ? (
         <View style={styles.brandRow}>
           <MomoMark size={36} />
-          <H1>{tr('send_money')}</H1>
+          <H1 style={{ flex: 1 }}>{tr('send_money')}</H1>
+          <Pressable
+            onPress={() => router.push('/contacts')}
+            hitSlop={8}
+            style={[styles.contactsBtn, { backgroundColor: t.surface2 }]}>
+            <Ionicons name="people" size={18} color={t.accent} />
+          </Pressable>
         </View>
       ) : (
         <StepHeader
@@ -804,6 +823,7 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
 
 const styles = StyleSheet.create({
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingTop: Spacing.four, paddingBottom: Spacing.four },
+  contactsBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   logo: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   errorBar: {
     flexDirection: 'row',

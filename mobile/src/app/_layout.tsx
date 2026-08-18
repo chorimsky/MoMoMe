@@ -1,3 +1,5 @@
+import '@/lib/crypto-polyfill'; // must run before any @noble crypto (contact vault)
+
 import { BagelFatOne_400Regular } from '@expo-google-fonts/bagel-fat-one';
 import {
   Fredoka_500Medium,
@@ -92,6 +94,8 @@ export default function RootLayout() {
           <Stack.Screen name="developers" options={{ title: 'Developers' }} />
           <Stack.Screen name="claim" options={{ title: 'Refund' }} />
           <Stack.Screen name="claim-account" options={{ title: 'Your number' }} />
+          <Stack.Screen name="contacts" options={{ title: 'Contacts' }} />
+          <Stack.Screen name="contacts-backup" options={{ title: 'Back up & restore' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
           <Stack.Screen name="legal/[doc]" options={{ title: 'Legal' }} />
           <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />

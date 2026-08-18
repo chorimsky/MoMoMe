@@ -15,6 +15,7 @@ const GROUPS: { titleKey: StringKey; items: Item[] }[] = [
   {
     titleKey: 'grp_you',
     items: [
+      { icon: 'people-circle', labelKey: 'contacts_title', subKey: 'contacts_sub', tone: 'recv', route: '/contacts' as Href },
       { icon: 'shield-checkmark', labelKey: 'own_number', subKey: 'own_number_sub', tone: 'brand', route: '/claim-account' as Href },
       { icon: 'time', labelKey: 'activity', subKey: 'activity_sub', tone: 'accent', route: '/activity' },
       { icon: 'cash', labelKey: 'claim_refund_label', subKey: 'claim_refund_sub', tone: 'recv', route: '/claim' },

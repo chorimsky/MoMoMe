@@ -72,19 +72,19 @@ export default function ContactsScreen() {
             <View
               key={c.id}
               style={[styles.row, i < items.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line2 }]}>
-              <Pressable hitSlop={6} onPress={() => toggleFav(c)}>
+              <Pressable hitSlop={12} onPress={() => toggleFav(c)}>
                 <Ionicons name={c.favorite ? 'star' : 'star-outline'} size={20} color={c.favorite ? t.brand : t.muted} />
               </Pressable>
-              <Pressable style={{ flex: 1 }} onPress={() => pay(c)}>
+              <Pressable style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })} onPress={() => pay(c)}>
                 <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{c.name}</Body>
                 <Body muted style={{ fontSize: 12.5 }}>
                   {FLAG[c.country]} {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
                 </Body>
               </Pressable>
-              <Pressable hitSlop={6} onPress={() => setEditing(c)}>
+              <Pressable hitSlop={12} onPress={() => setEditing(c)}>
                 <Ionicons name="create-outline" size={20} color={t.muted} />
               </Pressable>
-              <Pressable hitSlop={6} onPress={() => pay(c)}>
+              <Pressable hitSlop={12} onPress={() => pay(c)}>
                 <Ionicons name="arrow-forward-circle" size={26} color={t.accent} />
               </Pressable>
             </View>
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', gap: Spacing.two, paddingTop: Spacing.seven },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingHorizontal: Spacing.four, paddingVertical: Spacing.three },
   encrypted: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five },
-  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: { borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl, padding: Spacing.five, paddingBottom: Spacing.seven },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.three },
   phoneWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: Spacing.four, gap: Spacing.two, marginTop: Spacing.two },

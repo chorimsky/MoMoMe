@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
-import { Body, Button, Card, H2, IconCircle, Label, Pill, Screen } from '@/components/ui';
+import { Body, Button, Card, ErrorBar, H2, IconCircle, Label, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
@@ -36,9 +36,7 @@ export default function AmbassadorScreen() {
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('ambassador') }} />
       {error ? (
-        <Card padded style={{ marginTop: Spacing.four }}>
-          <Body style={{ color: t.bad }}>{error}</Body>
-        </Card>
+<ErrorBar message={error} style={{ marginTop: Spacing.four }} />
       ) : !data ? (
         <View style={styles.center}>
           <ActivityIndicator color={t.accent} />

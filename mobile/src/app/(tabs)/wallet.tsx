@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
   head: { paddingTop: Spacing.four, gap: Spacing.two, marginBottom: Spacing.four },
   addrRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   addr: { fontFamily: Fonts.displayBold, fontSize: 19 },
-  qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl },
+  qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
   copyRow: {
     flexDirection: 'row',
     alignItems: 'center',

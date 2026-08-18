@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { api, errMessage } from '@/api/client';
@@ -92,7 +92,6 @@ export default function SendScreen() {
   const [busy, setBusy] = useState(false);
   const [quoteExpired, setQuoteExpired] = useState(false);
   const [ack, setAck] = useState(false);
-  const [receiptOpen, setReceiptOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [enabledMethods, setEnabledMethods] = useState<Method[]>(ALL_METHODS);
@@ -404,7 +403,7 @@ export default function SendScreen() {
                 value={amount ? group(amount) : ''}
                 onChangeText={(x) => setAmount(x.replace(/\D/g, ''))}
                 placeholder="0"
-                placeholderTextColor={t.line}
+                placeholderTextColor={t.muted}
                 keyboardType="number-pad"
                 style={[styles.amountInput, { color: t.text }]}
               />
@@ -576,37 +575,61 @@ export default function SendScreen() {
 
       {/* ---------------- SUCCESS ---------------- */}
       {step === 'success' && payment && (
-        <View style={styles.successWrap}>
-          <View style={[styles.successCircle, { backgroundColor: t.recv }, Shadow.md]}>
-            <Ionicons name="checkmark" size={52} color="#fff" />
-          </View>
-          <H1 style={{ textAlign: 'center' }}>{tr('sent_excl')}</H1>
-          <Body center style={{ fontSize: 17 }}>
-            {tr('delivered_to', { n: xaf(payment.xaf) })}{'\n'}
-            <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName || phone}</Text>
-          </Body>
-          {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
-            <Pill
-              label={tr('quoted_settled', { n: xaf(payment.repricedFromXaf) })}
-              tone="accent"
-              icon="information-circle"
-            />
-          ) : null}
-          <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
-            <Mono>{tr('ref_short')} {payment.ref}</Mono>
-          </View>
-          <Button
-            title={tr('view_receipt')}
-            icon="receipt-outline"
-            variant="outline"
-            onPress={() => setReceiptOpen(true)}
-            style={{ alignSelf: 'stretch' }}
-          />
-          <Button title={tr('send_another')} icon="add" onPress={reset} style={{ alignSelf: 'stretch' }} />
-          <ReceiptModal visible={receiptOpen} payment={payment} onClose={() => setReceiptOpen(false)} />
-        </View>
+        <SuccessView payment={payment} recipientLabel={recipientName || phone} onReset={reset} />
       )}
     </Screen>
+  );
+}
+
+/** The payment-delivered payoff — a spring-in check with a soft bloom and
+ *  staggered copy. Self-contained so it animates once each time it mounts. */
+function SuccessView({ payment, recipientLabel, onReset }: { payment: Payment; recipientLabel: string; onReset: () => void }) {
+  const t = useTheme();
+  const { t: tr } = useI18n();
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const pop = useRef(new Animated.Value(0.5)).current;
+  const bloom = useRef(new Animated.Value(0)).current;
+  const rise = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(pop, { toValue: 1, friction: 5, tension: 90, useNativeDriver: true }),
+      Animated.timing(bloom, { toValue: 1, duration: 620, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(rise, { toValue: 1, duration: 460, delay: 160, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [pop, bloom, rise]);
+
+  return (
+    <View style={styles.successWrap}>
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View
+          style={[
+            styles.successBloom,
+            { backgroundColor: t.recv, opacity: bloom.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }), transform: [{ scale: bloom.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.9] }) }] },
+          ]}
+        />
+        <Animated.View style={[styles.successCircle, { backgroundColor: t.recv, transform: [{ scale: pop }] }, Shadow.md]}>
+          <Ionicons name="checkmark" size={52} color="#fff" />
+        </Animated.View>
+      </View>
+      <Animated.View
+        style={{ alignItems: 'center', gap: Spacing.four, alignSelf: 'stretch', opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }}>
+        <H1 style={{ textAlign: 'center' }}>{tr('sent_excl')}</H1>
+        <Body center style={{ fontSize: 17 }}>
+          {tr('delivered_to', { n: xaf(payment.xaf) })}{'\n'}
+          <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientLabel}</Text>
+        </Body>
+        {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
+          <Pill label={tr('quoted_settled', { n: xaf(payment.repricedFromXaf) })} tone="accent" icon="information-circle" />
+        ) : null}
+        <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
+          <Mono>{tr('ref_short')} {payment.ref}</Mono>
+        </View>
+        <Button title={tr('view_receipt')} icon="receipt-outline" variant="outline" onPress={() => setReceiptOpen(true)} style={{ alignSelf: 'stretch' }} />
+        <Button title={tr('send_another')} icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />
+      </Animated.View>
+      <ReceiptModal visible={receiptOpen} payment={payment} onClose={() => setReceiptOpen(false)} />
+    </View>
   );
 }
 
@@ -823,7 +846,7 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
 
 const styles = StyleSheet.create({
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingTop: Spacing.four, paddingBottom: Spacing.four },
-  contactsBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  contactsBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   logo: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   errorBar: {
     flexDirection: 'row',
@@ -891,7 +914,7 @@ const styles = StyleSheet.create({
   kv: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   payAmount: { fontFamily: Fonts.displayBold, fontSize: 30, letterSpacing: -0.4 },
-  qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl },
+  qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
   copyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -915,6 +938,7 @@ const styles = StyleSheet.create({
   pulse: { width: 10, height: 10, borderRadius: 5 },
   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four, paddingTop: Spacing.seven },
   successCircle: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center' },
+  successBloom: { position: 'absolute', width: 96, height: 96, borderRadius: 48 },
   refChip: { paddingHorizontal: Spacing.four, paddingVertical: Spacing.two, borderRadius: Radius.pill },
   payRecipCard: { alignSelf: 'stretch', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four },
   stageCard: { alignSelf: 'stretch', gap: Spacing.four, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four },

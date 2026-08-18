@@ -3,9 +3,11 @@
  * re-styling raw views, so spacing, elevation, radius and type stay consistent.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  DimensionValue,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -359,6 +361,90 @@ export function StepHeader({
   );
 }
 
+/* ---------- inline error bar (one styling for every screen) ---------- */
+export function ErrorBar({ message, style }: { message: string; style?: ViewStyle }) {
+  const t = useTheme();
+  return (
+    <View style={[styles.errorBar, { backgroundColor: t.badWash }, style]}>
+      <Ionicons name="alert-circle" size={18} color={t.bad} />
+      <Body style={{ color: t.bad, flex: 1 }}>{message}</Body>
+    </View>
+  );
+}
+
+/* ---------- segmented control (animated active pill) ---------- */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  style,
+}: {
+  options: { key: T; label: string; icon?: IconName }[];
+  value: T;
+  onChange: (k: T) => void;
+  style?: ViewStyle;
+}) {
+  const t = useTheme();
+  return (
+    <View style={[styles.segTrack, { backgroundColor: t.surface2 }, style]}>
+      {options.map((o) => {
+        const active = o.key === value;
+        return (
+          <Pressable
+            key={o.key}
+            onPress={() => onChange(o.key)}
+            style={({ pressed }) => [
+              styles.segItem,
+              active && [{ backgroundColor: t.surface }, Shadow.sm],
+              { opacity: pressed && !active ? 0.65 : 1 },
+            ]}>
+            {o.icon ? (
+              <Ionicons name={o.icon} size={15} color={active ? t.accent : t.muted} style={{ marginRight: 5 }} />
+            ) : null}
+            <Text style={[styles.segText, { color: active ? t.text : t.muted }]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/* ---------- shimmer skeleton (loading placeholder) ---------- */
+export function Skeleton({ height, width, radius, style }: { height: number; width?: DimensionValue; radius?: number; style?: ViewStyle }) {
+  const t = useTheme();
+  const o = useRef(new Animated.Value(0.55)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(o, { toValue: 1, duration: 750, useNativeDriver: true }),
+        Animated.timing(o, { toValue: 0.55, duration: 750, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [o]);
+  return (
+    <Animated.View
+      style={[{ height, width: width ?? '100%', borderRadius: radius ?? Radius.sm, backgroundColor: t.surface2, opacity: o }, style]}
+    />
+  );
+}
+
+/** A list-row-shaped skeleton (avatar circle + two text bars) for loading lists. */
+export function SkeletonRow() {
+  const t = useTheme();
+  return (
+    <View style={[styles.skelRow, { backgroundColor: t.surface, borderColor: t.line }]}>
+      <Skeleton height={44} width={44} radius={22} />
+      <View style={{ flex: 1, gap: Spacing.two }}>
+        <Skeleton height={13} width="55%" />
+        <Skeleton height={11} width="35%" />
+      </View>
+      <Skeleton height={16} width={54} radius={Radius.pill} />
+    </View>
+  );
+}
+
 /* ---------- countdown mm:ss from an ISO expiry ---------- */
 export function Countdown({ to, prefix }: { to: string; prefix?: string }) {
   const t = useTheme();
@@ -394,6 +480,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: Radius.xl,
     gap: Spacing.four,
+  },
+  errorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  segTrack: { flexDirection: 'row', borderRadius: Radius.pill, padding: 3, gap: 2 },
+  segItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.two,
+    borderRadius: Radius.pill,
+  },
+  segText: { fontFamily: Fonts.bodyBold, fontSize: 13 },
+  skelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.lg,
+    padding: Spacing.four,
   },
   h1: { fontFamily: Fonts.displayBold, fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
   h2: { fontFamily: Fonts.displayBold, fontSize: 22, lineHeight: 28, letterSpacing: -0.2 },

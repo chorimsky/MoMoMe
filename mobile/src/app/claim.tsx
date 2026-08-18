@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
-import { Body, Button, Card, Field, H3, IconCircle, Label, Mono, Screen } from '@/components/ui';
+import { Body, Button, Card, ErrorBar, Field, H3, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { xaf } from '@/lib/format';
@@ -51,15 +51,11 @@ export default function ClaimScreen() {
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('claim_refund_label') }} />
       <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
-        {error ? (
-          <Card padded style={{ borderColor: t.bad }}>
-            <Body style={{ color: t.bad }}>{error}</Body>
-          </Card>
-        ) : null}
+        {error ? <ErrorBar message={error} /> : null}
 
         {done ? (
           <Card padded style={{ alignItems: 'center', gap: Spacing.three }}>
-            <IconCircle name="checkmark" color="#fff" bg={t.recv} size={60} />
+            <IconCircle name="checkmark-circle" color={t.recv} bg={t.recvWash} size={64} />
             <H3>{tr('refund_on_way')}</H3>
             <Body center>{tr('refund_on_way_sub')}</Body>
           </Card>

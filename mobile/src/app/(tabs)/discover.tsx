@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
-import { Body, Card, Field, H1, IconCircle, Pill, Screen } from '@/components/ui';
+import { Body, ErrorBar, Field, H1, IconCircle, Pill, Screen, SkeletonRow } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
@@ -74,12 +74,12 @@ export default function DiscoverScreen() {
       </ScrollView>
 
       {error ? (
-        <Card padded style={{ marginTop: Spacing.four }}>
-          <Body style={{ color: t.bad }}>{error}</Body>
-        </Card>
+        <ErrorBar message={error} style={{ marginTop: Spacing.four }} />
       ) : list === null ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={t.accent} />
+        <View style={{ gap: Spacing.three, marginTop: Spacing.four }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <SkeletonRow key={i} />
+          ))}
         </View>
       ) : list.length === 0 ? (
         <View style={styles.center}>
@@ -121,14 +121,15 @@ function CatChip({ label, active, onPress }: { label: string; active: boolean; o
   return (
     <Pressable
       onPress={onPress}
-      style={{
+      style={({ pressed }) => ({
         paddingHorizontal: Spacing.four,
         paddingVertical: Spacing.two,
         borderRadius: Radius.pill,
         borderWidth: 1,
         backgroundColor: active ? t.brand : t.surface2,
         borderColor: active ? t.brand : t.line,
-      }}>
+        opacity: pressed ? 0.7 : 1,
+      })}>
       <Body style={{ color: active ? t.brandInk : t.textSecondary, fontFamily: Fonts.bodyBold, fontSize: 13.5 }}>
         {label}
       </Body>

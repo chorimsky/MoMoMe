@@ -1,10 +1,10 @@
 import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
 import { ReceiptModal } from '@/components/receipt';
-import { Body, Card, IconCircle, Pill, Screen } from '@/components/ui';
+import { Body, ErrorBar, IconCircle, Pill, Screen, Segmented, SkeletonRow } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
@@ -65,28 +65,20 @@ export default function ActivityScreen() {
         contentContainerStyle={{ paddingVertical: Spacing.four, gap: Spacing.three }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} />}>
         {items && items.length > 0 ? (
-          <View style={[styles.segment, { backgroundColor: t.surface2 }]}>
-            {FILTERS.map((f) => {
-              const active = filter === f.key;
-              return (
-                <Pressable
-                  key={f.key}
-                  onPress={() => setFilter(f.key)}
-                  style={[styles.segItem, active && { backgroundColor: t.surface }]}>
-                  <Text style={[styles.segText, { color: active ? t.text : t.muted }]}>{tr(f.labelKey)}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Segmented
+            options={FILTERS.map((f) => ({ key: f.key, label: tr(f.labelKey) }))}
+            value={filter}
+            onChange={setFilter}
+          />
         ) : null}
         {items === null ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={t.accent} />
+          <View style={{ gap: Spacing.three }}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <SkeletonRow key={i} />
+            ))}
           </View>
         ) : error && items.length === 0 ? (
-          <Card padded style={{ marginTop: Spacing.four }}>
-            <Body style={{ color: t.bad }}>{error}</Body>
-          </Card>
+          <ErrorBar message={error} style={{ marginTop: Spacing.four }} />
         ) : items.length === 0 ? (
           <View style={styles.center}>
             <IconCircle name="receipt-outline" color={t.muted} bg={t.surface2} size={56} />
@@ -155,9 +147,6 @@ export default function ActivityScreen() {
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', gap: Spacing.three, paddingTop: Spacing.eight },
-  segment: { flexDirection: 'row', borderRadius: Radius.pill, padding: 3, gap: 2 },
-  segItem: { flex: 1, alignItems: 'center', paddingVertical: Spacing.two, borderRadius: Radius.pill },
-  segText: { fontFamily: Fonts.bodyBold, fontSize: 13 },
   refundCta: { fontFamily: Fonts.bodyBold, fontSize: 12.5 },
   row: {
     flexDirection: 'row',

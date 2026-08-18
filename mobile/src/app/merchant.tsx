@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'rea
 import QRCode from 'react-native-qrcode-svg';
 
 import { ApiError, api, errMessage } from '@/api/client';
-import { Body, Button, Card, Chip, Field, H2, IconCircle, Label, Mono, Pill, Screen } from '@/components/ui';
+import { Body, Button, Card, Chip, ErrorBar, Field, H2, IconCircle, Label, Mono, Pill, Screen, Segmented } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { WEB_ORIGIN } from '@/lib/config';
@@ -59,9 +59,7 @@ export default function MerchantScreen() {
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
       {error ? (
-        <Card padded style={{ marginTop: Spacing.four }}>
-          <Body style={{ color: t.bad }}>{error}</Body>
-        </Card>
+        <ErrorBar message={error} style={{ marginTop: Spacing.four }} />
       ) : merchant ? (
         <Dashboard
           merchant={merchant}
@@ -283,18 +281,12 @@ function Dashboard({
 
       <Card padded>
         <Label>{linkKind === 'invoice' ? tr('new_invoice') : tr('new_link')}</Label>
-        <View style={styles.kindToggle}>
-          {(['link', 'invoice'] as const).map((k) => (
-            <Pressable
-              key={k}
-              onPress={() => setLinkKind(k)}
-              style={[styles.kindSeg, linkKind === k && { backgroundColor: t.surface }]}>
-              <Body style={{ color: linkKind === k ? t.text : t.muted, fontFamily: Fonts.bodyBold, fontSize: 13 }}>
-                {k === 'link' ? tr('payment_link') : tr('invoice')}
-              </Body>
-            </Pressable>
-          ))}
-        </View>
+        <Segmented
+          options={[{ key: 'link' as const, label: tr('payment_link') }, { key: 'invoice' as const, label: tr('invoice') }]}
+          value={linkKind}
+          onChange={setLinkKind}
+          style={{ marginTop: Spacing.two }}
+        />
         <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two }}>
           <Field
             placeholder={linkKind === 'invoice' ? tr('amount_field') : tr('amount_optional')}
@@ -449,14 +441,14 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
           ) : null}
           <Mono style={{ fontSize: 11 }} numberOfLines={1}>/pay/{link.code}</Mono>
         </View>
-        <Pressable hitSlop={8} onPress={() => setShowQr((v) => !v)}>
+        <Pressable hitSlop={12} onPress={() => setShowQr((v) => !v)}>
           <Ionicons name="qr-code-outline" size={18} color={showQr ? t.accent : t.muted} />
         </Pressable>
-        <Pressable hitSlop={8} onPress={() => Share.share({ message: url })}>
+        <Pressable hitSlop={12} onPress={() => Share.share({ message: url })}>
           <Ionicons name="share-outline" size={18} color={t.accent} />
         </Pressable>
         <Pressable
-          hitSlop={8}
+          hitSlop={12}
           onPress={async () => {
             await Clipboard.setStringAsync(url);
             setCopied(true);
@@ -464,7 +456,7 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
           }}>
           <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
         </Pressable>
-        <Pressable hitSlop={8} onPress={() => api.disableMerchantLink(link.code).then(onChange).catch(() => {})}>
+        <Pressable hitSlop={12} onPress={() => api.disableMerchantLink(link.code).then(onChange).catch(() => {})}>
           <Ionicons name="trash-outline" size={18} color={t.muted} />
         </Pressable>
       </View>
@@ -499,11 +491,9 @@ const styles = StyleSheet.create({
   knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff' },
   linkRow: { borderTopWidth: 1, paddingTop: Spacing.three, marginTop: Spacing.three },
   linkTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  linkQr: { alignItems: 'center', marginTop: Spacing.three, padding: Spacing.three, backgroundColor: '#fff', borderRadius: Radius.md },
-  kindToggle: { flexDirection: 'row', borderRadius: Radius.pill, padding: 3, gap: 2, backgroundColor: 'rgba(120,120,120,0.12)', marginTop: Spacing.two },
-  kindSeg: { flex: 1, alignItems: 'center', paddingVertical: Spacing.two, borderRadius: Radius.pill },
+  linkQr: { alignItems: 'center', marginTop: Spacing.three, padding: Spacing.three, backgroundColor: '#fff', borderRadius: Radius.md, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderTopWidth: 1, paddingTop: Spacing.three, marginTop: Spacing.three },
   posterHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   poster: { alignItems: 'center', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four, marginTop: Spacing.three },
-  posterQr: { padding: Spacing.three, backgroundColor: '#fff', borderRadius: Radius.md },
+  posterQr: { padding: Spacing.three, backgroundColor: '#fff', borderRadius: Radius.md, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
 });

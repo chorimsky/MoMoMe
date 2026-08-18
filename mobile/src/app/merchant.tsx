@@ -10,7 +10,7 @@ import { Body, Button, Card, Chip, Field, H2, IconCircle, Label, Mono, Pill, Scr
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { WEB_ORIGIN } from '@/lib/config';
-import { CATEGORIES } from '@/lib/categories';
+import { CATEGORIES, categoryLabel } from '@/lib/categories';
 import { METHOD_LABEL, statusLabel } from '@/lib/format';
 import { statusKey, useI18n } from '@/lib/i18n';
 import { detectProvider, localDigits, PROVIDERS } from '@shared/domain';
@@ -92,7 +92,7 @@ function Onboard({
   setError: (s: string | null) => void;
 }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [name, setName] = useState('');
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [tier, setTier] = useState<'individual' | 'business'>('individual');
@@ -132,7 +132,7 @@ function Onboard({
         <Label>{tr('category')}</Label>
         <View style={styles.wrapChips}>
           {CATEGORIES.map((c) => (
-            <Chip key={c} label={c} active={category === c} onPress={() => setCategory(c)} />
+            <Chip key={c} label={categoryLabel(c, lang)} active={category === c} onPress={() => setCategory(c)} />
           ))}
         </View>
         <Label>{tr('account_type')}</Label>
@@ -262,7 +262,7 @@ function Dashboard({
           <Label>{tr('verify_your_number')}</Label>
           <Body>{tr('verify_own_sub')}</Body>
           <View style={{ flexDirection: 'row', gap: Spacing.two }}>
-            <Field placeholder="6-digit code" keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
+            <Field placeholder={tr('six_digit_code')} keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
             <Button title={tr('verify')} size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
           </View>
           <Button title={tr('send_me_code')} variant="ghost" size="md" onPress={requestVerify} />
@@ -386,7 +386,7 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
             variant="ghost"
             size="md"
             icon="share-outline"
-            onPress={() => Share.share({ message: `Pay ${merchant.businessName} on MoMo›Me: ${url}` })}
+            onPress={() => Share.share({ message: `${tr('share_pay_merchant', { name: merchant.businessName })}${url}` })}
           />
         </View>
       ) : null}

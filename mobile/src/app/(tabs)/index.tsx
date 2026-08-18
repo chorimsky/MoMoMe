@@ -593,7 +593,7 @@ export default function SendScreen() {
             />
           ) : null}
           <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
-            <Mono>Ref {payment.ref}</Mono>
+            <Mono>{tr('ref_short')} {payment.ref}</Mono>
           </View>
           <Button
             title={tr('view_receipt')}
@@ -810,7 +810,7 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
         <Body center>{cfg.sub}</Body>
       </View>
       <View style={[styles.refChip, { backgroundColor: t.surface2 }]}>
-        <Mono>Ref {payment.ref}</Mono>
+        <Mono>{tr('ref_short')} {payment.ref}</Mono>
       </View>
       {needsClaim ? (
         <Button title={tr('claim_refund')} icon="cash" onPress={() => router.push('/claim')} style={{ alignSelf: 'stretch' }} />

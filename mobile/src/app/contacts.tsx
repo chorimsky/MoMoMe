@@ -3,6 +3,7 @@ import { Href, router, Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { errMessage } from '@/api/client';
 import { Body, Button, Card, Field, H2, IconCircle, Label, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -120,6 +121,7 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
   const [note, setNote] = useState(contact?.note ?? '');
   const [favorite, setFavorite] = useState(contact?.favorite ?? false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const digits = localDigits(phone, country);
   const provider = detectProvider(phone, country) ?? 'MTN';
@@ -127,6 +129,7 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
 
   const save = async () => {
     setBusy(true);
+    setError(null);
     try {
       const base =
         contact ??
@@ -141,6 +144,8 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
         favorite,
       });
       onSaved();
+    } catch (e) {
+      setError(errMessage(e));
     } finally {
       setBusy(false);
     }
@@ -149,9 +154,12 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
   const del = async () => {
     if (!contact) return;
     setBusy(true);
+    setError(null);
     try {
       await removeContact(contact.id);
       onSaved();
+    } catch (e) {
+      setError(errMessage(e));
     } finally {
       setBusy(false);
     }
@@ -219,6 +227,7 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
             <Body style={{ color: t.text }}>{tr('c_favorite')}</Body>
           </Pressable>
 
+          {error ? <Body style={{ color: t.bad, marginTop: Spacing.three }}>{error}</Body> : null}
           <Button title={tr('c_save')} icon="checkmark" onPress={save} loading={busy} disabled={!valid} style={{ marginTop: Spacing.four }} />
           {contact ? (
             <Button title={tr('c_delete')} icon="trash-outline" variant="ghost" size="md" onPress={del} />

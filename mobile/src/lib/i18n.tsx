@@ -207,6 +207,61 @@ export const STRINGS = {
   bk_restore_none: ['No backup was found for this number.', 'Aucune sauvegarde trouvée pour ce numéro.'],
   bk_bad_code: ['That recovery code didn’t work.', 'Ce code de récupération n’a pas fonctionné.'],
 
+  // refund claim
+  refund_on_way: ['Refund on its way', 'Remboursement en cours'],
+  refund_on_way_sub: ['Your money is being sent back to the destination you provided.', 'Votre argent est renvoyé vers la destination que vous avez indiquée.'],
+  no_refunds: ['No refunds pending', 'Aucun remboursement en attente'],
+  refunds_hint: [
+    "If a Mobile Money payout can't be delivered, it'll show up here so you can get your money back.",
+    'Si un versement Mobile Money ne peut pas être livré, il apparaîtra ici pour récupérer votre argent.',
+  ],
+  refund_destination: ['Refund destination', 'Destination du remboursement'],
+  refund_dest_ph: [
+    'Paste a payment request (Lightning invoice) to receive your refund',
+    'Collez une demande de paiement pour recevoir votre remboursement',
+  ],
+  submit_refund: ['Submit refund', 'Envoyer le remboursement'],
+  select_refund: ['Select the payment to refund:', 'Sélectionnez le paiement à rembourser :'],
+  refund_this: ['Refund this', 'Rembourser'],
+
+  // pay-a-merchant screen
+  amount_due: ['Amount due', 'Montant dû'],
+  enter_amount_next: ["You'll enter an amount next", 'Vous saisirez un montant ensuite'],
+  pay_now: ['Pay now', 'Payer maintenant'],
+  settles_instantly: ["Settles to the merchant's Mobile Money instantly", 'Réglé instantanément sur le Mobile Money du marchand'],
+  pay_screen_title: ['Pay', 'Payer'],
+
+  // receipt
+  rcpt_success: ['Payment successful', 'Paiement réussi'],
+  r_mobile_number: ['Mobile number', 'Numéro mobile'],
+  r_quoted: ['Quoted', 'Devis'],
+  r_delivered: ['Amount delivered', 'Montant livré'],
+  r_total_paid: ['Total paid', 'Total payé'],
+  r_paid_with: ['Paid with', 'Payé avec'],
+  r_amount_sent: ['Amount sent', 'Montant envoyé'],
+  r_value: ['Value', 'Valeur'],
+  r_date: ['Date', 'Date'],
+  r_status: ['Status', 'Statut'],
+  r_completed: ['Completed', 'Terminé'],
+  show_how_paid: ['Show how I paid', 'Afficher comment j’ai payé'],
+  rcpt_footer: ['Mobile Money payment successfully completed.', 'Paiement Mobile Money effectué avec succès.'],
+  rcpt_delivered_to: ['delivered to', 'livré à'],
+  close: ['Close', 'Fermer'],
+
+  // shared / misc
+  expired: ['Expired', 'Expiré'],
+  ref_short: ['Ref', 'Réf'],
+  tier_rep: ['Rep', 'Rep'],
+  tier_city: ['City Lead', 'Responsable ville'],
+  tier_regional: ['Regional Lead', 'Responsable régional'],
+  doc_fallback: ['See momome.xyz for the full document.', 'Consultez momome.xyz pour le document complet.'],
+  doc_error: ['Could not load right now. Please check your connection.', 'Chargement impossible pour le moment. Vérifiez votre connexion.'],
+  share_send_text: [
+    'Send money to any Mobile Money number, instantly, with MoMo›Me — ',
+    'Envoyez de l’argent vers n’importe quel numéro Mobile Money, instantanément, avec MoMo›Me — ',
+  ],
+  share_pay_merchant: ['Pay {name} on MoMo›Me: ', 'Payez {name} sur MoMo›Me : '],
+
   // receive
   get_paid: ['Get paid', 'Recevez des paiements'],
   get_paid_sub: ['Get paid from anywhere — it lands in your Mobile Money.', 'Recevez de l’argent de partout — il arrive sur votre Mobile Money.'],

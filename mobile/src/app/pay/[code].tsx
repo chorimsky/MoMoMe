@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
@@ -8,10 +8,12 @@ import { Body, Button, Card, H2, IconCircle, Label, Pill, Screen } from '@/compo
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { xaf } from '@/lib/format';
+import { useI18n } from '@/lib/i18n';
 import type { MerchantLinkPublic } from '@shared/types';
 
 export default function PayLinkScreen() {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const { code } = useLocalSearchParams<{ code: string }>();
   const [link, setLink] = useState<MerchantLinkPublic | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,24 +69,25 @@ export default function PayLinkScreen() {
 
   return (
     <Screen scroll>
+      <Stack.Screen options={{ title: tr('pay_screen_title') }} />
       <Card style={{ marginTop: Spacing.four, alignItems: 'center', gap: Spacing.three }} padded elevated>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={68} />
         <H2 style={{ textAlign: 'center' }}>{link.merchant.businessName}</H2>
-        {link.merchant.verifiedPhone ? <Pill label="Verified merchant" tone="recv" icon="shield-checkmark" /> : null}
+        {link.merchant.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" /> : null}
         {link.label ? <Body muted center>{link.label}</Body> : null}
         <View style={{ alignItems: 'center', gap: 2, paddingVertical: Spacing.two }}>
           {link.amountXaf ? (
             <>
-              <Label>Amount due</Label>
+              <Label>{tr('amount_due')}</Label>
               <Text style={[styles.amount, { color: t.text }]}>{xaf(link.amountXaf)}</Text>
             </>
           ) : (
-            <Body muted>You'll enter an amount next</Body>
+            <Body muted>{tr('enter_amount_next')}</Body>
           )}
         </View>
-        <Button title="Pay now" icon="flash" onPress={payInApp} style={{ alignSelf: 'stretch' }} />
+        <Button title={tr('pay_now')} icon="flash" onPress={payInApp} style={{ alignSelf: 'stretch' }} />
         <Body muted center style={{ fontSize: 12.5 }}>
-          <Ionicons name="lock-closed" size={11} color={t.muted} /> Settles to the merchant's Mobile Money instantly
+          <Ionicons name="lock-closed" size={11} color={t.muted} /> {tr('settles_instantly')}
         </Body>
       </Card>
     </Screen>

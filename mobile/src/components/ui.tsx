@@ -19,6 +19,7 @@ import { Edge, SafeAreaView } from 'react-native-safe-area-context';
 
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/lib/i18n';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -361,6 +362,7 @@ export function StepHeader({
 /* ---------- countdown mm:ss from an ISO expiry ---------- */
 export function Countdown({ to, prefix }: { to: string; prefix?: string }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [left, setLeft] = useState(() => Math.max(0, new Date(to).getTime() - Date.now()));
   useEffect(() => {
     const id = setInterval(() => {
@@ -374,7 +376,7 @@ export function Countdown({ to, prefix }: { to: string; prefix?: string }) {
   const expired = left <= 0;
   return (
     <Text style={[styles.countdown, { color: expired ? t.bad : t.muted }]}>
-      {expired ? 'Expired' : `${prefix ?? ''}${mm}:${ss}`}
+      {expired ? tr('expired') : `${prefix ?? ''}${mm}:${ss}`}
     </Text>
   );
 }

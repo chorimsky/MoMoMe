@@ -85,13 +85,24 @@ export default function ContactsBackupScreen() {
   const doRestore = async () => {
     setBusy(true);
     setError(null);
+    let recovery: { salt: string; iterations: number; iv: string; ct: string } | null;
     try {
+      // OTP + network failures surface as the real server message…
       const r = await api.anchorRestore(digits, otp);
-      if (!r.recovery) {
-        setError(tr('bk_restore_none'));
-        return;
-      }
-      await adoptVaultFromRecovery(r.recovery, recoveryCode.trim());
+      recovery = r.recovery;
+    } catch (e) {
+      setError(errMessage(e));
+      setBusy(false);
+      return;
+    }
+    if (!recovery) {
+      setError(tr('bk_restore_none'));
+      setBusy(false);
+      return;
+    }
+    try {
+      // …only a failed unwrap here means the recovery code was wrong.
+      await adoptVaultFromRecovery(recovery, recoveryCode.trim());
       setStep('done');
     } catch {
       setError(tr('bk_bad_code'));
@@ -99,50 +110,6 @@ export default function ContactsBackupScreen() {
       setBusy(false);
     }
   };
-
-  const PhoneStep = ({ sub, onNext }: { sub: string; onNext: () => void }) => (
-    <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
-      <Body center>{sub}</Body>
-      <Card padded>
-        <Label>{tr('your_mm_number')}</Label>
-        <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
-          <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
-            <Body style={{ fontSize: 18 }}>{FLAG[country]}</Body>
-            <Body style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>{COUNTRIES[country].dial}</Body>
-            <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
-          </Pressable>
-          <TextInput
-            placeholder="6 7X XX XX XX"
-            placeholderTextColor={t.muted}
-            keyboardType="phone-pad"
-            value={phone}
-            onChangeText={setPhone}
-            style={[styles.phoneInput, { color: t.text }]}
-          />
-        </View>
-        {pickCountry ? (
-          <View style={styles.countryRow}>
-            {(Object.keys(COUNTRIES) as CountryCode[]).map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => {
-                  setCountry(c);
-                  setPickCountry(false);
-                }}
-                style={[
-                  styles.countryChip,
-                  { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
-                ]}>
-                <Body style={{ fontSize: 15 }}>{FLAG[c]}</Body>
-                <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 12 }}>{COUNTRIES[c].dial}</Body>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-        <Button title={tr('bk_send_code')} icon="send" onPress={onNext} loading={busy} disabled={!valid} style={{ marginTop: Spacing.three }} />
-      </Card>
-    </View>
-  );
 
   return (
     <Screen scroll>
@@ -177,7 +144,22 @@ export default function ContactsBackupScreen() {
       ) : null}
 
       {/* BACKUP */}
-      {mode === 'backup' && step === 'number' ? <PhoneStep sub={tr('bk_backup_sub')} onNext={sendCode} /> : null}
+      {mode === 'backup' && step === 'number' ? (
+        <PhoneStep
+          t={t}
+          tr={tr}
+          country={country}
+          setCountry={setCountry}
+          pickCountry={pickCountry}
+          setPickCountry={setPickCountry}
+          phone={phone}
+          setPhone={setPhone}
+          valid={valid}
+          busy={busy}
+          sub={tr('bk_backup_sub')}
+          onNext={sendCode}
+        />
+      ) : null}
       {mode === 'backup' && step === 'otp' ? (
         <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} busy={busy} onVerify={doBackup} />
       ) : null}
@@ -195,7 +177,22 @@ export default function ContactsBackupScreen() {
       ) : null}
 
       {/* RESTORE */}
-      {mode === 'restore' && step === 'number' ? <PhoneStep sub={tr('bk_restore_sub')} onNext={sendCode} /> : null}
+      {mode === 'restore' && step === 'number' ? (
+        <PhoneStep
+          t={t}
+          tr={tr}
+          country={country}
+          setCountry={setCountry}
+          pickCountry={pickCountry}
+          setPickCountry={setPickCountry}
+          phone={phone}
+          setPhone={setPhone}
+          valid={valid}
+          busy={busy}
+          sub={tr('bk_restore_sub')}
+          onNext={sendCode}
+        />
+      ) : null}
       {mode === 'restore' && step === 'otp' ? (
         <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} busy={busy} onVerify={() => setStep('code')} />
       ) : null}
@@ -218,6 +215,81 @@ export default function ContactsBackupScreen() {
         </View>
       ) : null}
     </Screen>
+  );
+}
+
+// Hoisted to module scope so it keeps a stable identity across parent renders —
+// a component declared inside render remounts every keystroke and steals focus
+// from the phone TextInput.
+function PhoneStep({
+  t,
+  tr,
+  country,
+  setCountry,
+  pickCountry,
+  setPickCountry,
+  phone,
+  setPhone,
+  valid,
+  busy,
+  sub,
+  onNext,
+}: {
+  t: ReturnType<typeof useTheme>;
+  tr: ReturnType<typeof useI18n>['t'];
+  country: CountryCode;
+  setCountry: (c: CountryCode) => void;
+  pickCountry: boolean;
+  setPickCountry: (fn: (v: boolean) => boolean) => void;
+  phone: string;
+  setPhone: (s: string) => void;
+  valid: boolean;
+  busy: boolean;
+  sub: string;
+  onNext: () => void;
+}) {
+  return (
+    <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
+      <Body center>{sub}</Body>
+      <Card padded>
+        <Label>{tr('your_mm_number')}</Label>
+        <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
+          <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
+            <Body style={{ fontSize: 18 }}>{FLAG[country]}</Body>
+            <Body style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>{COUNTRIES[country].dial}</Body>
+            <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
+          </Pressable>
+          <TextInput
+            placeholder="6 7X XX XX XX"
+            placeholderTextColor={t.muted}
+            keyboardType="phone-pad"
+            value={phone}
+            onChangeText={setPhone}
+            style={[styles.phoneInput, { color: t.text }]}
+          />
+        </View>
+        {pickCountry ? (
+          <View style={styles.countryRow}>
+            {(Object.keys(COUNTRIES) as CountryCode[]).map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => {
+                  setCountry(c);
+                  setPickCountry(() => false);
+                }}
+                style={[
+                  styles.countryChip,
+                  { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
+                ]}>
+                <Body style={{ fontSize: 15 }}>{FLAG[c]}</Body>
+                <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 12 }}>{COUNTRIES[c].dial}</Body>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        <Button title={tr('bk_send_code')} icon="send" onPress={onNext} loading={busy} disabled={!valid} style={{ marginTop: Spacing.three }} />
+      </Card>
+    </View>
   );
 }
 

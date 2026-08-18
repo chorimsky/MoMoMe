@@ -8,7 +8,7 @@ import { Body, Card, Field, H1, IconCircle, Pill, Screen } from '@/components/ui
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { CATEGORIES } from '@/lib/categories';
+import { CATEGORIES, categoryLabel } from '@/lib/categories';
 import type { MerchantDirectoryEntry } from '@shared/types';
 
 const CAT_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -27,7 +27,7 @@ const CAT_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export default function DiscoverScreen() {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string | null>(null);
   const [list, setList] = useState<MerchantDirectoryEntry[] | null>(null);
@@ -69,7 +69,7 @@ export default function DiscoverScreen() {
         contentContainerStyle={styles.cats}>
         <CatChip label={tr('cat_all')} active={!cat} onPress={() => setCat(null)} />
         {CATEGORIES.map((c) => (
-          <CatChip key={c} label={c} active={cat === c} onPress={() => setCat(cat === c ? null : c)} />
+          <CatChip key={c} label={categoryLabel(c, lang)} active={cat === c} onPress={() => setCat(cat === c ? null : c)} />
         ))}
       </ScrollView>
 
@@ -103,7 +103,7 @@ export default function DiscoverScreen() {
                   {m.businessName}
                 </Body>
                 <Body muted style={{ fontSize: 13 }}>
-                  {m.category}
+                  {categoryLabel(m.category, lang)}
                   {m.location?.label ? ` · ${m.location.label}` : ''}
                 </Body>
               </View>

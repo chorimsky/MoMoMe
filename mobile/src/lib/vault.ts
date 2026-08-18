@@ -78,19 +78,25 @@ const dec = (b: Uint8Array) => new TextDecoder().decode(b);
 let vmkCache: Uint8Array | null = null;
 async function getVMK(): Promise<Uint8Array> {
   if (vmkCache) return vmkCache;
+  let stored: string | null;
   try {
-    const stored = await SecureStore.getItemAsync(VMK_KEY);
-    if (stored) return (vmkCache = fromB64(stored));
+    stored = await SecureStore.getItemAsync(VMK_KEY);
   } catch {
-    /* keychain unavailable — fall through to ephemeral */
+    // A TRANSIENT read failure (e.g. device locked) must NOT overwrite the real
+    // key — that would orphan every existing record. Use an ephemeral key for
+    // this session and never persist it.
+    return randomBytes(32);
   }
+  if (stored) return (vmkCache = fromB64(stored));
+  // First run only (read succeeded, returned null): mint + persist the VMK.
   const fresh = randomBytes(32);
   try {
     await SecureStore.setItemAsync(VMK_KEY, toB64(fresh));
+    vmkCache = fresh;
   } catch {
-    /* ephemeral for this session only */
+    /* couldn't persist — ephemeral for this session, not cached */
   }
-  return (vmkCache = fresh);
+  return fresh;
 }
 async function setVMK(raw: Uint8Array): Promise<void> {
   vmkCache = raw;

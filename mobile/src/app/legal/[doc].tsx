@@ -62,6 +62,7 @@ function Contact() {
 /* ---------- Terms / Privacy: canonical text rendered in-app ---------- */
 function Doc({ slug }: { slug: string }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [text, setText] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -74,9 +75,9 @@ function Doc({ slug }: { slug: string }) {
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
-        if (alive) setText(plain || 'See momome.xyz for the full document.');
+        if (alive) setText(plain || tr('doc_fallback'));
       })
-      .catch(() => alive && setText('Could not load right now. Please check your connection.'));
+      .catch(() => alive && setText(tr('doc_error')));
     return () => {
       alive = false;
     };

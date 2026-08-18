@@ -13,8 +13,11 @@ import { Body, Button, Divider, Label, Mono } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { METHOD_LABEL, xaf } from '@/lib/format';
-import { COUNTRIES, PROVIDERS } from '@shared/domain';
+import { useI18n } from '@/lib/i18n';
+import { COUNTRIES } from '@shared/domain';
 import type { Payment } from '@shared/types';
+
+type Tr = ReturnType<typeof useI18n>['t'];
 
 function fmtDate(iso: string): string {
   try {
@@ -50,24 +53,24 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 }
 
 /** Plain-text receipt for the Share sheet — mirrors the on-screen rows. */
-export function receiptText(p: Payment, showHow: boolean): string {
+export function receiptText(p: Payment, showHow: boolean, tr: Tr): string {
   const dial = COUNTRIES[p.recipient.country]?.dial ?? '';
   const lines = [
-    'MoMo›Me — Payment receipt',
+    `MoMo›Me — ${tr('rcpt_success')}`,
     '',
-    `Recipient:        ${p.recipient.name || '—'}`,
-    `Mobile number:    ${dial} ${p.recipient.phone}`,
-    `Amount delivered: ${xaf(p.xaf)}`,
-    `Fee:              ${xaf(p.feeXaf)}`,
-    `Total paid:       ${xaf(p.totalXaf)}`,
+    `${tr('recipient')}: ${p.recipient.name || '—'}`,
+    `${tr('r_mobile_number')}: ${dial} ${p.recipient.phone}`,
+    `${tr('r_delivered')}: ${xaf(p.xaf)}`,
+    `${tr('fee')}: ${xaf(p.feeXaf)}`,
+    `${tr('r_total_paid')}: ${xaf(p.totalXaf)}`,
   ];
   if (showHow) {
-    lines.push(`Paid with:        ${METHOD_LABEL[p.method]}`);
-    lines.push(`Amount sent:      ${p.payInstruction.amountLabel} (≈ $${p.usd.toFixed(2)})`);
+    lines.push(`${tr('r_paid_with')}: ${METHOD_LABEL[p.method]}`);
+    lines.push(`${tr('r_amount_sent')}: ${p.payInstruction.amountLabel} (≈ $${p.usd.toFixed(2)})`);
   }
-  lines.push(`Reference:        ${p.ref}`);
-  lines.push(`Date:             ${fmtDate(p.createdAt)}`);
-  lines.push('Status:           Completed');
+  lines.push(`${tr('reference')}: ${p.ref}`);
+  lines.push(`${tr('r_date')}: ${fmtDate(p.createdAt)}`);
+  lines.push(`${tr('r_status')}: ${tr('r_completed')}`);
   lines.push('', 'Mobile Money, made simple — momome.xyz');
   return lines.join('\n');
 }
@@ -82,13 +85,13 @@ export function ReceiptModal({
   onClose: () => void;
 }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   const [showHow, setShowHow] = useState(false);
   const dial = COUNTRIES[payment.recipient.country]?.dial ?? '';
-  const provider = payment.recipient.provider ? PROVIDERS[payment.recipient.provider]?.short : '';
 
   const share = async () => {
     try {
-      await Share.share({ message: receiptText(payment, showHow) });
+      await Share.share({ message: receiptText(payment, showHow, tr) });
     } catch {
       /* user dismissed the share sheet */
     }
@@ -103,40 +106,40 @@ export function ReceiptModal({
             <View style={[styles.check, { backgroundColor: t.recv }]}>
               <Ionicons name="checkmark" size={30} color="#fff" />
             </View>
-            <Label>Payment successful</Label>
+            <Label>{tr('rcpt_success')}</Label>
             <Text style={[styles.big, { color: t.text }]}>{xaf(payment.xaf)}</Text>
-            <Body muted center>delivered to {payment.recipient.name || payment.recipient.phone}</Body>
+            <Body muted center>{tr('rcpt_delivered_to')} {payment.recipient.name || payment.recipient.phone}</Body>
           </View>
 
           <ScrollView contentContainerStyle={{ padding: Spacing.four, gap: Spacing.one }}>
-            <Row label="Recipient" value={payment.recipient.name || '—'} />
-            <Row label="Mobile number" value={`${dial} ${payment.recipient.phone}`} />
+            <Row label={tr('recipient')} value={payment.recipient.name || '—'} />
+            <Row label={tr('r_mobile_number')} value={`${dial} ${payment.recipient.phone}`} />
             {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
-              <Row label="Quoted" value={xaf(payment.repricedFromXaf)} />
+              <Row label={tr('r_quoted')} value={xaf(payment.repricedFromXaf)} />
             ) : null}
-            <Row label="Amount delivered" value={xaf(payment.xaf)} />
-            <Row label="Fee" value={xaf(payment.feeXaf)} />
-            <Row label="Total paid" value={xaf(payment.totalXaf)} strong />
+            <Row label={tr('r_delivered')} value={xaf(payment.xaf)} />
+            <Row label={tr('fee')} value={xaf(payment.feeXaf)} />
+            <Row label={tr('r_total_paid')} value={xaf(payment.totalXaf)} strong />
 
             {showHow ? (
               <>
                 <Divider style={{ marginVertical: Spacing.two }} />
-                <Row label="Paid with" value={METHOD_LABEL[payment.method]} />
-                <Row label="Amount sent" value={payment.payInstruction.amountLabel} />
-                <Row label="Value" value={`≈ $${payment.usd.toFixed(2)}`} />
+                <Row label={tr('r_paid_with')} value={METHOD_LABEL[payment.method]} />
+                <Row label={tr('r_amount_sent')} value={payment.payInstruction.amountLabel} />
+                <Row label={tr('r_value')} value={`≈ $${payment.usd.toFixed(2)}`} />
               </>
             ) : null}
 
             <Divider style={{ marginVertical: Spacing.two }} />
             <View style={styles.row}>
-              <Body muted>Reference</Body>
+              <Body muted>{tr('reference')}</Body>
               <Mono>{payment.ref}</Mono>
             </View>
-            <Row label="Date" value={fmtDate(payment.createdAt)} />
+            <Row label={tr('r_date')} value={fmtDate(payment.createdAt)} />
             <View style={styles.row}>
-              <Body muted>Status</Body>
+              <Body muted>{tr('r_status')}</Body>
               <View style={[styles.statusPill, { backgroundColor: t.recvWash }]}>
-                <Text style={{ color: t.recv, fontFamily: Fonts.bodyBold, fontSize: 13 }}>Completed</Text>
+                <Text style={{ color: t.recv, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('r_completed')}</Text>
               </View>
             </View>
 
@@ -144,7 +147,7 @@ export function ReceiptModal({
             <Pressable
               onPress={() => setShowHow((v) => !v)}
               style={[styles.toggle, { borderColor: t.line }]}>
-              <Body style={{ flex: 1 }}>Show how I paid{provider ? '' : ''}</Body>
+              <Body style={{ flex: 1 }}>{tr('show_how_paid')}</Body>
               <Switch
                 value={showHow}
                 onValueChange={setShowHow}
@@ -153,13 +156,13 @@ export function ReceiptModal({
             </Pressable>
 
             <Body muted center style={{ fontSize: 12, marginTop: Spacing.two }}>
-              Mobile Money payment successfully completed.
+              {tr('rcpt_footer')}
             </Body>
           </ScrollView>
 
           <View style={styles.actions}>
-            <Button title="Share" icon="share-outline" variant="outline" onPress={share} style={{ flex: 1 }} />
-            <Button title="Close" onPress={onClose} style={{ flex: 1 }} />
+            <Button title={tr('share')} icon="share-outline" variant="outline" onPress={share} style={{ flex: 1 }} />
+            <Button title={tr('close')} onPress={onClose} style={{ flex: 1 }} />
           </View>
         </View>
       </View>

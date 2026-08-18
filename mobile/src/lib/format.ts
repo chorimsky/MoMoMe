@@ -15,13 +15,6 @@ export const METHOD_LABEL: Record<Method, string> = {
   USDC: 'US Dollars',
 };
 
-export const METHOD_BLURB: Record<Method, string> = {
-  LIGHTNING: 'Arrives in seconds · lowest fee',
-  ONCHAIN: 'Best for large amounts · 10–60 min',
-  USDT: 'Stable value · arrives in seconds',
-  USDC: 'Stable value · arrives in seconds',
-};
-
 /** Sender-facing coarse status for a payment state. */
 export function statusLabel(s: PaymentState): { text: string; tone: 'pending' | 'done' | 'fail' } {
   switch (s) {

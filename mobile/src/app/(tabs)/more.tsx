@@ -9,7 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { StringKey, useI18n } from '@/lib/i18n';
 
 type Tone = 'brand' | 'accent' | 'recv' | 'neutral';
-type Item = { icon: keyof typeof Ionicons.glyphMap; labelKey: StringKey; subKey?: StringKey; label?: string; tone: Tone; route: Href };
+type Item = { icon: keyof typeof Ionicons.glyphMap; labelKey: StringKey; subKey?: StringKey; tone: Tone; route: Href };
 
 const GROUPS: { titleKey: StringKey; items: Item[] }[] = [
   {

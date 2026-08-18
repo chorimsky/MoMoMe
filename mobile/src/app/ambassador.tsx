@@ -12,12 +12,6 @@ import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
 import type { AmbassadorSummary } from '@shared/types';
 
-const TIER_LABEL: Record<AmbassadorSummary['tier'], string> = {
-  rep: 'Rep',
-  city_lead: 'City Lead',
-  regional_lead: 'Regional Lead',
-};
-
 export default function AmbassadorScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
@@ -31,7 +25,7 @@ export default function AmbassadorScreen() {
 
   const link = data ? `${WEB_ORIGIN}/?ref=${data.code}` : '';
   const share = () =>
-    Share.share({ message: `Send money to any Mobile Money number, instantly, with MoMo›Me — ${link}` });
+    Share.share({ message: `${tr('share_send_text')}${link}` });
   const copy = async () => {
     await Clipboard.setStringAsync(link);
     setCopied(true);
@@ -55,7 +49,7 @@ export default function AmbassadorScreen() {
             <IconCircle name="people" color={t.recv} bg={t.recvWash} size={60} />
             <H2>{tr('refer_earn')}</H2>
             <Body center>{tr('refer_sub')}</Body>
-            <Pill label={TIER_LABEL[data.tier]} tone="brand" icon="ribbon" />
+            <Pill label={data.tier === 'rep' ? tr('tier_rep') : data.tier === 'city_lead' ? tr('tier_city') : tr('tier_regional')} tone="brand" icon="ribbon" />
             <View style={[styles.codeBox, { borderColor: t.line, backgroundColor: t.surface2 }]}>
               <Text style={[styles.code, { color: t.text }]}>{data.code}</Text>
             </View>

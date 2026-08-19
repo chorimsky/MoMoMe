@@ -33,6 +33,8 @@
     "production": {
       "channel": "production",
       "autoIncrement": true,
+      "credentialsSource": "local",
+      "android": { "buildType": "app-bundle" },
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"

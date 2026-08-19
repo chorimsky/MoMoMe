@@ -26,18 +26,20 @@ No local Android SDK/Studio is needed — EAS builds in the cloud.
 
 ## 1. Build the release AAB
 
-Google Play requires an **Android App Bundle (.aab)** (not an APK). The `production`
-profile builds one by default (no `buildType: apk`, unlike `preview`):
+Google Play requires an **Android App Bundle (.aab)**. The `production` profile builds
+one (`android.buildType: "app-bundle"`) and signs it non-interactively with the **local
+upload keystore** (`credentialsSource: "local"` → `credentials/momome.jks`):
 
 ```bash
 cd mobile && eas build -p android --profile production
 ```
 
-- First run: EAS asks to **generate an Android Keystore** — say **yes**. This is your
-  *upload key*; EAS stores it. (Google holds the real app-signing key via Play App
-  Signing — see §4.) Keep the EAS-managed keystore; losing it means re-registering an
-  upload key with Google.
-- ~10–15 min. The result is a downloadable `.aab` URL. This is what you upload to Play.
+- No keystore prompt — it uses `credentials.json` / `credentials/momome.jks`. ⚠️ **Back
+  that keystore up** (it's gitignored, so it only exists on this machine): it's your Play
+  **upload key**. If it's ever lost you can reset the upload key in Play Console, since
+  Google holds the real app-signing key (Play App Signing, §4).
+- `versionCode` auto-increments on EAS (remote) each build.
+- ~10–15 min. The result is a downloadable `.aab` URL — this is what you upload to Play.
 
 Sanity-check locally any time before building:
 
@@ -77,11 +79,12 @@ accept the declarations. Then work down the left-nav "Dashboard" checklist below
 
 ## 4. Signing — Play App Signing
 
-Use **Play App Signing** (the default and recommended). Flow: EAS's generated keystore
-is your **upload key**; you sign the AAB with it, Google re-signs with the app key it
-holds. Nothing extra to configure — just keep letting EAS manage credentials for the
-`production` profile. (The `preview` profile uses a **local** keystore in
-`mobile/credentials/` for internal APKs; that's separate and never used for Play.)
+Use **Play App Signing** (the default and recommended). Flow: the **local** keystore
+`mobile/credentials/momome.jks` is your **upload key** — the `production` build signs the
+AAB with it, and Google re-signs with the app-signing key it holds. On the first upload,
+Play Console enrolls this upload certificate automatically. Nothing else to configure.
+⚠️ Keep `credentials/momome.jks` + `credentials.json` backed up off this machine (both are
+gitignored). If lost, Play Console → App integrity → *Request upload key reset*.
 
 ---
 

@@ -53,3 +53,6 @@ example
 # EAS signing credentials (secret — never commit)
 credentials/
 credentials.json
+
+# local build artifacts (AABs/APKs)
+build/

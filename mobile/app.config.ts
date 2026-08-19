@@ -53,7 +53,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
-    package: 'com.momome.app',
+    // Must match the package registered for this app in Google Play Console
+    // (the Play listing expects "momome.app"). iOS keeps com.momome.app.
+    package: 'momome.app',
     adaptiveIcon: {
       backgroundColor: '#FFC92E',
       foregroundImage: './assets/images/android-icon-foreground.png',

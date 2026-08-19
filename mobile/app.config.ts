@@ -29,6 +29,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: 'automatic',
   backgroundColor: '#FAF9F5',
   primaryColor: '#FFC92E',
+  // EAS Update (OTA JS updates). runtimeVersion tracks `version`, so an OTA update
+  // only lands on builds of the same app version (a native change needs a new build).
+  updates: {
+    url: 'https://u.expo.dev/5b69824e-1b5c-4871-98de-4fe889de8c98',
+  },
+  runtimeVersion: {
+    policy: 'appVersion',
+  },
   // NOTE: `owner` + extra.eas.projectId are filled in by `eas init` (see DEPLOY.md).
   ios: {
     bundleIdentifier: 'com.momome.app',

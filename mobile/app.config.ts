@@ -19,7 +19,9 @@ const WEB_HOST = WEB_ORIGIN.replace(/^https?:\/\//, '');
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'MoMo›Me',
+  // Launcher label (under the icon). The in-app wordmark stays MoMo›Me; the Play
+  // store-listing title is set separately in the Play Console.
+  name: 'momome.app',
   slug: 'momome',
   owner: 'rimskycho',
   scheme: 'momome',

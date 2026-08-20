@@ -179,7 +179,9 @@ export async function sendOnchain(address: string, amountMsat: number): Promise<
 export async function payLightningAddress(lnAddress: string, amountMsat: number): Promise<PayResult> {
   const [name, domain] = lnAddress.split("@");
   if (!name || !domain) throw new Error("invalid lightning address");
-  const lnurl = await fetch(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`);
+  // Timeout-wrapped (fetchT): this LNURL resolve gates a real-money outbound sweep;
+  // a hung .well-known host must not block it indefinitely (see http.ts).
+  const lnurl = await fetchT(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`, { method: "GET" });
   if (!lnurl.ok) throw new Error(`lightning-address resolve failed: ${lnurl.status}`);
   const params = (await lnurl.json()) as { tag?: string; callback?: string; minSendable?: number; maxSendable?: number };
   if (params.tag !== "payRequest" || !params.callback) throw new Error("not a valid LNURL-pay address");

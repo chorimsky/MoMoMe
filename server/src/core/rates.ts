@@ -43,7 +43,16 @@ export function setRates(
   // would price real crypto on a stale/fallback rate.
   const hasReal = r.btcUsd != null || r.usdtUsd != null || r.usdcUsd != null || r.eurUsd != null;
   if (!hasReal && !cache) return; // dead feed on cold boot → stay unpriced (ratesFresh() = false → quoting refuses)
-  if (hasReal) sourceLabel = source;
+  if (hasReal) {
+    sourceLabel = source;
+    // Any fresh REAL pull clears a prior divergence latch. `divergent` is set only in
+    // setDualBtc and was never reset on the IBEX-primary path (jobs.ts calls setRates
+    // directly), so a transient public-feed divergence would otherwise wedge
+    // ratesFresh() false forever — a self-inflicted quoting outage until restart.
+    // Note: a divergent setDualBtc pull returns WITHOUT calling setRates, so it never
+    // clears itself here — only a subsequent agreed/IBEX pull does.
+    divergent = false;
+  }
   cache = {
     btcUsd: r.btcUsd ?? cache?.btcUsd ?? FALLBACK.btcUsd,
     usdtUsd: r.usdtUsd ?? cache?.usdtUsd ?? FALLBACK.usdtUsd,

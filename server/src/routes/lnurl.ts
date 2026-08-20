@@ -13,6 +13,9 @@ import { config } from "../config.js";
 import { getSettings } from "../core/settings.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { rateFor, formatAmount } from "../core/fx.js";
+import { liveMoney } from "../config.js";
+import { ratesFresh } from "../core/rates.js";
+import { ensureFreshRates } from "../jobs.js";
 import { createInstruction } from "../adapters/index.js";
 import { id, nextRef } from "../core/ids.js";
 import { store } from "../db/store.js";
@@ -64,6 +67,16 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   if (!Number.isFinite(msat) || msat <= 0) return res.json(lnErr("Missing or invalid amount."));
   const { min, max } = sendableRangeMsat();
   if (msat < min || msat > max) return res.json(lnErr(`Amount out of range (${min}–${max} msat).`));
+
+  // Rate-freshness gate — this unauthenticated path mints a REAL payout quote off
+  // rateFor("LIGHTNING"), and LIGHTNING is NOT re-priced downstream (confirmInbound
+  // re-prices ONCHAIN only). Without this, a cold/stale/divergent cache would price
+  // real sats on the hardcoded fallback → over- or under-pay the recipient. Mirror the
+  // /quote guard (api.ts): refresh on-miss, then refuse when not fresh & real money moves.
+  if (liveMoney()) await ensureFreshRates().catch(() => {});
+  if (liveMoney() && !ratesFresh()) {
+    return res.json(lnErr("Live exchange rates are momentarily unavailable — please try again in a moment."));
+  }
 
   const { btc, totalXaf, xaf, feeXaf } = quoteFromMsat(msat);
   if (xaf < 1) return res.json(lnErr("Amount too small to deliver."));

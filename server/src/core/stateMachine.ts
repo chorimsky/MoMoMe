@@ -418,7 +418,14 @@ export async function reconcileOneInbound(p: Payment): Promise<void> {
     // forever. Only when NOT paid (settled check above ran first). No funds moved.
     const expiredAt = Date.parse(p.payInstruction.expiresAt);
     if ((s?.failed || (expiredAt && expiredAt < Date.now() - 120_000)) && p.state === "AWAITING_INBOUND") {
-      await transition(p, "FAILED", "invoice expired — not paid");
+      // Lock + fresh state re-check before failing it: a settlement webhook may have
+      // booked/delivered this invoice concurrently. Failing the STALE copy would
+      // putPayment-overwrite (erase) its INBOUND_CONFIRMED/DELIVERED events → inboundBooked()
+      // false → a later reconcile tick re-books the ledger and pays out a SECOND time.
+      await store().lockPayment(p.id, async () => {
+        const fresh = await store().getPayment(p.id);
+        if (fresh && fresh.state === "AWAITING_INBOUND") await transition(fresh, "FAILED", "invoice expired — not paid");
+      });
     }
   } catch (e) { console.error("reconcile inbound", p.id, e); }
 }
@@ -470,7 +477,16 @@ export async function reconcileFailedPayouts(maxAgeMs = 120_000): Promise<void> 
  *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay).
  *  Honours the same real-money safety as the settle path and only marks DELIVERED
  *  on an authoritative payout confirmation (never eagerly on "accepted"). */
-export async function adminRetry(p: Payment): Promise<boolean> {
+export async function adminRetry(pIn: Payment): Promise<boolean> {
+  // Serialize with every other money path (mirrors adminRefund / onPayoutResult): without
+  // the lock + fresh read, an operator double-click, or a retry racing reconcile / a payout
+  // callback, could both observe "not in flight" and submit TWO real disbursements — the
+  // adapter's per-instance in-memory idempotency map cannot be the sole double-pay guard.
+  return store().lockPayment(pIn.id, () => adminRetryLocked(pIn.id));
+}
+async function adminRetryLocked(paymentId: string): Promise<boolean> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock
+  if (!p) return false;
   if (p.displayStatus === "Completed") return false;
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
   // Never re-disburse a payout that is already in flight (PAYOUT_REQUESTED). It looks
@@ -522,12 +538,14 @@ export async function adminRetry(p: Payment): Promise<boolean> {
   // Hand off to the confirmation path: onPayoutResult posts the delivery legs and
   // transitions to DELIVERED — only once the payout actually COMPLETED.
   await transition(p, "PAYOUT_REQUESTED", "retried by admin");
-  if (res.simulated) { await onPayoutResult(p.ref, "COMPLETED", res.providerRef); return true; }
+  // The per-payment lock is HELD here — call onPayoutResultLocked (not onPayoutResult,
+  // which re-acquires the same lock → re-entrant deadlock), mirroring confirmInboundLocked.
+  if (res.simulated) { await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); return true; }
   // Real rail: confirm via status query; settle on COMPLETED/FAILED, else keep polling.
   let status: PayoutStatus = "PENDING";
   try { status = (await agg.queryStatus(p.ref)) ?? "PENDING"; } catch { /* keep PENDING */ }
-  if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status, res.providerRef);
-  else void pollPayout(p.ref);
+  if (status === "COMPLETED" || status === "FAILED") await onPayoutResultLocked(p.ref, status, res.providerRef);
+  else void pollPayout(p.ref); // fire-and-forget: acquires the lock AFTER this one releases
   return true;
 }
 
@@ -630,8 +648,16 @@ async function finalizeRefundLocked(paymentId: string): Promise<void> {
 /** The outbound refund Lightning payment DEFINITIVELY failed (no route / expired) —
  *  the sats did NOT leave, so we still hold the inbound. Reopen the claim so the
  *  sender can supply a fresh invoice. Safe (no double-pay: the prior attempt failed). */
-async function reopenRefund(p: Payment): Promise<void> {
-  if (p.state !== "REFUND_PENDING") return;
+async function reopenRefund(pIn: Payment): Promise<void> {
+  return store().lockPayment(pIn.id, () => reopenRefundLocked(pIn.id));
+}
+async function reopenRefundLocked(paymentId: string): Promise<void> {
+  const p = await store().getPayment(paymentId); // fresh read under the lock (mirrors finalizeRefund)
+  // Fresh state re-check: if a concurrent finalizeRefund already settled this to REFUNDED,
+  // do NOT resurrect it to REFUND_PENDING + null refundTxId — that stale-copy clobber
+  // (putPayment overwrites the whole record) would let the sender submit a SECOND invoice
+  // → double refund.
+  if (!p || p.state !== "REFUND_PENDING") return;
   p.refundNeedsDestination = true;
   p.refundTxId = undefined; // void the failed attempt — a new invoice starts clean
   await transition(p, "REFUND_PENDING", "refund payout failed — awaiting a new invoice");

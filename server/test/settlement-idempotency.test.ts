@@ -83,6 +83,39 @@ async function main() {
   await markDetected(fresh);
   ok("AWAITING_INBOUND advances to INBOUND_DETECTED", fresh.state === "INBOUND_DETECTED", fresh.state);
 
+  // 5. On-chain over/under-payment guards (only the exactly-quoted band settles).
+  console.log("\nconfirmInbound — on-chain amount guards (under / over / exact)");
+  async function makeOnchain(id: string, amount = 0.001): Promise<Payment> {
+    const now = new Date().toISOString();
+    const xaf = 50_000, feeXaf = Math.round(xaf * 0.028);
+    const p: Payment = {
+      id, ref: `MMM-OC-${id}`, quoteId: `q_${id}`,
+      state: "AWAITING_INBOUND", displayStatus: "Pending", method: "ONCHAIN",
+      recipient: { phone: "677000001", country: "CM", provider: "MTN", name: "OC", nameSource: "manual" },
+      xaf, feeXaf, totalXaf: xaf + feeXaf, usd: 85, estimateOnly: true,
+      payInstruction: { method: "ONCHAIN", code: `bc1${id}`, qr: `bitcoin:bc1${id}`, asset: "BTC", amount, amountLabel: `${amount} BTC`, expiresAt: now, providerRef: `bc1${id}`, provider: "ibex" },
+      events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],
+      createdAt: now, updatedAt: now,
+    };
+    await store().putPayment(p);
+    return p;
+  }
+  const noteOf = (p: Payment) => p.events[p.events.length - 1]?.note ?? "";
+
+  const under = await makeOnchain("under");
+  await confirmInbound(under, under.payInstruction.amount * 0.5); // 50% short
+  ok("underpaid on-chain → MANUAL_REVIEW (underpaid)", under.state === "MANUAL_REVIEW" && /underpaid/.test(noteOf(under)), noteOf(under));
+
+  const over = await makeOnchain("over");
+  await confirmInbound(over, over.payInstruction.amount * 2); // 2× fat-finger
+  ok("overpaid on-chain → MANUAL_REVIEW (overpaid)", over.state === "MANUAL_REVIEW" && /overpaid/.test(noteOf(over)), noteOf(over));
+
+  // Exact payment PASSES both guards (it then holds on the FX re-price gate in this
+  // rail-less test — a DIFFERENT reason — proving the overpay guard didn't misfire).
+  const exact = await makeOnchain("exact");
+  await confirmInbound(exact, exact.payInstruction.amount);
+  ok("exact on-chain does NOT trip the overpay guard", !/overpaid|underpaid/.test(noteOf(exact)), noteOf(exact));
+
   console.log(`\n✅ ${passed} assertions passed`);
 }
 

@@ -27,6 +27,11 @@ import { ratesFresh } from "./rates.js";
  *  RPC to each provider on every call. NaN when no rail can be queried. */
 let floatCache: { xaf: number; at: number } | null = null;
 const FLOAT_CACHE_MS = Number(process.env.FLOAT_CACHE_MS ?? 8_000);
+// A confirmed on-chain/stablecoin inbound materially larger than invoiced isn't the
+// quoted deal (a fat-finger over-send, or an AML-relevant unexpected deposit) — hold
+// for review instead of auto-delivering a windfall. 15% over covers wallet rounding
+// / dust while catching 2×+ mistakes. Underpayment uses the mirror band (0.999).
+const OVERPAY_TOLERANCE = Number(process.env.OVERPAY_TOLERANCE ?? 1.15);
 async function liveAggregatorXaf(): Promise<number> {
   if (floatCache && Date.now() - floatCache.at < FLOAT_CACHE_MS) return floatCache.xaf;
   let live = NaN;
@@ -187,6 +192,14 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number): P
     // Underpayment guard: never auto-pay a short inbound (BACKEND_DESIGN §1).
     if (received < expected * 0.999) {
       await transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
+      return;
+    }
+    // Overpayment guard (symmetry): a materially larger inbound than invoiced isn't
+    // the quoted deal — it's backed by received crypto so it's not a platform loss,
+    // but auto-delivering a windfall (or an unexpected large deposit) must be reviewed,
+    // not settled silently. Holds a 2× fat-finger; passes normal wallet rounding.
+    if (received > expected * OVERPAY_TOLERANCE) {
+      await transition(p, "MANUAL_REVIEW", `overpaid: got ${received}, expected ${expected}`);
       return;
     }
   }

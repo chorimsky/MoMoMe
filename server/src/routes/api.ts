@@ -909,6 +909,7 @@ api.get("/ledger/:paymentId", async (req, res) => {
    The server stores/returns opaque ciphertext only; all crypto is on-device.
    Scoped to the anonymous sender/device id — a missing id means no vault. */
 api.get("/me/vault", async (req, res) => {
+  if (!getSettings().features.contacts) return res.json([]); // feature off → empty book
   const sid = await vaultOwnerOf(req);
   if (!sid) return res.json([]);
   const since = typeof req.query.since === "string" ? req.query.since : undefined;
@@ -916,6 +917,7 @@ api.get("/me/vault", async (req, res) => {
 });
 
 api.put("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  if (!getSettings().features.contacts) return res.status(403).json({ error: "feature_off", message: "Contacts are disabled." });
   const sid = await vaultOwnerOf(req);
   if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
   const body = (req.body ?? {}) as { ciphertext?: unknown; iv?: unknown; ver?: unknown };
@@ -930,6 +932,7 @@ api.put("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), 
 });
 
 api.delete("/me/vault/:recordId", rateLimitMiddleware("vault_write", 120, 60_000), async (req, res) => {
+  if (!getSettings().features.contacts) return res.status(403).json({ error: "feature_off", message: "Contacts are disabled." });
   const sid = await vaultOwnerOf(req);
   if (!sid) return res.status(401).json({ error: "no_device", message: "No device identity." });
   const rec = deleteVault(sid, String(req.params.recordId).slice(0, 64));
@@ -1016,6 +1019,7 @@ function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 
 /** Create / update my merchant profile (starts pending until the phone is verified). */
 api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (req, res) => {
+  if (!getSettings().features.merchant) return res.status(403).json({ error: "feature_off", message: "Merchant accounts aren't available right now." });
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const b = (req.body ?? {}) as { businessName?: string; category?: string; country?: string; settlementPhone?: string; tier?: string; location?: MerchantAccount["location"] };
@@ -1129,6 +1133,7 @@ api.get("/merchant/links", async (req, res) => {
   res.json({ links });
 });
 api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), async (req, res) => {
+  if (!getSettings().features.merchant) return res.status(403).json({ error: "feature_off", message: "Merchant accounts aren't available right now." });
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);

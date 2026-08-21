@@ -283,10 +283,14 @@ export function SettingsView() {
         <Card title="Product features" sub="Turn any product surface on or off platform-wide. Disabled features are hidden from users and refused by the API.">
           {(() => {
             const rows = [
+              ["merchant", "Merchant accounts", "Become a merchant, dashboard & payment links (accept payments). Turn off for a send-only MVP."],
               ["directory", "Discovery directory & map", "The public “Pay with MoMo›Me” business directory and map"],
               ["scanToPay", "Scan-to-pay", "Pay a merchant by scanning their QR / entering their code"],
               ["invoices", "Invoices", "Merchants can issue invoices (vs. plain payment links)"],
+              ["receive", "Get paid (receive)", "The personal “Get paid” / Lightning-address receive surface"],
+              ["contacts", "Contacts book", "The encrypted contact book + cross-device backup"],
               ["referrals", "Referrals & ambassadors", "Shareable referral codes and the ambassador dashboard"],
+              ["wallet", "Embedded wallet (beta)", "The self-custodial Lightning wallet — experimental"],
               ["developerApi", "Developer API", "Partner API keys and the developer portal"],
               ["diaspora", "Diaspora corridor", "The diaspora remittance landing page"],
             ] as const;

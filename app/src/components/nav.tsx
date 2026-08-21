@@ -63,7 +63,7 @@ const FOOT_LINKS: Array<[to: string, key: string, current: FootKey, feature?: ke
   ["/claim", "lp_foot_claim", "claim"],
   ["/contact", "lp_foot_help", "contact"],
   ["/discover", "foot_discover", null, "directory"],
-  ["/merchant", "foot_merchant", null],
+  ["/merchant", "foot_merchant", null, "merchant"],
   ["/developers", "foot_developers", null, "developerApi"],
   ["/terms", "lp_foot_terms", "terms"],
   ["/privacy", "lp_foot_privacy", "privacy"],
@@ -90,8 +90,9 @@ export function SiteFooter({ current = null }: { current?: FootKey }) {
       <span className="c" style={{ maxWidth: "62ch", lineHeight: 1.5 }}>{t("disclosure_legal")}</span>
       {/* Plain <a> (full page load), NOT <Link>: /wallet is a cross-origin-isolated
           island — a client-side navigation would enter it without the COOP/COEP
-          headers and SharedArrayBuffer would be unavailable. */}
-      <a href="/wallet" className="site-foot-partners">⚡ {t("nav_wallet")}</a>
+          headers and SharedArrayBuffer would be unavailable. Gated on the wallet
+          feature flag (beta surface a super-admin can hide). */}
+      {features.wallet ? <a href="/wallet" className="site-foot-partners">⚡ {t("nav_wallet")}</a> : null}
       <Link to="/admin" className="site-foot-partners">{t("lp_foot_partners")}</Link>
     </footer>
   );

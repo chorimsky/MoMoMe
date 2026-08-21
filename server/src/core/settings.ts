@@ -22,7 +22,7 @@ const DEFAULTS: AdminSettings = {
   // combo not enabled) → default off; the rest on.
   methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
   // Product surfaces — all on by default; a super-admin can disable any of them.
-  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true },
+  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, wallet: true, receive: true, contacts: true },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).

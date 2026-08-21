@@ -25,6 +25,7 @@ import {
   StepHeader,
 } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
+import { useFeatures } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
@@ -73,6 +74,7 @@ const group = (d: string) => d.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 export default function SendScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
+  const features = useFeatures();
   const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string }>();
 
   const [step, setStep] = useState<Step>('details');
@@ -286,12 +288,14 @@ export default function SendScreen() {
         <View style={styles.brandRow}>
           <MomoMark size={36} />
           <H1 style={{ flex: 1 }}>{tr('send_money')}</H1>
-          <Pressable
-            onPress={() => router.push('/contacts')}
-            hitSlop={8}
-            style={[styles.contactsBtn, { backgroundColor: t.surface2 }]}>
-            <Ionicons name="people" size={18} color={t.accent} />
-          </Pressable>
+          {features.contacts ? (
+            <Pressable
+              onPress={() => router.push('/contacts')}
+              hitSlop={8}
+              style={[styles.contactsBtn, { backgroundColor: t.surface2 }]}>
+              <Ionicons name="people" size={18} color={t.accent} />
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         <StepHeader

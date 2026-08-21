@@ -10,6 +10,7 @@ import { api } from "../api/client.js";
 
 const DEFAULTS: AppFeatures = {
   directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true,
+  merchant: true, wallet: true, receive: true, contacts: true,
 };
 
 let _features: AppFeatures = DEFAULTS;

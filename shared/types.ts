@@ -539,6 +539,10 @@ export interface AdminSettings {
     invoices: boolean;     // merchant invoices (vs plain payment links)
     developerApi: boolean; // partner API keys + developer portal
     diaspora: boolean;     // the diaspora remittance corridor page
+    merchant: boolean;     // become-a-merchant onboarding + dashboard + payment links (accept payments)
+    wallet: boolean;       // the embedded self-custodial Lightning wallet (beta)
+    receive: boolean;      // "Get paid" — the personal Lightning-address / receive surface
+    contacts: boolean;     // the encrypted contact book + cross-device backup
   };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the

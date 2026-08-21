@@ -267,6 +267,18 @@ export function assertAdminSecurity(): void {
   }
 }
 
+/** Fail closed in production: the cron endpoint (/api/cron/tick, which drives the
+ *  reconcile + FX jobs) must require CRON_SECRET, otherwise it's world-triggerable.
+ *  Unset is fine in local dev (so the endpoint is testable), but a real-money /
+ *  production deploy that forgot the var must not silently run it open. Mirrors
+ *  assertAdminSecurity's prod detection. */
+export function assertCronSecurity(): void {
+  const inProd = process.env.NODE_ENV === "production" || liveMoney();
+  if (inProd && !process.env.CRON_SECRET) {
+    throw new Error("Refusing to start in production without CRON_SECRET — the cron endpoint would be world-triggerable. Set CRON_SECRET (the value Vercel Cron sends as `Authorization: Bearer <secret>`).");
+  }
+}
+
 /** The compliance audit chain is a tamper-evident LEGAL guard: it only detects a
  *  privileged insider (someone who can edit the persisted store but not read the app
  *  secret) if the hash chain is KEYED. Unkeyed it degrades to plain SHA-256 — an

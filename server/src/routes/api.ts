@@ -823,9 +823,12 @@ api.post("/payments/:id/confirm", async (req, res) => {
  * the demo deliberately doesn't expose a payable invoice. Refuses in production,
  * so it can never fake a settlement on a real deployment.
  */
-api.post("/payments/:id/simulate", async (req, res) => {
+api.post("/payments/:id/simulate", rateLimitDurableMiddleware("simulate", 30, 60_000), async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  // Owner-or-admin only (mirrors /confirm): don't let an anonymous caller who guesses
+  // a payment id drive someone else's demo payment to DELIVERED or spam settle().
+  if (!(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   if (liveMoney()) return res.status(403).json({ error: "not_demo", message: "Simulation is disabled when a real-money rail is live." });
   if (p.state === "AWAITING_INBOUND") background(settle(p));
   res.json(p);

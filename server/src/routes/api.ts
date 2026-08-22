@@ -556,7 +556,7 @@ api.get("/recipients/resolve", rateLimitDurableMiddleware("resolve", 60, 60_000)
 });
 
 /* ---------- merchant identity resolution (MIG) ---------- */
-api.post("/merchants/resolve", rateLimitMiddleware("merchants", 30, 60_000), async (req, res) => {
+api.post("/merchants/resolve", rateLimitDurableMiddleware("merchants", 30, 60_000), async (req, res) => {
   const { input, country, provider, commit } = (req.body ?? {}) as { input?: string; country?: CountryCode; provider?: ProviderId; commit?: boolean };
   if (typeof input !== "string" || !input.trim() || input.length > 64) {
     return res.status(400).json({ error: "bad_input", message: "Enter a merchant code, number or QR." });

@@ -56,3 +56,6 @@ credentials.json
 
 # local build artifacts (AABs/APKs)
 build/
+
+# Google Play service-account key (secret — never commit)
+google-play-key.json

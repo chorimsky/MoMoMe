@@ -11,8 +11,9 @@ import { reconcileTick, fxTick } from "../jobs.js";
 export const cron = Router();
 
 /** When CRON_SECRET is set, require it (Vercel Cron sends it as a Bearer token).
- *  Unset → allow, so the endpoint is testable locally; production is fail-closed at
- *  boot (assertCronSecurity) so an unset secret can't silently leave it open there.
+ *  Unset → allow, so the endpoint is testable locally and on the sandbox/demo deploy;
+ *  a LIVE-money deploy is fail-closed at boot (assertCronSecurity) so an unset secret
+ *  can't silently leave it open where real money moves.
  *  Constant-time compare, like the rest of the codebase (adminAuth / IBEX webhook). */
 function authed(req: Request): boolean {
   const secret = process.env.CRON_SECRET;

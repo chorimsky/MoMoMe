@@ -273,9 +273,13 @@ export function assertAdminSecurity(): void {
  *  production deploy that forgot the var must not silently run it open. Mirrors
  *  assertAdminSecurity's prod detection. */
 export function assertCronSecurity(): void {
-  const inProd = process.env.NODE_ENV === "production" || liveMoney();
-  if (inProd && !process.env.CRON_SECRET) {
-    throw new Error("Refusing to start in production without CRON_SECRET — the cron endpoint would be world-triggerable. Set CRON_SECRET (the value Vercel Cron sends as `Authorization: Bearer <secret>`).");
+  // Gate on liveMoney() (a real-money rail is live), NOT NODE_ENV — Vercel sets
+  // NODE_ENV=production even for the sandbox/demo backend, where the cron endpoint
+  // drives only sandbox jobs (no money moves), so an unauthenticated endpoint is an
+  // acceptable trade-off there. A live-money deploy still fails closed without the
+  // secret. Mirrors assertComplianceConfig's Vercel-aware reasoning above.
+  if (liveMoney() && !process.env.CRON_SECRET) {
+    throw new Error("Refusing to run a live-money rail without CRON_SECRET — the cron endpoint would be world-triggerable. Set CRON_SECRET (the value Vercel Cron sends as `Authorization: Bearer <secret>`).");
   }
 }
 

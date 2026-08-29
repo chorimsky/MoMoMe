@@ -1,9 +1,14 @@
 /* Seed historical payments so Activity / Admin / Ops have data on boot. */
 import type { Payment, Method, CountryCode, ProviderId, DisplayStatus, PaymentState } from "../../shared/types.js";
-import { putPayment } from "./core/store.js";
+import { store } from "./db/store.js";
 import { ensureIdentity, claimIdentity } from "./core/identity.js";
 import { seedMerchants } from "./core/merchant.js";
 import * as peex from "./integrations/peex/service.js";
+
+/** Owner id stamped on every seeded payment so the demo set is reachable by the
+ *  seeded device without needing mayViewPayment to fail open (see F3). Ownerless
+ *  payments are refused by default; seed rows carry this explicit, non-guessable id. */
+export const SEED_OWNER = "seed:demo";
 
 interface Seed {
   name: string; phone: string; country: CountryCode; provider: ProviderId;
@@ -26,7 +31,7 @@ const STATE: Record<DisplayStatus, PaymentState> = {
   Failed: "FAILED",
 };
 
-export function seed() {
+export async function seed(): Promise<void> {
   for (const s of SEEDS) {
     const at = new Date(Date.now() - s.daysAgo * 86400_000).toISOString();
     const fee = Math.round(s.xaf * 0.025);
@@ -37,6 +42,7 @@ export function seed() {
       state: STATE[s.status],
       displayStatus: s.status,
       method: s.method,
+      senderId: SEED_OWNER,
       recipient: { phone: s.phone, country: s.country, provider: s.provider, name: s.name, nameSource: "provider" },
       xaf: s.xaf,
       feeXaf: fee,
@@ -47,7 +53,7 @@ export function seed() {
       createdAt: at,
       updatedAt: at,
     };
-    putPayment(p);
+    await store().putPayment(p);
     // Provision the recipient's custodial identity (Phase 1).
     ensureIdentity(p.recipient, s.ref);
     // Optional Peex enrichment (non-blocking) so the panel has data on boot.

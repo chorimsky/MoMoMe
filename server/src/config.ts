@@ -267,6 +267,35 @@ export function assertAdminSecurity(): void {
   }
 }
 
+/** Fail closed in production: the cron endpoint (/api/cron/tick, which drives the
+ *  reconcile + FX jobs) must require CRON_SECRET, otherwise it's world-triggerable.
+ *  Unset is fine in local dev (so the endpoint is testable), but a real-money /
+ *  production deploy that forgot the var must not silently run it open. Mirrors
+ *  assertAdminSecurity's prod detection. */
+export function assertCronSecurity(): void {
+  const inProd = process.env.NODE_ENV === "production" || liveMoney();
+  if (inProd && !process.env.CRON_SECRET) {
+    throw new Error("Refusing to start in production without CRON_SECRET — the cron endpoint would be world-triggerable. Set CRON_SECRET (the value Vercel Cron sends as `Authorization: Bearer <secret>`).");
+  }
+}
+
+/** The compliance audit chain is a tamper-evident LEGAL guard: it only detects a
+ *  privileged insider (someone who can edit the persisted store but not read the app
+ *  secret) if the hash chain is KEYED. Unkeyed it degrades to plain SHA-256 — an
+ *  insider can alter an event and recompute every hash, defeating the guard. So in
+ *  production (or once real money moves) require a chain key. `ADMIN_SESSION_SECRET`
+ *  counts ONLY when explicitly set in the env — the persisted-random fallback isn't
+ *  visible to core/compliance.ts, so it can't key the chain. Fail closed. */
+export function assertComplianceConfig(): void {
+  // Gate on liveMoney() (a production rail is live), NOT NODE_ENV — Vercel sets
+  // NODE_ENV=production even for the sandbox/demo backend, and a demo audit chain
+  // needn't be keyed. The legal guard matters once REAL transactions occur.
+  const chainKey = (process.env.COMPLIANCE_HMAC_KEY ?? "").trim() || (process.env.ADMIN_SESSION_SECRET ?? "").trim();
+  if (liveMoney() && !chainKey) {
+    throw new Error("Refusing to run a live-money rail without a compliance chain key — the tamper-evident audit log would run UNKEYED (plain SHA-256), which a privileged insider can forge. Set COMPLIANCE_HMAC_KEY (or ADMIN_SESSION_SECRET).");
+  }
+}
+
 /** Fail fast if live (Mobile Money payout) mode is on but a payout provider
  *  isn't configured. IBEX is validated separately (assertIbexConfig). */
 export function assertLiveConfig(): void {

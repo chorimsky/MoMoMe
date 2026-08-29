@@ -31,7 +31,7 @@ const whenStr = (p: Payment, locale = "en-GB") =>
 /** What the sender actually paid: the rail and the crypto amount. Exported so the
  *  on-screen receipt and the downloadable PNG stay identical. */
 export const cryptoMethod = (p: Payment): string =>
-  p.method === "LIGHTNING" ? "Lightning" : p.method === "ONCHAIN" ? "Bitcoin" : "USDT";
+  p.method === "LIGHTNING" ? "Instant" : p.method === "ONCHAIN" ? "Bitcoin" : "US Dollars";
 export const cryptoSent = (p: Payment): string => {
   const amt = p.payInstruction?.amount ?? 0;
   if (p.method === "LIGHTNING") return `${fmt(Math.round(amt * 1e8))} sats`; // BTC → sats
@@ -57,7 +57,7 @@ export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true)
     `${s.status}: ${s.completed}`,
     ``,
     // Viral tail: every shared receipt is a growth vector back to the product.
-    `Paid with MoMo›Me — crypto & Mobile Money, delivered instantly. momome.xyz`,
+    `Paid with MoMo›Me — Mobile Money, made simple. momome.xyz`,
   ].join("\n");
 }
 

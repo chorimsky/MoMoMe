@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -125,7 +125,11 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
   }, [s.phone]);
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
-  const valid = s.xaf >= MIN_XAF && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
+  // Operator payout ceiling — surfaced up-front (CEMAC compliance-by-design), so
+  // the sender isn't rejected only after confirming.
+  const payoutCap = PROVIDER_PAYOUT_MAX[s.provider] ?? MAX_XAF;
+  const overCap = s.xaf > payoutCap;
+  const valid = s.xaf >= MIN_XAF && !overCap && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
   // Early typo signal: a long-enough number that matches no known MTN/Orange prefix.
   // Soft (doesn't block — prefix lists evolve) — the real guard is the review-step tick.
   const numLooksOff = s.phone.replace(/\D/g, "").length >= 8 && !resolving && !verified && !detectProvider(s.phone.replace(/\D/g, ""), s.country);
@@ -241,6 +245,15 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
         </div>
         {s.xaf > 0 && s.xaf < MIN_XAF && (
           <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)" }}>{t("min_amount")}</div>
+        )}
+        {overCap && (
+          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)" }}>{t("cap_hint")}</div>
+        )}
+        {s.xaf >= 1_000_000 && !overCap && (
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "var(--brand-wash)", border: "1px solid var(--line)" }}>
+            <span aria-hidden style={{ color: "var(--warn-ink)", fontWeight: 800 }}>🛡</span>
+            <span style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{t("kyc_hint")}</span>
+          </div>
         )}
       </div>
 
@@ -443,7 +456,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("total_to_pay")}</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", whiteSpace: "nowrap", marginTop: 2 }}>{fmt(payment.totalXaf)} <span style={{ fontSize: 17, color: "var(--ink-3)" }}>XAF</span></div>
-          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{method === "LIGHTNING" ? `${fmt(Math.round(inst.amount * 1e8))} sats` : inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
+          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{t("send_exactly")} {inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
         </div>
       </div>
 

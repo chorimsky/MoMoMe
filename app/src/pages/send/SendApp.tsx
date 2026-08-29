@@ -10,6 +10,7 @@ import { SuccessStep } from "./Success.js";
 import { Activity } from "./Activity.js";
 import { Help } from "./Help.js";
 import { Contacts } from "./Contacts.js";
+import { useFeatures } from "../../lib/features.js";
 import { rememberPaidContact } from "../../lib/vault.js";
 
 export interface Draft {
@@ -77,6 +78,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const [params] = useSearchParams();
   const initialTab: Tab = ((p) => (p === "help" || p === "history" || p === "activity" ? (p === "activity" ? "history" : p) : "pay"))(params.get("tab"));
   const [tab, setTab] = useState<Tab>(initialTab);
+  const features = useFeatures();
   const [step, setStep] = useState<Step>("details");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -253,7 +255,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Activity /></div>
         ) : tab === "help" ? (
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}><Help support={demo?.support} /></div>
-        ) : tab === "contacts" ? (
+        ) : tab === "contacts" && features.contacts ? (
           <div className="flow-col" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Contacts onPick={(c) => { set({ country: c.country, provider: c.provider, phone: c.phone, recipientName: c.name, nameSource: "internal" }); setTab("pay"); go("details"); }} />
           </div>
@@ -274,7 +276,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           {/* Buttons are constrained to the 480px column so they don't stretch
               edge-to-edge on a wide desktop viewport while the bar spans full width. */}
           <div style={{ display: "flex", maxWidth: 480, margin: "0 auto" }}>
-            {([["pay", t("tab_pay"), "pay"], ["history", t("tab_activity"), "activity"], ["contacts", t("tab_contacts"), "contacts"], ["help", t("tab_help"), "help"]] as const).map(([k, label, ic]) => {
+            {([["pay", t("tab_pay"), "pay"], ["history", t("tab_activity"), "activity"], ["contacts", t("tab_contacts"), "contacts"], ["help", t("tab_help"), "help"]] as const).filter(([k]) => k !== "contacts" || features.contacts).map(([k, label, ic]) => {
               const on = tab === k;
               return (
                 <button key={k} type="button" aria-current={on ? "page" : undefined} onClick={() => { setTab(k); if (k === "pay") go("details"); }}

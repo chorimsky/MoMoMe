@@ -13,9 +13,12 @@ import { config } from "../config.js";
 import { getSettings } from "../core/settings.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { rateFor, formatAmount } from "../core/fx.js";
+import { liveMoney } from "../config.js";
+import { ratesFresh } from "../core/rates.js";
+import { ensureFreshRates } from "../jobs.js";
 import { createInstruction } from "../adapters/index.js";
 import { id, nextRef } from "../core/ids.js";
-import * as store from "../core/store.js";
+import { store } from "../db/store.js";
 import * as peex from "../integrations/peex/service.js";
 import {
   parseLnUser, quoteFromMsat, sendableRangeMsat, lnurlMetadata, lnAddress,
@@ -65,6 +68,16 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   const { min, max } = sendableRangeMsat();
   if (msat < min || msat > max) return res.json(lnErr(`Amount out of range (${min}–${max} msat).`));
 
+  // Rate-freshness gate — this unauthenticated path mints a REAL payout quote off
+  // rateFor("LIGHTNING"), and LIGHTNING is NOT re-priced downstream (confirmInbound
+  // re-prices ONCHAIN only). Without this, a cold/stale/divergent cache would price
+  // real sats on the hardcoded fallback → over- or under-pay the recipient. Mirror the
+  // /quote guard (api.ts): refresh on-miss, then refuse when not fresh & real money moves.
+  if (liveMoney()) await ensureFreshRates().catch(() => {});
+  if (liveMoney() && !ratesFresh()) {
+    return res.json(lnErr("Live exchange rates are momentarily unavailable — please try again in a moment."));
+  }
+
   const { btc, totalXaf, xaf, feeXaf } = quoteFromMsat(msat);
   if (xaf < 1) return res.json(lnErr("Amount too small to deliver."));
 
@@ -95,7 +108,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
     rate: rq.customerXafPerUnit, usd: totalXaf / rq.usdXaf, spreadBps: rq.spreadBps,
     issuedAt: now, expiresAt: instruction.expiresAt, estimateOnly: false,
   };
-  store.putQuote(quote);
+  await store().putQuote(quote);
 
   const payment: Payment = {
     id: id("pay"), ref, quoteId: quote.id,
@@ -112,9 +125,9 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
     events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],
     createdAt: now, updatedAt: now,
   };
-  store.putPayment(payment);
-  store.consumeQuote(quote.id);
-  if (instruction.providerRef) store.indexProviderRef(instruction.providerRef, payment.id);
+  await store().putPayment(payment);
+  await store().consumeQuote(quote.id);
+  if (instruction.providerRef) await store().indexProviderRef(instruction.providerRef, payment.id);
   void peex.enrich(payment);
 
   res.json({ pr: instruction.code, routes: [] });

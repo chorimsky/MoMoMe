@@ -78,8 +78,12 @@ export const PROVIDER_PAYOUT_MAX: Record<ProviderId, number> = {
   AIRTEL: 500_000,
 };
 
-/** Available XAF payout float (treasury). Payouts are blocked below this. */
-export const XAF_FLOAT_BASE = 200_000_000;
+/** CEILING on XAF payout capacity — a conservative cap, not a measurement. The real
+ *  figure comes from live aggregator balances (core/routing aggregatorFloatXaf); this
+ *  bounds it so a wrong or spoofed balance response can't authorize unlimited payout,
+ *  and stands in when no rail can be queried. Keep it at or below the treasury's actual
+ *  funded position. */
+export const XAF_FLOAT_MAX = 200_000_000;
 
 /** Quote TTL per rail, in seconds. */
 export const QUOTE_TTL_SEC: Record<Method, number> = {
@@ -93,12 +97,15 @@ export const QUOTE_TTL_SEC: Record<Method, number> = {
   ONCHAIN: 900,
 };
 
+// User-facing funding names are mobile-money-first: lead with speed/outcome, not
+// crypto jargon. The asset is only named where the payer must know what to send
+// (Bitcoin; and "US Dollars" for the USDT/USDC stablecoin rails).
 export const METHOD_META: Record<
   Method,
   { name: string; arrival: string; fast: boolean }
 > = {
-  LIGHTNING: { name: "Lightning", arrival: "Within seconds", fast: true },
+  LIGHTNING: { name: "Instant", arrival: "Within seconds", fast: true },
   ONCHAIN: { name: "Bitcoin", arrival: "10–60 minutes", fast: false },
-  USDT: { name: "USDT", arrival: "Within seconds", fast: true },
-  USDC: { name: "USDC", arrival: "Within seconds", fast: true },
+  USDT: { name: "US Dollars", arrival: "Within seconds", fast: true },
+  USDC: { name: "US Dollars", arrival: "Within seconds", fast: true },
 };

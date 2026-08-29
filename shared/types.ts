@@ -197,6 +197,10 @@ export interface Payment {
   /** Which rail paid the refund out (e.g. "ibex" | "blink") — so its status is
    *  re-queried on the SAME rail. Set alongside refundTxId. */
   refundProvider?: string;
+  /** On-chain only: the originally-quoted XAF, set when the payment was re-priced at
+   *  confirmation (the current xaf is the delivered figure). Lets the success screen +
+   *  receipt show "Quoted X · Delivered Y" so a moved on-chain rate isn't a surprise. */
+  repricedFromXaf?: number;
   events: PaymentEvent[];
   createdAt: string;
   updatedAt: string;
@@ -535,6 +539,10 @@ export interface AdminSettings {
     invoices: boolean;     // merchant invoices (vs plain payment links)
     developerApi: boolean; // partner API keys + developer portal
     diaspora: boolean;     // the diaspora remittance corridor page
+    merchant: boolean;     // become-a-merchant onboarding + dashboard + payment links (accept payments)
+    wallet: boolean;       // the embedded self-custodial Lightning wallet (beta)
+    receive: boolean;      // "Get paid" — the personal Lightning-address / receive surface
+    contacts: boolean;     // the encrypted contact book + cross-device backup
   };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the

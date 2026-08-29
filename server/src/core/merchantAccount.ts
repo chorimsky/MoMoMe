@@ -11,7 +11,7 @@ import type {
   CountryCode, ProviderId, MerchantAccount, MerchantTier, MerchantLink, MerchantLinkKind, Payment,
 } from "../../../shared/types.js";
 import { register, touch } from "./persist.js";
-import { listPayments } from "./store.js";
+import { store } from "../db/store.js";
 
 /** Stored shape = public account + the owning id (never returned to clients). */
 interface StoredMerchant extends MerchantAccount { owner: string }
@@ -164,8 +164,8 @@ export function disableLink(code: string, merchantId: string): boolean {
  *  NOT fall back to "any payment addressed to the settlement number": that let
  *  anyone create a merchant pointing at a victim's public MoMo number and read
  *  every payment (and payer PII) sent to it. Newest first. */
-export function salesFor(m: MerchantAccount): Payment[] {
-  return listPayments()
+export async function salesFor(m: MerchantAccount): Promise<Payment[]> {
+  return (await store().listPayments())
     .filter((p) => p.merchantId === m.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

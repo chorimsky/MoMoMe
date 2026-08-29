@@ -57,6 +57,10 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   const rows: Array<[string, string]> = [
     [t("recipient"), payment.recipient.name || "—"],
     [t("mobile_number"), fullPhone(payment)],
+    // On-chain re-priced at confirmation: show what was quoted vs what landed (F1).
+    ...(payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf
+      ? [[t("amount_quoted"), fmt(payment.repricedFromXaf) + " XAF"]] as Array<[string, string]>
+      : []),
     [t("amount_delivered"), fmt(payment.xaf) + " XAF"],
     [t("fee"), fmt(payment.feeXaf) + " XAF"],
     [t("total_paid"), fmt(payment.xaf + payment.feeXaf) + " XAF"],

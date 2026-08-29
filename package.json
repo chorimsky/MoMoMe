@@ -19,7 +19,7 @@
     "mobile:android": "cd mobile && npx expo start --android"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": "22.x"
   },
   "pnpm": {
     "overrides": {

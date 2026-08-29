@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "bash scripts/fetch-wavelength-runtime.sh && pnpm --filter @momome/app build",
+  "buildCommand": "bash scripts/fetch-wavelength-runtime.sh || echo '::warning:: wavelength runtime fetch skipped — /wallet runtime absent (non-fatal, build continues)'; pnpm --filter @momome/app build",
   "outputDirectory": "app/dist",
   "build": {
     "env": {

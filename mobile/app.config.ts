@@ -11,7 +11,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE ??
-  'https://momome-api-production.up.railway.app/api';
+  'https://mo-mo-me-server.vercel.app/api';
 
 // The web origin the app deep-links to / opens for the wasm Lightning wallet.
 const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN ?? 'https://momome.xyz';

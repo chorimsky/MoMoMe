@@ -33,7 +33,7 @@ import type {
 export const API_BASE = (
   process.env.EXPO_PUBLIC_API_BASE ??
   (Constants.expoConfig?.extra?.apiBase as string | undefined) ??
-  'https://momome-api-production.up.railway.app/api'
+  'https://mo-mo-me-server.vercel.app/api'
 ).replace(/\/$/, '');
 
 /* ---------- persistent, no-login device id ---------- */

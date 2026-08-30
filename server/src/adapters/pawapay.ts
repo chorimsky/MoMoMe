@@ -16,7 +16,7 @@ import { fetchT } from "./http.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { id } from "../core/ids.js";
-import { config, pawapayLive, isLive } from "../config.js";
+import { config, pawapayLive, liveMoney } from "../config.js";
 import { register, touch } from "../core/persist.js";
 
 export interface DisburseRequest {
@@ -228,7 +228,18 @@ const nameCache = new Map<string, { name: string } | null>();
 export async function lookupName(phone: string): Promise<{ name: string } | null> {
   const digits = phone.replace(/\D/g, "");
   if (nameCache.has(digits)) return nameCache.get(digits)!;
-  const result = isLive() ? null : sandboxLookup(digits);
+  // Gate on liveMoney() — NOT isLive() (RAILS_MODE). These names are FABRICATED
+  // (a hash into a hardcoded list) and resolveRecipient hands them to the sender as
+  // status:"provider", verified:true, trustLevel 1 — the trust layer's strongest
+  // provider-backed claim. RAILS_MODE=sandbox with a production rail (e.g.
+  // PEEXIT_ENV=production) is an explicitly supported deployment — assertLiveConfig
+  // documents it as "real money can move the moment any rail is live" — and under
+  // isLive() that combination moved REAL money while showing an INVENTED recipient
+  // name as verified. In this market name confirmation IS the safeguard against
+  // paying the wrong number, so a fabricated one is worse than none: it converts
+  // "unknown → confirm manually" into false confidence. Once any real rail is live
+  // there is no real lookup, so we return null → status "unknown" → manual confirm.
+  const result = liveMoney() ? null : sandboxLookup(digits);
   if (nameCache.size >= 10_000) nameCache.clear(); // bound the cache (caller input is unbounded)
   nameCache.set(digits, result);
   return result;

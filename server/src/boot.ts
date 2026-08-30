@@ -6,7 +6,7 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, liveMoney, peexitLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
@@ -28,6 +28,13 @@ export function runBootChecks(): void {
   }
   if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
     console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
+  }
+  // PawaPay callbacks are UNVERIFIED (v2 uses RFC-9421 asymmetric signatures, not
+  // implemented), so the endpoint fails closed on a live rail. Payouts still settle via
+  // the authoritative queryStatus re-query — say so plainly rather than implying the
+  // callback path works.
+  if (pawapayLive()) {
+    console.warn("⚠️  PawaPay is live but its callback signature (RFC-9421) is NOT verified — callbacks are REJECTED and payouts settle via status polling + reconcile (slower, still correct).");
   }
   if (peexitLive() && !config.peexit.callbackPass) {
     console.warn("⚠️  PEEXIT is live but PEEXIT_CALLBACK_PASS is not set — payout callbacks will be REJECTED (settlement falls back to slower reconcile polling). Set PEEXIT_CALLBACK_USER/PEEXIT_CALLBACK_PASS and give them to Peexit with your callback URL.");

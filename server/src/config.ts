@@ -311,7 +311,13 @@ export function assertLiveConfig(): void {
   // Any LIVE payout rail must have its callback secret set (else its async
   // confirmations can't be verified and settlement silently degrades).
   if (peexitLive() && !config.peexit.callbackPass) missing.add("PEEXIT_CALLBACK_PASS");
-  if (pawapayLive() && !config.pawapay.webhookSecret) missing.add("PAWAPAY_WEBHOOK_SECRET");
+  // NOT PAWAPAY_WEBHOOK_SECRET: PawaPay v2 signs callbacks with RFC-9421 asymmetric
+  // signatures, so a shared secret cannot verify them — and nothing in the codebase ever
+  // read this value for verification. Refusing to boot without it asserted a protection
+  // that did not exist, which is worse than none: an operator sets it and believes
+  // callbacks are authenticated. The callback now fails closed on a live rail instead
+  // (adapters/pawapay.ts verifyCallback), and payouts settle on the authoritative
+  // re-query, so this is a warning about REAL state rather than a fake guarantee.
   if (config.peex.mode === "live" && !config.peex.webhookSecret) missing.add("PEEX_WEBHOOK_SECRET");
   // RAILS_MODE=live must have the primary payout rail (Peexit) fully configured —
   // fail fast rather than boot a live deploy that can't pay out. PawaPay is optional.

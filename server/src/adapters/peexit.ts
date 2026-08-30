@@ -218,8 +218,27 @@ type Acct = {
 };
 let acctCache: Acct | null = null;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+/** SINGLE-FLIGHT. The 15s cache does not bound upstream load on a MISS: every
+ *  concurrent caller used to run its own pair of account reads, and this is reached
+ *  from payoutReady() and selectFundedAggregator() — i.e. once per payment creation
+ *  and once per settlement. A burst of N payments therefore became 2N simultaneous
+ *  Peexit requests. Peexit sandbox latency was measured climbing 1.3s → 10s under
+ *  exactly that pattern, against fetchT's 12s ceiling; crossing it makes balance()
+ *  return null, which payoutReady reads as insufficient_rail_balance and refuses
+ *  otherwise-good payments. Sharing one in-flight read collapses a burst to a single
+ *  round trip. No caller sees a different value — a joiner gets the result of the
+ *  read it joined. (Inert while the rail is pre-live, since availableBalanceXaf
+ *  returns null before reaching here; this matters the moment Peexit goes production.) */
+let acctInflight: Promise<Acct> | null = null;
 async function accountBalances(): Promise<Acct> {
   if (acctCache && Date.now() - acctCache.at < 15_000) return acctCache;
+  if (acctInflight) return acctInflight; // a read is already running — join it
+  const run = accountBalancesUncached();
+  acctInflight = run;
+  void run.catch(() => {}).then(() => { if (acctInflight === run) acctInflight = null; });
+  return run;
+}
+async function accountBalancesUncached(): Promise<Acct> {
   const read = async (path: string): Promise<Record<string, unknown>> => {
     try {
       const r = await peex(path, { method: "GET" });

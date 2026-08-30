@@ -86,10 +86,11 @@ export const pawapayAdapter: PayoutAdapter = {
   queryStatus: pawapay.queryStatus,
   balance: pawapay.availableBalanceXaf,
   statusByKey: pawapay.statusByKey,
-  // No callback signature verification yet (RFC-9421 TODO with PAWAPAY_WEBHOOK_SECRET);
-  // accept only when configured so the endpoint stays closed, and rely on the
-  // authoritative queryStatus re-query as the settlement gate.
-  verifyCallback: () => pawapayConfigured(),
+  // PawaPay v2 uses RFC-9421 asymmetric signatures, which are NOT implemented (see
+  // pawapay.verifyCallback). Previously this accepted ANY body whenever the rail was
+  // merely configured; it now fails closed on a live rail. Settlement is unaffected —
+  // the authoritative queryStatus re-query is the real gate.
+  verifyCallback: () => pawapay.verifyCallback(),
   parseCallback: (body) => {
     const payoutId = (body as { payoutId?: string })?.payoutId;
     if (!payoutId) return [];

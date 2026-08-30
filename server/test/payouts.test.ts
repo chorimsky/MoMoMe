@@ -50,6 +50,11 @@ async function main() {
   ok("peexit verifyCallback accepts valid basic auth", peexitAdapter.verifyCallback!("[]", { authorization: goodAuth }) === true);
   ok("pawapay parseCallback: unknown payoutId → [] (not ours)", pawapayAdapter.parseCallback!({ payoutId: "not-seeded" }).length === 0);
   ok("pawapay parseCallback: no payoutId → []", pawapayAdapter.parseCallback!({}).length === 0);
+  // PawaPay v2 signs callbacks with RFC-9421 (asymmetric), which is NOT implemented — so
+  // the endpoint must not accept an unverified body on a LIVE rail. It used to return
+  // pawapayConfigured(), i.e. accept ANY body once credentials existed. Here the rail is
+  // not live, so the sandbox/demo path stays open and the flow remains testable.
+  ok("pawapay verifyCallback: open while NOT live (demo stays testable)", pawapayAdapter.verifyCallback!("{}", {}) === true);
 
   console.log("\nPLUG-IN / OUT — add a rail with no routing change");
   const fake = {

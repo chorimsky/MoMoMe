@@ -210,6 +210,25 @@ export async function availableBalanceXaf(country: CountryCode, _provider?: Prov
   } catch { return null; }
 }
 
+/* ---------- callback authentication ----------
+   PawaPay v2 signs callbacks with RFC-9421 HTTP Message Signatures — ASYMMETRIC
+   (Signature / Signature-Input / Content-Digest, verified against PawaPay's PUBLIC key,
+   which is why PAWAPAY_WEBHOOK_SECRET — a shared secret — cannot verify them and never
+   did). That verification is NOT implemented here, and inventing an HMAC scheme PawaPay
+   does not use would reject every genuine callback while still proving nothing.
+
+   So this fails CLOSED on a live rail rather than accepting anything: an unverified body
+   must not be able to make the server act. Settlement is unaffected — the webhook body is
+   only ever a TRIGGER, and every payout settles on the authoritative
+   queryStatusByPayoutId() re-query driven by pollPayout + reconcileStuckPayouts. Rejecting
+   callbacks costs latency, not correctness.
+
+   Outside production the endpoint stays open so the flow remains testable — the same
+   posture peexit.verifyCallbackAuth takes when no callback password is configured. */
+export function verifyCallback(): boolean {
+  return !pawapayLive();
+}
+
 export function statusByKey(idempotencyKey: string): DisburseResult | null {
   return byKey.get(idempotencyKey) ?? null;
 }

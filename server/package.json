@@ -22,7 +22,7 @@
     "test:pg": "tsx test/pg-store.test.ts",
     "test:store": "DB_PATH=:memory: tsx test/store-contract.test.ts",
     "test:rates": "DB_PATH=:memory: tsx test/public-rates.test.ts",
-    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/ibex.test.ts && DB_PATH=:memory: tsx test/settings-features.test.ts && DB_PATH=:memory: RAILS_MODE=sandbox tsx test/http-auth.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && tsx test/peexit-singleflight.test.ts && tsx test/egress-proxy.test.ts && tsx test/egress-allowlist.test.ts && DB_PATH=:memory: RAILS_MODE=sandbox tsx test/egress-admin.test.ts && DB_PATH=:memory: tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts",
+    "test": "tsx test/rail-health.test.ts && tsx test/rail-registry.test.ts && tsx test/rail-registry-configured.test.ts && tsx test/blink.test.ts && tsx test/ibex.test.ts && tsx test/ibex-e2e.test.ts && DB_PATH=:memory: tsx test/settings-features.test.ts && DB_PATH=:memory: RAILS_MODE=sandbox tsx test/http-auth.test.ts && tsx test/outbound.test.ts && tsx test/payouts.test.ts && tsx test/peexit-singleflight.test.ts && tsx test/egress-proxy.test.ts && tsx test/egress-allowlist.test.ts && DB_PATH=:memory: RAILS_MODE=sandbox tsx test/egress-admin.test.ts && DB_PATH=:memory: tsx test/public-rates.test.ts && tsx test/settlement-idempotency.test.ts",
     "test:ibex": "tsx test/ibex.test.ts",
     "test:settings-features": "DB_PATH=:memory: tsx test/settings-features.test.ts",
     "test:http": "DB_PATH=:memory: RAILS_MODE=sandbox tsx test/http-auth.test.ts"

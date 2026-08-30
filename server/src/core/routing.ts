@@ -123,11 +123,17 @@ export async function payoutReady(provider: ProviderId, country: CountryCode, am
   // Real money: require a LIVE, configured rail with real balance ≥ amount.
   const live = candidates.filter((p) => p.configured() && p.live());
   if (!live.length) return { ok: false, reason: "no_live_rail" };
+  // A null balance means UNKNOWN (the rail could not be read), not zero. Collapsing both
+  // into "insufficient_rail_balance" sent operators hunting for an unfunded wallet when
+  // the account was never reachable — the exact confusion a Peexit 403 (IP allowlist)
+  // produces. Report the two apart.
+  let anyKnown = false;
   for (const p of live) {
     const bal = await p.balance(country, provider);
+    if (bal != null) anyKnown = true;
     if (bal != null && bal >= amountXaf) return { ok: true };
   }
-  return { ok: false, reason: "insufficient_rail_balance" };
+  return { ok: false, reason: anyKnown ? "insufficient_rail_balance" : "rail_unreachable" };
 }
 
 /** Record a payout outcome — feeds success rate, latency, and auto-failover. */

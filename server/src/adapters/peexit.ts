@@ -242,9 +242,26 @@ async function accountBalancesUncached(): Promise<Acct> {
   const read = async (path: string): Promise<Record<string, unknown>> => {
     try {
       const r = await peex(path, { method: "GET" });
-      if (!r.ok) return {};
+      if (!r.ok) {
+        // Do NOT swallow this silently. An unreadable balance becomes null →
+        // payoutReady reports insufficient_rail_balance, which reads as "the wallet is
+        // empty" when the real cause may be that we never reached the account at all.
+        // 403 specifically: server.peexit.com is IP-ALLOWLISTED, and it returns an nginx
+        // HTML 403 to any non-allowlisted source REGARDLESS of the SECRETKEY — so this is
+        // the signature of calling production from an egress IP Peexit has not whitelisted
+        // (e.g. after moving hosts), not of a bad key or an unfunded wallet.
+        console.warn(
+          r.status === 403
+            ? `[peexit] ${path} → 403 (nginx). server.peexit.com is IP-allowlisted and 403s ANY non-allowlisted egress regardless of SECRETKEY — this egress IP is almost certainly not on Peexit's allowlist. Balance is UNKNOWN, not zero.`
+            : `[peexit] ${path} → HTTP ${r.status}; balance is UNKNOWN, not zero.`,
+        );
+        return {};
+      }
       return (await r.json()) as Record<string, unknown>;
-    } catch { return {}; }
+    } catch (e) {
+      console.warn(`[peexit] ${path} unreachable (${e instanceof Error ? e.message : e}); balance is UNKNOWN, not zero.`);
+      return {};
+    }
   };
   // /disbursement/me → { disbursement_solde, mtn_fees, orange_fees, ... }
   // /collection/me   → { collect_solde, mtn_fees, orange_fees, ... }

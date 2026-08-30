@@ -32,16 +32,33 @@ const FLOAT_CACHE_MS = Number(process.env.FLOAT_CACHE_MS ?? 8_000);
 // for review instead of auto-delivering a windfall. 15% over covers wallet rounding
 // / dust while catching 2×+ mistakes. Underpayment uses the mirror band (0.999).
 const OVERPAY_TOLERANCE = Number(process.env.OVERPAY_TOLERANCE ?? 1.15);
+/** SINGLE-FLIGHT refresh. The cache alone does NOT bound upstream load: on a miss,
+ *  every concurrent caller used to launch its OWN aggregatorFloatXaf(), and each of those
+ *  hits EVERY configured rail's balance API (Peexit alone = /disbursement/me +
+ *  /collection/me). A burst of 10 payment creations therefore became ~20 simultaneous
+ *  balance RPCs — on the user-facing critical path of POST /payments, which is why
+ *  sequential creation stayed ~0.8s while a concurrent burst timed out: the rail throttles,
+ *  every call rides fetchT's 12s ceiling, and the requests pile up. Sharing one in-flight
+ *  refresh collapses that back to a single upstream round trip.
+ *  This changes NO value any caller observes — a joiner gets exactly the number the
+ *  refresh it joined produces, so the float/payout guards are untouched. */
+let floatInflight: Promise<number> | null = null;
 async function liveAggregatorXaf(): Promise<number> {
   if (floatCache && Date.now() - floatCache.at < FLOAT_CACHE_MS) return floatCache.xaf;
-  let live = NaN;
-  try {
-    live = await aggregatorFloatXaf(); // sum of funded-aggregator balances (NaN = none queryable)
-  } catch (e) {
-    console.error("[treasury] balance query failed — falling back to XAF_FLOAT_MAX", e);
-  }
-  floatCache = { xaf: live, at: Date.now() };
-  return live;
+  if (floatInflight) return floatInflight; // a refresh is already running — join it
+  const run = (async () => {
+    let live = NaN;
+    try {
+      live = await aggregatorFloatXaf(); // sum of funded-aggregator balances (NaN = none queryable)
+    } catch (e) {
+      console.error("[treasury] balance query failed — falling back to XAF_FLOAT_MAX", e);
+    }
+    floatCache = { xaf: live, at: Date.now() };
+    return live;
+  })();
+  floatInflight = run;
+  void run.catch(() => {}).then(() => { if (floatInflight === run) floatInflight = null; });
+  return run;
 }
 
 /** Available XAF payout float. Two accounting regimes:

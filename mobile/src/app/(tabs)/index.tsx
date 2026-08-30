@@ -233,6 +233,17 @@ export default function SendScreen() {
       setPayment(p);
       setStep('pay');
     } catch (e) {
+      // ORPHAN RECOVERY: the request can fail here while the server SUCCEEDED — a
+      // client-side timeout aborts a slow POST /payments that goes on to consume the
+      // quote and mint a REAL invoice. Confirming again then sends a spent quoteId
+      // (404 "already used"), and re-quoting mints a SECOND invoice for the same send,
+      // both payable for the full Lightning TTL. Adopt the payment the server already
+      // made rather than stranding it.
+      try {
+        const mine = await api.listPayments();
+        const orphan = mine.find((m) => m.quoteId === quote.id && m.state === 'AWAITING_INBOUND');
+        if (orphan) { setPayment(orphan); setStep('pay'); return; }
+      } catch { /* fall through to the normal error */ }
       setError(errMessage(e));
     } finally {
       setBusy(false);

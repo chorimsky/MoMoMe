@@ -117,6 +117,18 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     else setErr(errMessage(e, t));
   };
 
+  /** Did the server already create a payment for this quote? Answers the ambiguous
+   *  failure above (aborted client vs. genuinely-unused quote) from the sender's own
+   *  payment list, which is device-scoped server-side. Returns the still-payable
+   *  payment for `quoteId`, or null. Never throws — on failure the caller falls back
+   *  to its normal error handling. */
+  async function findPaymentForQuote(quoteId: string) {
+    try {
+      const mine = await api.listPayments();
+      return mine.find((p) => p.quoteId === quoteId && p.state === "AWAITING_INBOUND") ?? null;
+    } catch { return null; }
+  }
+
   /** method → review: fetch authoritative quote from the settlement engine. */
   async function toReview() {
     retryRef.current = toReview;
@@ -147,8 +159,19 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
       setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code }));
       go("pay");
     } catch (e) {
+      // ORPHAN RECOVERY — must run BEFORE any re-quote. The request can fail on this
+      // side while the server SUCCEEDED: the 20s client timeout aborts a slow
+      // POST /payments that goes on to consume the quote and mint a REAL invoice. The
+      // retry then sends a spent quoteId and the server answers 404 "already used",
+      // which isExpiry() reads as an expiry. Re-quoting there mints a SECOND invoice
+      // for the same send — and both stay payable for the full LIGHTNING TTL (10 min),
+      // so the customer can pay the orphan (which settles server-side and pays out
+      // while this screen is watching the other invoice) or pay twice. Adopt the
+      // payment the server already made instead of issuing another one.
+      const orphan = await findPaymentForQuote(quote.id);
+      if (orphan) { setPayment(orphan); go("pay"); return; }
       if (isExpiry(e)) {
-        // Quote expired between review and confirm — re-price and keep them on review.
+        // Genuinely expired/unused — no payment exists for it. Re-price, stay on review.
         try { setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country })); setErr(t("rate_refreshed")); } catch (e2) { fail(e2); }
       } else { fail(e); }
     } finally { setBusy(false); }

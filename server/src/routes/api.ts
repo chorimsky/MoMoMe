@@ -33,7 +33,7 @@ import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vaul
 import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
-import { egressStatus } from "../core/egress.js";
+import { egressStatus, invalidateEgressCache } from "../core/egress.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
@@ -1886,6 +1886,42 @@ api.get("/admin/rails", async (_req, res) => {
     // agree. This is the failure that silently broke Peexit on a hosting move.
     egress: await egressStatus(),
   });
+});
+
+/* ---------- egress IP allowlist (Rails section) ----------
+   Peexit production authenticates on the SOURCE IP: it 403s any non-allowlisted source
+   REGARDLESS of the SECRETKEY. The address registered with the rail therefore has to be
+   changeable the moment a provider allowlists a new one — an env var would need a redeploy
+   at exactly the wrong time — so it lives in settings, with EGRESS_ALLOWLISTED_IP as the
+   fallback. Gated by the `rails` section + the read-only check in the /admin guard. */
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const IPV6 = /^[0-9a-f:]{2,45}$/i;
+api.put("/admin/rails/egress", async (req, res) => {
+  const { allowlistedIp } = (req.body ?? {}) as { allowlistedIp?: unknown };
+  if (typeof allowlistedIp !== "string") {
+    return res.status(400).json({ error: "bad_ip", message: "Provide the IP address registered with the rail (or an empty value to clear it)." });
+  }
+  const ip = allowlistedIp.trim();
+  // Empty CLEARS the record — a legitimate state ("we no longer know"), distinct from a
+  // wrong value, and egressStatus() reports it as unknown rather than a false match.
+  if (ip && !IPV4.test(ip) && !(ip.includes(":") && IPV6.test(ip))) {
+    return res.status(400).json({ error: "bad_ip", message: "That doesn't look like a valid IPv4 or IPv6 address." });
+  }
+  updateSettings({ egress: { allowlistedIp: ip } });
+  invalidateEgressCache(); // re-probe so the response reflects the new comparison at once
+  res.json({ egress: await egressStatus() });
+});
+
+/* Re-check NOW: re-probe our outbound IP and, when Peexit is live, force a FRESH account
+   read so the operator sees 403 → 200 immediately after a provider registers the address,
+   instead of waiting out the caches. Read-only against the rail (an account GET). */
+api.post("/admin/rails/egress/recheck", async (_req, res) => {
+  invalidateEgressCache();
+  const [egress, reachability] = await Promise.all([
+    egressStatus(),
+    peexit.probeReachability().catch(() => null),
+  ]);
+  res.json({ egress, reachability });
 });
 
 /** Real operational notifications derived from payment activity. */

@@ -524,6 +524,12 @@ export interface AdminSettings {
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
   };
+  /** Egress-IP allowlist for rails that authenticate on the SOURCE IP (Peexit production
+   *  403s any non-allowlisted source regardless of key). This is the address REGISTERED
+   *  with that rail. Admin-editable because it changes the moment a provider allowlists a
+   *  new IP — an env var would need a redeploy at exactly the wrong moment. Empty = not
+   *  recorded; the env var EGRESS_ALLOWLISTED_IP is the fallback. */
+  egress: { allowlistedIp: string };
   /** Which crypto pay-in methods customers can use. A disabled method is hidden
    *  from the customer flow and refused by /quotes, so users never see or pick a
    *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */

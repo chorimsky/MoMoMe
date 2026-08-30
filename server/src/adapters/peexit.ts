@@ -294,6 +294,16 @@ async function accountBalancesUncached(): Promise<Acct> {
   return acctCache;
 }
 
+/** Force a FRESH account read (bypasses the 15s cache) and report what happened. Backs
+ *  the admin "verify against the rail" action: after registering an IP with Peexit the
+ *  operator needs to see 403 → 200 immediately, not up to 15s later. */
+export async function probeReachability(): Promise<PeexitReachability | null> {
+  if (!peexitLive()) return null;
+  acctCache = null;
+  await accountBalances();
+  return lastReach;
+}
+
 /** The account's fee schedule (as Peexit reports it on /disbursement/me + /collection/me).
  *  Values are the raw `mtn_fees` / `orange_fees` numbers; null when absent/not live.
  *  Whether these are % or flat XAF is marked by the caller after inspection. */

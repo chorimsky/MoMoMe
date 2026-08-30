@@ -17,9 +17,39 @@ type RailsCfg = Awaited<ReturnType<typeof api.adminRails>>;
 
 export function RailsView() {
   const [cfg, setCfg] = useState<RailsCfg | null>(null);
+  // Egress allowlist: Peexit production authenticates on the SOURCE IP (it 403s any
+  // non-allowlisted source regardless of the key), so this is money-path config an
+  // operator must be able to change the moment the provider registers a new address.
+  const [ipDraft, setIpDraft] = useState("");
+  const [egBusy, setEgBusy] = useState(false);
+  const [egMsg, setEgMsg] = useState<string | null>(null);
+  const egress = cfg?.egress;
+
+  async function saveIp() {
+    setEgBusy(true); setEgMsg(null);
+    try {
+      const { egress: e } = await api.adminSetEgressIp(ipDraft.trim());
+      setCfg((c) => (c ? { ...c, egress: e } : c));
+      setEgMsg(e.matches === true ? "Saved — matches the current outbound IP." : "Saved.");
+    } catch (err) { setEgMsg(err instanceof Error ? err.message : "Could not save."); }
+    finally { setEgBusy(false); }
+  }
+  async function recheck() {
+    setEgBusy(true); setEgMsg(null);
+    try {
+      const { egress: e, reachability } = await api.adminRecheckEgress();
+      setCfg((c) => (c ? { ...c, egress: e } : c));
+      setEgMsg(reachability ? `Rail check: ${reachability.reason}` : "Re-checked.");
+    } catch (err) { setEgMsg(err instanceof Error ? err.message : "Could not re-check."); }
+    finally { setEgBusy(false); }
+  }
 
   // Real rail configuration (env, configured, masked keys — never raw secrets).
-  useEffect(() => { let alive = true; api.adminRails().then((c) => { if (alive) setCfg(c); }).catch(() => {}); return () => { alive = false; }; }, []);
+  useEffect(() => {
+    let alive = true;
+    api.adminRails().then((c) => { if (!alive) return; setCfg(c); setIpDraft(c.egress?.expected ?? ""); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const envPill = (live: boolean, configured: boolean) => (configured ? (live ? "Production" : "Sandbox") : "Not set");
 
   return (
@@ -80,6 +110,51 @@ export function RailsView() {
           </Card>
         ))}
       </Grid>
+
+      {/* Egress IP allowlist. Surfaced next to rail config because that is what it is:
+          Peexit production accepts calls only from an address it has whitelisted, so a
+          mismatch here fails every payout with a 403 no credential change can fix. */}
+      <Card
+        title="Egress IP allowlist"
+        action={
+          <Pill status={
+            egress?.proxied ? "Via proxy"
+              : egress?.matches === true ? "Matching"
+              : egress?.matches === false ? "Mismatch"
+              : "Not recorded"
+          } />
+        }
+        style={{ marginTop: 16 }}
+      >
+        <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5, marginBottom: 12 }}>
+          {egress?.note ?? "Checking…"}
+        </div>
+        <Grid cols={2} gap={12}>
+          <Field label="Current outbound IP" value={egress?.ip ?? "unknown"} mono />
+          <Field label="Registered with rail" value={egress?.expected ?? "—"} mono />
+        </Grid>
+        {egress?.previousIp && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--warn-ink)" }}>
+            Outbound IP moved from {egress.previousIp} — re-register it with the rail.
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
+          <input
+            className="input"
+            value={ipDraft}
+            onChange={(e) => setIpDraft(e.target.value)}
+            placeholder={egress?.ip ?? "e.g. 152.55.177.87"}
+            aria-label="IP address registered with the rail"
+            style={{ flex: "1 1 200px", minWidth: 180, fontFamily: "var(--mono, monospace)" }}
+          />
+          <button className="btn" onClick={() => void saveIp()} disabled={egBusy}>Save</button>
+          {egress?.ip && egress.ip !== ipDraft && (
+            <button className="btn ghost" onClick={() => setIpDraft(egress.ip ?? "")} disabled={egBusy}>Use current</button>
+          )}
+          <button className="btn ghost" onClick={() => void recheck()} disabled={egBusy}>Re-check</button>
+        </div>
+        {egMsg && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--ink-3)" }}>{egMsg}</div>}
+      </Card>
     </div>
   );
 }

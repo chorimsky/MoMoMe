@@ -21,6 +21,7 @@
    ============================================================ */
 import { config } from "../config.js";
 import { register, touch } from "./persist.js";
+import { getSettings } from "./settings.js";
 
 export interface EgressStatus {
   /** Current outbound IP as observed from the public internet (null = undetermined). */
@@ -97,10 +98,17 @@ export async function currentEgressIp(): Promise<string | null> {
   return run;
 }
 
+/** Drop the cached IP so the next read re-probes. Used by the admin "re-check" action —
+ *  after registering an address with a provider an operator must be able to confirm it
+ *  NOW, not after the TTL lapses. */
+export function invalidateEgressCache(): void { cache = null; }
+
 /** Full allowlist picture for operators (boot log + /admin/rails). */
 export async function egressStatus(): Promise<EgressStatus> {
   const ip = await currentEgressIp();
-  const expected = config.egress.allowlistedIp || null;
+  // Admin-set value wins over the env fallback: a provider can allowlist a new IP at any
+  // time, and requiring a redeploy to record that is exactly the wrong shape for it.
+  const expected = (getSettings().egress?.allowlistedIp || config.egress.allowlistedIp) || null;
   const proxied = !!config.peexit.proxyUrl;
   const matches = ip && expected ? ip === expected : null;
   const previousIp = changedFrom && changedFrom !== ip ? changedFrom : null;

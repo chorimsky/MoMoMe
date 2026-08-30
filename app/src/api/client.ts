@@ -16,6 +16,20 @@ import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
 import { idbGet, idbSet } from "../lib/idb.js";
 
+
+/** Egress-IP allowlist state. Peexit production authenticates on the SOURCE IP, so this
+ *  is money-path configuration: a mismatch 403s every payout regardless of credentials. */
+export interface EgressStatus {
+  ip: string | null;
+  expected: string | null;
+  matches: boolean | null;
+  proxied: boolean;
+  previousIp: string | null;
+  checkedAt: string | null;
+  note: string;
+}
+export interface RailReachability { ok: boolean; status: number; reason: string; at: string }
+
 export interface AdminSessionUser { id: string; username: string; role: AdminRole; }
 
 // Same-origin "/api" by default (Vite proxy in dev, Vercel rewrite in prod).
@@ -363,8 +377,15 @@ export const api = {
     liveMoney: boolean;
     monitor: { pending: number; delivered24h: number; failed24h: number };
     crypto: { provider: string; env: string; configured: boolean; live: boolean; apiUrl: string; accountId: string; clientId: string; webhookSecret: string; methods: string[]; sandboxPayout: boolean };
-    payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string }>;
+    payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string; reachability?: RailReachability | null }>;
+    egress?: EgressStatus;
   }>("/admin/rails"),
+  /** Record the IP registered with an IP-allowlisting rail (Peexit production). */
+  adminSetEgressIp: (allowlistedIp: string) =>
+    req<{ egress: EgressStatus }>("/admin/rails/egress", { method: "PUT", body: JSON.stringify({ allowlistedIp }) }),
+  /** Re-probe our outbound IP and re-test the rail right now (after registering an IP). */
+  adminRecheckEgress: () =>
+    req<{ egress: EgressStatus; reachability: RailReachability | null }>("/admin/rails/egress/recheck", { method: "POST" }),
   adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
   retryPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),

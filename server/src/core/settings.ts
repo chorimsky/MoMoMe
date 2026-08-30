@@ -18,6 +18,9 @@ const DEFAULTS: AdminSettings = {
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
+  // The IP registered with an IP-allowlisting rail. Empty → fall back to
+  // EGRESS_ALLOWLISTED_IP, then to "not recorded". See core/egress.ts.
+  egress: { allowlistedIp: "" },
   // Crypto pay-in methods offered to customers. USDC is not live yet (IBEX receive
   // combo not enabled) → default off; the rest on.
   methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
@@ -51,6 +54,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
+    egress: { ...DEFAULTS.egress, ...(d.egress ?? {}) },
     methods: { ...DEFAULTS.methods, ...(d.methods ?? {}) },
     features: { ...DEFAULTS.features, ...(d.features ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
@@ -90,6 +94,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
+    egress: { ...settings.egress, ...(patch.egress ?? {}) },
     methods: { ...settings.methods, ...(patch.methods ?? {}) },
     features: { ...settings.features, ...(patch.features ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },

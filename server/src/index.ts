@@ -49,6 +49,29 @@ if (blinkConfigured() && config.publicUrl.startsWith("https://")) {
   });
 }
 
+/* EGRESS IP — log it once at boot. Peexit PRODUCTION (server.peexit.com) is
+   IP-allowlisted and 403s any non-allowlisted source REGARDLESS of the SECRETKEY, so the
+   single most important operational fact about this host is which IP its outbound calls
+   leave from — it is what Peexit has to whitelist. Discovering it previously meant asking
+   the provider why they were 403ing us. Best-effort and fire-and-forget: a short timeout,
+   never blocks the listen, never throws, and prints nothing sensitive.
+   (When EGRESS_PROXY_URL/PEEXIT_PROXY_URL is set, Peexit leaves via THAT proxy's IP
+   instead — allowlist the proxy, not this address.) */
+void (async () => {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      const r = await fetch("https://api.ipify.org?format=json", { signal: ctrl.signal });
+      const ip = ((await r.json()) as { ip?: string }).ip;
+      if (ip) {
+        const proxied = config.peexit.proxyUrl ? " (Peexit egresses via PEEXIT_PROXY_URL, not this IP)" : "";
+        console.log(`[egress] outbound IP: ${ip}${proxied} — this is the address an IP-allowlisting rail (e.g. Peexit production) must whitelist.`);
+      }
+    } finally { clearTimeout(t); }
+  } catch { /* never let a diagnostic affect startup */ }
+})();
+
 const server = app.listen(config.port, () => {
   const rails = [ibexConfigured() && `IBEX Hub (${config.ibex.env})`, blinkConfigured() && `Blink (${config.blink.env})`].filter(Boolean);
   const crypto = rails.length ? rails.join(" + ") : "sandbox";

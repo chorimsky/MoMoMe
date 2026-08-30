@@ -221,6 +221,13 @@ type Acct = {
   disbMtn: number | null; disbOrange: number | null;
   collMtn: number | null; collOrange: number | null;
 };
+/** Last observed reachability of the Peexit account endpoints. Distinguishes "we could
+ *  not reach/authenticate with Peexit" from "the wallet is empty" — those look identical
+ *  downstream (both yield a null balance) but need completely different fixes. */
+export interface PeexitReachability { ok: boolean; status: number; reason: string; at: string }
+let lastReach: PeexitReachability | null = null;
+export function reachability(): PeexitReachability | null { return lastReach; }
+
 let acctCache: Acct | null = null;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 /** SINGLE-FLIGHT. The 15s cache does not bound upstream load on a MISS: every
@@ -248,6 +255,11 @@ async function accountBalancesUncached(): Promise<Acct> {
     try {
       const r = await peex(path, { method: "GET" });
       if (!r.ok) {
+        lastReach = { ok: false, status: r.status, at: new Date().toISOString(),
+          reason: r.status === 403
+            ? "403 — egress IP not on Peexit's allowlist (server.peexit.com 403s any non-allowlisted source regardless of SECRETKEY)"
+            : r.status === 401 ? "401 — SECRETKEY rejected"
+            : `HTTP ${r.status}` };
         // Do NOT swallow this silently. An unreadable balance becomes null →
         // payoutReady reports insufficient_rail_balance, which reads as "the wallet is
         // empty" when the real cause may be that we never reached the account at all.
@@ -262,8 +274,10 @@ async function accountBalancesUncached(): Promise<Acct> {
         );
         return {};
       }
+      lastReach = { ok: true, status: r.status, at: new Date().toISOString(), reason: "ok" };
       return (await r.json()) as Record<string, unknown>;
     } catch (e) {
+      lastReach = { ok: false, status: 0, at: new Date().toISOString(), reason: `unreachable: ${e instanceof Error ? e.message : e}` };
       console.warn(`[peexit] ${path} unreachable (${e instanceof Error ? e.message : e}); balance is UNKNOWN, not zero.`);
       return {};
     }

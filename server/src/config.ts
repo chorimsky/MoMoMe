@@ -159,6 +159,14 @@ export const config = {
     passwordIsDefault: !process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === "momome-admin",
   },
 
+  /** Egress-IP awareness for rails that authenticate on the SOURCE IP (Peexit
+   *  production is IP-allowlisted and 403s any other source regardless of key).
+   *  EGRESS_ALLOWLISTED_IP is the address actually registered with that rail — set it and
+   *  the system reports drift instead of failing silently. See core/egress.ts. */
+  egress: {
+    allowlistedIp: env("EGRESS_ALLOWLISTED_IP").trim(),
+  },
+
   /** Peex — OPTIONAL intelligence / verification / metadata layer.
    *  "off" disables it entirely (MoMo›Me works identically); "sandbox"
    *  simulates it; "live" calls the real API. NEVER in the payment path. */

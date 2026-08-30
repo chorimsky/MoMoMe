@@ -12,6 +12,7 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRefund } from "../adapters/index.js";
 import { blinkBalances } from "../adapters/blink.js";
+import * as peexit from "../adapters/peexit.js";
 import { accountBalances } from "../adapters/ibex.js";
 import { bolt11AmountMsat } from "../core/bolt11.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, reconcileOneInbound } from "../core/stateMachine.js";
@@ -32,6 +33,7 @@ import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vaul
 import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
+import { egressStatus } from "../core/egress.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
@@ -1874,8 +1876,15 @@ api.get("/admin/rails", async (_req, res) => {
     ],
     payout: [
       { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(), apiUrl: config.pawapay.apiUrl, apiKey: mask(config.pawapay.apiKey) },
-      { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(), apiUrl: config.peexit.apiUrl, apiKey: mask(config.peexit.apiKey) },
+      { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(), apiUrl: config.peexit.apiUrl, apiKey: mask(config.peexit.apiKey),
+        // Peexit production authenticates on the SOURCE IP as well as the key, so its
+        // reachability is a distinct fact from "configured" — a 403 here means the egress
+        // is not allowlisted, NOT that the key or the wallet is wrong.
+        reachability: peexit.reachability() },
     ],
+    // Egress-IP allowlist state: what we leave from, what is registered, and whether they
+    // agree. This is the failure that silently broke Peexit on a hosting move.
+    egress: await egressStatus(),
   });
 });
 

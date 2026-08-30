@@ -25,6 +25,9 @@ export interface Store {
   pruneExpiredQuotes(): Promise<number>;
   // payments
   putPayment(p: Payment): Promise<void>;
+  // Atomic single-field patch — NOT a read-modify-write, so it needs no lock and
+  // cannot clobber a concurrent settlement write (see repo.setSenderLocation).
+  setSenderLocation(paymentId: string, loc: Payment["senderLocation"]): Promise<void>;
   getPayment(id: string): Promise<Payment | undefined>;
   findPaymentByRef(ref: string): Promise<Payment | undefined>;
   findByProviderRef(ref: string): Promise<Payment | undefined>;
@@ -78,6 +81,7 @@ const memoryStore: Store = {
   consumeQuote: async (id) => mem.consumeQuote(id),
   pruneExpiredQuotes: async () => mem.pruneExpiredQuotes(),
   putPayment: async (p) => mem.putPayment(p),
+  setSenderLocation: async (pid, loc) => mem.setSenderLocation(pid, loc),
   getPayment: async (id) => mem.getPayment(id),
   findPaymentByRef: async (ref) => mem.findPaymentByRef(ref),
   findByProviderRef: async (ref) => mem.findByProviderRef(ref),
@@ -105,6 +109,7 @@ const pgStore: Store = {
   consumeQuote: pg.consumeQuote,
   pruneExpiredQuotes: pg.pruneExpiredQuotes,
   putPayment: pg.putPayment,
+  setSenderLocation: pg.setSenderLocation,
   getPayment: pg.getPayment,
   findPaymentByRef: pg.findPaymentByRef,
   findByProviderRef: pg.findByProviderRef,

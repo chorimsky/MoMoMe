@@ -66,6 +66,14 @@ export function putPayment(p: Payment) {
   payments.set(p.id, p);
   touch("store");
 }
+/** Patch senderLocation in place (memory backend holds ONE shared object per payment,
+ *  so this can't clobber a concurrent writer the way a whole-record put would). */
+export function setSenderLocation(pid: string, loc: Payment["senderLocation"]): void {
+  const p = payments.get(pid);
+  if (!p) return;
+  p.senderLocation = loc;
+  touch("store");
+}
 export function getPayment(pid: string): Payment | undefined {
   return payments.get(pid);
 }

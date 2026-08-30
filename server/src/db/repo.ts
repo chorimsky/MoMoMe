@@ -49,6 +49,19 @@ export async function putPayment(p: Payment): Promise<void> {
      p.quoteId ?? null, p.aggregator ?? null, p.merchantId ?? null, JSON.stringify(p)],
   );
 }
+/** Patch ONE field on a payment atomically, without a read-modify-write.
+ *  `senderLocation` is backfilled asynchronously (a geo lookup takes up to 3.5s) while the
+ *  settlement state machine may be advancing the SAME row. A read-modify-write would need
+ *  the per-payment lock to be safe — but taking that lock here means holding a `withTx`
+ *  connection across the backfill while the inner read/write needs a SECOND pooled
+ *  connection, which exhausts PG_POOL_MAX under concurrency and deadlocks payment
+ *  creation. jsonb_set touches only this key in a single pooled statement, so it can
+ *  neither clobber a concurrent state/event write nor hold a transaction open.
+ *  updated_at is deliberately NOT bumped — the reconcile backstops key off it. */
+export async function setSenderLocation(paymentId: string, loc: unknown): Promise<void> {
+  await q(`UPDATE payments SET body = jsonb_set(body, '{senderLocation}', $2::jsonb, true) WHERE id=$1`,
+    [paymentId, JSON.stringify(loc)]);
+}
 export async function getPayment(id: string): Promise<Payment | undefined> {
   const rows = await q<{ body: Payment }>(`SELECT body FROM payments WHERE id=$1`, [id]);
   return rows[0]?.body;

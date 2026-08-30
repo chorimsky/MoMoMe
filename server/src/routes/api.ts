@@ -776,19 +776,19 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   void peex.enrich(payment);
   // Coarse geo-origin (IP → country/city) for operator fraud/AML review —
   // fire-and-forget, never blocks or slows creation; backfilled when it resolves.
-  // MUST run under the per-payment lock: the lookup can take seconds (a CDN geo
-  // header is instant, but the fallback HTTPS lookup waits up to 3.5s), and a
-  // Lightning inbound settles well inside that window. putPayment overwrites the
-  // WHOLE record, so an unlocked read-modify-write here would clobber a concurrent
-  // confirmInbound — erasing its INBOUND_CONFIRMED event, which makes inboundBooked()
-  // false and lets a later reconcile tick re-book the ledger and pay out a SECOND
-  // time. Same stale-copy hazard reconcileOneInbound already guards against.
+  // The lookup can take seconds (a CDN geo header is instant, but the fallback HTTPS
+  // lookup waits up to 3.5s) while the settlement state machine may be advancing the
+  // SAME row — so this must NOT be a read-modify-write via putPayment, which overwrites
+  // the WHOLE record and would erase a concurrent confirmInbound's INBOUND_CONFIRMED
+  // event (making inboundBooked() false → a later reconcile re-books the ledger and pays
+  // out a SECOND time). Taking the per-payment lock fixes the clobber but is WORSE: on
+  // Postgres the lock holds a withTx connection while the read/write inside it needs a
+  // SECOND pooled connection, which exhausts PG_POOL_MAX under concurrency and deadlocks
+  // payment creation. setSenderLocation is a single atomic jsonb_set touching only this
+  // key — no lock, no transaction held, no clobber.
   void resolveLocation(req).then(async (loc) => {
     if (!loc) return;
-    await store().lockPayment(payment.id, async () => {
-      const p = await store().getPayment(payment.id); // fresh read under the lock
-      if (p) { p.senderLocation = loc; await store().putPayment(p); }
-    });
+    await store().setSenderLocation(payment.id, loc);
   }).catch(() => {});
   res.json(payment);
 });

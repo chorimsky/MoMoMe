@@ -100,6 +100,12 @@ export const config = {
     // per Peexit docs is peex/peex_callback; production creds are ours to set.
     callbackUser: secret("PEEXIT_CALLBACK_USER", "peex"),
     callbackPass: secret("PEEXIT_CALLBACK_PASS"),
+    // Optional HTTP CONNECT proxy for OUTBOUND Peexit calls. server.peexit.com is
+    // IP-allowlisted and 403s any non-allowlisted egress regardless of SECRETKEY, so the
+    // rail only works from an IP Peexit has whitelisted. Pointing this at a fixed-IP proxy
+    // decouples the rail from where the backend runs (Railway → Vercel silently broke it).
+    // PEEXIT_PROXY_URL overrides the shared EGRESS_PROXY_URL. Unset → direct, unchanged.
+    proxyUrl: secret("PEEXIT_PROXY_URL") || secret("EGRESS_PROXY_URL"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
   /** Blink (Galoy) — SECOND crypto INBOUND rail alongside IBEX (Lightning +

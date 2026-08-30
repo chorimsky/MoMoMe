@@ -9,7 +9,7 @@ on:
       api_base:
         description: "VITE_API_BASE — the backend the SPA calls"
         required: false
-        default: "https://momome-api-production.up.railway.app/api"
+        default: "https://mo-mo-me-server.vercel.app/api"
   push:
     tags: ["v*"]
 
@@ -34,7 +34,7 @@ jobs:
 
       - name: Build frontend (type-checked)
         env:
-          VITE_API_BASE: ${{ github.event.inputs.api_base || 'https://momome-api-production.up.railway.app/api' }}
+          VITE_API_BASE: ${{ github.event.inputs.api_base || 'https://mo-mo-me-server.vercel.app/api' }}
           SITE_URL: https://momome.xyz
         run: |
           bash scripts/fetch-wavelength-runtime.sh   # self-host the /wallet wasm runtime (gitignored) BEFORE build so vite copies it into dist/

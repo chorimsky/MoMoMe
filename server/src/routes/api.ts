@@ -776,10 +776,19 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   void peex.enrich(payment);
   // Coarse geo-origin (IP → country/city) for operator fraud/AML review —
   // fire-and-forget, never blocks or slows creation; backfilled when it resolves.
+  // MUST run under the per-payment lock: the lookup can take seconds (a CDN geo
+  // header is instant, but the fallback HTTPS lookup waits up to 3.5s), and a
+  // Lightning inbound settles well inside that window. putPayment overwrites the
+  // WHOLE record, so an unlocked read-modify-write here would clobber a concurrent
+  // confirmInbound — erasing its INBOUND_CONFIRMED event, which makes inboundBooked()
+  // false and lets a later reconcile tick re-book the ledger and pay out a SECOND
+  // time. Same stale-copy hazard reconcileOneInbound already guards against.
   void resolveLocation(req).then(async (loc) => {
     if (!loc) return;
-    const p = await store().getPayment(payment.id);
-    if (p) { p.senderLocation = loc; await store().putPayment(p); }
+    await store().lockPayment(payment.id, async () => {
+      const p = await store().getPayment(payment.id); // fresh read under the lock
+      if (p) { p.senderLocation = loc; await store().putPayment(p); }
+    });
   }).catch(() => {});
   res.json(payment);
 });

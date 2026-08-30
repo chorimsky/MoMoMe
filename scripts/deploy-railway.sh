@@ -14,6 +14,27 @@
 # ============================================================
 set -uo pipefail
 
+# ---- DECOMMISSIONED: Railway is torn down ----------------------------------
+# The backend now runs as a Vercel serverless function (server/api/index.ts,
+# project `mo-mo-me-server`); see server/vercel.json. Everything below drives the
+# Railway API and its `momome-api` service, which no longer exist — running it
+# would set variables on / poll for a deployment that is gone, and report
+# misleading results on a LIVE-MONEY flip.
+#
+# The Vercel equivalents:
+#   deploy         → git push (Vercel auto-deploys), or `vercel deploy --prod`
+#   set a variable → `vercel env add <NAME> production` (or the dashboard)
+#   health check   → curl https://mo-mo-me-server.vercel.app/health
+#
+# Kept for reference only. Export MOMOME_ALLOW_RAILWAY=1 to run it anyway.
+if [[ "${MOMOME_ALLOW_RAILWAY:-}" != "1" ]]; then
+  echo "❌ $(basename "$0"): Railway is decommissioned — the backend is on Vercel now." >&2
+  echo "   See the header of this script for the Vercel equivalents." >&2
+  echo "   Set MOMOME_ALLOW_RAILWAY=1 to run it anyway." >&2
+  exit 2
+fi
+# ---------------------------------------------------------------------------
+
 TOKEN="${RAILWAY_API_TOKEN:-}"
 SVC="${RAILWAY_SERVICE_ID:-e61829e1-6ed3-4dbf-bb4a-7cdb26b87df1}"   # momome-api
 ENVI="${RAILWAY_ENV_ID:-32392d90-3ba4-4433-b6eb-ac1002e15dbe}"     # production

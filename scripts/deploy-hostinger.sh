@@ -16,7 +16,7 @@ SSH_HOST="${HOSTINGER_HOST:-92.112.182.63}"
 SSH_PORT="${HOSTINGER_PORT:-65002}"
 SSH_USER="${HOSTINGER_USER:-u739778915}"
 WEB_ROOT="${HOSTINGER_WEBROOT:-domains/momome.xyz/public_html}"
-API_BASE="${VITE_API_BASE:-https://momome-api-production.up.railway.app/api}"
+API_BASE="${VITE_API_BASE:-https://mo-mo-me-server.vercel.app/api}"
 SITE="${SITE_URL:-https://momome.xyz}"
 
 echo "──────────────────────────────────────────────"

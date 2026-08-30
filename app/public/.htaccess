@@ -13,8 +13,8 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 #     Apache shared/cloud hosting usually disallows mod_proxy (ProxyPass), so we
 #     302-redirect to the API host; LNURL (LUD-16) clients follow redirects.
 #     If your plan allows ProxyPass, prefer a real reverse proxy instead.
-RewriteRule ^\.well-known/lnurlp/(.*)$ https://momome-api-production.up.railway.app/.well-known/lnurlp/$1 [L,R=302]
-RewriteRule ^lnurl/pay/(.*)$ https://momome-api-production.up.railway.app/lnurl/pay/$1 [L,R=302]
+RewriteRule ^\.well-known/lnurlp/(.*)$ https://mo-mo-me-server.vercel.app/.well-known/lnurlp/$1 [L,R=302]
+RewriteRule ^lnurl/pay/(.*)$ https://mo-mo-me-server.vercel.app/lnurl/pay/$1 [L,R=302]
 
 # --- SPA fallback: serve index.html for client-side routes, but never for a
 #     real file or directory (so /assets/*, /og/*, the generated SEO HTML, and
@@ -35,8 +35,8 @@ RewriteRule ^ index.html [L]
   # load; disallowed origins are blocked). NOTE: the two 'sha256-…' hashes pin the
   # inline theme + service-worker scripts in app/index.html — if you EDIT those scripts,
   # regenerate the hashes (openssl dgst -sha256 -binary | openssl base64) or the page
-  # breaks. If the backend host (connect-src) changes from the Railway default, update it.
-  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-AwpjKjR51WAmVn4oih/C2mMuLcqlB7o94sO04RIudps=' 'sha256-3hcv+MhFRT9GjZc2vmLwM/kZsFbOYDYRiVgV9P2gDKM='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://momome-api-production.up.railway.app; worker-src 'self' blob:; manifest-src 'self'"
+  # breaks. If the backend host (connect-src) changes, update it here AND in vercel.json.
+  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-AwpjKjR51WAmVn4oih/C2mMuLcqlB7o94sO04RIudps=' 'sha256-3hcv+MhFRT9GjZc2vmLwM/kZsFbOYDYRiVgV9P2gDKM='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://mo-mo-me-server.vercel.app; worker-src 'self' blob:; manifest-src 'self'"
 
   # Hashed build assets are immutable; HTML must revalidate so deploys show up.
   <FilesMatch "\.(js|css|woff2?|ttf|png|jpe?g|webp|gif|svg)$">

@@ -4,7 +4,7 @@
 # Produces app/dist/ — upload its CONTENTS to public_html — and a zip you can
 # extract in Hostinger's File Manager.
 #
-#   VITE_API_BASE  the backend the SPA calls (default: the live Railway backend)
+#   VITE_API_BASE  the backend the SPA calls (default: the live Vercel backend)
 #   SITE_URL       canonical/SEO domain (default https://momome.xyz)
 #
 # Override VITE_API_BASE only if you front the backend with a custom domain
@@ -14,9 +14,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Default to the actual deployed backend. (The old default api.momome.xyz is
-# NXDOMAIN — a no-arg build with it shipped a frontend that couldn't reach the API.)
-API_BASE="${VITE_API_BASE:-https://momome-api-production.up.railway.app/api}"
+# Default to the actual deployed backend (Vercel — Railway is torn down). A no-arg
+# build must point at a host that actually resolves, or the SPA can't reach the API.
+# Keep this in sync with connect-src in app/public/.htaccess.
+API_BASE="${VITE_API_BASE:-https://mo-mo-me-server.vercel.app/api}"
 SITE="${SITE_URL:-https://momome.xyz}"
 
 echo "──────────────────────────────────────────────"

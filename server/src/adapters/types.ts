@@ -66,7 +66,11 @@ export interface RailAdapter {
   /** Create the inbound pay instruction (invoice / address). Idempotent on ref. */
   createInstruction(req: InstructionRequest): Promise<PayInstruction>;
   /** Verify a raw webhook payload's authenticity. */
-  verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>): boolean;
+  /** `clientIp` is the TRUST-PROXY-RESOLVED sender (Express req.ip), not a raw header.
+   *  Adapters that allowlist sender IPs must prefer it: X-Forwarded-For is supplied by the
+   *  caller and can be forged, whereas req.ip is derived using the configured proxy hop
+   *  count. Optional so non-Express callers (tests, internal replay) still work. */
+  verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>, clientIp?: string): boolean;
   /** Parse a verified webhook body into a normalised event (null = ignore). */
   parseEvent(body: unknown): RailEvent | null;
   /** OPTIONAL authoritative re-query: given a providerRef (LN payment hash / tx id),

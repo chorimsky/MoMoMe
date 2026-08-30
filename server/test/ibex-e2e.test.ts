@@ -94,6 +94,15 @@ async function main() {
     r = await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.1" }, body: webhookBody() });
     ok("sender IP not on IBEX's allowlist → 401", r.status === 401, String(r.status));
 
+    // SPOOF — the assertion that matters. X-Forwarded-For is caller-supplied, and only the
+    // RIGHTMOST entry is appended by the trusted proxy (trust proxy = 1), so that is the
+    // real sender. Here an ALLOWLISTED sandbox IP is prepended while the actual sender is
+    // 203.0.113.9. The old check used `.some()` over the whole chain and accepted this,
+    // which meant anyone could satisfy the IP allowlist by naming it.
+    r = await fetch(`${base}/webhooks/ibex`, { method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "35.243.242.121, 203.0.113.9" }, body: webhookBody() });
+    ok("allowlisted IP PREPENDED to the XFF chain → 401 (not spoofable)", r.status === 401, String(r.status));
+
     // 3. A VALID webhook while IBEX still reports the invoice OPEN must NOT settle:
     //    the body is only a trigger, the re-query is authoritative.
     settled = false;

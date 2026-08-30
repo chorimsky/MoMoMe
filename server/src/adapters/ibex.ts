@@ -200,13 +200,39 @@ export async function payLightningAddress(lnAddress: string, amountMsat: number)
 
 /** Is the inbound webhook from an allowed IBEX sender IP? Checks the forwarded
  *  chain; if the IP can't be determined we don't block (the secret still gates). */
-function ipAllowed(headers: Record<string, string | string[] | undefined>): boolean {
+/** IBEX documents the IPs its webhooks originate from, and their guidance is to check the
+ *  secret AND the sender IP. Doing that correctly hinges on WHICH value you trust.
+ *
+ *  X-Forwarded-For is supplied by the caller. The previous implementation parsed it here
+ *  and accepted a match ANYWHERE in the chain (`.some`), so anyone could send
+ *  `X-Forwarded-For: 34.148.92.171` and satisfy the IP check outright — it added no
+ *  security against a deliberate forgery, only against an accidental one. It also returned
+ *  true when the header was absent, i.e. fail-open.
+ *
+ *  Express already resolves the real sender into req.ip using the configured proxy hop
+ *  count (app.set("trust proxy", 1)), so that value — and only that value — is what an
+ *  allowlist may be checked against. When it is available the decision is made on it
+ *  alone, with EXACT membership. The header path survives solely for callers that cannot
+ *  supply req.ip (internal replay, tests), where it is no weaker than before. */
+function ipAllowed(headers: Record<string, string | string[] | undefined>, clientIp?: string): boolean {
   const allow = config.ibex.webhookIps;
   if (!allow.length) return true;
+  // Trustworthy source: decide on it and nothing else. A resolved IP that is NOT on the
+  // allowlist is a rejection, never a fall-through to the spoofable header.
+  if (clientIp) return allow.includes(clientIp.replace(/^::ffff:/, ""));
+  // No resolved sender — reachable only by callers that cannot supply req.ip (internal
+  // replay, direct unit calls). Over HTTP, Express always sets req.ip, so the strong check
+  // above is what production uses. Here we keep the original header scan: it is defence in
+  // depth against misrouted or careless traffic and is no weaker than the previous
+  // behaviour, but it is NOT a security boundary — X-Forwarded-For is caller-supplied, and
+  // its entries cannot even be ranked without knowing the proxy topology (by the standard
+  // the ORIGIN is leftmost and each hop appends to the right, so neither end is dependably
+  // the sender). Anything that must not be forgeable relies on the shared secret and, for a
+  // settlement, the authoritative confirmSettlement() re-query.
   const xff = headers["x-forwarded-for"] ?? headers["x-real-ip"];
   const raw = Array.isArray(xff) ? xff[0] : xff;
-  if (!raw) return true;
-  return raw.split(",").map((s) => s.trim()).some((ip) => allow.includes(ip));
+  if (!raw) return true; // nothing to check — the secret gates
+  return raw.split(",").map((x) => x.trim().replace(/^::ffff:/, "")).some((ip) => allow.includes(ip));
 }
 
 /** Per-stablecoin IBEX account (IBEX is account-per-currency). USDT = currencyId
@@ -292,9 +318,10 @@ export const ibexAdapter: RailAdapter = {
     };
   },
 
-  verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined> = {}): boolean {
-    // 1) Sender IP allowlist (the documented IBEX webhook IPs), when determinable.
-    if (!ipAllowed(headers)) return false;
+  verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined> = {}, clientIp?: string): boolean {
+    // 1) Sender IP allowlist (the documented IBEX webhook IPs), checked against the
+    //    trust-proxy-resolved sender when available — see ipAllowed.
+    if (!ipAllowed(headers, clientIp)) return false;
     // 2) Shared secret echoed in the body. Without a configured secret, accept ONLY
     //    when no real payout can result from an IBEX inbound (pure sandbox testing).
     //    If a payout CAN result (production, or IBEX_ALLOW_SANDBOX_PAYOUT), an unsigned

@@ -99,7 +99,12 @@ async function main() {
   const goodBody = JSON.stringify({ secret: SECRET, transaction: { id: "tx_ln_1" } });
   ok("correct secret + allowed IP → accepted", ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": ALLOWED_IP }));
   ok("correct secret + no IP header → accepted (secret gates)", ibexAdapter.verifyWebhook(goodBody, {}));
-  ok("correct secret in a proxy IP chain → accepted", ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": `${ALLOWED_IP}, 10.0.0.1` }));
+  // Called WITHOUT a resolved req.ip, so the allowlist cannot be enforced from a
+  // caller-supplied header — the secret gates instead. Over HTTP the route passes req.ip
+  // and this exact chain is REJECTED; see ibex-e2e.test.ts ("allowlisted IP PREPENDED").
+  ok("correct secret, no resolved sender → accepted (secret gates)", ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": `${ALLOWED_IP}, 10.0.0.1` }));
+  ok("resolved sender NOT on the allowlist → rejected", ibexAdapter.verifyWebhook(goodBody, {}, "10.0.0.1") === false);
+  ok("resolved sender ON the allowlist → accepted", ibexAdapter.verifyWebhook(goodBody, {}, ALLOWED_IP) === true);
   ok("wrong secret → rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ secret: "nope", transaction: {} }), { "x-forwarded-for": ALLOWED_IP }));
   ok("missing secret → rejected", !ibexAdapter.verifyWebhook(JSON.stringify({ transaction: {} }), { "x-forwarded-for": ALLOWED_IP }));
   ok("disallowed sender IP → rejected (even with correct secret)", !ibexAdapter.verifyWebhook(goodBody, { "x-forwarded-for": "1.2.3.4" }));

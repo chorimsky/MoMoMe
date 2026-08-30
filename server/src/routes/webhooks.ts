@@ -62,7 +62,9 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   if (!adapter) return res.status(404).json({ error: "unknown_provider" });
 
   const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  if (!adapter.verifyWebhook(rawBody, req.headers)) {
+  // req.ip is resolved via app.set("trust proxy", 1) — pass it so an IP allowlist checks
+  // the ACTUAL sender rather than a caller-supplied X-Forwarded-For value.
+  if (!adapter.verifyWebhook(rawBody, req.headers, req.ip)) {
     return res.status(401).json({ error: "bad_signature" });
   }
 

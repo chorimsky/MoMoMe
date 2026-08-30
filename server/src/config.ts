@@ -31,7 +31,13 @@ export const config = {
   port: Number(env("PORT", "4000")),
   /** Public base URL the providers can reach for webhook callbacks. */
   publicUrl: env("PUBLIC_URL", "http://localhost:4000"),
-  railsMode: (env("RAILS_MODE", "sandbox") as RailsMode),
+  // Normalised, NOT a blind cast. `as RailsMode` silently accepted any string, and an
+  // unrecognised one is indistinguishable from "sandbox" because isLive() only ever
+  // compares against "live". A real deployment was found running RAILS_MODE=production —
+  // a value that does not exist in the type — so the operator believed the rails were
+  // live while every isLive() check returned false. The boot assert below rejects an
+  // unrecognised value outright rather than letting it mean sandbox by accident.
+  railsMode: (env("RAILS_MODE", "sandbox").trim().toLowerCase() === "live" ? "live" : "sandbox") as RailsMode,
   /** Whether a real SMS provider is wired up. Until it is (SMS_ENABLED=true),
    *  phone-number OTP verification can't actually reach the user in production, so
    *  the merchant onboarding auto-activates instead of asking for a code. Flip this
@@ -158,6 +164,24 @@ export const config = {
     webhookSecret: env("PEEX_WEBHOOK_SECRET"),
   },
 };
+
+/** Fail closed on a RAILS_MODE the type does not define. Silently treating an unknown
+ *  value as "sandbox" is the dangerous direction in BOTH senses: an operator who typed
+ *  `production` (a real, observed case) thinks the rails are live when nothing is, and a
+ *  future typo could just as easily hide an intended sandbox. The only accepted values
+ *  are "sandbox" and "live" (case/whitespace-insensitive, matching how isProdEnv already
+ *  normalises the per-rail *_ENV vars). Note "production" is correct for IBEX_ENV /
+ *  PEEXIT_ENV / PAWAPAY_ENV but WRONG here — hence the explicit hint. */
+export function assertRailsMode(): void {
+  const raw = (process.env.RAILS_MODE ?? "").trim();
+  if (!raw) return; // unset → the "sandbox" default, which is intentional
+  const v = raw.toLowerCase();
+  if (v === "sandbox" || v === "live") return;
+  const hint = ["production", "prod", "live-money", "livemoney"].includes(v)
+    ? ` Did you mean RAILS_MODE=live? ("production" is the right value for IBEX_ENV/PEEXIT_ENV/PAWAPAY_ENV, but RAILS_MODE only accepts "sandbox" or "live".)`
+    : "";
+  throw new Error(`RAILS_MODE="${raw}" is not a valid rails mode — use "sandbox" or "live".${hint} Refusing to start rather than silently running in SANDBOX with a value that looks live.`);
+}
 
 export function isLive(): boolean {
   return config.railsMode === "live";

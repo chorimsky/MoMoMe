@@ -6,12 +6,13 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, liveMoney, peexitLive, pawapayLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
  *  would run on an unsafe footing; warns on softer misconfigurations. */
 export function runBootChecks(): void {
+  assertRailsMode(); // an unrecognised RAILS_MODE must never quietly mean sandbox
   assertLiveConfig();
   assertIbexConfig();
   assertBlinkConfig();

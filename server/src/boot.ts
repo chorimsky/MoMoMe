@@ -6,13 +6,14 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, liveMoney, peexitLive, pawapayLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
  *  would run on an unsafe footing; warns on softer misconfigurations. */
 export function runBootChecks(): void {
   assertRailsMode(); // an unrecognised RAILS_MODE must never quietly mean sandbox
+  assertDeployEnv(); // a preview/branch deployment must never run a real-money rail
   assertLiveConfig();
   assertIbexConfig();
   assertBlinkConfig();
@@ -27,6 +28,10 @@ export function runBootChecks(): void {
   if (liveMoney() && !persistDurable()) {
     throw new Error("Real-money rail is live but the database is NOT durable (node:sqlite unavailable or DB_PATH not writable) — refusing to start. Fix DB_PATH / the mounted volume (or a managed DB), or run fully in sandbox.");
   }
+  // One line naming what this instance actually is. The dangerous mistake with a sandbox
+  // environment is not knowing which database you are pointed at; show the host (never the
+  // URL, which carries the password).
+  console.log(`[deploy] env=${deployEnv()} · rails=${config.railsMode} · liveMoney=${liveMoney()} · store=${process.env.STORE_BACKEND || "memory"} · db=${databaseHost()}`);
   if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
     console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
   }

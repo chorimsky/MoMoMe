@@ -197,6 +197,40 @@ export function assertRailsMode(): void {
   throw new Error(`RAILS_MODE="${raw}" is not a valid rails mode — use "sandbox" or "live".${hint} Refusing to start rather than silently running in SANDBOX with a value that looks live.`);
 }
 
+/** Which Vercel environment this instance is running in. Vercel sets VERCEL_ENV to
+ *  "production" | "preview" | "development"; absent (local/Railway) → "development". */
+export type DeployEnv = "production" | "preview" | "development";
+export function deployEnv(): DeployEnv {
+  const v = (process.env.VERCEL_ENV ?? "").trim().toLowerCase();
+  return v === "production" || v === "preview" ? v : "development";
+}
+
+/** Database host only — never the URL, which carries the password. Lets an operator SEE
+ *  at a glance that a sandbox deployment is not pointed at the production database. */
+export function databaseHost(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) return "none (in-process store)";
+  try { return new URL(url).hostname; } catch { return "unparseable"; }
+}
+
+/** A PREVIEW deployment must never move real money. Vercel gives every branch and pull
+ *  request its own throwaway deployment, and env vars scoped to "All Environments" are
+ *  inherited by all of them — so production rail credentials silently reach every preview
+ *  unless they are scoped to Production only. That is how a sandbox environment turns into
+ *  an unnoticed second production: a branch deploy holding live IBEX/Peexit keys can mint
+ *  real invoices and move real funds, usually against the production database too.
+ *  Fail closed instead: a preview may run any sandbox rail, never a live one. */
+export function assertDeployEnv(): void {
+  if (deployEnv() === "preview" && liveMoney()) {
+    throw new Error(
+      "Refusing to start: this is a Vercel PREVIEW deployment but a real-money rail is live " +
+      "(IBEX/Blink/PawaPay/Peexit in production). Preview deployments are created per branch and " +
+      "pull request and must never move real funds. Scope the production rail credentials to the " +
+      "Production environment only, and give Preview sandbox credentials plus its own DATABASE_URL.",
+    );
+  }
+}
+
 export function isLive(): boolean {
   return config.railsMode === "live";
 }

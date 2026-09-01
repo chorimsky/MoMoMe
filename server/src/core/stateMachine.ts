@@ -10,7 +10,7 @@
    ============================================================ */
 import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types.js";
 import { store } from "../db/store.js";
-import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX } from "../../../shared/domain.js";
+import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, recordExecution, markRailHardDown } from "./routing.js";
@@ -620,7 +620,7 @@ async function completeRefundLocked(paymentId: string, bolt11: string): Promise<
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p || p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
   if (p.payInstruction.method !== "LIGHTNING") return { ok: false, error: "refund_lightning_only" };
-  const inboundMsat = Math.round(p.payInstruction.amount * 1e11);
+  const inboundMsat = btcToMsat(p.payInstruction.amount);
   const invMsat = bolt11AmountMsat(bolt11);
   if (invMsat == null) return { ok: false, error: "bad_invoice" };
   // Over/under-refund guard: accept an amount-less invoice (we set the amount) or one

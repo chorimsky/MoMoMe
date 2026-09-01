@@ -228,6 +228,8 @@ function PruneIdentities() {
 export function AdministrationView() {
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
   const [rails, setRails] = useState<Rails | null>(null);
+  // The base crypto rail (IBEX). Was `rails.crypto`, a duplicate of cryptoRails[0].
+  const baseRail = rails?.cryptoRails?.find((r) => r.base) ?? rails?.cryptoRails?.[0];
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
@@ -255,11 +257,11 @@ export function AdministrationView() {
         <Card title="System & environment" sub="Live rail configuration">
           <div style={{ marginTop: 2 }}>
             <KV k="Money mode" v={<Pill status={rails?.liveMoney ? "Live · real money" : "Sandbox · simulated"} tone={rails?.liveMoney ? "warn" : "recv"} />} />
-            <KV k={`Crypto inbound · ${rails?.crypto.provider ?? "IBEX"}`} v={<Pill status={envPill(!!rails?.crypto.configured, !!rails?.crypto.live)} tone={envTone(!!rails?.crypto.configured, !!rails?.crypto.live)} />} />
+            <KV k={`Crypto inbound · ${baseRail?.name ?? "IBEX Hub"}`} v={<Pill status={envPill(!!baseRail?.configured, !!baseRail?.live)} tone={envTone(!!baseRail?.configured, !!baseRail?.live)} />} />
             {(rails?.payout ?? []).map((p) => (
               <KV key={p.name} k={`Payout · ${p.name}`} v={<Pill status={envPill(p.configured, p.live)} tone={envTone(p.configured, p.live)} />} />
             ))}
-            {rails?.crypto.sandboxPayout && <KV k="Sandbox → real payout" v={<Pill status="Enabled" tone="warn" />} />}
+            {baseRail?.sandboxPayout && <KV k="Sandbox → real payout" v={<Pill status="Enabled" tone="warn" />} />}
           </div>
         </Card>
       </Grid>

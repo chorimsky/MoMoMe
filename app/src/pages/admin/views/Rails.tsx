@@ -24,6 +24,8 @@ export function RailsView() {
   const [egBusy, setEgBusy] = useState(false);
   const [egMsg, setEgMsg] = useState<string | null>(null);
   const egress = cfg?.egress;
+  // The base rail (IBEX) drives the top method pills; every rail gets its own card below.
+  const baseRail = cfg?.cryptoRails?.find((r) => r.base) ?? cfg?.cryptoRails?.[0];
 
   async function saveIp() {
     setEgBusy(true); setEgMsg(null);
@@ -63,7 +65,7 @@ export function RailsView() {
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{r.name}</div>
                 <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{r.sub}</div>
               </div>
-              <Pill status={r.name === "USDT" ? "Gated" : envPill(!!cfg?.crypto.live, !!cfg?.crypto.configured)} />
+              <Pill status={r.name === "USDT" ? "Gated" : envPill(!!baseRail?.live, !!baseRail?.configured)} />
             </div>
             <KV k={r.a[0]} v={r.a[1]} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0" }}>
@@ -91,15 +93,20 @@ export function RailsView() {
 
       <SectionTitle t="Provider configuration" s="Live environment config — secrets are masked, never exposed." />
       <Grid cols={3} gap={16}>
-        <Card title={`${cfg?.crypto.provider ?? "IBEX Hub"} · crypto inbound`} action={<Pill status={envPill(!!cfg?.crypto.live, !!cfg?.crypto.configured)} />}>
-          <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
-            <Field label="Environment" value={cfg?.crypto.env ?? "—"} mono />
-            <Field label="Account ID" value={cfg?.crypto.accountId ?? "—"} mono />
-            <Field label="Client ID" value={cfg?.crypto.clientId ?? "—"} mono />
-            <Field label="Webhook secret" value={cfg?.crypto.webhookSecret ?? "—"} mono />
-            {cfg?.crypto.sandboxPayout && <Field label="Sandbox → real payout" value="ENABLED (real sats)" mono />}
-          </Grid>
-        </Card>
+        {(cfg?.cryptoRails ?? []).map((rail) => (
+          <Card key={rail.name} title={`${rail.name} · crypto inbound`} action={<Pill status={envPill(rail.live, rail.configured)} />}>
+            <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
+              <Field label="Environment" value={rail.env} mono />
+              <Field label="API URL" value={rail.apiUrl} mono />
+              <Field label="Methods" value={rail.methods.join(", ")} mono />
+              {rail.accountId && <Field label="Account ID" value={rail.accountId} mono />}
+              {rail.clientId && <Field label="Client ID" value={rail.clientId} mono />}
+              {rail.walletId && <Field label="Wallet ID" value={rail.walletId} mono />}
+              <Field label="Webhook secret" value={rail.webhookSecret} mono />
+              {rail.sandboxPayout && <Field label="Sandbox → real payout" value="ENABLED (real sats)" mono />}
+            </Grid>
+          </Card>
+        ))}
         {(cfg?.payout ?? []).map((p) => (
           <Card key={p.name} title={`${p.name} · Mobile Money payout`} action={<Pill status={envPill(p.live, p.configured)} />}>
             <Grid cols={1} gap={12} style={{ marginTop: 4 }}>

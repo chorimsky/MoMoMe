@@ -17,13 +17,11 @@
 import crypto from "node:crypto";
 import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC, METHOD_ASSET } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET, btcToMsat, msatToBtc } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
 
-const btcToMsat = (btc: number) => Math.round(btc * 1e11); // 1 BTC = 1e11 msat
-const msatToBtc = (msat: number) => msat / 1e11;
 
 /* ---------- OAuth2 client-credentials token manager (in-flight deduped) ---------- */
 let cached: { accessToken: string; expiresAt: number } | null = null;

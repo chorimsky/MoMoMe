@@ -109,3 +109,14 @@ export const METHOD_META: Record<
   USDT: { name: "US Dollars", arrival: "Within seconds", fast: true },
   USDC: { name: "US Dollars", arrival: "Within seconds", fast: true },
 };
+
+/* ---------- Bitcoin unit conversion ----------
+   1 BTC = 100,000,000 sat = 100,000,000,000 msat. The `1e11` literal was previously
+   re-typed at five call sites across the IBEX adapter, treasury, settlement and the bolt11
+   parser. A wrong exponent in any of them is a 100,000,000x money error that no type
+   catches, so it lives here once. */
+export const MSAT_PER_BTC = 1e11;
+/** BTC → millisatoshi (rounded — msat is the smallest integral unit). */
+export const btcToMsat = (btc: number): number => Math.round(btc * MSAT_PER_BTC);
+/** Millisatoshi → BTC. */
+export const msatToBtc = (msat: number): number => msat / MSAT_PER_BTC;

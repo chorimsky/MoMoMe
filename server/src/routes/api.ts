@@ -1852,26 +1852,27 @@ api.get("/admin/rails", async (_req, res) => {
   res.json({
     liveMoney: liveMoney(),
     monitor,
-    crypto: {
-      provider: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
-      apiUrl: config.ibex.apiUrl, accountId: head(config.ibex.accountId),
-      clientId: mask(config.ibex.clientId), webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
-      methods: ["LIGHTNING", "ONCHAIN"], // USDT gated per-org by IBEX
-      // Sandbox LN takes real sats → a settled sandbox inbound can authorize a
-      // real payout when this opt-in is on (off by default).
-      sandboxPayout: config.ibex.allowSandboxPayout,
-    },
-    // All crypto inbound rails (IBEX is the base, priority-ordered). Additive to the
-    // `crypto` field above so existing views keep working while new ones can list rails.
+    // ONE list for every crypto inbound rail. This used to be two overlapping fields —
+    // `crypto` (IBEX only, what the UI read) and `cryptoRails` (IBEX again + Blink, read by
+    // nothing) — so IBEX's env/configured/live/apiUrl/webhookSecret were serialised twice
+    // and could drift, while Blink was invisible to operators despite being a real rail.
+    // Per-rail identifiers stay optional because the rails genuinely differ: IBEX is
+    // account+client scoped, Blink is wallet scoped.
     cryptoRails: [
       {
         name: "IBEX Hub", base: true, env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
-        apiUrl: config.ibex.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
+        apiUrl: config.ibex.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], // USDT gated per-org by IBEX
+        webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
+        accountId: head(config.ibex.accountId), clientId: mask(config.ibex.clientId),
+        // Sandbox LN takes real sats → a settled sandbox inbound can authorize a real
+        // payout when this opt-in is on (off by default).
+        sandboxPayout: config.ibex.allowSandboxPayout,
       },
       {
         name: "Blink", base: false, env: config.blink.env, configured: blinkConfigured(), live: blinkLive(),
-        apiUrl: config.blink.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], walletId: head(config.blink.walletId),
+        apiUrl: config.blink.apiUrl, methods: ["LIGHTNING", "ONCHAIN"],
         webhookSecret: config.blink.webhookSecret ? "set" : "unset",
+        walletId: head(config.blink.walletId),
       },
     ],
     payout: [

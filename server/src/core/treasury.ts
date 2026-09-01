@@ -6,6 +6,7 @@
    payments). Super-Admin only (enforced at the route); every withdrawal is audited.
    ============================================================ */
 import type { PaymentState, TreasuryPool, TreasuryRail, TreasuryWithdrawal } from "../../../shared/types.js";
+import { btcToMsat, msatToBtc } from "../../../shared/domain.js";
 import { config } from "../config.js";
 import { getSettings } from "./settings.js";
 import { store } from "../db/store.js";
@@ -53,7 +54,7 @@ function recentWithdrawal(rail: TreasuryRail, amount: number, by: string, window
 
 /** IBEX account balance (smallest unit, by currencyId) → the asset's natural unit. */
 function toDisplay(currencyId: number, bal: number): number {
-  if (currencyId === 0) return bal / 1e11;            // MSAT → BTC
+  if (currencyId === 0) return msatToBtc(bal);         // MSAT → BTC
   if (currencyId === 1) return bal / 1e8;             // SATS → BTC
   if (currencyId === 2) return bal;                   // BTC
   if (currencyId === 29 || currencyId === 30) return bal / 1e6; // USDT/USDC base units
@@ -115,11 +116,11 @@ export async function withdraw(rail: TreasuryRail, amount: number, by: string): 
   const entry: TreasuryWithdrawal = { id: id("tw"), at: new Date().toISOString(), rail, asset, amount, destination: dest, by, status: "sent" };
   try {
     if (rail === "lightning") {
-      const r = await payLightningAddress(dest, Math.round(amount * 1e11)); // BTC → msat
+      const r = await payLightningAddress(dest, btcToMsat(amount));
       entry.txId = r.transactionId;
       entry.status = r.settled ? "settled" : "sent";
     } else { // onchain
-      const r = await sendOnchain(dest, Math.round(amount * 1e11)); // BTC → msat (BTC account unit)
+      const r = await sendOnchain(dest, btcToMsat(amount)); // BTC account unit is msat
       entry.txId = r.txId;
       entry.status = "sent";
     }

@@ -7,6 +7,7 @@
    Lives in core/ (not adapters/ibex.ts) so every rail — IBEX, Blink, future — shares
    one implementation instead of importing a decoder from a specific provider.
    ============================================================ */
+import { btcToMsat } from "../../../shared/domain.js";
 
 /** Amount encoded in a BOLT11 invoice's HRP, in msat: 0 = amount-less; null = unparseable.
  *  Used to bound a refund so we can never over-pay a sender-supplied invoice. */
@@ -18,7 +19,7 @@ export function bolt11AmountMsat(bolt11: string): number | null {
   if (!m) return null;
   if (!m[2]) return 0; // amount-less invoice
   const factor: Record<string, number> = { m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12 };
-  return Math.round(Number(m[2]) * (factor[m[3]] ?? 1) * 1e11); // BTC→msat
+  return btcToMsat(Number(m[2]) * (factor[m[3]] ?? 1));
 }
 
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";

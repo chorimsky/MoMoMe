@@ -376,7 +376,13 @@ export const api = {
   adminRails: () => req<{
     liveMoney: boolean;
     monitor: { pending: number; delivered24h: number; failed24h: number };
-    crypto: { provider: string; env: string; configured: boolean; live: boolean; apiUrl: string; accountId: string; clientId: string; webhookSecret: string; methods: string[]; sandboxPayout: boolean };
+    /** Every crypto inbound rail, base rail first. Replaces the old `crypto` field, which
+     *  duplicated the base rail's config and hid the others. */
+    cryptoRails: Array<{
+      name: string; base: boolean; env: string; configured: boolean; live: boolean;
+      apiUrl: string; methods: string[]; webhookSecret: string;
+      accountId?: string; clientId?: string; walletId?: string; sandboxPayout?: boolean;
+    }>;
     payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string; reachability?: RailReachability | null }>;
     egress?: EgressStatus;
   }>("/admin/rails"),

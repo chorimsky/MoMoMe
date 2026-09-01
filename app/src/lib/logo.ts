@@ -88,26 +88,6 @@ function contentBox(ctx: CanvasRenderingContext2D, w: number, h: number): BBox |
   if (maxx < minx || maxy < miny) return null;
   return { x: minx, y: miny, w: maxx - minx + 1, h: maxy - miny + 1 };
 }
-
-/** Do the corners look like a single opaque solid colour (a removable
- *  background)? Returns that colour, or null. */
-export async function detectSolidBackground(dataUrl: string): Promise<RGB | null> {
-  try {
-    const img = await loadImage(dataUrl);
-    const drawn = draw(img);
-    if (!drawn) return null;
-    const { ctx, canvas } = drawn;
-    const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const cs = corners(data, width, height);
-    if (cs.some((c) => c.a < 250)) return null; // already transparent
-    const bg = cs[0].rgb;
-    if (!cs.every((c) => dist(c.rgb, bg) < 24)) return null; // not uniform
-    return bg;
-  } catch {
-    return null;
-  }
-}
-
 /** Does this logo need cleanup before it displays well? `solidBg` = sits on a
  *  removable background; `padded` = the artwork is surrounded by enough empty
  *  margin that it would render noticeably small. */

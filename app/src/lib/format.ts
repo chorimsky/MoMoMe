@@ -4,9 +4,7 @@ export function fmt(n: number, d = 0): string {
   // in English too. XAF is zero-decimal so there's no separator clash. The nbsp keeps
   // the number from wrapping mid-value and is stripped by any \D digit-parse on input.
   return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/,/g, " ");
-}
-export const fmtXAF = (n: number) => fmt(Math.round(n)) + " XAF";
-export const fmtSats = (n: number) => fmt(Math.round(n)) + " sats";
+}export const fmtSats = (n: number) => fmt(Math.round(n)) + " sats";
 
 /** Compact XAF for dense tables — accurate at every scale (never rounds a real
  *  balance down to "0.0M"). Full grouped below 100k, "k" up to 1M, "M" above. */

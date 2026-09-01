@@ -9,10 +9,3 @@ export interface PeexVerification {
   at: string;
   source: "PEEX";
 }
-
-export interface PeexLog {
-  at: string;
-  kind: "webhook" | "api" | "verify";
-  ok: boolean;
-  summary: string;
-}

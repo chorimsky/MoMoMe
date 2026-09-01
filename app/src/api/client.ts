@@ -99,8 +99,6 @@ function ensureSenderId(): string {
   }
 }
 let senderId = ensureSenderId();
-export function getSenderId(): string { return senderId; }
-
 /* ---------- device proof-of-possession (signed requests) ----------
    The device enrols a keypair for its id (trust-on-first-use) and signs every
    request thereafter, so a stolen id can't act without the private key. Enrolment

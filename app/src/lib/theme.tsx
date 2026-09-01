@@ -84,8 +84,3 @@ export function useTheme(): ThemeContextValue {
   if (!v) throw new Error("useTheme must be used within a ThemeProvider");
   return v;
 }
-
-/** Legacy one-shot apply (kept for any direct callers). */
-export function useApplyTheme(t: ThemeSettings) {
-  useEffect(() => applyTheme(t), [t]);
-}

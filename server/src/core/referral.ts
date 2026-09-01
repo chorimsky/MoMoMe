@@ -61,4 +61,3 @@ export function recordReferral(newOwner: string, refCode: string): boolean {
 }
 
 export function referralsOf(owner: string): string[] { return referredList.get(owner) ?? []; }
-export function referrerOfOwner(owner: string): string | undefined { return referrerOf.get(owner); }

@@ -82,12 +82,3 @@ export function Wordmark({ size = 22, mono, color }: { size?: number; mono?: boo
   );
 }
 
-/** The app-icon lockup: goggle-eye tile + wordmark, used on the splash and headers. */
-export function BrandLockup({ size = 30, style }: { size?: number; style?: ViewStyle }) {
-  return (
-    <View style={[{ flexDirection: 'row', alignItems: 'center', gap: size * 0.34 }, style]}>
-      <MomoMark size={size * 1.2} />
-      <Wordmark size={size * 0.72} />
-    </View>
-  );
-}

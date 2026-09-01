@@ -277,15 +277,6 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
   return <canvas ref={ref} width={size} height={size} style={{ width: size, height: size, borderRadius: 10, display: "block" }} aria-label="Payment QR code" role="img" />;
 }
 
-/* ---------- asset / rail glyphs ---------- */
-export function AssetGlyph({ kind, size = 30 }: { kind: "BTC" | "USDT"; size?: number }) {
-  const isBtc = kind === "BTC";
-  return (
-    <span style={{ width: size, height: size, borderRadius: 9, flex: "none", display: "inline-grid", placeItems: "center", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: size * 0.5, color: "#fff", background: isBtc ? "var(--lightning)" : "oklch(0.62 0.13 162)" }}>
-      {isBtc ? "₿" : "₮"}
-    </span>
-  );
-}
 
 // Rail-NEUTRAL by method — the crypto rail (IBEX/Blink) is an internal detail, so the
 // badge no longer hardcodes "IBEX". Pass `provider` (payInstruction.provider) to show

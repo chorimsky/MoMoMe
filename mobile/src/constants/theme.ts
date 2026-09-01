@@ -133,6 +133,3 @@ export const Shadow = {
     elevation: 6,
   },
 } as const;
-
-export const BottomTabInset = Platform.select({ ios: 50, android: 70 }) ?? 0;
-export const MaxContentWidth = 560;

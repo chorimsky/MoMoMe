@@ -13,9 +13,6 @@ import { register, touch } from "./persist.js";
 import { HealthTracker, type RailHealthState } from "./railHealth.js";
 import { PAYOUTS, payoutByName, payoutsFor, peexitAdapter, type PayoutAdapter } from "../adapters/payouts.js";
 
-/** Back-compat alias — callers still refer to the payout rail as an "aggregator". */
-export type AggregatorAdapter = PayoutAdapter;
-
 const ALL_PROVIDERS: ProviderId[] = ["MTN", "ORANGE", "AIRTEL"];
 
 /** Availability + auto-failover for payout rails, on the SHARED tracker also used by

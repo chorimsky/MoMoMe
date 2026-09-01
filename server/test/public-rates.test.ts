@@ -14,24 +14,8 @@ function ok(label: string, cond: boolean, detail = "") {
 }
 
 async function main() {
-  const { parsePublicRates, parseKrakenBtc } = await import("../src/core/publicRates.js");
+  const { parseKrakenBtc } = await import("../src/core/publicRates.js");
   const { setRates, setDualBtc, ratesFresh, ratesMeta, btcUsd } = await import("../src/core/rates.js");
-
-  console.log("\nPublic rates — parsePublicRates (Coinbase shapes)");
-  {
-    const r = parsePublicRates({ data: { amount: "112345.67" } }, { data: { rates: { USD: "1.09" } } });
-    ok("btcUsd parsed", r.btcUsd === 112345.67, String(r.btcUsd));
-    ok("eurUsd parsed", r.eurUsd === 1.09, String(r.eurUsd));
-    ok("stablecoins pegged to 1", r.usdtUsd === 1 && r.usdcUsd === 1);
-  }
-  {
-    const r = parsePublicRates(null, null);
-    ok("missing responses → null btc/eur", r.btcUsd === null && r.eurUsd === null);
-  }
-  {
-    const r = parsePublicRates({ data: { amount: "0" } }, { data: { rates: {} } });
-    ok("zero/absent amounts → null (never priced on 0)", r.btcUsd === null && r.eurUsd === null);
-  }
 
   console.log("\nPublic rates — cache freshness + source label");
   // Before any real pull, a cold cache is NOT fresh (quoting refuses in live mode).

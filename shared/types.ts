@@ -355,12 +355,6 @@ export interface Merchant {
   createdAt: string;
   updatedAt: string;
 }
-
-export interface ResolveMerchantInput {
-  input: string;
-  country?: CountryCode;
-  provider?: ProviderId;
-}
 export interface ResolveMerchantResult {
   inputType: MerchantInputType;
   merchant: Merchant | null;
@@ -752,21 +746,6 @@ export interface AuditEntry {
 }
 
 /* ---------- compliance ---------- */
-export interface ComplianceSnapshot {
-  kyc: { verified: number; pending: number; rejected: number };
-  flagged: Array<{
-    ref: string;
-    phone: string;
-    amountXaf: number;
-    reason: string;
-    level: "warn" | "bad";
-    /** Peex intelligence signal (optional — only when the enrichment ran). */
-    peexRisk?: number;
-    peexSignal?: "clear" | "review";
-  }>;
-  audit: Array<{ at: string; ref: string; event: string }>;
-}
-
 /* ============================================================
    AML / CFT compliance engine (CEMAC Règlement N°01 / GABAC / ANIF Cameroun).
    A tamper-evident, retained record of detection → case → disposition → report.

@@ -165,6 +165,4 @@ function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInst
 }
 
 /** Test/admin hook: expose the inbound rail health tracker. */
-export function inboundRailHealth(): HealthTracker { return health; }
-
 export type { InstructionRequest, RailEvent, RailAdapter, SettlementStatus } from "./types.js";

@@ -57,8 +57,6 @@ export function getUser(uid: string): AdminUser | undefined { return byId.get(ui
 export function listUsers(): AdminUserView[] {
   return [...byId.values()].map(view).sort((a, b) => a.username.localeCompare(b.username));
 }
-export function userCount(): number { return byId.size; }
-
 export function createUser(username: string, password: string, role: AdminRole): AdminUserView {
   const u: AdminUser = { id: id("usr"), username: norm(username), role, ...makeHash(password), createdAt: new Date().toISOString() };
   byId.set(u.id, u);

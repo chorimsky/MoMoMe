@@ -113,8 +113,12 @@ export const METHOD_META: Record<
 > = {
   LIGHTNING: { name: "Instant", arrival: "Within seconds", fast: true },
   ONCHAIN: { name: "Bitcoin", arrival: "10–60 minutes", fast: false },
-  USDT: { name: "US Dollars", arrival: "Within seconds", fast: true },
-  USDC: { name: "US Dollars", arrival: "Within seconds", fast: true },
+  // The ticker is in the name because BOTH stablecoins are "US Dollars" to a customer —
+  // with USDC live they sat side by side in the method picker as two identical rows, one
+  // of which you could only tell apart by its glyph. The pay screen has always said
+  // "Send US Dollars (USDT)", so this just matches it.
+  USDT: { name: "US Dollars (USDT)", arrival: "Within seconds", fast: true },
+  USDC: { name: "US Dollars (USDC)", arrival: "Within seconds", fast: true },
 };
 
 /* ---------- Bitcoin unit conversion ----------

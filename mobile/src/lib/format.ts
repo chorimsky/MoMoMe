@@ -11,8 +11,10 @@ export function xaf(n: number): string {
 export const METHOD_LABEL: Record<Method, string> = {
   LIGHTNING: 'Instant',
   ONCHAIN: 'Bitcoin',
-  USDT: 'US Dollars',
-  USDC: 'US Dollars',
+  // Ticker included: with both stablecoins on offer, "US Dollars" twice is two
+  // indistinguishable rows in the method picker (matches shared/domain METHOD_META).
+  USDT: 'US Dollars (USDT)',
+  USDC: 'US Dollars (USDC)',
 };
 
 /** Sender-facing coarse status for a payment state. */

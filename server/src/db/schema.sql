@@ -64,6 +64,17 @@ CREATE INDEX IF NOT EXISTS payments_merchant  ON payments (merchant_id) WHERE me
 -- insert violated payments_ref_key. A sequence is the only counter that is actually
 -- shared, and nextval() is atomic and non-blocking even across concurrent transactions.
 CREATE SEQUENCE IF NOT EXISTS payment_ref_seq START 418843;
+-- Align the sequence with refs ALREADY issued by the old in-memory counter. CREATE
+-- SEQUENCE ... IF NOT EXISTS will not adjust an existing sequence, and starting at 418843
+-- sits BELOW numbers the counter had already handed out — so every nextval() collided with
+-- an existing row until it caught up, which is the duplicate-key failure this replaced.
+-- GREATEST(last_value, max-in-table, floor) can only ever move the sequence FORWARD, so
+-- this is safe to re-run on every cold start and never reissues a used ref.
+SELECT setval('payment_ref_seq', GREATEST(
+  (SELECT last_value FROM payment_ref_seq),
+  COALESCE((SELECT MAX(NULLIF(substring(ref from '[0-9]+$'), '')::bigint) FROM payments), 0),
+  418842
+));
 
 -- ---- Ledger: append-only double-entry journal (money source of truth) ----
 CREATE TABLE IF NOT EXISTS ledger (

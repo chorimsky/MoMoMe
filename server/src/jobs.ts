@@ -10,7 +10,7 @@ import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured, blinkConfigured } from "./config.js";
 import { rate as ibexRate } from "./adapters/ibex.js";
-import { setRates, setDualBtc, CCY, ratesFresh } from "./core/rates.js";
+import { setRates, setDualBtc, CCY, ratesFresh, setRatesRefresher } from "./core/rates.js";
 import { fetchEurUsd, fetchDualBtcUsd } from "./core/publicRates.js";
 
 /** Reconcile backstops (payouts / cashins / inbounds / refunds / failed-payouts) +
@@ -65,3 +65,8 @@ export async function ensureFreshRates(): Promise<void> {
   if (!fxEnsureInflight) fxEnsureInflight = fxTick().finally(() => { fxEnsureInflight = null; });
   await fxEnsureInflight;
 }
+
+// Let any module that NEEDS a fresh rate pull one without importing jobs.ts (which imports
+// stateMachine.ts — the reverse import would be a cycle). Registered at module load, so it
+// is in place before the first request on either runtime.
+setRatesRefresher(fxTick);

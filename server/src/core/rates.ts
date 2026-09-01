@@ -101,6 +101,33 @@ export function setDualBtc(a: number | null, b: number | null): void {
  *  stale/fallback rate would over- or under-charge the customer. Quoting must
  *  refuse when this is false AND real money can move. */
 const MAX_RATE_AGE_MS = 5 * 60_000;
+/* ---------- on-demand refresh ----------
+   The always-on server polls FX on a timer. Serverless has no poller: the only scheduled
+   refresh is Vercel Cron, which on the Hobby plan runs ONCE A DAY. So any code that
+   requires a fresh rate must be able to pull one itself.
+
+   This mattered for real money. On-chain quotes are `estimateOnly` — a 10-60 minute
+   confirmation window cannot honour a locked rate — so confirmInbound RE-PRICES at the
+   current rate and correctly refuses to price on a stale feed. But nothing refreshed the
+   feed at settlement time, so `ratesFresh()` was false by then and EVERY on-chain payment
+   held at MANUAL_REVIEW after the customer's BTC had already been booked to the ledger.
+   The refusal was right; the missing refresh was the bug.
+
+   The refresher is INJECTED (jobs.ts registers fxTick at import) so this module keeps no
+   dependency on the adapters. Single-flighted: a burst of settlements triggers one pull. */
+type Refresher = () => Promise<void>;
+let refresher: Refresher | null = null;
+let refreshInflight: Promise<void> | null = null;
+export function setRatesRefresher(fn: Refresher): void { refresher = fn; }
+
+/** Pull fresh rates if the cache is stale. No-op when already fresh or no refresher is
+ *  registered. Never throws — callers decide what a still-stale feed means. */
+export async function ensureRatesFresh(): Promise<void> {
+  if (ratesFresh() || !refresher) return;
+  if (!refreshInflight) refreshInflight = refresher().catch(() => {}).finally(() => { refreshInflight = null; });
+  await refreshInflight;
+}
+
 export function ratesFresh(maxAgeMs: number = MAX_RATE_AGE_MS): boolean {
   return !divergent && !!cache && Date.now() - cache.at < maxAgeMs;
 }

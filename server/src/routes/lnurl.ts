@@ -73,7 +73,9 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   // re-prices ONCHAIN only). Without this, a cold/stale/divergent cache would price
   // real sats on the hardcoded fallback → over- or under-pay the recipient. Mirror the
   // /quote guard (api.ts): refresh on-miss, then refuse when not fresh & real money moves.
-  if (liveMoney()) await ensureFreshRates().catch(() => {});
+  // Always try (single-flighted, no-op when fresh). Quoting on a stale rate that
+  // settlement will then refuse is an inconsistency, not a saving.
+  await ensureFreshRates().catch(() => {});
   if (liveMoney() && !ratesFresh()) {
     return res.json(lnErr("Live exchange rates are momentarily unavailable — please try again in a moment."));
   }

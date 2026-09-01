@@ -448,7 +448,9 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
   // Serverless has no long-lived FX poller, so the per-instance cache can be cold/stale
   // on a request-serving instance — refresh ON-MISS here (deduped) so a live quote isn't
   // falsely refused. A warm/fresh cache returns instantly; only a miss awaits a pull.
-  if (liveMoney()) await ensureFreshRates().catch(() => {});
+  // Always try (single-flighted, no-op when fresh). Quoting on a stale rate that
+  // settlement will then refuse is an inconsistency, not a saving.
+  await ensureFreshRates().catch(() => {});
   if (liveMoney() && !ratesFresh()) {
     return res.status(503).json({ error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." });
   }

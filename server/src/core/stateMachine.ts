@@ -20,7 +20,7 @@ import { getSettings, refreshSettingsIfStale } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
 import { bolt11AmountMsat } from "./bolt11.js";
 import { rateFor } from "./fx.js";
-import { ratesFresh } from "./rates.js";
+import { ratesFresh, ensureRatesFresh } from "./rates.js";
 
 /** Live queryable XAF across funded aggregators, briefly cached so the payment hot
  *  path (every /payments pre-flight + every confirmInbound) doesn't issue a balance
@@ -234,6 +234,11 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number): P
   // (Lightning / USDT) keep their lock: their exposure is seconds, which is what the
   // tighter 150bp spread already pays for.
   if (p.payInstruction.method === "ONCHAIN") {
+    // PULL a rate before judging the feed stale. Settlement happens 10-60 minutes after the
+    // quote, and on serverless nothing refreshes FX in between (no poller; Hobby cron is
+    // daily) — so this check used to be false essentially always, holding every on-chain
+    // payment for review AFTER the customer's crypto had been booked.
+    await ensureRatesFresh();
     // No fresh rate = no honest price. Holding is the only safe move: booking the
     // stale lock is the bug we're fixing, and guessing is worse. (ratesFresh() is also
     // false on a divergent two-source feed — see F4 — so a manipulated feed holds too.)

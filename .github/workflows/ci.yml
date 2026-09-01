@@ -1,0 +1,43 @@
+# Runs on every push and pull request. Until now the ONLY workflow was a manual Hostinger
+# deploy, so nothing verified main — a broken build reached the production branch and sat
+# there (the vercel-backend deploy failed on a TypeScript syntax error and stayed down).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4          # pnpm version comes from package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22                  # matches engines.node = 22.x
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (server + app)
+        run: pnpm -r typecheck
+
+      - name: Tests (server)
+        run: pnpm -r test
+
+      # mobile/ is deliberately OUTSIDE the pnpm workspace (Expo manages its own tree), so
+      # it needs its own install + typecheck or the shipped iOS app goes unverified.
+      - name: Typecheck (mobile)
+        run: npm --prefix mobile ci --no-audit --no-fund && npm --prefix mobile run typecheck
+
+      # The build is part of the check: a type-clean app can still fail to bundle.
+      - name: Build (app)
+        run: pnpm --filter @momome/app build
+        env:
+          SKIP_WAVELENGTH_RUNTIME: "1"

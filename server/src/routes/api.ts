@@ -2128,13 +2128,36 @@ api.get("/ops/snapshot", async (req, res) => {
     ageSec: Math.max(0, Math.round((Date.now() - Date.parse(p.createdAt)) / 1000)),
     live: !["DELIVERED", "FAILED", "REFUNDED"].includes(p.state),
   }));
+  // Every figure below is DERIVED. This endpoint previously reported fabricated numbers:
+  // floatXaf was `max(0, payout_float_XAF) + 48_500_000` — and payout_float_XAF is a credit
+  // balance, so it is always ≤ 0 and max(0, …) is always 0, making the treasury a hardcoded
+  // 48.5M; "today" counted ALL time; and every rail was healthy:true with invented
+  // latencies. Every /admin/* view had already been moved to real data — this one was
+  // missed, and an ops dashboard that invents its numbers is worse than one that says
+  // "unknown", because decisions get made on it.
   const methods: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const today = (p: Payment) => Date.parse(p.updatedAt) >= startOfDay.getTime();
   const snapshot: OpsSnapshot = {
     inFlight: live.length,
-    deliveredToday: all.filter((p) => p.displayStatus === "Completed").length,
-    failedToday: all.filter((p) => p.displayStatus === "Failed").length,
-    floatXaf: Math.max(0, await store().balance("payout_float_XAF", "XAF")) + 48_500_000,
-    rails: methods.map((m) => ({ method: m, healthy: true, latencyMs: m === "ONCHAIN" ? 2600 : m === "LIGHTNING" ? 900 : 1200 })),
+    deliveredToday: all.filter((p) => p.displayStatus === "Completed" && today(p)).length,
+    failedToday: all.filter((p) => p.displayStatus === "Failed" && today(p)).length,
+    // The same figure the payout gate itself uses, so the dashboard and the money path
+    // cannot disagree about how much can actually be paid out.
+    floatXaf: Math.max(0, Math.round(await availableFloatXaf())),
+    rails: methods.map((m) => {
+      const forMethod = all.filter((p) => p.method === m);
+      const settled = forMethod.filter((p) => p.displayStatus !== "Pending");
+      const failed = settled.filter((p) => p.displayStatus === "Failed").length;
+      // Healthy unless this method is actually failing: needs evidence (≥3 settled) before
+      // a single early failure can paint a rail red.
+      const healthy = settled.length < 3 || failed / settled.length < 0.5;
+      // Real median time from creation to delivery; 0 = not enough data to say.
+      const times = forMethod.filter((p) => p.state === "DELIVERED")
+        .map((p) => Date.parse(p.updatedAt) - Date.parse(p.createdAt))
+        .filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+      return { method: m, healthy, latencyMs: times.length ? times[Math.floor(times.length / 2)] : 0 };
+    }),
     rows,
   };
   res.json(snapshot);

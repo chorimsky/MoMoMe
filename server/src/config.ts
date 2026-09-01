@@ -331,8 +331,19 @@ export function assertAdminSecurity(): void {
   if (inProd && config.admin.passwordIsDefault) {
     throw new Error("Refusing to start in production with the default ADMIN_PASSWORD. Set a strong ADMIN_PASSWORD (and ideally ADMIN_RECOVERY_KEY + ADMIN_SESSION_SECRET).");
   }
-  if (inProd && !config.admin.sessionSecret) {
-    console.warn("⚠️  ADMIN_SESSION_SECRET is not set — using a persisted random signing secret. Set ADMIN_SESSION_SECRET to pin it across deploys.");
+  // Gate on liveMoney(), NOT inProd — Vercel sets NODE_ENV=production for the sandbox
+  // backend too, and this must not block a demo deploy (same reasoning as
+  // assertCronSecurity / assertComplianceConfig).
+  //
+  // Once real money can move this is a correctness requirement, not advice. Without an
+  // explicit secret each instance falls back to a RANDOM one generated at its own cold
+  // start, so a token issued by one serverless instance is rejected by the next: operators
+  // get logged out at random, mid-task, with no error that explains why.
+  if (liveMoney() && !config.admin.sessionSecret) {
+    throw new Error("Refusing to run a live-money rail without ADMIN_SESSION_SECRET — each serverless instance would otherwise sign sessions with its own random secret, so admin logins would fail unpredictably across instances. Set ADMIN_SESSION_SECRET to a long random value.");
+  }
+  if (!liveMoney() && inProd && !config.admin.sessionSecret) {
+    console.warn("⚠️  ADMIN_SESSION_SECRET is not set — each instance signs with its own random secret. Required before going live.");
   }
   if (inProd && !process.env.ADMIN_RECOVERY_KEY) {
     console.warn("⚠️  ADMIN_RECOVERY_KEY is not set — /admin/forgot falls back to ADMIN_PASSWORD. Set a distinct ADMIN_RECOVERY_KEY.");

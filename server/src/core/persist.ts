@@ -80,6 +80,11 @@ export function persistDurable(): boolean { return db !== null || PG; }
 const sel = db?.prepare("SELECT json FROM snapshot WHERE key = ?") ?? null;
 const up = db?.prepare("INSERT INTO snapshot(key, json) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json") ?? null;
 
+/** Snapshot version last seen for each key, so a write can tell whether another instance
+ *  changed the row underneath it. Absent → we have not read this key yet and write
+ *  unconditionally. */
+const versions = new Map<string, number>();
+
 const dumpers = new Map<string, () => unknown>();
 const restorers = new Map<string, (data: unknown) => void>();
 
@@ -104,8 +109,18 @@ export function touch(key: string): void {
   const dump = dumpers.get(key);
   if (!dump) return;
   if (PG) {
-    // waitUntil-backed so the write survives the serverless freeze after the response.
-    background(setSnapshot(key, JSON.stringify(dump())));
+    // Conditional on the version we last saw. A lost update no longer passes silently: we
+    // still write (this instance's state is what the operator just changed, and dropping it
+    // would be worse), but the event is REPORTED with the key, so a collection quietly
+    // losing data is visible instead of invisible. waitUntil-backed so it survives the
+    // serverless freeze after the response.
+    const expected = versions.get(key);
+    background(setSnapshot(key, JSON.stringify(dump()), expected).then(async (v) => {
+      if (v !== null) { versions.set(key, v); return; }
+      console.warn(`[persist] LOST UPDATE on snapshot "${key}": another instance wrote it since this one last read. Overwriting with local state — concurrent edits to this collection can be lost. (Per-row storage is the real fix for money/user data.)`);
+      const forced = await setSnapshot(key, JSON.stringify(dump()));
+      if (forced !== null) versions.set(key, forced);
+    }));
     return;
   }
   if (!up) return;
@@ -118,7 +133,8 @@ export function touch(key: string): void {
 export async function hydrateSnapshots(): Promise<void> {
   if (!PG) return;
   try {
-    for (const { key, json } of await allSnapshots()) {
+    for (const { key, json, version } of await allSnapshots()) {
+      versions.set(key, version);
       const restore = restorers.get(key);
       if (restore) { try { restore(json); } catch (e) { console.error("persist hydrate", key, e); } }
     }
@@ -134,8 +150,11 @@ export async function rehydrate(key: string): Promise<void> {
   if (!PG) return;
   const restore = restorers.get(key);
   if (!restore) return;
-  const json = await getSnapshot(key);
-  if (json !== undefined) { try { restore(json); } catch (e) { console.error("persist rehydrate", key, e); } }
+  const row = await getSnapshot(key);
+  if (row !== undefined) {
+    versions.set(key, row.version);
+    try { restore(row.json); } catch (e) { console.error("persist rehydrate", key, e); }
+  }
 }
 
 /** Flush every collection (graceful shutdown / end of a serverless invocation). */

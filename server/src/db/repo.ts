@@ -9,6 +9,7 @@
    proven in isolation against real Postgres first (test/pg-store.test.ts).
    ============================================================ */
 import type { Quote, Payment, LedgerEntry, LedgerAccount } from "../../../shared/types.js";
+import { randomUUID } from "node:crypto";
 import { q, withTx } from "./pg.js";
 
 /* ---------------- quotes ---------------- */
@@ -74,8 +75,18 @@ export async function findByProviderRef(providerRef: string): Promise<Payment | 
   const rows = await q<{ body: Payment }>(`SELECT body FROM payments WHERE provider_ref=$1`, [providerRef]);
   return rows[0]?.body;
 }
+/** Newest-first payments, BOUNDED. This is called by roughly ten admin views and by both
+ *  reconcile ticks, and it used to select the entire table and deserialize every row on each
+ *  one — fine at hundreds of payments, fatal at a hundred thousand. The cap keeps the newest
+ *  rows, which is what every caller actually wants (recent activity, reconcile windows).
+ *  It LOGS when the cap is reached, because a silently truncated total would read as a real
+ *  figure on a dashboard — the same class of lie the fabricated ops numbers were. */
+const PAYMENTS_SCAN_MAX = Number(process.env.PAYMENTS_SCAN_MAX || "10000");
 export async function listPayments(): Promise<Payment[]> {
-  const rows = await q<{ body: Payment }>(`SELECT body FROM payments ORDER BY created_at DESC`);
+  const rows = await q<{ body: Payment }>(`SELECT body FROM payments ORDER BY created_at DESC LIMIT $1`, [PAYMENTS_SCAN_MAX]);
+  if (rows.length === PAYMENTS_SCAN_MAX) {
+    console.warn(`[store] listPayments hit the ${PAYMENTS_SCAN_MAX}-row cap — totals derived from it are UNDERSTATED. Move aggregates to SQL or raise PAYMENTS_SCAN_MAX.`);
+  }
   return rows.map((r) => r.body);
 }
 /** Point a providerRef at a payment (when the instruction is minted after the row).
@@ -99,7 +110,13 @@ const signed = (l: Leg) => (l.direction === "debit" ? l.amount : -l.amount);
 
 /** Append a BALANCED journal transaction (debits == credits per currency) in one txn.
  *  Amount stored SIGNED (debit +, credit −) so a balance is a trivial SUM. */
-export async function recordTxn(paymentId: string, legs: Leg[], at = new Date().toISOString(), txnId = `txn_${paymentId}_${legs.length}`): Promise<void> {
+/** A journal transaction id must be UNIQUE per posting: it is how the ledger view groups
+ *  legs into the transaction they belong to. The old default, `txn_<paymentId>_<legCount>`,
+ *  collided by construction — a payment's inbound booking, its FX conversion and its
+ *  delivery leg are all 2-leg postings, so three distinct transactions shared one id and the
+ *  audit trail merged them. (The in-memory ledger always used a unique id; only Postgres
+ *  had this.) */
+export async function recordTxn(paymentId: string, legs: Leg[], at = new Date().toISOString(), txnId = `txn_${randomUUID()}`): Promise<void> {
   const net = new Map<string, number>();
   for (const l of legs) net.set(l.currency, (net.get(l.currency) ?? 0) + signed(l));
   for (const [ccy, n] of net) if (Math.abs(n) > 1e-9) throw new Error(`Unbalanced ledger txn for ${paymentId}: ${ccy} nets ${n}`);
@@ -154,15 +171,35 @@ export async function reversePayment(paymentId: string): Promise<void> {
 /* ---------------- snapshots (non-money collections: settings/routing/merchants/…) ----------------
    Coarse key→JSON blobs with optimistic version bump. Money data never lives here — it's
    in the quotes/payments/ledger tables. Last-writer-wins is acceptable for config-ish state. */
-export async function setSnapshot(key: string, json: string): Promise<void> {
-  await q(
-    `INSERT INTO snapshots(key, json, version, updated_at) VALUES($1, $2::jsonb, 1, now())
-     ON CONFLICT(key) DO UPDATE SET json = excluded.json, version = snapshots.version + 1, updated_at = now()`,
-    [key, json],
+/** Write a snapshot. When `expected` is supplied the write is CONDITIONAL on the row still
+ *  being at that version; the returned version is null if another instance had already moved
+ *  it on. The caller decides what to do — see persist.touch(), which force-writes but LOGS.
+ *
+ *  This matters because the snapshot is a whole-collection blob written from per-instance
+ *  memory. Two serverless instances that both hydrated at their own cold start will each
+ *  write their entire view, so one silently erases the other's additions — the contact
+ *  vault, device enrolments and admin users all live here. The schema claimed "reject on
+ *  stale" but nothing ever compared the version, so the loss was invisible. */
+export async function setSnapshot(key: string, json: string, expected?: number): Promise<number | null> {
+  if (expected === undefined) {
+    const rows = await q<{ version: string }>(
+      `INSERT INTO snapshots(key, json, version, updated_at) VALUES($1, $2::jsonb, 1, now())
+       ON CONFLICT(key) DO UPDATE SET json = excluded.json, version = snapshots.version + 1, updated_at = now()
+       RETURNING version::text`,
+      [key, json],
+    );
+    return Number(rows[0]?.version ?? 0);
+  }
+  const rows = await q<{ version: string }>(
+    `UPDATE snapshots SET json = $2::jsonb, version = version + 1, updated_at = now()
+     WHERE key = $1 AND version = $3 RETURNING version::text`,
+    [key, json, expected],
   );
+  return rows.length ? Number(rows[0].version) : null; // null = someone else wrote first
 }
-export async function allSnapshots(): Promise<Array<{ key: string; json: unknown }>> {
-  return q<{ key: string; json: unknown }>(`SELECT key, json FROM snapshots`);
+export async function allSnapshots(): Promise<Array<{ key: string; json: unknown; version: number }>> {
+  const rows = await q<{ key: string; json: unknown; version: string }>(`SELECT key, json, version::text FROM snapshots`);
+  return rows.map((r) => ({ key: r.key, json: r.json, version: Number(r.version) }));
 }
 
 /* ---------------- compliance chain (append-only, tamper-evident legal log) ----------------
@@ -184,9 +221,9 @@ export async function allComplianceEvents(): Promise<unknown[]> {
 
 /** Read ONE snapshot key (for cross-instance freshness re-reads — e.g. the settings
  *  kill-switch a warm serverless instance would otherwise serve stale). undefined if absent. */
-export async function getSnapshot(key: string): Promise<unknown | undefined> {
-  const rows = await q<{ json: unknown }>(`SELECT json FROM snapshots WHERE key = $1`, [key]);
-  return rows.length ? rows[0].json : undefined;
+export async function getSnapshot(key: string): Promise<{ json: unknown; version: number } | undefined> {
+  const rows = await q<{ json: unknown; version: string }>(`SELECT json, version::text FROM snapshots WHERE key = $1`, [key]);
+  return rows.length ? { json: rows[0].json, version: Number(rows[0].version) } : undefined;
 }
 
 /* ---------------- momo_ops (admin Mobile-Money ops — real money, one row per op) ----------------

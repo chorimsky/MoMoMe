@@ -2,7 +2,7 @@
   "name": "momome",
   "private": true,
   "version": "0.1.0",
-  "description": "MoMo›Me — pay Mobile Money over crypto rails. Monorepo: React frontend + Node settlement backend.",
+  "description": "MoMo\u203aMe \u2014 pay Mobile Money over crypto rails. Monorepo: React frontend + Node settlement backend.",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
@@ -11,12 +11,13 @@
     "build": "pnpm --filter @momome/server build && pnpm --filter @momome/app build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check": "pnpm typecheck && pnpm test",
+    "check": "pnpm typecheck && pnpm typecheck:mobile && pnpm test",
     "mobile": "npm --prefix mobile run",
     "mobile:start": "cd mobile && npx expo start",
     "mobile:doctor": "cd mobile && npx expo-doctor",
     "mobile:ios": "cd mobile && npx expo start --ios",
-    "mobile:android": "cd mobile && npx expo start --android"
+    "mobile:android": "cd mobile && npx expo start --android",
+    "typecheck:mobile": "npm --prefix mobile run typecheck"
   },
   "engines": {
     "node": "22.x"

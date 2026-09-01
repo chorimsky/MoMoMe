@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE UNIQUE INDEX IF NOT EXISTS payments_provider_ref ON payments (provider_ref) WHERE provider_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS payments_sender_id ON payments (sender_id);
 CREATE INDEX IF NOT EXISTS payments_state     ON payments (state);
+-- listPayments() orders by created_at DESC on every admin view and reconcile tick;
+-- without this it is a full scan plus a sort of the entire table.
+CREATE INDEX IF NOT EXISTS payments_created_at ON payments (created_at DESC);
 CREATE INDEX IF NOT EXISTS payments_merchant  ON payments (merchant_id) WHERE merchant_id IS NOT NULL;
 
 -- The ref is the payment's human-facing id AND its payout idempotency key, and

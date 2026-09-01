@@ -25,6 +25,16 @@ export function pgPool(): PoolType {
     pool = new Pool({
       connectionString,
       max: Number(process.env.PG_POOL_MAX || "10"),
+      // Every one of these bounds a way the pool could HANG rather than fail. Without
+      // connectionTimeoutMillis, pool.connect() waits forever when every connection is
+      // checked out — a request that never answers, which is strictly worse than an error
+      // because the caller cannot retry or report. statement_timeout bounds a single query;
+      // idle_in_transaction_session_timeout reclaims a transaction whose holder died
+      // mid-flight (lockPayment holds one across external rail calls, so this is the
+      // difference between a transient failure and a permanently poisoned pool).
+      connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || "8000"),
+      statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || "15000"),
+      idle_in_transaction_session_timeout: Number(process.env.PG_IDLE_TX_TIMEOUT_MS || "30000"),
       ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     });
   }

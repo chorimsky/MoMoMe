@@ -79,7 +79,21 @@ export async function reconcilePendingCashins(): Promise<void> {
     // after a rail delay / restart gap, leg-2 must still fire rather than strand the
     // funds on the treasury phone. Plain cash-ins settle fast → keep the 24h scan.
     const maxAge = o.kind === "transfer_out" || o.kind === "transfer_in" ? 72 : 24;
-    if (o.rail !== "peexit" || now - Date.parse(o.at) > maxAge * 3600_000) continue;
+    if (now - Date.parse(o.at) > maxAge * 3600_000) continue;
+    // A PawaPay cash-in was SUBMITTED (pawapay.deposit) but never re-queried, because this
+    // loop filtered to peexit — so it sat at "accepted" forever even after the payer
+    // approved, and the operator had no way to know the money arrived. pawapay is dormant
+    // today (railFor() hardcodes peexit), but a half-wired settlement path is exactly what
+    // breaks the day it is switched on.
+    if (o.rail === "pawapay") {
+      if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted" && o.providerRef) {
+        const s = await pawapay.queryDepositStatus(o.providerRef).catch(() => null);
+        if (s === "COMPLETED") { o.status = "completed"; persistOp(o); }
+        else if (s === "FAILED") { o.status = "failed"; o.error = o.error ?? "deposit rejected by payer/rail"; persistOp(o); }
+      }
+      continue;
+    }
+    if (o.rail !== "peexit") continue;
     if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
       const s = await peexit.collectStatus(o.id).catch(() => null);
       if (s === "COMPLETED") { o.status = "completed"; o.feeXaf = peexit.feeXafFor(o.id) ?? o.feeXaf; persistOp(o); }

@@ -1,30 +1,41 @@
 # Vercel environment setup — `mo-mo-me-server`
 
-Two generated files sit in the repo root. They are **gitignored** (`.gitignore:16` → `.env.*`)
+Two generated files sit in the repo root. They are **gitignored** (`.gitignore` → `vercel-env/`)
 and must never be committed or pasted into chat:
 
 | file | upload to |
 |---|---|
-| `.env.vercel-production` | Environment Variables → **Production** |
-| `.env.vercel-preview` | Environment Variables → **Preview** (the sandbox) |
+| `vercel-env/production.env` | Environment Variables → **Production** |
+| `vercel-env/preview.env` | Environment Variables → **Preview** (the sandbox) |
+
+The filename matters: Vercel's importer only accepts a file whose name ends in `.env`, which
+is why these are `production.env` / `preview.env` rather than `.env.vercel-production`.
+Vercel also rejects a key with an empty value, so **no blank keys are in these files** — the
+credentials only you hold are added afterwards, in the dashboard.
 
 The random secrets in them were generated locally with a CSPRNG. Everything else is either
 a known-correct config value or a blank you fill in.
 
-## Fill these before uploading
+## Add these yourself, after importing
 
-**`.env.vercel-production`**
+Import the file first, then **Add Environment Variable** for each of these. They are the
+values only you hold, so they are deliberately not in the packaged files.
+
+**Production**
 - `IBEX_CLIENT_ID`, `IBEX_CLIENT_SECRET`, `IBEX_ACCOUNT_ID` — from IBEX. Use **rotated**
   credentials; the ones shared earlier are compromised.
-- `ADMIN_PASSWORD` — the current one was exposed and should be replaced.
+- `ADMIN_PASSWORD` — already set on Vercel. Replace it: the current value was exposed.
 
-**`.env.vercel-preview`**
+**Preview**
 - `DATABASE_URL` — a **separate** database. Sharing production's means sandbox testing
   writes into the real ledger. Connect one of the Neon databases to Preview scope, or paste
   its URL here.
 - `ADMIN_PASSWORD` — a different value from production.
 
-Leave a line blank and Vercel simply won't set it; nothing silently half-configures.
+Importing `production.env` before adding the IBEX credentials is safe and boots normally:
+`IBEX_ENV=production` on its own does nothing, because `ibexConfigured()` needs all three
+credentials before the rail counts as live. So the import and the go-live are two separate,
+deliberate steps.
 
 ## Importing
 
@@ -53,9 +64,10 @@ that one does not exist yet.
 The production file was run against the real `runBootChecks()` with the blanks filled:
 
 ```
-as packaged              BOOTS
-+ VERCEL_ENV=production  BOOTS
-+ VERCEL_ENV=preview     REFUSES — preview deployments must never run a live rail
+production.env as imported (no credentials yet)   BOOTS   liveMoney=false ibexLive=false
+production.env + IBEX credentials                 BOOTS   liveMoney=true  ibexLive=true
+production.env mis-uploaded to Preview scope      REFUSES — preview must never run a live rail
+preview.env as imported                           BOOTS   liveMoney=false ibexLive=false
 ```
 
 That last line is the safety net: if the production file is ever uploaded to the wrong

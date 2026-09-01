@@ -12,6 +12,8 @@ data/
 *.sqlite3
 
 # Secrets — only .env.example is committed
+# Packaged Vercel env files (contain generated secrets — never commit)
+vercel-env/
 .env
 .env.*
 !.env.example

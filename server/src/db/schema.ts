@@ -33,6 +33,14 @@ CREATE INDEX IF NOT EXISTS payments_sender_id ON payments (sender_id);
 CREATE INDEX IF NOT EXISTS payments_state     ON payments (state);
 CREATE INDEX IF NOT EXISTS payments_merchant  ON payments (merchant_id) WHERE merchant_id IS NOT NULL;
 
+-- The ref is the payment's human-facing id AND its payout idempotency key, and
+-- payments.ref is UNIQUE. It used to come from an in-memory counter persisted via the
+-- coarse snapshot — per-INSTANCE state pretending to be global: every concurrent
+-- serverless instance hydrated the same value and minted the SAME ref, so the second
+-- insert violated payments_ref_key and the request hung on an unhandled rejection.
+-- A sequence is the only counter genuinely shared; nextval() is atomic and never blocks.
+CREATE SEQUENCE IF NOT EXISTS payment_ref_seq START 418843;
+
 CREATE TABLE IF NOT EXISTS ledger (
   seq         BIGSERIAL PRIMARY KEY,
   payment_id  TEXT NOT NULL,

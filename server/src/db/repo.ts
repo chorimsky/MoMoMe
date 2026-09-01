@@ -85,6 +85,14 @@ export async function indexProviderRef(providerRef: string, paymentId: string): 
   await q(`UPDATE payments SET provider_ref=$1, updated_at=now() WHERE id=$2`, [providerRef, paymentId]);
 }
 
+/** Next payment reference number, from a Postgres SEQUENCE — the only counter genuinely
+ *  shared across serverless instances. nextval() is atomic and never blocks, so concurrent
+ *  payment creations cannot collide the way the per-instance in-memory counter did. */
+export async function nextRefNumber(): Promise<number> {
+  const rows = await q<{ n: string }>(`SELECT nextval('payment_ref_seq')::text AS n`);
+  return Number(rows[0]?.n ?? 0);
+}
+
 /* ---------------- ledger (append-only, double-entry) ---------------- */
 export interface Leg { account: LedgerAccount; direction: "debit" | "credit"; amount: number; currency: LedgerEntry["currency"] }
 const signed = (l: Leg) => (l.direction === "debit" ? l.amount : -l.amount);

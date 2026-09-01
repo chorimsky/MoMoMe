@@ -58,6 +58,11 @@ export interface Store {
   // read the COMPLETE cross-instance set (leg-2 fires + full screening). No-op on memory.
   upsertMomoOp(op: { id: string; kind: string; status: string; transferId?: string; at: string }): Promise<void>;
   allMomoOps(): Promise<unknown[]>;
+  /** Next payment-ref number. Postgres: a shared SEQUENCE, atomic across instances.
+   *  Memory: the in-process counter, correct when there IS one process. Must NOT come
+   *  from module state — payments.ref is UNIQUE and doubles as the payout idempotency
+   *  key, so a per-instance counter collides under concurrency. */
+  nextRefNumber(): Promise<number>;
   pruneRateLimits(): Promise<void>; // delete expired durable rate-limit counters (cron)
 }
 
@@ -98,6 +103,7 @@ const memoryStore: Store = {
   allComplianceEvents: async () => [],
   upsertMomoOp: async () => {}, // memory keeps ops in-process (array + snapshot)
   allMomoOps: async () => [],
+  nextRefNumber: async () => mem.nextRefCounter(),
   pruneRateLimits: async () => {}, // in-memory limiter self-sweeps
 };
 
@@ -134,6 +140,7 @@ const pgStore: Store = {
   allComplianceEvents: pg.allComplianceEvents,
   upsertMomoOp: pg.upsertMomoOp,
   allMomoOps: pg.allMomoOps,
+  nextRefNumber: pg.nextRefNumber,
   pruneRateLimits: pg.pruneRateLimits,
 };
 

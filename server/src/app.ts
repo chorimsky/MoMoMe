@@ -43,6 +43,31 @@ function securityHeaders(_req: Request, res: Response, next: NextFunction): void
   next();
 }
 
+/** NEVER LET A REQUEST HANG. Express 4 does not forward a rejection from an async route
+ *  handler to the error middleware, so a throw inside `async (req, res) => …` produced NO
+ *  response at all — the socket stayed open until the platform's own limit. That is exactly
+ *  how a duplicate-ref insert turned into POST /payments hanging for minutes rather than
+ *  returning an error. A hung request is worse than a failed one: the client cannot retry,
+ *  cannot report, and cannot distinguish a slow network from a broken server.
+ *
+ *  Fires only when nothing has been sent, and logs loudly so the underlying bug still
+ *  surfaces instead of being quietly absorbed. Exported so it is directly testable — the
+ *  app's own catch-all 404 is registered last, which makes appending a test route to a
+ *  built app impossible. */
+export function responseDeadline(ms: number) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const timer = setTimeout(() => {
+      if (res.headersSent) return;
+      console.error(`[stuck] ${req.method} ${req.url} sent no response in ${ms}ms — returning 503. This indicates an unhandled rejection in the route.`);
+      res.status(503).json({ error: "timeout", message: "That took too long. Please try again." });
+    }, ms);
+    timer.unref?.();
+    res.on("finish", () => clearTimeout(timer));
+    res.on("close", () => clearTimeout(timer));
+    next();
+  };
+}
+
 /** Build the Express app (no listen). Used by the server bootstrap and tests. */
 export function createApp() {
   const app = express();
@@ -83,6 +108,7 @@ export function createApp() {
     }
     return next(err);
   });
+  app.use(responseDeadline(Number(process.env.RESPONSE_DEADLINE_MS ?? 30_000)));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

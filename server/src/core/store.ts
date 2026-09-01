@@ -86,3 +86,7 @@ export function findPaymentByRef(ref: string): Payment | undefined {
   for (const p of payments.values()) if (p.ref === ref) return p;
   return undefined;
 }
+
+/** Re-exported so the memory store backend can reach the single-process ref counter
+ *  without db/store.ts importing core/ids.ts (which imports db/store.ts — a cycle). */
+export { nextRefCounter } from "./ids.js";

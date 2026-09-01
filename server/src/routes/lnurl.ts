@@ -85,7 +85,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   const resolved = await resolveRecipient(r.national, r.country).catch(() => null);
   const name = resolved?.name;
   const now = new Date().toISOString();
-  const ref = nextRef();
+  const ref = await nextRef();
 
   // Mint the bolt11 the wallet will pay. The amount is exactly the payer's msat.
   let instruction;

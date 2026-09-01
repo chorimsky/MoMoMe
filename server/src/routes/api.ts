@@ -528,7 +528,7 @@ api.post("/wallet/ln/receive", async (req, res) => {
   if (!rail.trusted()) return res.status(503).json({ error: "no_live_rail", message: "No live crypto rail is configured — activate IBEX or Blink first." });
   const memo = String((req.body ?? {}).memo ?? "").slice(0, 64);
   try {
-    const inst = await createInstruction({ method: "LIGHTNING", ref: memo || `wallet-${nextRef()}`, amount: amountSat / 1e8 });
+    const inst = await createInstruction({ method: "LIGHTNING", ref: memo || `wallet-${await nextRef()}`, amount: amountSat / 1e8 });
     return res.json({ invoice: inst.code, paymentHash: inst.providerRef, provider: inst.provider, expiresAt: inst.expiresAt, amountSat });
   } catch (e) {
     console.error("[wallet-ln] receive:", e instanceof Error ? e.message : e);
@@ -760,7 +760,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
 
   // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
-  const ref = nextRef();
+  const ref = await nextRef();
   let instruction;
   try {
     // The registry picks the rail (IBEX base → added rails → sandbox) and builds the

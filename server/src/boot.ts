@@ -8,10 +8,15 @@
    ============================================================ */
 import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
+import { installProcessGuards } from "./core/processGuards.js";
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
  *  would run on an unsafe footing; warns on softer misconfigurations. */
 export function runBootChecks(): void {
+  // FIRST: an unhandled rejection must never be able to kill the process. On serverless
+  // one instance serves many concurrent requests, so a single rejection took every
+  // in-flight payment down with it — the 'concurrency' failure that was not one.
+  installProcessGuards();
   assertRailsMode(); // an unrecognised RAILS_MODE must never quietly mean sandbox
   assertDeployEnv(); // a preview/branch deployment must never run a real-money rail
   assertLiveConfig();

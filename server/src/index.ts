@@ -70,16 +70,8 @@ const server = app.listen(config.port, () => {
   console.log(`MoMo›Me settlement engine → http://localhost:${config.port}  [payout: ${config.railsMode}, crypto: ${crypto}]`);
 });
 
-// Safety net: an unhandled promise rejection in an async route (Express 4 does not
-// forward it to the error middleware) would otherwise, under Node's default policy,
-// crash the whole settlement engine → full outage. Log and keep serving instead;
-// the offending request still fails, but every other in-flight payment survives.
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason instanceof Error ? reason.stack : reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err instanceof Error ? err.stack : err);
-});
+// Process-level guards are installed by runBootChecks() → installProcessGuards(), shared
+// with the Vercel entrypoint so the two runtimes cannot drift.
 
 // Flush any pending state on graceful shutdown. flushAll() is async on the Postgres
 // backend (network snapshot writes), so AWAIT it before closing the server / exiting —

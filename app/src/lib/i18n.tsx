@@ -365,7 +365,7 @@ export const STRINGS: Dict = {
   lp_why_affordable_t: ["Affordable", "Abordable"],
   lp_why_affordable_d: ["One small upfront fee. No surprises.", "Un petit frais à l'avance. Aucune surprise."],
   lp_nets_title: ["Pay however suits you", "Payez comme il vous convient"],
-  lp_nets_sub: ["Fund your payment with Bitcoin, Lightning or USDT — your recipient only ever receives Mobile Money.", "Financez votre paiement avec Bitcoin, Lightning ou USDT — votre bénéficiaire ne reçoit toujours que du Mobile Money."],
+  lp_nets_sub: ["Fund your payment with Bitcoin, Lightning, USDT or USDC — your recipient only ever receives Mobile Money.", "Financez votre paiement avec Bitcoin, Lightning, USDT ou USDC — votre bénéficiaire ne reçoit toujours que du Mobile Money."],
   lp_foot_copy: ["© 2026 MoMo›Me · Secure Mobile Money payments", "© 2026 MoMo›Me · Paiements Mobile Money sécurisés"],
   disclosure_legal: [
     "Software platform provided by Bitbase Technologies Inc. (Houston, Texas, USA). Any regulated local services are offered by the applicable operating entity, subject to local law and availability.",

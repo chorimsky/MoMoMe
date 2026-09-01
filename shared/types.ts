@@ -526,7 +526,7 @@ export interface AdminSettings {
   egress: { allowlistedIp: string };
   /** Which crypto pay-in methods customers can use. A disabled method is hidden
    *  from the customer flow and refused by /quotes, so users never see or pick a
-   *  rail that isn't operational. (USDC is not offered yet — kept for the future.) */
+   *  rail that isn't operational. */
   methods: { LIGHTNING: boolean; ONCHAIN: boolean; USDT: boolean; USDC: boolean };
   /** Product-surface switches — a super-admin can turn any of these features on or
    *  off platform-wide. A disabled feature is hidden in the client (via /config); the

@@ -21,9 +21,13 @@ const DEFAULTS: AdminSettings = {
   // The IP registered with an IP-allowlisting rail. Empty → fall back to
   // EGRESS_ALLOWLISTED_IP, then to "not recorded". See core/egress.ts.
   egress: { allowlistedIp: "" },
-  // Crypto pay-in methods offered to customers. USDC is not live yet (IBEX receive
-  // combo not enabled) → default off; the rest on.
-  methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: false },
+  // Crypto pay-in methods offered to customers. USDC is ON: it routes exactly like USDT —
+  // to IBEX when IBEX_USDC_ACCOUNT_ID is set (its own account, since IBEX is
+  // account-per-currency), and to the simulated rail otherwise. If IBEX has not enabled the
+  // USDC receive combo for the org, minting the address fails and POST /payments answers a
+  // clean method_unavailable with the quote un-claimed — it cannot strand a payment. An
+  // operator can still switch any method off here.
+  methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: true },
   // Product surfaces — all on by default; a super-admin can disable any of them.
   features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, wallet: true, receive: true, contacts: true },
   // Treasury sweep destinations — all unset until an operator configures them.

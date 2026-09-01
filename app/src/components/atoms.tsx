@@ -283,8 +283,12 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
 // the actual rail that issued the payment, e.g. "Blink · Lightning".
 const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> = {
   LIGHTNING: { label: "Lightning", color: "var(--lightning)", glyph: "⚡" },
-  USDT: { label: "USDT · Tron", color: "var(--tron)", glyph: "◆" },
-  USDC: { label: "USDC", color: "var(--tron)", glyph: "◆" },
+  // Ethereum, not Tron. Both stablecoins are minted as ERC-20 receive addresses on
+  // IBEX (`network: "ethereum"`), and every pay screen tells the customer to send on
+  // ERC-20 — a badge naming the wrong chain is how a deposit gets sent somewhere
+  // unrecoverable.
+  USDT: { label: "USDT · Ethereum", color: "var(--tron)", glyph: "◆" },
+  USDC: { label: "USDC · Ethereum", color: "var(--tron)", glyph: "◆" },
   ONCHAIN: { label: "Bitcoin · on-chain", color: "var(--lightning)", glyph: "₿" },
   PawaPay: { label: "PawaPay", color: "var(--recv)", glyph: "◎" },
   FX: { label: "FX Engine", color: "var(--info)", glyph: "⇄" },

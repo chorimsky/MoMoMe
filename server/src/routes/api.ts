@@ -5,12 +5,12 @@ import type {
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider,
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, ALL_METHODS,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
-import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRefund } from "../adapters/index.js";
+import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRefund, methodServable, ibexMethods } from "../adapters/index.js";
 import { blinkBalances } from "../adapters/blink.js";
 import * as peexit from "../adapters/peexit.js";
 import { accountBalances } from "../adapters/ibex.js";
@@ -429,9 +429,11 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
   if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
     return res.status(400).json({ error: "bad_method", message: "Unknown payment method." });
   }
-  // Refuse a method the operator has disabled (the customer flow already hides it,
-  // but guard the API so a stale client / direct call can't quote a dead rail).
-  if (!getSettings().methods[method as keyof AdminSettings["methods"]]) {
+  // Refuse a method the operator has disabled OR that no real rail can serve here (the
+  // customer flow already hides both, but guard the API so a stale client / direct call
+  // can't quote a dead rail). Refusing at QUOTE time rather than at payment creation means
+  // the customer is redirected before they've entered a recipient.
+  if (!offeredMethods()[method as keyof AdminSettings["methods"]]) {
     return res.status(400).json({ error: "method_unavailable", message: "This payment method isn't available right now." });
   }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {
@@ -479,6 +481,17 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
 
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
  *  ~350 KB base64). Keeps the settings blob (and SQLite row) small. */
+/** The pay-in methods actually ON OFFER: the operator's switches in Settings AND'd with
+ *  what a real rail can serve on this deployment (methodServable). Two independent gates,
+ *  one answer — so /config, the send flow and the quote endpoint can never disagree about
+ *  whether a method is available. */
+function offeredMethods(): AdminSettings["methods"] {
+  const on = getSettings().methods;
+  return Object.fromEntries(
+    (Object.keys(on) as Array<keyof AdminSettings["methods"]>).map((m) => [m, on[m] && methodServable(m as Method)]),
+  ) as AdminSettings["methods"];
+}
+
 function isValidLogo(v: unknown): v is string {
   // RASTER ONLY — no SVG. The brand logo is echoed to every client (customer + admin)
   // via the public /config endpoint; an SVG can carry <script>/onload, so accepting it
@@ -496,8 +509,8 @@ api.get("/config", async (_req, res) => {
     // Live platform fee (fraction) so the customer's pre-quote fee preview tracks
     // the admin's Rates & Pricing setting instead of a hardcoded constant.
     feePct: getSettings().pricing.feePct,
-    // Which crypto pay-in methods are enabled — the customer flow only shows these.
-    methods: getSettings().methods,
+    // Which crypto pay-in methods are on offer — the customer flow only shows these.
+    methods: offeredMethods(),
     // Which product surfaces are enabled — the client hides anything turned off.
     features: getSettings().features,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
@@ -1663,7 +1676,7 @@ api.get("/admin/revenue", async (req, res) => {
   const costOf = (p: Payment) => Math.round(p.xaf * costs.payoutPct + p.totalXaf * costs.railPct + costs.fixedXaf);
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
-  const methods: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
+  const methods = ALL_METHODS;
   const byRail = methods.map((m) => {
     const ps = completed.filter((p) => p.method === m);
     const volumeXaf = ps.reduce((s, p) => s + p.xaf, 0);
@@ -1919,7 +1932,9 @@ api.get("/admin/rails", async (_req, res) => {
     cryptoRails: [
       {
         name: "IBEX Hub", base: true, env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
-        apiUrl: config.ibex.apiUrl, methods: ["LIGHTNING", "ONCHAIN"], // USDT gated per-org by IBEX
+        // Stablecoins appear only when their per-currency IBEX account is configured
+        // (IBEX is account-per-currency, and the receive combo is enabled per organisation).
+        apiUrl: config.ibex.apiUrl, methods: ibexMethods(),
         webhookSecret: config.ibex.webhookSecret ? "set" : "unset",
         accountId: head(config.ibex.accountId), clientId: mask(config.ibex.clientId),
         // Sandbox LN takes real sats → a settled sandbox inbound can authorize a real
@@ -2137,7 +2152,7 @@ api.get("/ops/snapshot", async (req, res) => {
   // latencies. Every /admin/* view had already been moved to real data — this one was
   // missed, and an ops dashboard that invents its numbers is worse than one that says
   // "unknown", because decisions get made on it.
-  const methods: Method[] = ["LIGHTNING", "ONCHAIN", "USDT"];
+  const methods = ALL_METHODS;
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const today = (p: Payment) => Date.parse(p.updatedAt) >= startOfDay.getTime();
   const snapshot: OpsSnapshot = {

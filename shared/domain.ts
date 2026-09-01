@@ -50,6 +50,13 @@ export const EUR_XAF_PEG = 655.957;
  *  truth for merchant/customer identities and the LNURL-pay server. */
 export const LN_ADDRESS_DOMAIN = "momome.xyz";
 
+/** Every crypto pay-in method, in the order the product presents them. Single source of
+ *  truth: the send flow, the admin analytics split and the ops dashboard all read this, so
+ *  adding a method can't leave one of them silently blind to its volume. Whether a method is
+ *  actually OFFERED is a separate question — the operator's switches AND real rail support
+ *  (see /config `methods`). */
+export const ALL_METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT", "USDC"];
+
 /** Per-rail spread in basis points — wider where confirmation exposure is longer. */
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure

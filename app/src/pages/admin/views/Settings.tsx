@@ -267,7 +267,7 @@ export function SettingsView() {
 
         <Card title="Crypto pay-in methods" sub="Turn a rail off to hide it from customers — they only see and can pay with what's enabled.">
           {(() => {
-            const rows = [["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "Ethereum · ERC-20"], ["USDC", "USDC (stablecoin)", "Not live yet — keep off until IBEX enables receive"]] as const;
+            const rows = [["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "Ethereum · ERC-20"], ["USDC", "USDC (stablecoin)", "Ethereum · ERC-20"]] as const;
             return rows.map(([k, name, desc], i) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>
                 <div>

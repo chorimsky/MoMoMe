@@ -701,6 +701,12 @@ function PayStep({
         <QRCode value={pi.qr} size={214} backgroundColor="#fff" color="#111" />
       </View>
       <Body muted center>{tr('scan_or_copy')}</Body>
+      {pi.method === 'USDT' || pi.method === 'USDC' ? (
+        <View style={[styles.netWarn, { backgroundColor: t.surface2, borderColor: t.line }]}>
+          <Ionicons name="warning-outline" size={16} color={t.accent} />
+          <Body style={{ flex: 1, color: t.text }}>{tr('erc20_only')}</Body>
+        </View>
+      ) : null}
 
       <Pressable
         onPress={copy}
@@ -930,6 +936,16 @@ const styles = StyleSheet.create({
   rateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   payAmount: { fontFamily: Fonts.displayBold, fontSize: 30, letterSpacing: -0.4 },
   qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  netWarn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    alignSelf: 'stretch',
+  },
   copyRow: {
     flexDirection: 'row',
     alignItems: 'center',

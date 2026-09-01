@@ -95,26 +95,35 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
     return res.json({ ok: true });
   }
   res.json({ ok: true });
-  // Authoritative re-confirm: never settle on the webhook body alone. Re-query the
-  // rail (any rail exposing confirmSettlement — IBEX, Blink, …) so a forged "settled"
-  // webhook — even one with a leaked secret — can't trigger a real payout for an
-  // unpaid invoice. confirmSettlement returns null when it can't determine (e.g. an
-  // on-chain address) or the rail has no re-query, in which case we fall back to the
-  // verified webhook (still secret-gated, amount re-checked in confirmInbound); only
-  // an EXPLICIT not-settled result is rejected.
+  // Authoritative re-confirm: never settle a LIGHTNING inbound on the webhook body alone.
+  // Re-query the rail (any rail exposing confirmSettlement — IBEX, Blink, …) so a forged
+  // "settled" webhook — even one with a leaked secret — can't trigger a real payout for an
+  // unpaid invoice.
+  //
+  // ONLY LIGHTNING. That is the one method whose providerRef is a transaction id the rail
+  // can actually be asked about. Every DEPOSIT method — on-chain BTC and the ERC-20
+  // stablecoins (USDT/USDC) — stores the RECEIVE ADDRESS as providerRef, and no rail can
+  // answer "is this address settled?" from its transaction-by-id endpoint. Asking anyway is
+  // not merely wasted: the answer comes back shaped like a verdict. IBEX's transactionStatus
+  // derives `settled` purely from Lightning invoice fields, and Blink's says so outright —
+  // "on-chain addresses aren't pollable here → returns {settled:false}". A falsy `settled`
+  // in a truthy object hit the `if (!s.settled) return` below and DROPPED the settlement, so
+  // a deposit whose crypto had already landed would never pay out. Gating here makes the
+  // code do what these comments have described all along.
+  //
+  // A deposit is therefore settled on its webhook body — which is still shared-secret gated
+  // and sender-IP allowlisted, with the amount re-checked against the locked quote in
+  // confirmInbound, and the reconcile backstop covering a webhook that never arrives.
   background((async () => {
-    if (adapter.confirmSettlement) {
+    if (adapter.confirmSettlement && payment.payInstruction.method === "LIGHTNING") {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
       if (s) { if (!s.settled) return; } // explicit verdict: not paid → ignore
-      // Indeterminate re-query (null: network failure / a rail that can't re-query this ref).
-      // For a REAL-money LIGHTNING inbound do NOT settle on the webhook body — hold; the
-      // poll/reconcile backstop re-queries and settles the moment the rail can confirm. This
-      // stops a transient re-query failure from downgrading "never settle on the body alone"
-      // to "settle on a secret-gated body". On-chain can't be re-queried (providerRef is an
-      // address), so its secret-gated + IP-allowlisted webhook body stays authoritative
-      // (amount is re-checked against the lock in confirmInbound); non-real inbounds move no
-      // real money either way.
-      else if (adapter.trusted() && payment.payInstruction.method === "LIGHTNING") return;
+      // Indeterminate (null: network failure, or the rail has no re-query). For REAL money
+      // do NOT fall back to the webhook body — hold, and let the poll/reconcile backstop
+      // settle the moment the rail can confirm. This stops a transient re-query failure from
+      // quietly downgrading "never settle on the body alone" to "settle on a secret-gated
+      // body". A non-real inbound moves no real money either way, so it proceeds.
+      else if (adapter.trusted()) return;
     }
     await confirmInbound(payment, event.amount);
   })());

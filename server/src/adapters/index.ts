@@ -15,7 +15,8 @@
    and the RailAdapter contract (name / trusted() / confirmSettlement()).
    ============================================================ */
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { config } from "../config.js";
+import { ALL_METHODS } from "../../../shared/domain.js";
+import { config, liveMoney } from "../config.js";
 import { HealthTracker } from "../core/railHealth.js";
 import type { InstructionRequest, RailAdapter, SettlementStatus } from "./types.js";
 import { sandboxAdapter } from "./sandbox.js";
@@ -118,7 +119,7 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
   if (!primary) throw new Error(`No rail adapter for method ${req.method}`);
 
   // Sandbox primary (no real rail for this method) → just use it, no failover.
-  if (primary.name === "sandbox") return callRail(primary, req);
+  if (primary.name === "sandbox") return callSandbox(req);
 
   // Real primary: candidate pool = configured real rails of the SAME trust class,
   // eligible first (skip ones currently failing), else all of them (all-down → still
@@ -150,12 +151,52 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
   // broken configured rail (e.g. IBEX with dead creds) not dead-end a demo deployment.
   if (!primary.trusted() && primary.name !== "sandbox") {
     try {
-      const inst = await callRail(sandboxAdapter, req);
+      const inst = await callSandbox(req);
       console.warn(`[rail] ${primary.name} failed — served ${req.method} via sandbox simulator (demo, non-trusted)`);
       return inst;
     } catch (e) { lastErr = e; }
   }
   throw lastErr instanceof Error ? lastErr : new Error(`All rails failed for method ${req.method}`);
+}
+
+/** Can a REAL rail serve this pay-in method on this deployment?
+ *
+ *  On a live-money deployment the simulator is refused (see callSandbox), so a method the
+ *  operator has switched ON but that no real rail claims would be advertised, chosen, and
+ *  only then fail. Answering the question up front lets /config hide it and the quote
+ *  refuse it early — and lets it light up the moment the rail is configured, with no code
+ *  change and no admin toggle. On a non-live deployment the simulator legitimately serves
+ *  everything, so every method is servable. */
+export function methodServable(m: Method): boolean {
+  if (!liveMoney()) return true;
+  return activeRails().some((r) => r.name !== "sandbox" && r.supports(m));
+}
+
+/** The methods IBEX itself can serve right now — Lightning and on-chain BTC always, plus
+ *  whichever stablecoins have their per-currency account configured. Shown in the admin
+ *  rails view so an operator can SEE why USDC is or isn't on offer. */
+export function ibexMethods(): Method[] {
+  return ALL_METHODS.filter((m) => ibexAdapter.supports(m));
+}
+
+/** THE SIMULATOR MUST NEVER SERVE A LIVE-MONEY DEPLOYMENT.
+ *
+ *  sandboxAdapter.supports() returns true for everything and it sits at MAX priority as the
+ *  always-configured catch-all, so it silently becomes the primary for any method no real
+ *  rail claims — and IBEX claims a stablecoin only when that currency's account id is set
+ *  (IBEX is account-per-currency). Enable USDC with IBEX_USDC_ACCOUNT_ID missing and the
+ *  path above would have handed a customer a FABRICATED ERC-20 address, on a deployment
+ *  moving real money, with instructions to send real USDC to it. There is no recovering
+ *  funds sent to an address nobody holds the key for.
+ *
+ *  Refusing is strictly better: POST /payments answers `method_unavailable`, the quote is
+ *  un-claimed, and the customer picks another method. The same guard covers the demo
+ *  fallback below, so no live-money path can reach the simulator by any route. */
+async function callSandbox(req: CreateInboundRequest): Promise<PayInstruction> {
+  if (liveMoney()) {
+    throw new Error(`No real rail is configured for ${req.method} — refusing to issue a simulated pay-in address on a live-money deployment`);
+  }
+  return callRail(sandboxAdapter, req);
 }
 
 function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInstruction> {

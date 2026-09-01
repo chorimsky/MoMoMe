@@ -87,6 +87,10 @@ export const STRINGS = {
   send_exactly: ['Send exactly', 'Envoyez exactement'],
   quoted_settled: ['Quoted {n} · settled at final rate', 'Devis {n} · réglé au taux final'],
   scan_or_copy: ['Scan this code to pay, or copy it below.', 'Scannez ce code pour payer, ou copiez-le ci-dessous.'],
+  // Shown for USDT/USDC only. Both are minted as ERC-20 receive addresses, and a deposit
+  // sent on Tron/BSC/Polygon to an Ethereum address is unrecoverable — the web pay screen
+  // has always said this, the app did not.
+  erc20_only: ['Ethereum (ERC-20) only — sending on any other network will lose the funds.', 'Ethereum (ERC-20) uniquement — un envoi sur un autre réseau entraîne la perte des fonds.'],
   waiting_auto: ['Waiting for your payment — this updates automatically.', 'En attente de votre paiement — mise à jour automatique.'],
   to: ['To', 'À'],
   mobile_money: ['Mobile Money', 'Mobile Money'],

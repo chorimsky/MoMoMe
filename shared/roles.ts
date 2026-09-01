@@ -43,6 +43,12 @@ export const ROLE_ACCESS_LABEL: Record<AdminRole, string> = {
 
 export function canAccess(role: AdminRole, section: Section): boolean {
   const a = ROLE_SECTIONS[role];
+  // An unrecognised role has no entry, and `undefined.includes` threw — turning the admin
+  // guard into a 500 instead of a denial. A role can be unrecognised for mundane reasons
+  // (a restored snapshot from an older version, a role retired in a later one, corrupt
+  // stored data), and "the authorisation check crashed" must never read as anything other
+  // than DENY on a money-path console.
+  if (!a) return false;
   return a === "all" || a.includes(section);
 }
 export const isReadOnly = (role: AdminRole): boolean => role === "Read Only";

@@ -52,7 +52,15 @@ async function main() {
 
     const token = await login("admin", "momome-admin");
     ok("super-admin signed in", !!token);
-    const A = { ...J, authorization: `Bearer ${token}` };
+    let A = { ...J, authorization: `Bearer ${token}` };
+
+    // The allowlist repoints what a rail trusts, so it now sits behind step-up auth: a
+    // stolen session token alone must not be able to change it.
+    let g = await fetch(`${base}/api/admin/rails/egress`, { method: "PUT", headers: A, body: JSON.stringify({ allowlistedIp: "1.2.3.4" }) });
+    ok("un-elevated PUT → 403 elevation_required", g.status === 403, String(g.status));
+    g = await fetch(`${base}/api/admin/elevate`, { method: "POST", headers: A, body: JSON.stringify({ password: "momome-admin" }) });
+    A = { ...J, authorization: `Bearer ${((await g.json()) as { token: string }).token}` };
+    ok("elevated for the guarded writes", g.status === 200, String(g.status));
 
     // The status is visible where rail config lives.
     r = await fetch(`${base}/api/admin/rails`, { headers: A });
@@ -103,6 +111,14 @@ async function main() {
     ok("read-only CANNOT set the allowlist → 403", r.status === 403, String(r.status));
     r = await fetch(`${base}/api/admin/rails/egress/recheck`, { method: "POST", headers: V });
     ok("read-only CANNOT trigger a recheck → 403", r.status === 403, String(r.status));
+    // Even if a Read Only operator elevated, the role gate still denies — step-up is an
+    // ADDITIONAL factor, never a substitute for the permission check.
+    const ve = await fetch(`${base}/api/admin/elevate`, { method: "POST", headers: V, body: JSON.stringify({ password: "ViewerPass123!" }) });
+    if (ve.status === 200) {
+      const VE = { ...J, authorization: `Bearer ${((await ve.json()) as { token: string }).token}` };
+      r = await fetch(`${base}/api/admin/rails/egress`, { method: "PUT", headers: VE, body: JSON.stringify({ allowlistedIp: "1.1.1.1" }) });
+      ok("ELEVATED read-only still cannot set the allowlist → 403", r.status === 403, String(r.status));
+    }
   } finally {
     server.close();
   }

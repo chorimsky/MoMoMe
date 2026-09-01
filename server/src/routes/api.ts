@@ -21,7 +21,7 @@ import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive,
+  config, isLive, liveMoney, ibexConfigured, ibexLive, deployEnv, databaseHost,
   blinkConfigured, blinkLive,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
@@ -34,6 +34,8 @@ import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
 import { egressStatus, invalidateEgressCache } from "../core/egress.js";
+import { persistDurable } from "../core/persist.js";
+import { usingPostgres } from "../db/store.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
@@ -44,7 +46,7 @@ import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
 import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
-import { issueToken, verifyToken, tokenFromHeaders, type Session } from "../core/adminAuth.js";
+import { issueToken, verifyToken, tokenFromHeaders, isElevated, ELEVATION_TTL_MS, type Session } from "../core/adminAuth.js";
 import {
   verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
@@ -113,6 +115,39 @@ api.post("/admin/forgot", async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------- step-up authentication ----------
+   Re-enter the password to ELEVATE an existing session for a few minutes. A 12h admin
+   session is convenient but it is also a standing authorisation: a walked-away laptop or a
+   token lifted from localStorage can otherwise sweep the treasury or grant itself a role.
+   Elevation makes the destructive operations require proof the operator is present RIGHT
+   NOW. Registered before the /admin guard because it must be reachable by a session that
+   is authenticated but not yet elevated. */
+api.post("/admin/elevate", async (req, res) => {
+  const session = verifyToken(tokenFromHeaders(req.headers));
+  const user = session ? getUser(session.uid) : undefined;
+  if (!session || !user) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+  // Throttled per user AND per IP: this endpoint takes a password, so it is an oracle for
+  // guessing one. Durable so the limit holds across serverless instances.
+  const [ipRl, userRl] = await Promise.all([
+    rateLimitDurable(`elevate:ip:${clientIp(req)}`, 20, 15 * 60_000),
+    rateLimitDurable(`elevate:user:${user.id}`, 8, 15 * 60_000),
+  ]);
+  if (!ipRl.ok || !userRl.ok) {
+    res.setHeader("Retry-After", String(Math.max(ipRl.retryAfterSec, userRl.retryAfterSec)));
+    return res.status(429).json({ error: "rate_limited", message: "Too many attempts. Please wait a few minutes." });
+  }
+  const { password } = (req.body ?? {}) as { password?: string };
+  // Verify against THIS session's own account — never a username from the body, which
+  // would let one operator elevate using another's credentials.
+  if (typeof password !== "string" || !verifyCredentials(user.username, password)) {
+    return res.status(401).json({ error: "bad_credentials", message: "Incorrect password." });
+  }
+  await rateLimitResetDurable(`elevate:user:${user.id}`);
+  const elevatedUntil = Date.now() + ELEVATION_TTL_MS;
+  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role, elevatedUntil });
+  res.json({ token, expiresAt, elevatedUntil });
+});
+
 /* Map a request sub-path (mount-relative, e.g. "/liquidity") to its console
    section, for the role gate. */
 function sectionForPath(sub: string): Section | null {
@@ -124,6 +159,7 @@ function sectionForPath(sub: string): Section | null {
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     notifications: "notifications", health: "health", settings: "settings",
+    readiness: "administration", // go-live console — Super Admin only (checked in the route)
     users: "administration", audit: "administration",
   };
   return map[p] ?? null;
@@ -142,6 +178,26 @@ api.use("/admin", (req, res, next) => {
   // "/users", "/users/:id", "/password"). Do NOT strip again.
   const sub = req.path;
 
+  // STEP-UP GATE. These are the operations an attacker with a stolen session token would
+  // actually want: moving funds, changing who has access, minting partner API keys, and
+  // repointing the rail allowlist. Role checks alone do not help there — a stolen
+  // Super-Admin token already passes them — so require proof the operator re-entered their
+  // password within the last few minutes. Everything else (viewing, dispositioning, normal
+  // settings) is unaffected.
+  const ELEVATED_ONLY: RegExp[] = [
+    /^\/treasury\/(withdraw|destinations)$/,          // sweeps real crypto out of the platform wallet
+    /^\/momo\/(cashout|cashin|transfer)$/,            // moves real Mobile Money funds
+    /^\/payments\/[^/]+\/(retry|refund)$/,           // re-pays or refunds a real payment
+    /^\/users(\/|$)/,                                // who can access the console at all
+    /^\/apikeys(\/|$)/,                              // partner keys authorize real payments
+    /^\/rails\/egress(\/|$)/,                        // repoints the IP allowlist a rail trusts
+  ];
+  if (req.method !== "GET" && ELEVATED_ONLY.some((re) => re.test(sub)) && !isElevated({ uid: user.id, role, elevatedUntil: session.elevatedUntil })) {
+    return res.status(403).json({
+      error: "elevation_required",
+      message: "Re-enter your password to confirm this action.",
+    });
+  }
   // User administration is Super-Admin only.
   if (sub === "/users" || sub.startsWith("/users/")) {
     if (!isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
@@ -1923,6 +1979,75 @@ api.post("/admin/rails/egress/recheck", async (_req, res) => {
     peexit.probeReachability().catch(() => null),
   ]);
   res.json({ egress, reachability });
+});
+
+/* ---------- go-live readiness (Super Admin) ----------
+   One page answering "what is stopping this from going live, and what exactly do I set?".
+   Every fact is derived from the SAME functions the boot gates and the money path use, so
+   it cannot drift from reality the way a written checklist does. It reports PRESENCE and
+   shape only — never a secret value — so it is safe to read over the shoulder. */
+type ReadyState = "ok" | "warn" | "blocked";
+api.get("/admin/readiness", async (req, res) => {
+  if (!isSuperAdmin(sessionOf(req)!.role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+  const has = (k: string) => !!(process.env[k] ?? "").trim();
+  // A value that is PRESENT but obviously a placeholder is worse than a missing one: it
+  // satisfies the boot gate and then fails at runtime. Both real cases seen on this
+  // project ("..." and "<any long random string you pick>") are caught by these shapes.
+  const placeholder = (k: string) => {
+    const v = (process.env[k] ?? "").trim();
+    return !!v && (v.length < 8 || /^[.\-_*x]+$/i.test(v) || /[<>]/.test(v) || /change|placeholder|your|todo|example/i.test(v));
+  };
+  const check = (label: string, state: ReadyState, detail: string, fix?: string) => ({ label, state, detail, ...(fix ? { fix } : {}) });
+
+  const secrets = ["IBEX_WEBHOOK_SECRET", "CRON_SECRET", "COMPLIANCE_HMAC_KEY", "ADMIN_SESSION_SECRET", "ADMIN_RECOVERY_KEY", "PEEXIT_CALLBACK_PASS"]
+    .map((k) => check(k,
+      placeholder(k) ? "blocked" : has(k) ? "ok" : "warn",
+      placeholder(k) ? "set, but the value looks like a placeholder" : has(k) ? "set" : "not set",
+      placeholder(k) ? "Replace with a real random value — a placeholder passes the boot check and then fails in use." : undefined));
+
+  // Boot gates, evaluated live rather than described. Each mirrors an assert in boot.ts.
+  const gates = [
+    check("Durable store", persistDurable() ? "ok" : liveMoney() ? "blocked" : "warn",
+      `${usingPostgres() ? "postgres" : "in-process"} · db=${databaseHost()}`,
+      persistDurable() ? undefined : "A real-money rail refuses to start without a durable store."),
+    check("Deploy environment", deployEnv() === "preview" && liveMoney() ? "blocked" : "ok",
+      `${deployEnv()} · rails=${config.railsMode}`,
+      deployEnv() === "preview" && liveMoney() ? "A preview deployment must never run a live rail." : undefined),
+    check("CRON_SECRET", liveMoney() && !has("CRON_SECRET") ? "blocked" : has("CRON_SECRET") ? "ok" : "warn",
+      has("CRON_SECRET") ? "set" : "not set", "Without it the cron endpoint is world-triggerable once money is live."),
+    check("Compliance chain key", liveMoney() && !(has("COMPLIANCE_HMAC_KEY") || has("ADMIN_SESSION_SECRET")) ? "blocked" : "ok",
+      has("COMPLIANCE_HMAC_KEY") || has("ADMIN_SESSION_SECRET") ? "keyed" : "UNKEYED",
+      "Unkeyed, the tamper-evident audit log is forgeable by an insider."),
+    check("Admin password", config.admin.passwordIsDefault ? "blocked" : "ok",
+      config.admin.passwordIsDefault ? "DEFAULT — publicly known" : "set"),
+    check("Public URL", config.publicUrl.startsWith("https://") ? "ok" : "blocked", config.publicUrl,
+      "IBEX will not deliver webhooks to a non-https callback."),
+  ];
+
+  const egress = await egressStatus();
+  res.json({
+    liveMoney: liveMoney(),
+    deployEnv: deployEnv(),
+    gates,
+    secrets,
+    egress,
+    rails: {
+      crypto: [
+        { name: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
+          missing: ["IBEX_CLIENT_ID", "IBEX_CLIENT_SECRET", "IBEX_ACCOUNT_ID"].filter((k) => !has(k)) },
+        { name: "Blink", env: config.blink.env, configured: blinkConfigured(), live: blinkLive(),
+          missing: ["BLINK_API_KEY", "BLINK_WALLET_ID"].filter((k) => !has(k)) },
+      ],
+      payout: [
+        { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(),
+          missing: ["PEEXIT_API_KEY", "PEEXIT_CALLBACK_PASS"].filter((k) => !has(k)),
+          reachability: peexit.reachability(), routes: true },
+        { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(),
+          missing: ["PAWAPAY_API_TOKEN"].filter((k) => !has(k)),
+          reachability: null, routes: false }, // supports() === false — out of rotation
+      ],
+    },
+  });
 });
 
 /** Real operational notifications derived from payment activity. */

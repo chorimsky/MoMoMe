@@ -30,6 +30,20 @@ export interface EgressStatus {
 }
 export interface RailReachability { ok: boolean; status: number; reason: string; at: string }
 
+
+/** Go-live readiness: every fact derived from the same functions the boot gates and the
+ *  money path use, so it cannot drift from reality the way a written checklist does. */
+export interface ReadinessCheck { label: string; state: "ok" | "warn" | "blocked"; detail: string; fix?: string }
+export interface ReadinessRail { name: string; env: string; configured: boolean; live: boolean; missing: string[]; reachability?: RailReachability | null; routes?: boolean }
+export interface Readiness {
+  liveMoney: boolean;
+  deployEnv: string;
+  gates: ReadinessCheck[];
+  secrets: ReadinessCheck[];
+  egress: EgressStatus;
+  rails: { crypto: ReadinessRail[]; payout: ReadinessRail[] };
+}
+
 export interface AdminSessionUser { id: string; username: string; role: AdminRole; }
 
 // Same-origin "/api" by default (Vite proxy in dev, Vercel rewrite in prod).
@@ -48,6 +62,16 @@ export function setAdminToken(token: string | null): void {
   try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
 }
 export function getAdminToken(): string | null { return adminToken; }
+
+
+/* ---------- step-up elevation ----------
+   A guarded action answers 403 `elevation_required` when the session has not been
+   re-authenticated recently. Rather than surfacing that as a raw error the operator has to
+   decode, the console registers a prompt: we ask for the password, elevate, and retry the
+   original request ONCE. Retrying only once matters — a loop would turn a genuinely
+   forbidden action into repeated password prompts. */
+let elevationPrompt: (() => Promise<string | null>) | null = null;
+export function setElevationPrompt(fn: (() => Promise<string | null>) | null): void { elevationPrompt = fn; }
 
 /* ---------- anonymous sender identity (no login) ----------
    A persistent per-device id the system uses to recognise the returning user and
@@ -135,7 +159,7 @@ const deviceReady: Promise<void> = (async () => {
   } catch { /* never block the app on enrolment */ }
 })();
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = false): Promise<T> {
   await deviceReady; // returning/persisted devices settle here; brand-new ones resolve instantly
 
   let res: Response;
@@ -192,6 +216,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof body?.error === "string") code = body.error; // stable code for i18n mapping
     } catch {
       /* non-JSON error */
+    }
+    // Step-up: the action is allowed for this role but the session needs re-authenticating.
+    // Ask once, elevate, replay the SAME request. Guarded so a genuinely forbidden action
+    // cannot turn into a password-prompt loop, and so /admin/elevate never recurses.
+    if (res.status === 403 && code === "elevation_required" && elevationPrompt && !retriedAfterElevation && path !== "/admin/elevate") {
+      const password = await elevationPrompt();
+      if (password) {
+        await api.adminElevate(password); // throws (bad password / rate-limited) → surfaces below
+        return req<T>(path, init, true);
+      }
     }
     throw new ApiError(message, res.status, code);
   }
@@ -392,6 +426,14 @@ export const api = {
   /** Re-probe our outbound IP and re-test the rail right now (after registering an IP). */
   adminRecheckEgress: () =>
     req<{ egress: EgressStatus; reachability: RailReachability | null }>("/admin/rails/egress/recheck", { method: "POST" }),
+  adminReadiness: () => req<Readiness>("/admin/readiness"),
+  /** Step-up: re-enter the password to elevate this session for a few minutes. Swaps the
+   *  stored token for the elevated one so subsequent guarded calls carry it. */
+  adminElevate: async (password: string) => {
+    const r = await req<{ token: string; expiresAt: string; elevatedUntil: number }>("/admin/elevate", { method: "POST", body: JSON.stringify({ password }) });
+    setAdminToken(r.token);
+    return r;
+  },
   adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
   retryPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "wavelength-api": {
+      "source": "lightninglabs/wavelength-sdk",
+      "sourceType": "github",
+      "skillPath": "skills/wavelength-api/SKILL.md",
+      "computedHash": "dde1a5cdbe974155426c4671089daf7665c6d5591eb33f0ea4a3650a5e70b479"
+    }
+  }
+}

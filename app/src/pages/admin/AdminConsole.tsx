@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
-import { api } from "../../api/client.js";
+import { api, setElevationPrompt } from "../../api/client.js";
 import { canAccess as roleCanAccess, isSuperAdmin, type AdminRole, type Section } from "@shared/roles.js";
 import { useAdminUser } from "./AdminGate.js";
 import { AdminContext, type AdminKey, type Notif } from "./context.js";
@@ -24,6 +24,7 @@ import { ComplianceView } from "./views/Compliance.js";
 import { ReportsView } from "./views/Reports.js";
 import { HealthView } from "./views/Health.js";
 import { AdministrationView } from "./views/Administration.js";
+import { ReadinessView } from "./views/Readiness.js";
 import { PeexView } from "./views/Peex.js";
 import { NotificationsView } from "./views/Notifications.js";
 import { SettingsView } from "./views/Settings.js";
@@ -48,6 +49,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
     mobilemoney: <g><rect x="4.5" y="1.5" width="7" height="13" rx="1.5" /><path d="M7 12.5h2" /></g>,
     reports: <g><path d="M2.5 13.5V8M6 13.5V3.5M9.5 13.5V6M13 13.5V2.5" /></g>,
     health: <g><path d="M1.5 8h3l1.5-4 3 8 1.5-4h3" /></g>,
+    readiness: <g><path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z" /><path d="M5.8 8l1.6 1.6L10.4 6.6" /></g>,
     administration: <g><circle cx="8" cy="4.5" r="2.2" /><path d="M3.5 13c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" /><circle cx="12.5" cy="3.5" r="1" /></g>,
     notifications: <g><path d="M8 2a4 4 0 00-4 4c0 4-1.5 5-1.5 5h11S12 10 12 6a4 4 0 00-4-4z" /><path d="M6.8 14a1.4 1.4 0 002.4 0" /></g>,
     settings: <g><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" /></g>,
@@ -59,7 +61,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
-  | "notifications" | "health" | "settings" | "administration" | "developers";
+  | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: null, items: [["overview", "Overview"]] },
@@ -69,7 +71,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
   { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"]] },
-  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"]] },
+  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items)) as Record<Key, string>;
 const VIEWS: Record<Key, ComponentType> = {
@@ -91,6 +93,7 @@ const VIEWS: Record<Key, ComponentType> = {
   settings: SettingsView,
   developers: ApiKeysView,
   administration: AdministrationView,
+  readiness: ReadinessView,
 };
 
 // The console nav keys are exactly the shared role Sections — the same module
@@ -100,7 +103,7 @@ const VIEWS: Record<Key, ComponentType> = {
 const canAccess = (role: AdminRole, key: Key) =>
   // "developers" (API keys) isn't a shared RBAC Section — it's Super-Admin-only,
   // mirroring the server's explicit /admin/apikeys gate.
-  (key === "developers" ? isSuperAdmin(role) : roleCanAccess(role, key as Section)) && (key !== "administration" || isSuperAdmin(role));
+  (key === "developers" ? isSuperAdmin(role) : roleCanAccess(role, key as Section)) && (key !== "administration" || isSuperAdmin(role)) && (key !== "readiness" || isSuperAdmin(role));
 
 function loadSection(): Key {
   try {
@@ -117,6 +120,15 @@ const SEARCHABLE: Key[] = ["payments", "customers"];
 export function AdminConsole() {
   const { username, role } = useAdminUser();
   const [active, setActive] = useState<Key>(loadSection);
+  // Step-up prompt. A guarded action (treasury sweep, momo movement, user/API-key changes,
+  // the rail allowlist) answers 403 elevation_required; the client calls this, we collect
+  // the password, and it elevates and replays the request. Resolving null cancels.
+  const [elevate, setElevate] = useState<{ resolve: (v: string | null) => void } | null>(null);
+  const [elevatePw, setElevatePw] = useState("");
+  useEffect(() => {
+    setElevationPrompt(() => new Promise<string | null>((resolve) => { setElevatePw(""); setElevate({ resolve }); }));
+    return () => setElevationPrompt(null);
+  }, []);
   const [navOpen, setNavOpen] = useState(false);
   const [query, setQueryState] = useState("");
   const [notifications, setNotifications] = useState<Notif[]>([]);
@@ -173,6 +185,33 @@ export function AdminConsole() {
   const View = VIEWS[active] ?? OverviewView;
 
   return (
+    <>
+      {/* Step-up prompt — shown only when a guarded action demands re-authentication. */}
+      {elevate && (
+        <div
+          role="dialog" aria-modal="true" aria-label="Confirm your password"
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", zIndex: 1000 }}
+          onClick={() => { elevate.resolve(null); setElevate(null); }}
+        >
+          <div className="card" style={{ padding: 20, width: "min(380px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Confirm your password</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5, marginBottom: 14 }}>
+              This action moves funds or changes access. Re-enter your password to confirm — it stays confirmed for a few minutes.
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); elevate.resolve(elevatePw); setElevate(null); }}>
+              <input
+                className="input" type="password" autoFocus value={elevatePw}
+                onChange={(e) => setElevatePw(e.target.value)}
+                placeholder="Password" aria-label="Password" style={{ width: "100%" }}
+              />
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                <button type="button" className="btn ghost" onClick={() => { elevate.resolve(null); setElevate(null); }}>Cancel</button>
+                <button type="submit" className="btn" disabled={!elevatePw}>Confirm</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
    <AdminContext.Provider value={admin}>
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--paper)", color: "var(--ink)" }}>
       {/* sidebar */}
@@ -286,5 +325,6 @@ export function AdminConsole() {
       `}</style>
     </div>
    </AdminContext.Provider>
+    </>
   );
 }

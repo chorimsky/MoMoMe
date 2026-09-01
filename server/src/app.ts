@@ -64,6 +64,25 @@ export function createApp() {
   // a tight limit everywhere else caps unauthenticated large-body DoS.
   app.use("/api/admin/settings", express.json({ limit: "768kb", verify: keepRaw }));
   app.use(express.json({ limit: "32kb", verify: keepRaw }));
+  // MAP BODY-PARSER FAILURES TO 4xx. express.json() calls next(err) on a body it cannot
+  // parse, and with no handler here that fell through to the terminal 500 — so a request
+  // the CLIENT got wrong was reported as a server fault. That is not cosmetic: a TRUNCATED
+  // body is the dominant failure on 2G/metered data in this market (the API client's own
+  // timeout comments say as much), and every one of them surfaced to the user as
+  // "Request failed (500)". A 500 also tells the client the server is broken, so it retries
+  // the same bad payload instead of failing fast.
+  // Registered immediately after the parsers so it catches their errors specifically;
+  // anything else still falls through to the terminal handler below.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    const e = err as { type?: string; status?: number } | undefined;
+    if (e?.type === "entity.too.large") {
+      return res.status(413).json({ error: "payload_too_large", message: "That request is too large." });
+    }
+    if (err instanceof SyntaxError || e?.type === "entity.parse.failed") {
+      return res.status(400).json({ error: "bad_json", message: "The request body wasn't valid JSON." });
+    }
+    return next(err);
+  });
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

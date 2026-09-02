@@ -3,7 +3,7 @@ import { runBootChecks } from "./boot.js";
 import { config, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { egressStatus } from "./core/egress.js";
-import { registerAccountWebhook } from "./adapters/ibex.js";
+import { registerAccountWebhook, accountBalances } from "./adapters/ibex.js";
 import { reconcileTick, fxTick } from "./jobs.js";
 import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
@@ -41,7 +41,21 @@ if (ibexConfigured() || liveMoney()) {
 if (ibexConfigured() && config.publicUrl.startsWith("https://")) {
   void registerAccountWebhook()
     .then(() => console.log(`IBEX account webhook → ${config.publicUrl}/webhooks/ibex`))
-    .catch((e) => console.error("IBEX register account webhook failed", e));
+    .catch(async (e) => {
+      console.error("IBEX register account webhook failed", e);
+      // A wrong IBEX_ACCOUNT_ID is otherwise a dead end. IBEX answers "account not found" /
+      // "incorrect account id" without saying which accounts DO exist, the id is a UUID
+      // nobody can guess, and reading it means logging into their console. The credentials
+      // we already hold can list them — so say what the valid options are instead of
+      // leaving an operator to hunt. Account ids are identifiers, not secrets (the failing
+      // one is already in the line above); best-effort and never fatal.
+      try {
+        const ids = Object.keys(await accountBalances());
+        if (ids.length) {
+          console.error(`[ibex] IBEX_ACCOUNT_ID="${config.ibex.accountId}" is not an account on this organisation. Available account ids: ${ids.join(", ")}`);
+        }
+      } catch { /* listing is a courtesy, not a requirement */ }
+    });
 }
 
 /* EGRESS IP — the address an IP-allowlisting rail must whitelist. Peexit production 403s

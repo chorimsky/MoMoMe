@@ -47,10 +47,24 @@ async function main() {
   ok("note explains the 403 is IP-based, not credential-based",
      e.note.includes("MISMATCH") && e.note.includes("403") && e.note.includes("regardless of credentials"));
 
-  // 4. Proxied → the PROXY's IP is what gets allowlisted, not ours.
+  // 4. Proxied. `ip` must now be the address the RAIL sees — i.e. the proxy's — because
+  //    that is the one an operator registers. Reporting this platform's own address there
+  //    would hand them the wrong value, which is the mistake this module exists to prevent.
+  //    Here the proxy is unreachable (nothing is listening on proxy.example), which is the
+  //    FIRST state an operator hits after configuring one: set, but not actually carrying
+  //    traffic. It must be called out, not quietly reported as an IP.
   config.peexit.proxyUrl = "http://proxy.example:8080";
   e = await egressStatus();
-  ok("proxied → note redirects to the proxy IP", e.proxied === true && e.note.includes("PROXY"));
+  ok("proxied → flagged as proxied", e.proxied === true);
+  ok("unreachable proxy → NO ip reported (never a wrong address to register)", e.ip === null, String(e.ip));
+  ok("…and the note says the tunnel isn't carrying traffic",
+    e.note.includes("did not answer") && e.note.includes("PEEXIT_PROXY_URL"), e.note.slice(0, 70));
+  // directIp is whatever the platform currently resolves to (case 3 moved it) — the point
+  // is that it is reported SEPARATELY from `ip`, so it can never be mistaken for the
+  // address to register.
+  ok("this platform's own IP is reported separately, never as the one to register",
+    e.directIp !== null && e.directIp !== e.ip, `direct=${e.directIp} rail=${e.ip}`);
+  ok("no false 'matching' while the proxy is down", e.matches === null);
   config.peexit.proxyUrl = "";
 
   // 5. Sources disagree → report UNKNOWN rather than an IP someone would go register.

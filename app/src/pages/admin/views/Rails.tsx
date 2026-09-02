@@ -137,7 +137,11 @@ export function RailsView() {
           {egress?.note ?? "Checking…"}
         </div>
         <Grid cols={2} gap={12}>
-          <Field label="Current outbound IP" value={egress?.ip ?? "unknown"} mono />
+          {/* `ip` is the address the RAIL sees — the proxy's when one is configured — because
+              that is the one to register. This platform's own address is shown separately
+              so it can never be mistaken for it. */}
+          <Field label={egress?.proxied ? "Egress IP (via proxy) — register this" : "Current outbound IP"} value={egress?.ip ?? "unknown"} mono />
+          {egress?.proxied && <Field label="This platform's own IP (do NOT register)" value={egress?.directIp ?? "unknown"} mono />}
           <Field label="Registered with rail" value={egress?.expected ?? "—"} mono />
         </Grid>
         {egress?.previousIp && (

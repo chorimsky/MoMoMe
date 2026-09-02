@@ -24,6 +24,9 @@ export interface EgressStatus {
   expected: string | null;
   matches: boolean | null;
   proxied: boolean;
+  /** When proxied, this platform's OWN outbound IP — informational, NOT the one to
+   *  register: rail traffic leaves via the proxy, so `ip` is the address to allowlist. */
+  directIp: string | null;
   previousIp: string | null;
   checkedAt: string | null;
   note: string;

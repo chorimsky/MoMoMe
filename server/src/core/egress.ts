@@ -20,6 +20,7 @@
    and telling an operator precisely what to register — which is what this does.
    ============================================================ */
 import { config } from "../config.js";
+import { fetchT } from "../adapters/http.js";
 import { register, touch } from "./persist.js";
 import { getSettings } from "./settings.js";
 
@@ -30,8 +31,11 @@ export interface EgressStatus {
   expected: string | null;
   /** Do they agree? null when either side is unknown — "unknown" is NOT "matching". */
   matches: boolean | null;
-  /** True when rail traffic leaves via a proxy; then the PROXY's IP is what to allowlist. */
+  /** True when rail traffic leaves via a proxy; then `ip` IS the proxy's address. */
   proxied: boolean;
+  /** When proxied, this platform's OWN outbound IP — informational only, and NOT the
+   *  address to register: rail traffic does not leave from here. null when not proxied. */
+  directIp: string | null;
   /** Previously-seen IP, when it differs from `ip` — i.e. the egress moved. */
   previousIp: string | null;
   checkedAt: string | null;
@@ -59,17 +63,31 @@ let changedFrom: string | null = null;
  *  register with a payment provider. */
 const SOURCES = ["https://api.ipify.org?format=json", "https://ifconfig.co/json"];
 
-async function probe(url: string): Promise<string | null> {
+async function probe(url: string, proxyUrl?: string): Promise<string | null> {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    try {
-      const r = await fetch(url, { signal: ctrl.signal, headers: { accept: "application/json" } });
-      if (!r.ok) return null;
-      const d = (await r.json()) as { ip?: string };
-      return typeof d.ip === "string" && d.ip ? d.ip : null;
-    } finally { clearTimeout(t); }
+    // Through fetchT so `proxyUrl` routes the probe over the SAME HTTP CONNECT tunnel the
+    // rail calls use — that is the only way to observe the address the rail actually sees.
+    const r = await fetchT(url, { headers: { accept: "application/json" } }, 4000, proxyUrl);
+    if (!r.ok) return null;
+    const d = (await r.json()) as { ip?: string };
+    return typeof d.ip === "string" && d.ip ? d.ip : null;
   } catch { return null; }
+}
+
+/** The address an IP-allowlisting rail sees us as. With a proxy configured that is the
+ *  PROXY's address, not this platform's — and it is the one an operator must register.
+ *  Probed through the proxy rather than assumed, so the console can confirm the tunnel is
+ *  actually carrying traffic instead of merely being configured. Cached separately from the
+ *  direct probe; both are best-effort and never throw. */
+let proxyCache: { ip: string | null; at: number } | null = null;
+export async function railEgressIp(): Promise<string | null> {
+  const proxyUrl = config.peexit.proxyUrl;
+  if (!proxyUrl) return currentEgressIp();
+  if (proxyCache && Date.now() - proxyCache.at < TTL_MS) return proxyCache.ip;
+  const [a, b] = await Promise.all(SOURCES.map((u) => probe(u, proxyUrl)));
+  const ip = a && b ? (a === b ? a : null) : (a ?? b ?? null);
+  proxyCache = { ip, at: Date.now() };
+  return ip;
 }
 
 /** Current outbound IP. Cached, single-flight, best-effort — never throws, never blocks a
@@ -78,7 +96,7 @@ export async function currentEgressIp(): Promise<string | null> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.ip;
   if (inflight) return inflight;
   const run = (async () => {
-    const [a, b] = await Promise.all(SOURCES.map(probe));
+    const [a, b] = await Promise.all(SOURCES.map((u) => probe(u)));
     // Agree, or exactly one answered → trust it. Disagree → report unknown rather than
     // hand an operator an IP that would be allowlisted incorrectly.
     const ip = a && b ? (a === b ? a : null) : (a ?? b ?? null);
@@ -101,21 +119,31 @@ export async function currentEgressIp(): Promise<string | null> {
 /** Drop the cached IP so the next read re-probes. Used by the admin "re-check" action —
  *  after registering an address with a provider an operator must be able to confirm it
  *  NOW, not after the TTL lapses. */
-export function invalidateEgressCache(): void { cache = null; }
+export function invalidateEgressCache(): void { cache = null; proxyCache = null; }
 
 /** Full allowlist picture for operators (boot log + /admin/rails). */
 export async function egressStatus(): Promise<EgressStatus> {
-  const ip = await currentEgressIp();
+  const proxied = !!config.peexit.proxyUrl;
+  // `ip` always means "the address a rail sees", so it is the PROXY's when one is set.
+  // Reporting the platform's own address there would hand an operator the wrong value to
+  // register — the exact mistake this module exists to prevent.
+  const ip = await railEgressIp();
+  const directIp = proxied ? await currentEgressIp() : null;
   // Admin-set value wins over the env fallback: a provider can allowlist a new IP at any
   // time, and requiring a redeploy to record that is exactly the wrong shape for it.
   const expected = (getSettings().egress?.allowlistedIp || config.egress.allowlistedIp) || null;
-  const proxied = !!config.peexit.proxyUrl;
   const matches = ip && expected ? ip === expected : null;
   const previousIp = changedFrom && changedFrom !== ip ? changedFrom : null;
 
   let note: string;
-  if (proxied) {
-    note = "Peexit egresses through PEEXIT_PROXY_URL, so the PROXY's IP is what must be allowlisted — not this address.";
+  if (proxied && !ip) {
+    note = "Peexit is routed through a proxy, but the proxy did not answer — traffic is NOT reaching the internet through it. Check PEEXIT_PROXY_URL; until it works every Peexit call will fail.";
+  } else if (proxied && !expected) {
+    note = `Peexit egresses through the proxy as ${ip}. Register THAT address with Peexit (not this platform's ${directIp ?? "own"} IP), then set EGRESS_ALLOWLISTED_IP=${ip}.`;
+  } else if (proxied && matches) {
+    note = `Peexit egresses through the proxy as ${ip}, which matches the allowlisted address. Correctly configured.`;
+  } else if (proxied) {
+    note = `MISMATCH: Peexit traffic leaves the proxy as ${ip} but ${expected} is registered. Every call will 403 regardless of credentials — register ${ip}, or point the proxy at the allowlisted address.`;
   } else if (!ip) {
     note = "Outbound IP could not be determined (echo services unreachable or disagreeing).";
   } else if (!expected) {
@@ -125,5 +153,5 @@ export async function egressStatus(): Promise<EgressStatus> {
   } else {
     note = `MISMATCH: traffic leaves from ${ip} but ${expected} is registered as allowlisted. An IP-allowlisting rail will 403 every call regardless of credentials — re-register, or route it through a proxy on the allowlisted IP.`;
   }
-  return { ip, expected, matches, proxied, previousIp, checkedAt: cache ? new Date(cache.at).toISOString() : null, note };
+  return { ip, expected, matches, proxied, directIp, previousIp, checkedAt: cache ? new Date(cache.at).toISOString() : null, note };
 }

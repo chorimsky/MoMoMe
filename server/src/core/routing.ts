@@ -97,19 +97,28 @@ export async function aggregatorFloatXaf(): Promise<number> {
   let sum = 0;
   let any = false;
   const seen = new Set<string>();
-  const silent: string[] = [];
+  // Track WHY each rail contributed nothing. The first version of this only recorded rails
+  // that were queried and returned null — but a rail that is skipped before the query
+  // (unconfigured, or marked ineligible by the health tracker) never reaches that branch, so
+  // the list came back empty and nothing was logged at all. "Nobody was even asked" is a
+  // different fault from "everyone was asked and none answered", and the operator needs to
+  // be able to tell them apart.
+  const why: string[] = [];
   for (const p of PAYOUTS) {
-    if (seen.has(p.name) || !p.configured() || !eligible(p.name)) continue;
+    if (seen.has(p.name)) continue;
     seen.add(p.name);
+    if (!p.configured()) { why.push(`${p.name}: not configured`); continue; }
+    if (!eligible(p.name)) { why.push(`${p.name}: marked unhealthy by the rail health tracker`); continue; }
     const bal = await p.balance("CM");
-    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; } else { silent.push(p.name); }
+    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; }
+    else { why.push(`${p.name}: balance unreadable (not live, or the balance API failed)`); }
   }
   // NaN sends availableFloatXaf() into the static-ceiling fallback, which on a long-lived
   // deployment has been depleted by every past delivery and blocks payouts outright. The
   // operator saw only "payouts_unavailable". Name the rails that could not answer — that is
   // the difference between "we are out of money" and "we cannot see our money".
-  if (!any && silent.length) {
-    console.error(`[treasury] NO payout rail could report a balance (${silent.join(", ")}) — falling back to the static ceiling. This is "balance unknown", NOT "balance zero".`);
+  if (!any) {
+    console.error(`[treasury] NO payout rail contributed a balance — falling back to the static ceiling. This is "balance unknown", NOT "balance zero". Reasons: ${why.length ? why.join(" | ") : "no payout rails registered at all"}`);
   }
   return any ? sum : NaN;
 }

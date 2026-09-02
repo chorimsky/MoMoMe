@@ -87,4 +87,19 @@ export interface RailAdapter {
   /** OPTIONAL authoritative status of an OUTBOUND payment by its id (LN payment hash /
    *  tx id). null = indeterminate. Pairs with payInvoice for the refund reconcile loop. */
   outboundStatus?(txId: string): Promise<SettlementStatus | null>;
+
+  /* ---- OPTIONAL custodial accounts: one wallet per end user ----
+     A rail that can open an account per end user exposes these, and the identity layer
+     gives every Mobile-Money number a REAL Lightning wallet instead of a placeholder.
+     A rail without the capability omits them and identities keep their simulated ref —
+     the number still works as a Lightning Address, it just isn't a wallet that holds. */
+
+  /** Open a custodial account on the rail and return ITS id. `name` is a stable,
+   *  caller-chosen label (we pass the customer id) so the account is identifiable in the
+   *  rail's console. MUST NOT be assumed idempotent by the rail — the caller guarantees
+   *  it is only ever called once per identity. */
+  createAccount?(name: string): Promise<string>;
+  /** Balance of ONE custodial account, in that account's smallest unit (msat for a BTC
+   *  account). null = the account is unknown to the rail. */
+  accountBalance?(accountId: string): Promise<{ currencyId: number; balance: number } | null>;
 }

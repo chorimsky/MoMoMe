@@ -308,8 +308,14 @@ export interface Identity {
   e164: string; // +237670123456
   country: CountryCode;
   walletId: string; // LNW00001
-  /** Custodial Lightning wallet ref (IBEX account id in live mode). */
+  /** Custodial Lightning wallet ref. A REAL rail account id once a wallet-capable rail
+   *  has opened one (IBEX opens one account per end user); until then a `sim_wal_…`
+   *  placeholder. Use walletIsReal() rather than eyeballing it — the distinction decides
+   *  whether a balance may be shown at all. */
   lnWalletRef: string;
+  /** Which rail holds lnWalletRef ("ibex"). Absent while the ref is a placeholder — the
+   *  balance lookup needs it to know which rail to ask. */
+  lnWalletProvider?: string;
   ledgerId: string; // LED00001
   /** number@momome.africa — the latent Lightning identity. */
   lightningAddress: string;

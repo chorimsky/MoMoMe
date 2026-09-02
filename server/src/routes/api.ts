@@ -24,7 +24,7 @@ import {
 import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/settings.js";
 import * as treasury from "../core/treasury.js";
 import * as momoOps from "../core/momoOps.js";
-import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
+import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits, walletIsReal, walletBalance } from "../core/identity.js";
 import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
 import { getDevice, enrollDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
@@ -1421,7 +1421,36 @@ api.get("/admin/identities", async (_req, res) => {
     const k = nsn(p.recipient.phone);
     receivedXaf.set(k, (receivedXaf.get(k) ?? 0) + p.xaf);
   }
-  res.json(listIdentities().map((i) => ({ ...i, balances: { ...i.balances, XAF: receivedXaf.get(nsn(i.phone)) ?? 0 } })));
+  // `walletReal` tells the console whether the Lightning wallet is an actual rail account
+  // or still a placeholder — without it an operator cannot tell the difference from the
+  // ref alone, and "wallets: N" in the stats would overstate what exists.
+  res.json(listIdentities().map((i) => ({
+    ...i,
+    walletReal: walletIsReal(i),
+    balances: { ...i.balances, XAF: receivedXaf.get(nsn(i.phone)) ?? 0 },
+  })));
+});
+
+/** LIVE balance of one identity's custodial Lightning wallet, read from the rail that
+ *  holds it. Deliberately a separate call rather than a field on the list above: it is a
+ *  network round-trip per rail, and the list renders for every identity. `balance: null`
+ *  means "unavailable" (placeholder wallet, or the rail could not be reached) and MUST be
+ *  rendered as unknown — never as zero, which would be a false claim about someone's money. */
+api.get("/admin/identities/:id/wallet", async (req, res) => {
+  const identity = listIdentities().find((i) => i.customerId === req.params.id);
+  if (!identity) return res.status(404).json({ error: "not_found", message: "No such identity." });
+  const real = walletIsReal(identity);
+  const bal = await walletBalance(identity).catch(() => null);
+  res.json({
+    customerId: identity.customerId,
+    lightningAddress: identity.lightningAddress,
+    provider: identity.lnWalletProvider ?? null,
+    accountId: identity.lnWalletRef,
+    real,
+    // msat for a BTC account; null = unavailable, NOT zero.
+    balance: bal?.balance ?? null,
+    currencyId: bal?.currencyId ?? null,
+  });
 });
 /** Maintenance: drop phantom identities (unclaimed + never received money) left
  *  by the old at-creation provisioning. Self-healing — re-provisioned on delivery. */

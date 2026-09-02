@@ -114,6 +114,20 @@ async function main() {
     ok("an operator can see why", after.events.some((e) => (e.note ?? "").includes("refund owed")),
       after.events.map((e) => e.note).filter(Boolean).slice(-1)[0] ?? "no note");
 
+    // ---- the backstop path must not reopen the hole ----
+    // The reconcile loop and the on-demand poll settle from an authoritative RE-QUERY, not
+    // a webhook, so they have no deposit id to pass. That left the seen-list empty, and a
+    // later real second deposit was then indistinguishable from a replay — silently kept,
+    // which is exactly what this guard exists to prevent. Booking now always seeds the
+    // list, falling back to the paid leg's providerRef.
+    {
+      const { store } = await import("../src/db/store.js");
+      const settledByBackstop = (await store().listPayments()).find((x) => x.id === pay.id);
+      ok("a settled payment always remembers at least one deposit id",
+        (settledByBackstop?.inboundEventIds?.length ?? 0) > 0,
+        JSON.stringify(settledByBackstop?.inboundEventIds));
+    }
+
     // ---- the debt must also protect the treasury ----
     // A duplicate sits on a DELIVERED payment, and treasury's state-based scan counts a
     // DELIVERED payment's crypto as ours. Without refund_payable in the liability sum, an
@@ -131,6 +145,33 @@ async function main() {
     await new Promise((res) => setTimeout(res, 700));
     const led4 = await get(`/api/ledger/${pay.id}`) as unknown[];
     ok("replaying the second deposit does not double the debt", led4.length === legs3, `${legs3} → ${led4.length}`);
+    // ---- the scenario that hole actually produced ----
+    // Settle a payment WITHOUT a webhook (the backstop path: no deposit id), then have a
+    // real deposit arrive. Before the seeding fix this was silently kept.
+    {
+      let r2 = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 20000, method: "USDC", country: "CM" }) });
+      const q2 = await r2.json() as { id: string };
+      r2 = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({
+        quoteId: q2.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Backstop" } }) });
+      const p2 = await r2.json() as { id: string; payInstruction: { amount: number } };
+      // /simulate settles with no deposit id, exactly like the reconcile backstop.
+      await fetch(`${base}/api/payments/${p2.id}/simulate`, { method: "POST", headers: DEV });
+      let st = "";
+      for (let i = 0; i < 50; i++) {
+        await new Promise((res) => setTimeout(res, 200));
+        st = ((await get(`/api/payments/${p2.id}`)) as { state: string }).state;
+        if (["DELIVERED", "FAILED", "MANUAL_REVIEW"].includes(st)) break;
+      }
+      ok("a payment settled without a webhook still delivers", st === "DELIVERED", st);
+      const before2 = ((await get(`/api/ledger/${p2.id}`)) as unknown[]).length;
+      // Now real crypto arrives for it.
+      await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: deposit("ibex-tx-late", p2.payInstruction.amount) });
+      await new Promise((res) => setTimeout(res, 900));
+      const l2 = await get(`/api/ledger/${p2.id}`) as Array<{ account: string; direction: string; amount: number }>;
+      const owed2 = l2.filter((e) => e.account === "refund_payable").reduce((s2, e) => s2 + (e.direction === "debit" ? e.amount : -e.amount), 0);
+      ok("a real deposit after a backstop settle is NOT silently kept", l2.length > before2, `${before2} → ${l2.length}`);
+      ok("…it is booked as a refund owed", owed2 < 0, String(owed2));
+    }
   } finally { server.close(); }
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);

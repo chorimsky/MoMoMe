@@ -204,7 +204,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     // credited, never refunded, never even recorded. Delivering again is not the answer
     // either — the recipient was already paid once. So book it as a LIABILITY we owe back
     // and say so on the payment, where an operator can act on it.
-    if (!eventId || seen.length === 0) return; // (a), or a rail with no deposit ids
+    if (!eventId) return; // (a) — nothing to tell this apart by, so assume a replay
     const amount = actualAmount;
     p.inboundEventIds = [...seen, eventId];
     const note = amount != null
@@ -224,7 +224,6 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     console.error(`[settle] ${p.ref} DUPLICATE INBOUND — ${note}`);
     return;
   }
-  if (eventId) p.inboundEventIds = [...seen, eventId];
   // Compare against the amount LOCKED at quote time (carried on the instruction),
   // never a freshly-recomputed rate — spot drifts, and the customer paid the locked
   // invoice amount. Recomputing here would falsely trip the guard on a good payment.
@@ -240,6 +239,18 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   const paidMethod = leg.method;
   const asset = leg.asset;
   const expected = leg.amount;
+
+  // Remember which deposit this was, so a redelivery is recognised and a genuinely NEW
+  // deposit is not. When the caller has no deposit id — the reconcile backstop and the
+  // on-demand poll both settle from an authoritative re-query rather than a webhook — fall
+  // back to the PAID LEG'S providerRef. For Lightning, the only method either of those
+  // paths handles, providerRef IS the rail's transaction id, so the webhook that arrives
+  // later for the same payment matches and is correctly ignored.
+  //
+  // Seeding this matters: leaving the list empty meant a payment settled by the backstop
+  // had nothing to compare against, so a later REAL second deposit looked indistinguishable
+  // from a replay and was silently kept — the exact hole this guard exists to close.
+  p.inboundEventIds = [...seen, eventId ?? leg.providerRef ?? p.payInstruction.providerRef ?? "settled"];
 
   // Lightning invoices settle in full or not at all — a confirmed LN webhook
   // means the locked amount arrived, so we credit the locked amount and never

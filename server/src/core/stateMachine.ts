@@ -174,18 +174,57 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
-export async function confirmInbound(pIn: Payment, actualAmount?: number): Promise<void> {
+export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string): Promise<void> {
   // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
   // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
   // webhooks) re-reads inside the lock, sees the booking below, and aborts — closing the
   // double-settle → double real-payout hole (memory's shared-object serialization the tests
   // rely on does NOT hold on Postgres, where each call gets an independent copy).
-  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount));
+  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId));
 }
-async function confirmInboundLocked(paymentId: string, actualAmount?: number): Promise<void> {
+async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string): Promise<void> {
   await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
-  if (!p || inboundBooked(p)) return; // already settling/settled/held — never re-book (see inboundBooked)
+  if (!p) return;
+  // Has this exact deposit already been processed? A rail redelivers webhooks freely, so a
+  // repeat of the SAME deposit must be ignored — that is what the seen-list is for.
+  const seen = p.inboundEventIds ?? [];
+  if (eventId && seen.includes(eventId)) return; // true replay of a deposit already handled
+
+  if (inboundBooked(p)) {
+    // The payment has already settled. Two very different things land here:
+    //
+    //  (a) a redelivered webhook for the deposit we already booked — ignore it; and with
+    //      no eventId to tell it apart, that is the only safe assumption (the old
+    //      behaviour, kept for rails that cannot supply one).
+    //  (b) a genuinely NEW deposit — the sender paid twice, or paid an address again after
+    //      it had settled. That is real money arriving for an order already filled.
+    //
+    // (b) used to take the same silent `return` as (a): the crypto was received, never
+    // credited, never refunded, never even recorded. Delivering again is not the answer
+    // either — the recipient was already paid once. So book it as a LIABILITY we owe back
+    // and say so on the payment, where an operator can act on it.
+    if (!eventId || seen.length === 0) return; // (a), or a rail with no deposit ids
+    const amount = actualAmount;
+    p.inboundEventIds = [...seen, eventId];
+    const note = amount != null
+      ? `duplicate inbound: ${amount} ${p.payInstruction.asset} received after this payment already settled — refund owed to the sender`
+      : `duplicate inbound received after this payment already settled (amount unverified) — refund owed to the sender`;
+    // The payment itself STAYS as it is: the order really was delivered. What is new is a
+    // debt, so it is recorded as one rather than by rewriting history.
+    p.events.push({ at: new Date().toISOString(), state: p.state, note });
+    p.updatedAt = new Date().toISOString();
+    await store().putPayment(p);
+    if (amount != null && amount > 0) {
+      await store().recordTxn(p.id, [
+        { account: "inbound_clearing", direction: "debit", amount, currency: p.payInstruction.asset },
+        { account: "refund_payable", direction: "credit", amount, currency: p.payInstruction.asset },
+      ]);
+    }
+    console.error(`[settle] ${p.ref} DUPLICATE INBOUND — ${note}`);
+    return;
+  }
+  if (eventId) p.inboundEventIds = [...seen, eventId];
   // Compare against the amount LOCKED at quote time (carried on the instruction),
   // never a freshly-recomputed rate — spot drifts, and the customer paid the locked
   // invoice amount. Recomputing here would falsely trip the guard on a good payment.

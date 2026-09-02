@@ -367,7 +367,11 @@ export const ibexAdapter: RailAdapter = {
     let amount: number | undefined;
     if (isStable) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
     else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
-    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount };
+    // The transaction id identifies THIS deposit. For Lightning it equals providerRef; for
+    // a deposit method providerRef is the address, so this is the only thing that tells a
+    // webhook replay apart from a second payment to the same address.
+    const eventId = t.id ?? t.infoId;
+    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount, ...(eventId ? { eventId } : {}) };
   },
 
   // Authoritative re-query used by the webhook handler + reconcile backstop so a

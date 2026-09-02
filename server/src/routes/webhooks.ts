@@ -124,6 +124,6 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
       // body". A non-real inbound moves no real money either way, so it proceeds.
       else if (adapter.trusted()) return;
     }
-    await confirmInbound(payment, event.amount);
+    await confirmInbound(payment, event.amount, event.eventId);
   })());
 });

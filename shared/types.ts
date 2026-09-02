@@ -194,6 +194,10 @@ export interface Payment {
   /** Outbound transaction id of the refund payment (set once the refund is submitted).
    *  For Lightning this is the invoice's payment hash — the rail-agnostic poll key. */
   refundTxId?: string;
+  /** Rail deposit ids already processed for this payment. Lets a redelivered webhook be
+   *  told apart from a genuine SECOND deposit to the same receive address — the first is
+   *  ignored, the second is booked to refund_payable rather than silently kept. */
+  inboundEventIds?: string[];
   /** Which rail paid the refund out (e.g. "ibex") — so its status is
    *  re-queried on the SAME rail. Set alongside refundTxId. */
   refundProvider?: string;
@@ -286,7 +290,12 @@ export type LedgerAccount =
   | "fx_position"
   | "payout_float_XAF"
   | "fee_revenue"
-  | "external_recipient";
+  | "external_recipient"
+  /** Crypto received that we owe BACK to the sender — a second deposit against a payment
+   *  that had already settled. It cannot be delivered again (the order was filled once),
+   *  and it must not be quietly kept, so it is booked here as an explicit liability for an
+   *  operator to refund. A non-zero balance is money that is not ours. */
+  | "refund_payable";
 
 export interface LedgerEntry {
   id: string;

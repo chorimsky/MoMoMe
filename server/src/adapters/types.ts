@@ -27,6 +27,13 @@ export interface RailEvent {
   kind: "detected" | "confirmed";
   /** Actual amount received, in asset units (for under/overpayment checks). */
   amount?: number;
+  /** The RAIL'S OWN id for this particular deposit — distinct per deposit, unlike
+   *  providerRef, which for on-chain and ERC-20 is the receive ADDRESS and is therefore
+   *  identical across every deposit sent to it. Without this, a redelivered webhook and a
+   *  genuine SECOND payment to the same address are indistinguishable, and the settlement
+   *  guard treats both as "already booked" — silently keeping real money. Optional: a rail
+   *  that cannot supply one degrades to the old behaviour. */
+  eventId?: string;
 }
 
 /** Authoritative settlement result from re-querying the provider by providerRef.

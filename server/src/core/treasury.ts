@@ -70,6 +70,14 @@ export async function cryptoLiabilities(): Promise<Record<Asset, number>> {
     const a = p.payInstruction.asset as Asset;
     if (a in out) out[a] += p.payInstruction.amount;
   }
+  // Plus every duplicate deposit still owed back. Those sit on payments that are
+  // DELIVERED — the order really was filled — so the state-based scan above counts their
+  // crypto as OURS and would have let an operator sweep money belonging to the sender.
+  // The debt lives on the ledger instead, as a credit balance on refund_payable (credits
+  // are negative in this debit-positive sum), and is a liability until it is refunded.
+  for (const a of ["BTC", "USDT", "USDC"] as Asset[]) {
+    out[a] += Math.max(0, -(await store().balance("refund_payable", a)));
+  }
   return out;
 }
 

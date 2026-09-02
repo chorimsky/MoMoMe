@@ -3,10 +3,6 @@ import { Link } from "react-router-dom";
 import { DocShell, Sec, Summary } from "./LegalLayout.js";
 
 export function Privacy() {
-  useEffect(() => {
-    document.title = "Privacy Policy · MoMo›Me";
-  }, []);
-
   return (
     <DocShell kicker="Legal" title="Privacy Policy" updated="1 June 2026" current="privacy" langToggle>
       <Summary>

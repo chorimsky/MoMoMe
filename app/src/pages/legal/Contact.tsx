@@ -9,10 +9,6 @@ export function Contact() {
   const { t, lang } = useI18n();
   const [c, setC] = useState<SupportContact>(DEFAULT_SUPPORT);
 
-  useEffect(() => {
-    document.title = lang === "fr" ? "Contact & assistance · MoMo›Me" : "Contact & support · MoMo›Me";
-  }, [lang]);
-
   // Pull the live, admin-managed support email/phone (Settings → Company).
   useEffect(() => {
     let alive = true;

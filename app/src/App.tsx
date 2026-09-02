@@ -6,6 +6,7 @@ import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
 import { Receive } from "./pages/Receive.js";
+import { RouteTitle } from "./lib/routeTitle.js";
 import { AdminGate } from "./pages/admin/AdminGate.js";
 import { Terms } from "./pages/legal/Terms.js";
 import { Privacy } from "./pages/legal/Privacy.js";
@@ -51,7 +52,9 @@ export function App() {
   useRouteSeo(); // per-route canonical + robots (index public pages, noindex admin/ops/404)
   useReferralCapture();
   return (
-    <Routes>
+    <>
+      <RouteTitle />
+      <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/send" element={<SendApp />} />
       <Route path="/claim" element={<Claim />} />
@@ -72,6 +75,7 @@ export function App() {
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="*" element={<NotFound />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

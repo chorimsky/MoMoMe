@@ -364,3 +364,17 @@ button, input, select, textarea { color: inherit; }
   .print-poster { position: static !important; box-shadow: none !important; margin: 0 auto !important; }
   @page { margin: 12mm; }
 }
+
+/* Visible to screen readers, not on screen. Used for a page-level <h1> where the visible
+   design has no room for one — a document with no h1 gives assistive tech no top-level
+   landmark to jump to, and every step of the send flow was such a document. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

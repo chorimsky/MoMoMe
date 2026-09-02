@@ -3,10 +3,6 @@ import { Link } from "react-router-dom";
 import { PageTop, PageFoot } from "./LegalLayout.js";
 
 export function NotFound() {
-  useEffect(() => {
-    document.title = "Page not found · MoMo›Me";
-  }, []);
-
   return (
     <div className="page">
       <PageTop />

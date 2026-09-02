@@ -61,7 +61,7 @@ export function Claim() {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {step === "number" && (
             <FlowCard>
-              <h2 style={{ fontSize: 25, marginTop: 4 }}>{t("claim_title")}</h2>
+              <h1 style={{ fontSize: 25, marginTop: 4 }}>{t("claim_title")}</h1>
               <p style={{ color: "var(--ink-2)", fontSize: 14.5, margin: "6px 0 24px", lineHeight: 1.5 }}>{t("claim_sub")}</p>
               <Label>{t("mm_number")}</Label>
               <div style={{ display: "flex", gap: 8 }}>
@@ -81,7 +81,7 @@ export function Claim() {
 
           {step === "otp" && (
             <FlowCard>
-              <h2 style={{ fontSize: 24, marginTop: 4 }}>{t("claim_otp_title")}</h2>
+              <h1 style={{ fontSize: 24, marginTop: 4 }}>{t("claim_otp_title")}</h1>
               <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 18px", lineHeight: 1.5 }}>{t("claim_otp_sub")} <span className="num" style={{ fontWeight: 700, color: "var(--ink)" }}>{c.dial} {phone}</span></p>
               {devCode && (
                 <div style={{ marginBottom: 14, padding: "10px 13px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>
@@ -101,7 +101,7 @@ export function Claim() {
                 <div style={{ width: 72, height: 72, borderRadius: "50%", background: "var(--recv)", display: "grid", placeItems: "center", margin: "0 auto 18px", animation: "popIn .4s ease", boxShadow: "0 8px 26px var(--recv-wash)" }}>
                   <span style={{ color: "#fff", fontSize: 34, fontWeight: 800 }}>✓</span>
                 </div>
-                <h2 style={{ fontSize: 25 }}>{t("claim_done_title")}</h2>
+                <h1 style={{ fontSize: 25 }}>{t("claim_done_title")}</h1>
                 <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 0", lineHeight: 1.5 }}>{t("claim_done_sub")}</p>
               </div>
               <div style={{ marginTop: 22, background: "var(--surface-2)", borderRadius: "var(--r)", padding: "16px", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

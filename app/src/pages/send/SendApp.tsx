@@ -235,6 +235,11 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: `12px clamp(16px,4vw,24px) ${showTabs ? "calc(84px + env(safe-area-inset-bottom))" : "calc(40px + env(safe-area-inset-bottom))"}` }}>
         <SiteHeader cta={false} />
+        {/* The send flow is one document across four steps, and each step's visible heading
+            is an <h2> for its own section — so the page itself had no <h1> on any step, and
+            assistive tech had no top-level landmark to jump to. This names the document
+            once; the step headings stay correctly nested beneath it. */}
+        <h1 className="sr-only">{merchant ? t("mrc_paying") : t("pay_title")}</h1>
 
         {merchant && (
           <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--brand-wash)", border: "1px solid color-mix(in oklab, var(--brand) 30%, var(--line))" }}>

@@ -3,10 +3,6 @@ import { Link } from "react-router-dom";
 import { DocShell, Sec, Summary } from "./LegalLayout.js";
 
 export function Terms() {
-  useEffect(() => {
-    document.title = "Terms of Service · MoMo›Me";
-  }, []);
-
   return (
     <DocShell kicker="Legal" title="Terms of Service" updated="1 June 2026" current="terms" langToggle>
       <Summary>

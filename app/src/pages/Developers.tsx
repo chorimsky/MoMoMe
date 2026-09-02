@@ -96,7 +96,6 @@ export function Developers() {
   const [active, setActive] = useState("intro");
   const [base, setBase] = useState(absBase);
 
-  useEffect(() => { document.title = "MoMo›Me API — Developer documentation"; }, []);
 
   // Pull the authoritative base URL from the live spec (never drifts from prod).
   useEffect(() => {

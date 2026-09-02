@@ -5,7 +5,7 @@ import type {
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, ALL_METHODS,
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, ALL_METHODS, bip21,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
@@ -726,6 +726,36 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     await store().putQuote(quote);
     return res.status(503).json({ error: "method_unavailable", message: "This payment method isn't available right now. Please choose another or try again shortly." });
   }
+  // UNIFIED BIP-21 QR. For an on-chain Bitcoin payment, also mint a Lightning invoice for
+  // the SAME BTC amount and fold it into one code: `bitcoin:<addr>?amount=…&lightning=…`.
+  // A Lightning-capable wallet pays the invoice; one that isn't ignores the unknown
+  // parameter and pays the address. The payer no longer has to know which they have.
+  //
+  // The BTC amount comes from the ON-CHAIN quote, i.e. the wider spread. That is the
+  // conservative direction: we cannot know in advance which leg will be used, and being
+  // under-collected is the only outcome that loses money.
+  //
+  // Best-effort by design — if the Lightning mint fails, the payment proceeds as a normal
+  // on-chain one. A unified QR is a convenience; failing the payment over it would trade a
+  // working payment for a nicer QR.
+  if (quote.method === "ONCHAIN" && instruction.providerRef && getSettings().methods.LIGHTNING) {
+    try {
+      const ln = await createInstruction({ method: "LIGHTNING", ref, amount: quote.inboundAmount, usd: quote.usd });
+      if (ln.providerRef) {
+        instruction = {
+          ...instruction,
+          qr: bip21(instruction.code, quote.inboundAmount, ln.code),
+          alt: {
+            method: "LIGHTNING" as const, code: ln.code, providerRef: ln.providerRef, provider: ln.provider,
+            asset: ln.asset, amount: ln.amount, expiresAt: ln.expiresAt,
+          },
+        };
+      }
+    } catch (e) {
+      console.warn(`[pay] unified QR: Lightning leg not minted for ${ref} — serving on-chain only:`, e instanceof Error ? e.message : e);
+    }
+  }
+
   const payment: Payment = {
     id: id("pay"),
     ref,
@@ -773,6 +803,10 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   await store().putPayment(payment);
   // (the quote was already atomically claimed above — a locked rate is used once)
   if (instruction.providerRef) await store().indexProviderRef(instruction.providerRef, payment.id);
+  // The Lightning leg of a unified QR settles through the SAME payment, so its ref must
+  // resolve there too — otherwise a customer who pays the invoice sends real sats that
+  // match no payment at all.
+  if (instruction.alt?.providerRef) await store().linkProviderRef(instruction.alt.providerRef, payment.id, instruction.alt.method);
   // NOTE: the recipient's custodial identity (the phone → Lightning address) is
   // provisioned on the first SUCCESSFUL delivery, not here — a number only
   // becomes an account once it has actually received money (see stateMachine).

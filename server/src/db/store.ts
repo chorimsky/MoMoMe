@@ -32,6 +32,10 @@ export interface Store {
   findPaymentByRef(ref: string): Promise<Payment | undefined>;
   findByProviderRef(ref: string): Promise<Payment | undefined>;
   indexProviderRef(ref: string, paymentId: string): Promise<void>;
+  /** Link an ADDITIONAL settlement ref to a payment (the Lightning leg of a unified BIP-21
+   *  QR). findByProviderRef resolves the primary ref and these alike, so a webhook on either
+   *  leg reaches the same payment. */
+  linkProviderRef(ref: string, paymentId: string, method: string): Promise<void>;
   listPayments(): Promise<Payment[]>;
   // ledger
   recordTxn(paymentId: string, legs: Leg[]): Promise<void>;
@@ -91,6 +95,8 @@ const memoryStore: Store = {
   findPaymentByRef: async (ref) => mem.findPaymentByRef(ref),
   findByProviderRef: async (ref) => mem.findByProviderRef(ref),
   indexProviderRef: async (ref, pid) => mem.indexProviderRef(ref, pid),
+  // Memory already keys refs in a Map, so an extra ref is just another entry.
+  linkProviderRef: async (ref, pid) => mem.indexProviderRef(ref, pid),
   listPayments: async () => mem.listPayments(),
   recordTxn: async (pid, legs) => memLedger.recordTxn(pid, legs),
   balance: async (account, currency) => memLedger.balance(account, currency),
@@ -120,6 +126,7 @@ const pgStore: Store = {
   findPaymentByRef: pg.findPaymentByRef,
   findByProviderRef: pg.findByProviderRef,
   indexProviderRef: pg.indexProviderRef,
+  linkProviderRef: pg.linkProviderRef,
   listPayments: pg.listPayments,
   recordTxn: pg.recordTxn,
   balance: pg.balance,

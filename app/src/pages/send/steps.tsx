@@ -388,6 +388,14 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
   const { label, expired } = useExpiry(inst.expiresAt);
+  // A unified BIP-21 QR carries the Lightning invoice as `lightning=…`, but the two legs do
+  // not live equally long — the invoice dies well before the on-chain address does. Once it
+  // has, strip it: a wallet that scans a dead invoice reports a failure, whereas the plain
+  // on-chain URI still pays. `alt.expiresAt` is the invoice's own expiry, not the payment's.
+  const altAlive = !!inst.alt && Date.parse(inst.alt.expiresAt) > Date.now();
+  const qrValue = inst.alt && !altAlive && inst.qr.includes("&lightning=")
+    ? inst.qr.slice(0, inst.qr.indexOf("&lightning="))
+    : inst.qr;
   // The name attached to the number. When no real name is on file the backend
   // stores the number itself as the name — show a neutral label instead of
   // repeating the digits, so "Paying to" always reads as a recipient.
@@ -451,7 +459,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           </div>
         ) : (
           <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
-            <QR value={inst.qr} size={186} />
+            <QR value={qrValue} size={186} />
           </div>
         )}
         <div style={{ textAlign: "center" }}>

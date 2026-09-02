@@ -79,6 +79,20 @@ SELECT setval('payment_ref_seq', GREATEST(
   418842
 ));
 
+-- ---- Secondary settlement refs: one payment, more than one way to pay it ----
+-- A unified BIP-21 QR carries an on-chain address AND a Lightning invoice for the same
+-- payment, so a webhook may arrive matching either. payments.provider_ref holds the
+-- PRIMARY ref (and keeps its UNIQUE guarantee); this table holds the others.
+-- PRIMARY KEY on ref gives the same protection the primary column has: one ref can never
+-- fan out to two payments, so a forged or replayed callback cannot settle the wrong one.
+CREATE TABLE IF NOT EXISTS payment_refs (
+  ref         TEXT PRIMARY KEY,
+  payment_id  TEXT NOT NULL,
+  method      TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS payment_refs_payment ON payment_refs (payment_id);
+
 -- ---- Ledger: append-only double-entry journal (money source of truth) ----
 CREATE TABLE IF NOT EXISTS ledger (
   seq         BIGSERIAL PRIMARY KEY,

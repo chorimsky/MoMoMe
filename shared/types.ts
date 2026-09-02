@@ -231,6 +231,24 @@ export interface PayInstruction {
    *  ("ibex", "sandbox", …). Open string so new crypto rails can be
    *  added without touching this shared type (see server/src/adapters). */
   provider?: string;
+  /** A SECOND way to pay this same payment, for the SAME asset amount — the Lightning leg
+   *  of a Bitcoin payment, so one BIP-21 QR serves both on-chain and Lightning wallets.
+   *  Whichever leg is paid first settles the payment; a payment on the other leg afterwards
+   *  is a duplicate deposit and becomes a refund_payable debt (see confirmInbound).
+   *
+   *  It carries its own expiry because the two legs do NOT live equally long: a Lightning
+   *  invoice is capped far shorter than an on-chain address stays valid. Past `expiresAt`
+   *  the client must drop the `lightning=` parameter from the QR — a scanned dead invoice
+   *  is a worse experience than a plain on-chain address. */
+  alt?: {
+    method: Method;
+    code: string;
+    providerRef: string;
+    provider?: string;
+    asset: InboundAsset;
+    amount: number;
+    expiresAt: string;
+  };
 }
 
 export interface CreatePaymentRequest {

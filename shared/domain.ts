@@ -87,6 +87,19 @@ export function erc20PaymentUri(asset: "USDT" | "USDC", address: string, amount:
   return `ethereum:${contract}@${ETH_CHAIN_ID}/transfer?address=${address}&uint256=${baseUnits}`;
 }
 
+/** BIP-21 payment URI. With `bolt11` it is a UNIFIED QR: a Lightning-capable wallet pays
+ *  the invoice, and one that isn't simply ignores the unknown `lightning=` parameter and
+ *  pays the on-chain address. That graceful degradation is why both fit in one code, and
+ *  why there is no equivalent for the ERC-20 stablecoins — `bitcoin:` and `ethereum:` are
+ *  disjoint namespaces that no wallet reads both of.
+ *
+ *  `bolt11` is omitted once the Lightning leg has expired: an invoice outlives its use long
+ *  before the address does, and offering a dead one is worse than offering only the address. */
+export function bip21(address: string, amountBtc: number, bolt11?: string): string {
+  const base = `bitcoin:${address}?amount=${amountBtc.toFixed(8)}`;
+  return bolt11 ? `${base}&lightning=${bolt11.toUpperCase()}` : base;
+}
+
 /** Per-rail spread in basis points — wider where confirmation exposure is longer. */
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure

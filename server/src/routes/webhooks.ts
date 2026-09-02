@@ -114,7 +114,12 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   // and sender-IP allowlisted, with the amount re-checked against the locked quote in
   // confirmInbound, and the reconcile backstop covering a webhook that never arrives.
   background((async () => {
-    if (adapter.confirmSettlement && payment.payInstruction.method === "LIGHTNING") {
+    // Which leg was paid decides this too: a unified BIP-21 QR's Lightning leg IS
+    // re-queryable (its ref is a transaction id) even though the payment itself is on-chain.
+    const paidLeg = payment.payInstruction.alt?.providerRef === event.providerRef
+      ? payment.payInstruction.alt
+      : payment.payInstruction;
+    if (adapter.confirmSettlement && paidLeg.method === "LIGHTNING") {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
       if (s) { if (!s.settled) return; } // explicit verdict: not paid → ignore
       // Indeterminate (null: network failure, or the rail has no re-query). For REAL money
@@ -124,6 +129,6 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
       // body". A non-real inbound moves no real money either way, so it proceeds.
       else if (adapter.trusted()) return;
     }
-    await confirmInbound(payment, event.amount, event.eventId);
+    await confirmInbound(payment, event.amount, event.eventId, event.providerRef);
   })());
 });

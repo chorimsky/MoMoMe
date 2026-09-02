@@ -174,15 +174,15 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
-export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string): Promise<void> {
+export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string): Promise<void> {
   // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
   // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
   // webhooks) re-reads inside the lock, sees the booking below, and aborts — closing the
   // double-settle → double real-payout hole (memory's shared-object serialization the tests
   // rely on does NOT hold on Postgres, where each call gets an independent copy).
-  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId));
+  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef));
 }
-async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string): Promise<void> {
+async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string): Promise<void> {
   await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p) return;
@@ -228,15 +228,25 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // Compare against the amount LOCKED at quote time (carried on the instruction),
   // never a freshly-recomputed rate — spot drifts, and the customer paid the locked
   // invoice amount. Recomputing here would falsely trip the guard on a good payment.
-  const asset = p.payInstruction.asset;
-  const expected = p.payInstruction.amount;
+  // WHICH LEG WAS PAID. A unified BIP-21 QR offers two ways to pay one payment, and they
+  // settle under different rules — Lightning is full-or-nothing and keeps its lock, on-chain
+  // can be partial and is re-priced on confirmation. Keying any of that off
+  // payInstruction.method would apply the on-chain rules to a Lightning payment (and hold
+  // it for a "stale FX feed" it never needed). The ref the webhook matched is what actually
+  // says which leg the money came in on.
+  const leg = matchedRef && p.payInstruction.alt?.providerRef === matchedRef
+    ? p.payInstruction.alt
+    : p.payInstruction;
+  const paidMethod = leg.method;
+  const asset = leg.asset;
+  const expected = leg.amount;
 
   // Lightning invoices settle in full or not at all — a confirmed LN webhook
   // means the locked amount arrived, so we credit the locked amount and never
   // depend on the webhook's amount/units. On-chain can be partial, so verify
   // the (correctly-scaled) received amount against the lock.
   let received: number;
-  if (p.payInstruction.method === "LIGHTNING") {
+  if (paidMethod === "LIGHTNING") {
     received = expected;
   } else {
     // A confirmed inbound with no verified amount is untrusted — hold for review.
@@ -272,7 +282,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // fee as the same proportion of the total the customer agreed to. Fast rails
   // (Lightning / USDT) keep their lock: their exposure is seconds, which is what the
   // tighter 150bp spread already pays for.
-  if (p.payInstruction.method === "ONCHAIN") {
+  if (paidMethod === "ONCHAIN") {
     // PULL a rate before judging the feed stale. Settlement happens 10-60 minutes after the
     // quote, and on serverless nothing refreshes FX in between (no poller; Hobby cron is
     // daily) — so this check used to be false essentially always, holding every on-chain

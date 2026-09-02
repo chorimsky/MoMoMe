@@ -54,6 +54,18 @@ const STAGE_ORDER: PaymentState[] = [
   'DELIVERED',
 ];
 const ALL_METHODS: Method[] = ['LIGHTNING', 'USDT', 'ONCHAIN', 'USDC'];
+
+/** The value to encode. A unified BIP-21 QR carries the Lightning invoice as `lightning=…`,
+ *  but the invoice expires well before the on-chain address does — once it has, strip it,
+ *  because a wallet scanning a dead invoice reports a failure while the plain on-chain URI
+ *  still pays. */
+function qrValue(pi: Payment['payInstruction']): string {
+  const alt = pi.alt;
+  if (alt && Date.parse(alt.expiresAt) <= Date.now() && pi.qr.includes('&lightning=')) {
+    return pi.qr.slice(0, pi.qr.indexOf('&lightning='));
+  }
+  return pi.qr;
+}
 const QUICK = [1000, 2000, 5000, 10000];
 // CEMAC customer due-diligence: above this single-transfer value the operator
 // must be able to identify the customer (Règlement 02/24). We surface it as an
@@ -698,7 +710,7 @@ function PayStep({
       </View>
 
       <View style={[styles.qrCard, Shadow.md]}>
-        <QRCode value={pi.qr} size={214} backgroundColor="#fff" color="#111" />
+        <QRCode value={qrValue(pi)} size={214} backgroundColor="#fff" color="#111" />
       </View>
       <Body muted center>{tr('scan_or_copy')}</Body>
       {pi.method === 'USDT' || pi.method === 'USDC' ? (

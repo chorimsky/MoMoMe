@@ -71,8 +71,18 @@ export async function findPaymentByRef(ref: string): Promise<Payment | undefined
   const rows = await q<{ body: Payment }>(`SELECT body FROM payments WHERE ref=$1`, [ref]);
   return rows[0]?.body;
 }
+export async function linkProviderRef(ref: string, paymentId: string, method: string): Promise<void> {
+  // ON CONFLICT DO NOTHING: re-linking the same ref is a no-op, and the PRIMARY KEY still
+  // stops a DIFFERENT payment from ever claiming a ref that is already spoken for.
+  await q(`INSERT INTO payment_refs(ref, payment_id, method) VALUES($1,$2,$3) ON CONFLICT (ref) DO NOTHING`, [ref, paymentId, method]);
+}
+
 export async function findByProviderRef(providerRef: string): Promise<Payment | undefined> {
-  const rows = await q<{ body: Payment }>(`SELECT body FROM payments WHERE provider_ref=$1`, [providerRef]);
+  const rows = await q<{ body: Payment }>(
+    `SELECT p.body FROM payments p WHERE p.provider_ref=$1
+     UNION ALL
+     SELECT p.body FROM payment_refs r JOIN payments p ON p.id = r.payment_id WHERE r.ref=$1
+     LIMIT 1`, [providerRef]);
   return rows[0]?.body;
 }
 /** Newest-first payments, BOUNDED. This is called by roughly ten admin views and by both

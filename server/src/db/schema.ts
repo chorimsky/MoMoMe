@@ -36,6 +36,19 @@ CREATE INDEX IF NOT EXISTS payments_state     ON payments (state);
 CREATE INDEX IF NOT EXISTS payments_created_at ON payments (created_at DESC);
 CREATE INDEX IF NOT EXISTS payments_merchant  ON payments (merchant_id) WHERE merchant_id IS NOT NULL;
 
+-- Secondary settlement refs: one payment, more than one way to pay it. A unified BIP-21 QR
+-- carries an on-chain address AND a Lightning invoice for the same payment, so a webhook may
+-- match either. payments.provider_ref keeps the PRIMARY ref (and its UNIQUE guarantee); this
+-- holds the others. PRIMARY KEY on ref gives the same protection: one ref can never fan out
+-- to two payments, so a forged or replayed callback cannot settle the wrong one.
+CREATE TABLE IF NOT EXISTS payment_refs (
+  ref         TEXT PRIMARY KEY,
+  payment_id  TEXT NOT NULL,
+  method      TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS payment_refs_payment ON payment_refs (payment_id);
+
 -- The ref is the payment's human-facing id AND its payout idempotency key, and
 -- payments.ref is UNIQUE. It used to come from an in-memory counter persisted via the
 -- coarse snapshot — per-INSTANCE state pretending to be global: every concurrent

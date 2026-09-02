@@ -1,0 +1,9 @@
+{
+  "name": "@momome/egress-proxy",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Fixed-IP HTTP proxy so IP-allowlisted rails (Peexit) see one stable address.",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node server.js" }
+}

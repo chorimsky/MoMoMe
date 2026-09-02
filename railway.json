@@ -4,7 +4,7 @@
     "buildCommand": "pnpm --filter @momome/server build"
   },
   "deploy": {
-    "startCommand": "pnpm --filter @momome/server start",
+    "startCommand": "node server/dist/server/src/index.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

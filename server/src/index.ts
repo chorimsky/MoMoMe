@@ -50,9 +50,20 @@ if (ibexConfigured() && config.publicUrl.startsWith("https://")) {
       // leaving an operator to hunt. Account ids are identifiers, not secrets (the failing
       // one is already in the line above); best-effort and never fatal.
       try {
-        const ids = Object.keys(await accountBalances());
-        if (ids.length) {
-          console.error(`[ibex] IBEX_ACCOUNT_ID="${config.ibex.accountId}" is not an account on this organisation. Available account ids: ${ids.join(", ")}`);
+        // IBEX is account-per-currency, so the id alone is not enough — an operator has to
+        // know WHICH of them is BTC vs USDT vs USDC to set the three vars correctly.
+        const CCY: Record<number, string> = { 0: "MSAT", 1: "SATS", 2: "BTC", 3: "USD", 8: "EUR", 29: "USDT", 30: "USDC" };
+        const accounts = await accountBalances();
+        const rows = Object.entries(accounts).map(([id, a]) => `${CCY[a.currencyId] ?? `ccy${a.currencyId}`}=${id}`);
+        if (rows.length) {
+          // Only call it wrong if it actually IS absent. The first version of this message
+          // asserted "is not an account" whenever registration failed, and printed that
+          // beside a listing containing the very id it was rejecting — a confident, wrong
+          // diagnosis is worse than none.
+          const known = Object.keys(accounts).includes(config.ibex.accountId);
+          console.error(known
+            ? `[ibex] IBEX_ACCOUNT_ID="${config.ibex.accountId}" IS a valid account — the webhook registration failed for another reason (see above). Accounts: ${rows.join("  ")}`
+            : `[ibex] IBEX_ACCOUNT_ID="${config.ibex.accountId}" is not an account on this organisation. Available: ${rows.join("  ")}`);
         }
       } catch { /* listing is a courtesy, not a requirement */ }
     });

@@ -84,20 +84,28 @@ export async function registerAccountWebhook(): Promise<void> {
   // deposits all notify. (USDC was previously omitted → USDC deposits silently
   // never registered their webhook.) De-dupe in case ids coincide.
   const accounts = [...new Set([config.ibex.accountId, config.ibex.usdtAccountId, config.ibex.usdcAccountId].filter(Boolean))];
+  // Try EVERY account before reporting. Throwing on the first failure meant one bad account
+  // silently prevented the others from registering at all — with the BTC account listed
+  // first, a rejection there left USDT and USDC deposits with no webhook even though those
+  // accounts were fine. Collect the failures and report them together.
+  const failures: string[] = [];
   for (const acct of accounts) {
-    const res = await ibex(`/accounts/${acct}/webhooks`, {
-      method: "POST",
-      body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
-    });
-    // Already-registered is success, not failure (IBEX returns 409 or a 400
-    // "webhook already exists") — tolerate both so boot doesn't log a false error.
-    if (!res.ok && res.status !== 409) {
-      const body = await res.text();
-      if (!/already exists/i.test(body)) {
-        throw new Error(`IBEX register account webhook failed (${acct}): ${res.status} ${body}`);
+    try {
+      const res = await ibex(`/accounts/${acct}/webhooks`, {
+        method: "POST",
+        body: JSON.stringify({ url, ...(config.ibex.webhookSecret ? { secret: config.ibex.webhookSecret } : {}) }),
+      });
+      // Already-registered is success, not failure (IBEX returns 409 or a 400
+      // "webhook already exists") — tolerate both so boot doesn't log a false error.
+      if (!res.ok && res.status !== 409) {
+        const body = await res.text();
+        if (!/already exists/i.test(body)) failures.push(`${acct}: ${res.status} ${body}`);
       }
+    } catch (e) {
+      failures.push(`${acct}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  if (failures.length) throw new Error(`IBEX register account webhook failed for ${failures.length}/${accounts.length} account(s) — ${failures.join(" | ")}`);
 }
 
 /** Reconciliation backstop / "I've paid" check: was this Lightning invoice

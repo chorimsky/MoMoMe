@@ -30,7 +30,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
+import { ALL_METHODS, COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -53,7 +53,8 @@ const STAGE_ORDER: PaymentState[] = [
   'PAYOUT_CONFIRMED',
   'DELIVERED',
 ];
-const ALL_METHODS: Method[] = ['LIGHTNING', 'USDT', 'ONCHAIN', 'USDC'];
+// (method order comes from the shared ALL_METHODS — a local copy had drifted, listing the
+//  two stablecoins either side of Bitcoin instead of together)
 
 /** The value to encode. A unified BIP-21 QR carries the Lightning invoice as `lightning=…`,
  *  but the invoice expires well before the on-chain address does — once it has, strip it,
@@ -691,7 +692,7 @@ function PayStep({
   onSimulate: () => void;
 }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, ml } = useI18n();
   const status = statusLabel(payment.state);
   const pi = payment.payInstruction;
   const [copied, setCopied] = useState(false);
@@ -703,34 +704,66 @@ function PayStep({
   const tone = status.tone === 'done' ? 'recv' : status.tone === 'fail' ? 'bad' : 'accent';
   return (
     <View style={{ gap: Spacing.four, alignItems: 'center' }}>
+      {/* What to actually DO. The app used to show only a generic "scan or copy", so a payer
+          sending USDT had no on-screen instruction that it must be Ethereum ERC-20, and one
+          sending on-chain BTC had no idea it could take an hour. Same copy as the web. */}
+      <View style={{ alignItems: 'center', gap: 4, alignSelf: 'stretch' }}>
+        <Text style={[styles.payHeading, { color: t.text }]}>{ml(pi.method, 'title')}</Text>
+        <Body muted center>{ml(pi.method, 'desc')}</Body>
+      </View>
+
       <View style={{ alignItems: 'center', gap: 2 }}>
         <Label>{tr('total_to_pay')}</Label>
         <Text style={[styles.payAmount, { color: t.text }]}>{xaf(payment.totalXaf)}</Text>
         <Body muted center>{tr('send_exactly')} {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
       </View>
 
-      <View style={[styles.qrCard, Shadow.md]}>
-        <QRCode value={qrValue(pi)} size={214} backgroundColor="#fff" color="#111" />
-      </View>
-      <Body muted center>{tr('scan_or_copy')}</Body>
-      {pi.method === 'USDT' || pi.method === 'USDC' ? (
-        <View style={[styles.netWarn, { backgroundColor: t.surface2, borderColor: t.line }]}>
-          <Ionicons name="warning-outline" size={16} color={t.accent} />
-          <Body style={{ flex: 1, color: t.text }}>{tr('erc20_only')}</Body>
+      {/* DEMO MODE: the instruction is simulated, so its address/invoice is fabricated.
+          Rendering it as a normal scannable code invites someone to send real crypto to an
+          address nobody holds a key for. The web has always swapped the QR for this notice;
+          the app did not, and shipped a payable-looking code for a fake destination. */}
+      {demoMode ? (
+        <View style={[styles.sandboxCard, { borderColor: t.accent, backgroundColor: t.surface2 }]}>
+          <Text style={{ fontSize: 26 }}>🧪</Text>
+          <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>{tr('sandbox_title')}</Text>
+          <Body muted center>{tr('sandbox_desc')}</Body>
+        </View>
+      ) : (
+        <>
+          <View style={[styles.qrCard, Shadow.md]}>
+            <QRCode value={qrValue(pi)} size={214} backgroundColor="#fff" color="#111" />
+          </View>
+          <Body muted center>{tr('scan_or_copy')}</Body>
+          {pi.method === 'USDT' || pi.method === 'USDC' ? (
+            <View style={[styles.netWarn, { backgroundColor: t.surface2, borderColor: t.line }]}>
+              <Ionicons name="warning-outline" size={16} color={t.accent} />
+              <Body style={{ flex: 1, color: t.text }}>{tr('erc20_only')}</Body>
+            </View>
+          ) : null}
+        </>
+      )}
+
+      {/* The copyable code is fabricated in demo mode too, so it is hidden along with the
+          QR — otherwise the notice above says "not a real invoice" while the screen still
+          offers the address to copy and send to. */}
+      {!demoMode ? (
+        <View style={{ alignSelf: 'stretch', gap: Spacing.one }}>
+          <Label>{ml(pi.method, 'codeLabel')}</Label>
+          <Pressable
+            onPress={copy}
+            accessibilityRole="button"
+            accessibilityLabel={ml(pi.method, 'codeLabel')}
+            style={({ pressed }) => [
+              styles.copyRow,
+              { backgroundColor: t.surface2, borderColor: t.line, opacity: pressed ? 0.85 : 1 },
+            ]}>
+            <Mono style={{ flex: 1 }} numberOfLines={1}>
+              {pi.code}
+            </Mono>
+            <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
+          </Pressable>
         </View>
       ) : null}
-
-      <Pressable
-        onPress={copy}
-        style={({ pressed }) => [
-          styles.copyRow,
-          { backgroundColor: t.surface2, borderColor: t.line, opacity: pressed ? 0.85 : 1 },
-        ]}>
-        <Mono style={{ flex: 1 }} numberOfLines={1}>
-          {pi.code}
-        </Mono>
-        <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
-      </Pressable>
 
       <View style={[styles.statusRow, { backgroundColor: t.surface, borderColor: t.line }]}>
         <View style={styles.pulseWrap}>
@@ -948,6 +981,21 @@ const styles = StyleSheet.create({
   rateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   payAmount: { fontFamily: Fonts.displayBold, fontSize: 30, letterSpacing: -0.4 },
   qrCard: { backgroundColor: '#fff', padding: Spacing.four, borderRadius: Radius.xl, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  payHeading: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 17,
+    textAlign: 'center',
+  },
+  sandboxCard: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.five,
+    alignSelf: 'stretch',
+  },
   netWarn: {
     flexDirection: 'row',
     alignItems: 'center',

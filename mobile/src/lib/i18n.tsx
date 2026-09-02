@@ -12,7 +12,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 
-import type { PaymentState } from '@shared/types';
+import type { Method, PaymentState } from '@shared/types';
 
 export type Lang = 'en' | 'fr';
 type Pair = [string, string];
@@ -96,6 +96,14 @@ export const STRINGS = {
   mobile_money: ['Mobile Money', 'Mobile Money'],
   reference: ['Reference', 'Référence'],
   simulate_demo: ['Simulate payment (demo)', 'Simuler le paiement (démo)'],
+  // Shown INSTEAD of the QR in demo mode. The instruction is simulated, so the address /
+  // invoice in it is fabricated — rendering it as a normal scannable code invites someone
+  // to send real crypto somewhere nobody holds a key.
+  sandbox_title: ['Sandbox demo', 'Démo (bac à sable)'],
+  sandbox_desc: [
+    "This is not a real invoice — don't pay it from a wallet. Use “Simulate payment” below to complete the demo.",
+    "Ceci n'est pas une vraie facture — ne la payez pas depuis un portefeuille. Utilisez « Simuler le paiement » ci-dessous pour terminer la démo.",
+  ],
 
   // send — processing / outcomes
   proc_title: ['Processing payment', 'Paiement en cours'],
@@ -445,10 +453,67 @@ export function translate(l: Lang, key: StringKey, vars?: Record<string, string 
   return s;
 }
 
+/* ---------- per-method pay instructions ----------
+   What a payer must actually DO differs by method, and the difference is the part that
+   loses money when it is missing: which network to send on, and how long to expect to wait.
+   The web pay screen has always shown this; the app showed only a generic "scan or copy",
+   so an app user sending USDT got no on-screen instruction that it must be Ethereum
+   ERC-20, and one sending on-chain BTC had no idea it would take up to an hour.
+   Mirrors the web's METHOD copy so the two products say the same thing. */
+type PayCopy = { title: string; desc: string; codeLabel: string };
+const METHOD_PAY: Record<'en' | 'fr', Record<Method, PayCopy>> = {
+  en: {
+    LIGHTNING: {
+      title: 'Pay with Lightning',
+      desc: 'Scan or paste this invoice in any Lightning wallet. It arrives in seconds, and we deliver the Mobile Money the moment it does.',
+      codeLabel: 'Lightning invoice',
+    },
+    ONCHAIN: {
+      title: 'Send Bitcoin (on-chain)',
+      desc: 'Send the exact amount to this Bitcoin address. On-chain confirmation takes 10–60 minutes — the Mobile Money is delivered as soon as it confirms. This code also works in a Lightning wallet, which arrives in seconds.',
+      codeLabel: 'Bitcoin address',
+    },
+    USDT: {
+      title: 'Send US Dollars (USDT)',
+      desc: 'Send the exact amount of US Dollars (USDT) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.',
+      codeLabel: 'USDT address (Ethereum · ERC-20)',
+    },
+    USDC: {
+      title: 'Send US Dollars (USDC)',
+      desc: 'Send the exact amount of US Dollars (USDC) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.',
+      codeLabel: 'USDC address (Ethereum · ERC-20)',
+    },
+  },
+  fr: {
+    LIGHTNING: {
+      title: 'Payer avec Lightning',
+      desc: "Scannez ou collez cette facture dans n'importe quel portefeuille Lightning. Elle arrive en quelques secondes, et nous livrons le Mobile Money dès réception.",
+      codeLabel: 'Facture Lightning',
+    },
+    ONCHAIN: {
+      title: 'Envoyer des bitcoins (on-chain)',
+      desc: "Envoyez le montant exact à cette adresse Bitcoin. La confirmation on-chain prend 10 à 60 minutes — le Mobile Money est livré dès confirmation. Ce code fonctionne aussi dans un portefeuille Lightning, ce qui arrive en quelques secondes.",
+      codeLabel: 'Adresse Bitcoin',
+    },
+    USDT: {
+      title: 'Envoyer des dollars (USDT)',
+      desc: "Envoyez le montant exact en dollars (USDT) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.",
+      codeLabel: 'Adresse USDT (Ethereum · ERC-20)',
+    },
+    USDC: {
+      title: 'Envoyer des dollars (USDC)',
+      desc: "Envoyez le montant exact en dollars (USDC) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.",
+      codeLabel: 'Adresse USDC (Ethereum · ERC-20)',
+    },
+  },
+};
+
 export function useI18n() {
   const l = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const t = (key: StringKey, vars?: Record<string, string | number>) => translate(l, key, vars);
-  return { t, lang: l, setLang };
+  /** Per-method pay copy — mirrors the web's `ml()`. */
+  const ml = (method: Method, field: keyof PayCopy) => METHOD_PAY[l === 'fr' ? 'fr' : 'en'][method][field];
+  return { t, ml, lang: l, setLang };
 }
 
 /** Localized label for a payment state (pairs with statusLabel's tone). */

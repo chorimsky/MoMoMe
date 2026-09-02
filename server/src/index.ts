@@ -10,7 +10,16 @@ import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
 
-runBootChecks(); // asserts + fail-closed durability/admin/peexit checks (shared with the Vercel handler)
+// Boot checks fail CLOSED, which is right — but on Railway's railpack runtime stderr is not
+// captured, so a throw here left literally no trace: the container simply never answered its
+// healthcheck, four deploys in a row, with an empty log. An unreadable failure is barely
+// better than a silent one, so the reason goes to stdout before the throw propagates.
+try {
+  runBootChecks(); // asserts + fail-closed durability/admin/peexit checks (shared with the Vercel handler)
+} catch (e) {
+  console.log(`[boot] REFUSED TO START: ${e instanceof Error ? e.message : String(e)}`);
+  throw e;
+}
 // Postgres backend: ensure the schema exists + rehydrate the non-money snapshots AND the
 // durable compliance chain before serving — parity with the Vercel handler (api/index.ts).
 // Without hydrateComplianceChain, the import-time anchor re-heal runs on an empty chain and

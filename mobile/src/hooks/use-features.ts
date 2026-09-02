@@ -18,7 +18,6 @@ const DEFAULTS: AppFeatures = {
   developerApi: true,
   diaspora: true,
   merchant: true,
-  wallet: true,
   receive: true,
   contacts: true,
 };

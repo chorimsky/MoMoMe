@@ -194,7 +194,7 @@ export interface Payment {
   /** Outbound transaction id of the refund payment (set once the refund is submitted).
    *  For Lightning this is the invoice's payment hash — the rail-agnostic poll key. */
   refundTxId?: string;
-  /** Which rail paid the refund out (e.g. "ibex" | "blink") — so its status is
+  /** Which rail paid the refund out (e.g. "ibex") — so its status is
    *  re-queried on the SAME rail. Set alongside refundTxId. */
   refundProvider?: string;
   /** On-chain only: the originally-quoted XAF, set when the payment was re-priced at
@@ -221,7 +221,7 @@ export interface PayInstruction {
    *  to match an inbound webhook back to this payment. */
   providerRef?: string;
   /** Which rail provider issued this instruction — a rail adapter's `name`
-   *  ("ibex", "blink", "sandbox", …). Open string so new crypto rails can be
+   *  ("ibex", "sandbox", …). Open string so new crypto rails can be
    *  added without touching this shared type (see server/src/adapters). */
   provider?: string;
 }
@@ -540,7 +540,6 @@ export interface AdminSettings {
     developerApi: boolean; // partner API keys + developer portal
     diaspora: boolean;     // the diaspora remittance corridor page
     merchant: boolean;     // become-a-merchant onboarding + dashboard + payment links (accept payments)
-    wallet: boolean;       // the embedded self-custodial Lightning wallet (beta)
     receive: boolean;      // "Get paid" — the personal Lightning-address / receive surface
     contacts: boolean;     // the encrypted contact book + cross-device backup
   };

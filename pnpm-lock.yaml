@@ -13,15 +13,6 @@ importers:
 
   app:
     dependencies:
-      '@lightninglabs/wavelength-core':
-        specifier: ^0.1.1
-        version: 0.1.1
-      '@lightninglabs/wavelength-react':
-        specifier: ^0.1.1
-        version: 0.1.1(react@18.3.1)
-      '@lightninglabs/wavelength-web':
-        specifier: ^0.1.1
-        version: 0.1.1
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
@@ -518,17 +509,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@lightninglabs/wavelength-core@0.1.1':
-    resolution: {integrity: sha512-I3bGQPMm0ZAYLvIe7K92KIqHp/QRjVvGgWU0FVv5Ebt5h3w9eP24LAa5TKKip8xaeG4fSCI8qgb0ExVfQVan7g==}
-
-  '@lightninglabs/wavelength-react@0.1.1':
-    resolution: {integrity: sha512-xsGfWdp9jPIVX/Z/rCZ4tDkzRyhtRHSc6F59/knlX0y5jn1QrJyZdg6mAdt91d+2poSINrLEljhmfnwdxZlQ4A==}
-    peerDependencies:
-      react: ^18.0.0 || ^19.0.0
-
-  '@lightninglabs/wavelength-web@0.1.1':
-    resolution: {integrity: sha512-pithOaW2PfaWIUoo1ZM6hjjHXbWYf1py6TJafb9L1upwaTeYZpbgSvueFjblKeybtTBjLHeQCCXXjkPy0zYP3A==}
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     resolution: {integrity: sha512-FrJibrAk6v29eabIPgcTUMPXiEz8ssrAk7TXxsiZzww9UTQ1Z5KAbFJs+Z0Ez+VZTYgnE5IQJqBcoSiMebtPHA==}
@@ -1964,17 +1944,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@lightninglabs/wavelength-core@0.1.1': {}
-
-  '@lightninglabs/wavelength-react@0.1.1(react@18.3.1)':
-    dependencies:
-      '@lightninglabs/wavelength-core': 0.1.1
-      react: 18.3.1
-
-  '@lightninglabs/wavelength-web@0.1.1':
-    dependencies:
-      '@lightninglabs/wavelength-core': 0.1.1
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     optional: true

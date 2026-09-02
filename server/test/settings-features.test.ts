@@ -3,7 +3,7 @@
    surface (AdminSettings.features), and the merge is non-breaking.
 
    Covers: the default set includes every surface (incl. the MVP-composition
-   flags merchant/wallet/receive/contacts) all-ON; updateSettings persists a
+   flags merchant/receive/contacts) all-ON; updateSettings persists a
    toggle and leaves siblings untouched; and a PARTIAL features patch (an older
    client that omits the newer keys) preserves the omitted flags rather than
    dropping them to undefined.
@@ -26,21 +26,21 @@ async function main() {
   const { getSettings, updateSettings } = await import("../src/core/settings.js");
   const ALL_KEYS: (keyof AdminSettings["features"])[] = [
     "directory", "scanToPay", "referrals", "invoices", "developerApi", "diaspora",
-    "merchant", "wallet", "receive", "contacts",
+    "merchant", "receive", "contacts",
   ];
 
   console.log("\nFeature switches — defaults");
   const f0 = getSettings().features;
   ok("every product surface has a flag", ALL_KEYS.every((k) => typeof f0[k] === "boolean"), Object.keys(f0).join(","));
-  ok("MVP-composition flags present (merchant/wallet/receive/contacts)",
-    ["merchant", "wallet", "receive", "contacts"].every((k) => k in f0));
+  ok("MVP-composition flags present (merchant/receive/contacts)",
+    ["merchant", "receive", "contacts"].every((k) => k in f0));
   ok("defaults are all-ON (nothing hidden out of the box)", ALL_KEYS.every((k) => f0[k] === true));
 
   console.log("\nFeature switches — a super-admin toggles surfaces off (MVP)");
-  const next = updateSettings({ features: { ...f0, merchant: false, contacts: false, wallet: false } });
+  const next = updateSettings({ features: { ...f0, merchant: false, contacts: false } });
   ok("merchant off persisted", next.features.merchant === false);
   ok("contacts off persisted", next.features.contacts === false);
-  ok("wallet off persisted", next.features.wallet === false);
+  ok("contacts off persisted", next.features.contacts === false);
   ok("untouched siblings stay on (directory/scanToPay/receive)",
     next.features.directory === true && next.features.scanToPay === true && next.features.receive === true);
   ok("getSettings() reflects the change", getSettings().features.merchant === false);

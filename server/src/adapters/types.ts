@@ -13,7 +13,7 @@ export interface InstructionRequest {
   /** Inbound amount in asset units (BTC or USDT). */
   amount: number;
   /** Quote value in USD — used by rails that can receive into a USD-denominated
-   *  wallet (e.g. Blink Stablesats) to hedge crypto-price risk. Optional; a rail
+   *  wallet to hedge crypto-price risk. Optional; a rail
    *  that only receives in the native asset ignores it. */
   usd?: number;
   /** Provider webhook callback URL for this rail. */
@@ -82,7 +82,7 @@ export interface RailAdapter {
   /** OPTIONAL crypto-OUTBOUND (refund a sender / treasury sweep). Pays a BOLT11 invoice
    *  from the rail's wallet; `amountMsat` is required for an amount-less invoice. A rail
    *  that can't send omits this — the registry only routes refunds to rails that have it,
-   *  so "Blink without IBEX" (and vice-versa) refunds through whichever rail is live. */
+   *  so refunds route through whichever rail is live, without the state machine knowing. */
   payInvoice?(bolt11: string, amountMsat?: number): Promise<OutboundResult>;
   /** OPTIONAL authoritative status of an OUTBOUND payment by its id (LN payment hash /
    *  tx id). null = indeterminate. Pairs with payInvoice for the refund reconcile loop. */

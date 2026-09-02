@@ -6,7 +6,7 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertBlinkConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 import { installProcessGuards } from "./core/processGuards.js";
 
@@ -21,7 +21,6 @@ export function runBootChecks(): void {
   assertDeployEnv(); // a preview/branch deployment must never run a real-money rail
   assertLiveConfig();
   assertIbexConfig();
-  assertBlinkConfig();
   assertAdminSecurity(); // fail closed on a default admin password in production
   assertCronSecurity(); // fail closed if the cron endpoint would be world-triggerable in production
   assertComplianceConfig(); // fail closed on an UNKEYED (forgeable) compliance chain in production

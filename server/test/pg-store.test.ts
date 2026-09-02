@@ -27,7 +27,7 @@ const payment = (id: string, ref: string, providerRef?: string): Payment => ({
   id, ref, quoteId: `q_${id}`, state: "AWAITING_INBOUND", displayStatus: "Pending", method: "LIGHTNING",
   recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "T" },
   senderId: "dev1", xaf: 5000, feeXaf: 25, totalXaf: 5025, usd: 1, spreadBps: 150,
-  payInstruction: providerRef ? { method: "LIGHTNING", code: "lnbc1", asset: "BTC", amount: 0.0001, amountLabel: "x", expiresAt: "", providerRef, provider: "blink" } : undefined,
+  payInstruction: providerRef ? { method: "LIGHTNING", code: "lnbc1", asset: "BTC", amount: 0.0001, amountLabel: "x", expiresAt: "", providerRef, provider: "ibex" } : undefined,
   events: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 } as unknown as Payment);
 

@@ -290,7 +290,6 @@ export function SettingsView() {
               ["receive", "Get paid (receive)", "The personal “Get paid” / Lightning-address receive surface"],
               ["contacts", "Contacts book", "The encrypted contact book + cross-device backup"],
               ["referrals", "Referrals & ambassadors", "Shareable referral codes and the ambassador dashboard"],
-              ["wallet", "Embedded wallet (beta)", "The self-custodial Lightning wallet — experimental"],
               ["developerApi", "Developer API", "Partner API keys and the developer portal"],
               ["diaspora", "Diaspora corridor", "The diaspora remittance landing page"],
             ] as const;

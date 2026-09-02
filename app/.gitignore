@@ -1,3 +1,0 @@
-# Wavelength wallet WASM runtime (~145MB uncompressed) — NOT committed.
-# Fetch with: bash scripts/fetch-wavelength-runtime.sh
-/public/wavewalletdk/

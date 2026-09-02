@@ -2,10 +2,10 @@
    Vendor-neutral PUBLIC FX rate source — the fallback (and, for a crypto rail
    that isn't IBEX, the PRIMARY) feed for the quote engine.
 
-   Historically the rate cache was populated only from IBEX (core/rates.ts);
-   a deployment whose crypto rail is Blink (which provides no FX feed) would
-   therefore never have fresh rates → every live quote refused
-   (`rates_unavailable`). This module lets the feed stand on its own: a
+   IBEX supplies the primary feed (core/rates.ts). This module is the INDEPENDENT
+   fallback, so an IBEX rate outage degrades pricing instead of stopping it — without
+   it, a dead rate call means every live quote is refused (`rates_unavailable`).
+   It is a market-data source, not a crypto rail: nothing here touches funds.
    Two INDEPENDENT venues supply BTC/USD (Coinbase + Kraken) so the caller can refuse to
    price when they disagree; Coinbase alone supplies EUR/USD. Parsing is split from
    fetching so the extraction is unit-testable without network.

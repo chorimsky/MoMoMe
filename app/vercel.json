@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "bash ../scripts/fetch-wavelength-runtime.sh && pnpm run build",
+  "buildCommand": "pnpm run build",
   "outputDirectory": "dist",
   "build": {
     "env": {
@@ -8,41 +8,47 @@
     }
   },
   "rewrites": [
-    { "source": "/.well-known/lnurlp/:user", "destination": "https://mo-mo-me-server.vercel.app/.well-known/lnurlp/:user" },
-    { "source": "/lnurl/pay/:user", "destination": "https://mo-mo-me-server.vercel.app/lnurl/pay/:user" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "headers": [
     {
-      "source": "/wallet",
-      "headers": [
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
-      ]
+      "source": "/.well-known/lnurlp/:user",
+      "destination": "https://mo-mo-me-server.vercel.app/.well-known/lnurlp/:user"
     },
     {
-      "source": "/wavewalletdk/(.*)",
-      "headers": [
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
-        { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" }
-      ]
-    },
-    {
-      "source": "/assets/(wavewalletdk-worker.*)",
-      "headers": [
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
-        { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" }
-      ]
+      "source": "/lnurl/pay/:user",
+      "destination": "https://mo-mo-me-server.vercel.app/lnurl/pay/:user"
     },
     {
       "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
       "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
-        { "key": "Permissions-Policy", "value": "geolocation=(), microphone=(), camera=(), payment=()" },
-        { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" }
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000; includeSubDomains"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "geolocation=(), microphone=(), camera=(), payment=()"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+        }
       ]
     }
   ]

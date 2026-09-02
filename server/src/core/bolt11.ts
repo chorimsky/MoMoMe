@@ -3,8 +3,8 @@
    Two things the settlement + refund flows need from a sender-supplied invoice:
      • the amount (to bound a refund so we can never over-pay), and
      • the payment hash (a rail-agnostic id to poll an OUTBOUND payment's status by,
-       since Blink's lnInvoicePaymentSend returns only status, not a tx id).
-   Lives in core/ (not adapters/ibex.ts) so every rail — IBEX, Blink, future — shares
+       for a rail whose send call returns only a status, not a tx id).
+   Lives in core/ (not adapters/ibex.ts) so every rail — IBEX and any future one — shares
    one implementation instead of importing a decoder from a specific provider.
    ============================================================ */
 import { btcToMsat } from "../../../shared/domain.js";

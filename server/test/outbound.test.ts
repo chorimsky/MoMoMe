@@ -1,17 +1,18 @@
 /* ============================================================
-   Crypto-OUTBOUND (refund) abstraction — proves "Blink without IBEX" refunds.
-   Configures Blink ALONE in production (no IBEX creds) and asserts the outbound rail
-   resolves to Blink, plus the pure BOLT11 decoders the refund flow depends on.
+   Crypto-OUTBOUND (refund) abstraction. Asserts the outbound rail is selected through
+   the registry — not hardwired — and covers the pure BOLT11 decoders the refund flow
+   depends on. The selection stays generic so a future rail sends refunds without the
+   state machine changing; today IBEX is the only rail that can.
    Run: pnpm --filter @momome/server test:outbound
    ============================================================ */
 import assert from "node:assert/strict";
 
-// Blink ONLY, production → trusted → eligible for outbound. No IBEX creds set.
-process.env.BLINK_API_KEY = "blink_test_key";
-process.env.BLINK_WALLET_ID = "wallet_btc_test";
-process.env.BLINK_USD_WALLET_ID = "wallet_usd_test";
-process.env.BLINK_WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
-process.env.BLINK_ENV = "production";
+// IBEX in production → trusted → eligible for outbound.
+process.env.IBEX_CLIENT_ID = "ibx_id";
+process.env.IBEX_CLIENT_SECRET = "ibx_secret";
+process.env.IBEX_ACCOUNT_ID = "ibx_acct";
+process.env.IBEX_ENV = "production";
+process.env.IBEX_WEBHOOK_SECRET = "ibx_webhook_secret";
 process.env.PUBLIC_URL = "https://example.test";
 
 let passed = 0;
@@ -29,8 +30,8 @@ const KNOWN_HASH = "000102030405060708090001020304050607080900010203040506070809
 async function main() {
   const { bolt11PaymentHash, bolt11AmountMsat } = await import("../src/core/bolt11.js");
   const { outboundRail, refundStatus } = await import("../src/adapters/index.js");
-  const { blinkAdapter } = await import("../src/adapters/blink.js");
-  const { ibexConfigured, blinkLive } = await import("../src/config.js");
+  const { ibexAdapter } = await import("../src/adapters/ibex.js");
+  const { ibexLive } = await import("../src/config.js");
 
   console.log("\nBOLT11 decoders (pure)");
   ok("payment hash decoded from bech32", bolt11PaymentHash(INV_2500U) === KNOWN_HASH, bolt11PaymentHash(INV_2500U) ?? "null");
@@ -38,12 +39,14 @@ async function main() {
   ok("amount-less invoice → 0", bolt11AmountMsat("lnbc1pvjluezpp5") === 0, String(bolt11AmountMsat("lnbc1pvjluezpp5")));
   ok("garbage → null hash", bolt11PaymentHash("not-an-invoice") === null);
 
-  console.log("\nOutbound rail selection — Blink standalone (no IBEX)");
-  ok("IBEX is NOT configured", !ibexConfigured());
-  ok("Blink is live (production)", blinkLive());
-  ok("Blink adapter exposes payInvoice + outboundStatus", typeof blinkAdapter.payInvoice === "function" && typeof blinkAdapter.outboundStatus === "function");
+  console.log("\nOutbound rail selection");
+  ok("IBEX is live (production)", ibexLive());
+  ok("IBEX exposes payInvoice + outboundStatus", typeof ibexAdapter.payInvoice === "function" && typeof ibexAdapter.outboundStatus === "function");
   const rail = outboundRail();
-  ok("outboundRail() resolves to Blink (Blink-without-IBEX refunds)", rail?.name === "blink", rail?.name ?? "none");
+  ok("outboundRail() resolves through the registry to IBEX", rail?.name === "ibex", rail?.name ?? "none");
+  // The selection is by capability (trusted + payInvoice), never by name — that is what
+  // lets a rail be swapped without touching the refund path in the state machine.
+  ok("the simulator is never an outbound rail (it holds no crypto)", rail?.name !== "sandbox");
 
   console.log("\nrefundStatus routing");
   ok("unknown provider → null (no crash)", (await refundStatus("does-not-exist", KNOWN_HASH)) === null);

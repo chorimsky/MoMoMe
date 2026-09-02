@@ -21,9 +21,8 @@ import { usingPostgres } from "../src/db/store.js";
 import { applySchema } from "../src/db/pg.js";
 import { hydrateSnapshots } from "../src/core/persist.js";
 import { hydrateComplianceChain } from "../src/core/compliance.js";
-import { config, ibexConfigured, blinkConfigured } from "../src/config.js";
+import { config, ibexConfigured } from "../src/config.js";
 import { registerAccountWebhook } from "../src/adapters/ibex.js";
-import { registerBlinkCallback } from "../src/adapters/blink.js";
 
 runBootChecks();
 // Postgres backend: create the schema if missing + rehydrate non-money snapshots before
@@ -39,7 +38,6 @@ if (usingPostgres()) {
 // needs its own registration since it never runs index.ts.
 if (config.publicUrl.startsWith("https://")) {
   if (ibexConfigured()) void registerAccountWebhook().catch((e) => console.error("IBEX webhook reg", e));
-  if (blinkConfigured()) void registerBlinkCallback().catch((e) => console.error("Blink callback reg", e));
 }
 
 // @vercel/node recognises a default-exported Express app and invokes it per request.

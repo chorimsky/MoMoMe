@@ -1,18 +1,20 @@
 /* ============================================================
    Crypto INBOUND rail registry.
 
-   Rails are decoupled from RAILS_MODE: each real rail activates when its
-   own credentials are present. For a given method the registry picks the
-   configured rail with the lowest `priority` that supports it — IBEX (0) is
-   the BASE crypto rail, added rails (Blink = 10) come next, and the
-   zero-credential sandbox (priority MAX) is the always-on catch-all so every
-   method always resolves. With no real rail configured everything runs on
-   sandbox (demo).
+   IBEX Hub is the ONE real crypto rail. It is decoupled from RAILS_MODE — it
+   activates when its own credentials are present. For a given method the registry
+   picks the configured rail with the lowest `priority` that supports it: IBEX (0),
+   then the zero-credential sandbox simulator (priority MAX) as the always-on
+   catch-all so every method resolves. With no IBEX credentials everything runs on
+   the simulator (demo) — and on a LIVE-MONEY deployment the simulator is refused
+   outright rather than handing out a fabricated address (see callSandbox).
 
-   ADD A RAIL: implement RailAdapter (see ./types.ts and ./blink.ts as a
-   template) and add it to RAILS below — nothing else changes. The state
-   machine, webhook handler and API talk to rails only through this registry
-   and the RailAdapter contract (name / trusted() / confirmSettlement()).
+   The registry stays even with a single real rail, because it is what keeps the
+   state machine, webhook handler and API from knowing anything about IBEX: they
+   talk to rails only through this module and the RailAdapter contract (name /
+   trusted() / confirmSettlement()). ADD A RAIL: implement RailAdapter (see
+   ./types.ts, with ./ibex.ts as the worked example) and add it to RAILS below —
+   nothing else changes.
    ============================================================ */
 import type { Method, PayInstruction } from "../../../shared/types.js";
 import { ALL_METHODS } from "../../../shared/domain.js";
@@ -21,11 +23,10 @@ import { HealthTracker } from "../core/railHealth.js";
 import type { InstructionRequest, RailAdapter, SettlementStatus } from "./types.js";
 import { sandboxAdapter } from "./sandbox.js";
 import { ibexAdapter } from "./ibex.js";
-import { blinkAdapter } from "./blink.js";
 
 /** Every known crypto inbound rail. Order here is irrelevant — selection is by
  *  `priority` among the CONFIGURED rails. Sandbox is always configured (catch-all). */
-const RAILS: RailAdapter[] = [ibexAdapter, blinkAdapter, sandboxAdapter];
+const RAILS: RailAdapter[] = [ibexAdapter, sandboxAdapter];
 
 /** Availability / auto-failover across real rails (shared with the payout router).
  *  A real rail that fails createInstruction repeatedly is skipped in favour of the
@@ -72,18 +73,17 @@ export function confirmSettlement(name: string | undefined, providerRef: string)
 
 /* ---------- crypto OUTBOUND (refunds) — rail-agnostic, mirrors inbound ---------- */
 /** The rail that sends crypto OUT (refunds): the highest-priority CONFIGURED + TRUSTED
- *  rail that implements payInvoice. IBEX (base, priority 0) wins when live; Blink covers
- *  it standalone → "Blink without IBEX" refunds work. undefined = nothing can send
- *  (sandbox/demo, or staging rails that aren't trusted) → the caller holds the crypto. */
+ *  rail that implements payInvoice — IBEX when it is live. undefined = nothing can send
+ *  (sandbox/demo, or a rail that isn't trusted) → the caller holds the crypto. The lookup
+ *  stays generic so a future rail sends refunds without touching the state machine. */
 export function outboundRail(): RailAdapter | undefined {
   return activeRails().find((r) => r.trusted() && typeof r.payInvoice === "function");
 }
 
 export interface RefundResult { transactionId: string; settled: boolean; feesMsat?: number; provider: string; }
-/** Pay a refund BOLT11 through the live outbound rail. Prefers the trusted outbound rail
- *  (Blink when it's the only one → "Blink without IBEX" refunds); otherwise falls back to
- *  IBEX, the BASE outbound rail. In a no-real-rail demo the IBEX call throws (no creds) →
- *  the state machine holds for review, exactly as before. */
+/** Pay a refund BOLT11 through the live outbound rail, falling back to IBEX as the base.
+ *  In a no-real-rail demo the IBEX call throws (no creds) → the state machine holds the
+ *  refund for review rather than pretending it was paid. */
 export async function payRefund(bolt11: string, amountMsat?: number): Promise<RefundResult> {
   const rail = outboundRail() ?? ibexAdapter; // IBEX is the base outbound rail
   if (!rail.payInvoice) throw new Error("no_outbound_rail");

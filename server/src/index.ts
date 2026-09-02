@@ -1,10 +1,9 @@
 import { createApp } from "./app.js";
 import { runBootChecks } from "./boot.js";
-import { config, ibexConfigured, blinkConfigured, liveMoney, peexitLive } from "./config.js";
+import { config, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { egressStatus } from "./core/egress.js";
 import { registerAccountWebhook } from "./adapters/ibex.js";
-import { registerBlinkCallback, blinkBalances } from "./adapters/blink.js";
 import { reconcileTick, fxTick } from "./jobs.js";
 import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
@@ -22,7 +21,7 @@ const app = createApp();
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME
 // jobs run via /api/cron/* (routes/cron.ts) since serverless has no persistent process.
 setInterval(() => void reconcileTick(), 30_000).unref();
-if (ibexConfigured() || blinkConfigured() || liveMoney()) {
+if (ibexConfigured() || liveMoney()) {
   void fxTick().catch((e) => console.error("fx rates", e)); // prime the cache at boot
   setInterval(() => void fxTick().catch((e) => console.error("fx rates", e)), 30_000).unref();
 }
@@ -34,20 +33,6 @@ if (ibexConfigured() && config.publicUrl.startsWith("https://")) {
   void registerAccountWebhook()
     .then(() => console.log(`IBEX account webhook → ${config.publicUrl}/webhooks/ibex`))
     .catch((e) => console.error("IBEX register account webhook failed", e));
-}
-
-// Blink (Galoy) callback endpoint — so Lightning/on-chain receives notify us.
-// Same gate as IBEX: only when configured and PUBLIC_URL is publicly reachable.
-if (blinkConfigured() && config.publicUrl.startsWith("https://")) {
-  void registerBlinkCallback()
-    .then((ok) => { if (ok) console.log(`Blink callback → ${config.publicUrl}/webhooks/blink`); })
-    .catch((e) => console.error("Blink register callback failed", e));
-  // Log receive routing + both wallet balances so ops can confirm the hedge is wired.
-  const usd = config.blink.usdWalletId ? "USD wallet set" : "no USD wallet (BTC-only)";
-  console.log(`Blink receive policy: ${config.blink.receivePolicy} (${usd})`);
-  void blinkBalances().then((bals) => {
-    if (bals?.length) console.log(`Blink balances: ${bals.map((b) => `${b.currency} ${b.balance}${b.currency === "BTC" ? " sat" : b.currency === "USD" ? "¢" : ""}`).join(", ")}`);
-  });
 }
 
 /* EGRESS IP — the address an IP-allowlisting rail must whitelist. Peexit production 403s
@@ -65,8 +50,7 @@ void egressStatus().then((e) => {
 }).catch(() => {});
 
 const server = app.listen(config.port, () => {
-  const rails = [ibexConfigured() && `IBEX Hub (${config.ibex.env})`, blinkConfigured() && `Blink (${config.blink.env})`].filter(Boolean);
-  const crypto = rails.length ? rails.join(" + ") : "sandbox";
+  const crypto = ibexConfigured() ? `IBEX Hub (${config.ibex.env})` : "sandbox";
   console.log(`MoMo›Me settlement engine → http://localhost:${config.port}  [payout: ${config.railsMode}, crypto: ${crypto}]`);
 });
 

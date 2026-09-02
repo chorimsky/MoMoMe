@@ -26,10 +26,6 @@ echo "   VITE_API_BASE = $API_BASE"
 echo "   SITE_URL      = $SITE"
 echo "──────────────────────────────────────────────"
 
-# Self-host the Wavelength wallet wasm runtime (+ worker) under app/public/ so vite
-# build copies it into dist/. It's gitignored (~145MB), so fetch it here; idempotent.
-bash scripts/fetch-wavelength-runtime.sh
-
 VITE_API_BASE="$API_BASE" SITE_URL="$SITE" pnpm --filter @momome/app build
 
 DIST="app/dist"

@@ -37,7 +37,6 @@ jobs:
           VITE_API_BASE: ${{ github.event.inputs.api_base || 'https://mo-mo-me-server.vercel.app/api' }}
           SITE_URL: https://momome.xyz
         run: |
-          bash scripts/fetch-wavelength-runtime.sh   # self-host the /wallet wasm runtime (gitignored) BEFORE build so vite copies it into dist/
           pnpm --filter @momome/app build
           [ -f app/dist/.htaccess ] || cp app/public/.htaccess app/dist/.htaccess
 

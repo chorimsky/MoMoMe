@@ -96,7 +96,7 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   }
   res.json({ ok: true });
   // Authoritative re-confirm: never settle a LIGHTNING inbound on the webhook body alone.
-  // Re-query the rail (any rail exposing confirmSettlement — IBEX, Blink, …) so a forged
+  // Re-query the rail (any rail exposing confirmSettlement) so a forged
   // "settled" webhook — even one with a leaked secret — can't trigger a real payout for an
   // unpaid invoice.
   //
@@ -105,11 +105,10 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   // stablecoins (USDT/USDC) — stores the RECEIVE ADDRESS as providerRef, and no rail can
   // answer "is this address settled?" from its transaction-by-id endpoint. Asking anyway is
   // not merely wasted: the answer comes back shaped like a verdict. IBEX's transactionStatus
-  // derives `settled` purely from Lightning invoice fields, and Blink's says so outright —
-  // "on-chain addresses aren't pollable here → returns {settled:false}". A falsy `settled`
-  // in a truthy object hit the `if (!s.settled) return` below and DROPPED the settlement, so
-  // a deposit whose crypto had already landed would never pay out. Gating here makes the
-  // code do what these comments have described all along.
+  // derives `settled` purely from Lightning invoice fields, so for an address it answers
+  // "not settled" — a falsy `settled` in a truthy object, which hit the `if (!s.settled)
+  // return` below and DROPPED the settlement, so a deposit whose crypto had already landed
+  // would never pay out. Gating here makes the code do what these comments describe.
   //
   // A deposit is therefore settled on its webhook body — which is still shared-secret gated
   // and sender-IP allowlisted, with the amount re-checked against the locked quote in

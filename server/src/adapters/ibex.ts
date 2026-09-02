@@ -271,7 +271,7 @@ export const ibexAdapter: RailAdapter = {
       if (!res.ok) throw new Error(`IBEX add-invoice failed: ${res.status} ${await res.text()}`);
       const data = (await res.json()) as { transactionId: string; bolt11: string; hash: string };
       return {
-        // QR uses the `lightning:` BOLT11 URI scheme so wallets (Blink, Wallet of
+        // QR uses the `lightning:` BOLT11 URI scheme so wallets (Wallet of
         // Satoshi, …) recognise it as a Lightning invoice. A bare/uppercased
         // bolt11 is rejected by some scanners as "not a valid address".
         method: "LIGHTNING", code: data.bolt11, qr: `lightning:${data.bolt11}`, asset: "BTC",

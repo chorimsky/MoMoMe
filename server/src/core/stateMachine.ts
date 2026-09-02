@@ -429,7 +429,7 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
 
 /** Backstop for a lost inbound webhook: poll the issuing rail for Lightning payments
  *  still awaiting inbound and settle any the rail reports paid. Works for any rail
- *  exposing confirmSettlement (IBEX, Blink, …). Idempotent — only ever advances a
+ *  exposing confirmSettlement. Idempotent — only ever advances a
  *  genuinely-settled payment. (On-chain settles by address via the account webhook;
  *  it isn't pollable by transaction id here.) */
 /** Authoritative re-query + settle/expire for ONE Lightning inbound. Shared by the

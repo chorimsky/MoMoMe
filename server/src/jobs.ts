@@ -8,7 +8,7 @@ import { store } from "./db/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { scanCompliance } from "./core/compliance.js";
-import { ibexConfigured, blinkConfigured } from "./config.js";
+import { ibexConfigured } from "./config.js";
 import { rate as ibexRate } from "./adapters/ibex.js";
 import { setRates, setDualBtc, CCY, ratesFresh, setRatesRefresher } from "./core/rates.js";
 import { fetchEurUsd, fetchDualBtcUsd } from "./core/publicRates.js";
@@ -18,9 +18,9 @@ import { fetchEurUsd, fetchDualBtcUsd } from "./core/publicRates.js";
 export async function reconcileTick(): Promise<void> {
   await reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
   await reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
-  // Inbound reconcile applies to any crypto rail with authoritative re-query (IBEX/Blink);
+  // Inbound reconcile applies to any crypto rail with authoritative re-query (IBEX);
   // refund reconcile is IBEX-specific (refunds pay out via IBEX).
-  if (ibexConfigured() || blinkConfigured()) await reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+  if (ibexConfigured()) await reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

@@ -25,10 +25,6 @@ echo "   API  = $API_BASE"
 echo "   host = $SSH_USER@$SSH_HOST:$WEB_ROOT"
 echo "──────────────────────────────────────────────"
 
-# Self-host the /wallet wasm runtime (gitignored, ~145MB) BEFORE building so vite
-# copies it into dist/ — otherwise the deployed embedded wallet 404s its runtime.
-bash scripts/fetch-wavelength-runtime.sh
-
 # Full build (tsc --noEmit + vite + SEO). A type error aborts the deploy.
 VITE_API_BASE="$API_BASE" SITE_URL="$SITE" pnpm --filter @momome/app build
 [ -f app/dist/.htaccess ] || cp app/public/.htaccess app/dist/.htaccess

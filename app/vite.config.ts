@@ -16,39 +16,8 @@ const gscVerification = {
   },
 };
 
-// The Wavelength wallet needs cross-origin isolation (SharedArrayBuffer) — but COEP
-// `require-corp` would block the cross-origin OpenStreetMap tiles on /discover. So we
-// serve COOP/COEP ONLY on the /wallet document; the map and everything else stay
-// non-isolated. (/wallet is entered/left via a full page load so isolation never
-// leaks across client routes — see app/src/pages/Wallet.tsx.)
-const walletIsolation = {
-  name: "wallet-cross-origin-isolation",
-  configureServer(server: { middlewares: { use: (fn: (req: { url?: string }, res: { setHeader: (k: string, v: string) => void }, next: () => void) => void) => void } }) {
-    server.middlewares.use((req, res, next) => {
-      const url = req.url || "";
-      // Isolate ONLY the /wallet document — a COEP header on any other document
-      // (notably /discover, with its cross-origin OSM tiles) would block those
-      // subresources. /wallet is entered/left via full page loads, so isolation
-      // never leaks across client routes (see app/src/pages/Wallet.tsx).
-      if (url === "/wallet" || url.startsWith("/wallet?") || url.startsWith("/wallet/")) {
-        res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-        res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-      }
-      // The wasm worker (…/wavewalletdk-worker.js) and hosted runtime assets — incl.
-      // the nested sqlite worker under /wavewalletdk/ — must be embeddable inside the
-      // isolated realm; a dedicated worker needs its own COEP header. Match by name so
-      // both the bundled worker and the /wavewalletdk/ tree are covered.
-      if (url.includes("wavewalletdk")) {
-        res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-        res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-      }
-      next();
-    });
-  },
-};
-
 export default defineConfig({
-  plugins: [react(), gscVerification, walletIsolation],
+  plugins: [react(), gscVerification],
   resolve: {
     alias: {
       "@shared": fileURLToPath(new URL("../shared", import.meta.url)),

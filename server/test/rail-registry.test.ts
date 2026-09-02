@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 
 // Ensure a clean sandbox-only environment (ignore any creds leaked from the shell).
-for (const k of ["IBEX_CLIENT_ID", "IBEX_CLIENT_SECRET", "IBEX_ACCOUNT_ID", "IBEX_USDT_ACCOUNT_ID", "IBEX_USDC_ACCOUNT_ID", "BLINK_API_KEY", "BLINK_WALLET_ID"]) delete process.env[k];
+for (const k of ["IBEX_CLIENT_ID", "IBEX_CLIENT_SECRET", "IBEX_ACCOUNT_ID", "IBEX_USDT_ACCOUNT_ID", "IBEX_USDC_ACCOUNT_ID"]) delete process.env[k];
 
 let passed = 0;
 function ok(label: string, cond: boolean, detail = "") {

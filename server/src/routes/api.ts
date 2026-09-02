@@ -10,11 +10,8 @@ import {
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
-import { createInstruction, adapterFor, adapterByName, confirmSettlement, payRefund, methodServable, ibexMethods } from "../adapters/index.js";
-import { blinkBalances } from "../adapters/blink.js";
+import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
-import { accountBalances } from "../adapters/ibex.js";
-import { bolt11AmountMsat } from "../core/bolt11.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
@@ -22,7 +19,6 @@ import { store } from "../db/store.js";
 import { id, nextRef } from "../core/ids.js";
 import {
   config, isLive, liveMoney, ibexConfigured, ibexLive, deployEnv, databaseHost,
-  blinkConfigured, blinkLive,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/settings.js";
@@ -527,71 +523,6 @@ api.get("/config", async (_req, res) => {
   });
 });
 
-/* ---------- Operator "Real Lightning" wallet — Blink/IBEX-backed, ADMIN ONLY ----------
-   Exposes the platform's LIVE crypto rail as a usable Lightning wallet: receive a REAL
-   (mainnet) invoice any wallet can pay (incl. Wallet of Satoshi), send a bolt11, read the
-   balance. Moves real money on the PLATFORM account → admin-gated (no per-user ledger; it
-   IS the platform account). Distinct from the self-custodial /wallet (embedded Wavelength).
-   Only functions when a live crypto rail (IBEX/Blink production) is configured. */
-const LN_SEND_MAX_SAT = Number(process.env.WALLET_LN_SEND_MAX_SAT || "1000000"); // per-send drain guard
-
-api.post("/wallet/ln/receive", async (req, res) => {
-  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only", message: "Operator sign-in required." });
-  const amountSat = Math.round(Number((req.body ?? {}).amountSat));
-  if (!Number.isFinite(amountSat) || amountSat <= 0) return res.status(400).json({ error: "bad_amount", message: "Enter a positive sats amount." });
-  const rail = adapterFor("LIGHTNING");
-  if (!rail.trusted()) return res.status(503).json({ error: "no_live_rail", message: "No live crypto rail is configured — activate IBEX or Blink first." });
-  const memo = String((req.body ?? {}).memo ?? "").slice(0, 64);
-  try {
-    const inst = await createInstruction({ method: "LIGHTNING", ref: memo || `wallet-${await nextRef()}`, amount: amountSat / 1e8 });
-    return res.json({ invoice: inst.code, paymentHash: inst.providerRef, provider: inst.provider, expiresAt: inst.expiresAt, amountSat });
-  } catch (e) {
-    console.error("[wallet-ln] receive:", e instanceof Error ? e.message : e);
-    return res.status(502).json({ error: "receive_failed", message: "Couldn't create the invoice." });
-  }
-});
-
-api.get("/wallet/ln/status", async (req, res) => {
-  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only" });
-  const hash = String(req.query.hash ?? ""), provider = String(req.query.provider ?? "");
-  if (!hash) return res.status(400).json({ error: "bad_hash" });
-  const s = await confirmSettlement(provider || undefined, hash).catch(() => null);
-  return res.json({ settled: !!s?.settled, failed: !!s?.failed });
-});
-
-api.post("/wallet/ln/send", async (req, res) => {
-  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only", message: "Operator sign-in required." });
-  const bolt11 = String((req.body ?? {}).bolt11 ?? "").trim().replace(/^lightning:/i, "");
-  const amtMsat = bolt11 ? bolt11AmountMsat(bolt11) : null;
-  if (amtMsat === null) return res.status(400).json({ error: "bad_invoice", message: "Not a valid Lightning invoice." });
-  if (amtMsat === 0) return res.status(400).json({ error: "amountless_invoice", message: "Use an invoice with a fixed amount." });
-  if (amtMsat > LN_SEND_MAX_SAT * 1000) return res.status(400).json({ error: "amount_too_high", message: `Max ${LN_SEND_MAX_SAT.toLocaleString()} sats per send.` });
-  try {
-    const r = await payRefund(bolt11); // routes to the live outbound rail (Blink/IBEX)
-    return res.json({ settled: r.settled, txId: r.transactionId, provider: r.provider });
-  } catch (e) {
-    console.error("[wallet-ln] send:", e instanceof Error ? e.message : e);
-    return res.status(502).json({ error: "send_failed", message: "Payment couldn't be sent." });
-  }
-});
-
-api.get("/wallet/ln/balance", async (req, res) => {
-  if (!isAdminRequest(req)) return res.status(401).json({ error: "admin_only" });
-  const balances: Array<{ provider: string; currency: string; balanceSat?: number; balance?: number }> = [];
-  try {
-    const b = await blinkBalances();
-    if (b) for (const w of b) balances.push({ provider: "blink", currency: w.currency, ...(w.currency === "BTC" ? { balanceSat: w.balance } : { balance: w.balance }) });
-  } catch { /* ignore */ }
-  try {
-    if (ibexConfigured()) {
-      const bals = await accountBalances();
-      const acct = bals[config.ibex.accountId];
-      if (acct) balances.push({ provider: "ibex", currency: "BTC", balanceSat: Math.round(acct.balance / 1000) }); // msat→sat
-    }
-  } catch { /* ignore */ }
-  return res.json({ balances, live: adapterFor("LIGHTNING").trusted() });
-});
-
 /* ---------- developer API: machine-readable spec (public) ---------- */
 api.get("/openapi.json", async (_req, res) => {
   res.setHeader("Cache-Control", "public, max-age=300");
@@ -755,7 +686,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
   }
   // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the
-  //    inbound will be real crypto (a trusted rail, e.g. IBEX/Blink in production); a
+  //    inbound will be real crypto (a trusted rail — IBEX in production); a
   //    simulated inbound may use a simulated rail. "service functional + has balance".
   //    trusted() on the primary rail for this method generalises the old IBEX-only check.
   const willBeReal = adapterFor(quote.method).trusted();
@@ -886,7 +817,7 @@ api.post("/payments/:id/confirm", async (req, res) => {
     const inst = p.payInstruction;
     const adapter = adapterByName(inst.provider ?? "");
     if (adapter?.confirmSettlement && inst.providerRef) {
-      // REAL rail (IBEX / Blink / …): settle ONLY if the rail confirms the crypto
+      // REAL rail (IBEX): settle ONLY if the rail confirms the crypto
       // actually arrived. Tapping "I've paid" without paying does nothing; a genuine
       // payment also auto-settles via the webhook + reconcile without any tap.
       const s = await adapter.confirmSettlement(inst.providerRef).catch(() => null);
@@ -939,7 +870,7 @@ api.post("/payments/:id/refund-destination", rateLimitDurableMiddleware("refund_
   res.json(await store().getPayment(p.id) ?? p);
 });
 
-// Per-instance throttle for the poll-driven inbound re-query below (caps IBEX/Blink
+// Per-instance throttle for the poll-driven inbound re-query below (caps IBEX
 // calls to ~once/4s per payment even under rapid frontend polling). Pruned lazily.
 const pollReQueryAt = new Map<string, number>();
 api.get("/payments/:id", async (req, res) => {
@@ -1898,7 +1829,6 @@ api.get("/admin/health", async (_req, res) => {
   const health: import("../../../shared/types.js").HealthSnapshot = {
     apis: [
       { name: "IBEX · Crypto inbound", status: ibexConfigured() ? "Online" : "Offline", detail: envLabel(ibexConfigured(), config.ibex.env) },
-      { name: "Blink · Crypto inbound", status: blinkConfigured() ? "Online" : "Offline", detail: envLabel(blinkConfigured(), config.blink.env) },
       { name: "PawaPay · Mobile Money", status: pawapayConfigured() ? "Online" : "Offline", detail: envLabel(pawapayConfigured(), config.pawapay.env) },
       { name: "Peexit · Mobile Money", status: peexitConfigured() ? "Online" : "Offline", detail: envLabel(peexitConfigured(), config.peexit.env) },
       { name: "FX feed", status: fxLive ? "Online" : "Degraded", detail: fxLive ? `live (${ratesMeta().source})` : "fallback rates" },
@@ -1923,12 +1853,10 @@ api.get("/admin/rails", async (_req, res) => {
   res.json({
     liveMoney: liveMoney(),
     monitor,
-    // ONE list for every crypto inbound rail. This used to be two overlapping fields —
-    // `crypto` (IBEX only, what the UI read) and `cryptoRails` (IBEX again + Blink, read by
-    // nothing) — so IBEX's env/configured/live/apiUrl/webhookSecret were serialised twice
-    // and could drift, while Blink was invisible to operators despite being a real rail.
-    // Per-rail identifiers stay optional because the rails genuinely differ: IBEX is
-    // account+client scoped, Blink is wallet scoped.
+    // ONE list for every crypto inbound rail — IBEX is the only one. It stays a LIST
+    // (not a flattened object) so plugging a second rail in later is a registry change
+    // here and nothing at all in the admin UI. Per-rail identifiers stay optional
+    // because rails differ in how they're scoped: IBEX is account+client scoped.
     cryptoRails: [
       {
         name: "IBEX Hub", base: true, env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
@@ -1940,12 +1868,6 @@ api.get("/admin/rails", async (_req, res) => {
         // Sandbox LN takes real sats → a settled sandbox inbound can authorize a real
         // payout when this opt-in is on (off by default).
         sandboxPayout: config.ibex.allowSandboxPayout,
-      },
-      {
-        name: "Blink", base: false, env: config.blink.env, configured: blinkConfigured(), live: blinkLive(),
-        apiUrl: config.blink.apiUrl, methods: ["LIGHTNING", "ONCHAIN"],
-        webhookSecret: config.blink.webhookSecret ? "set" : "unset",
-        walletId: head(config.blink.walletId),
       },
     ],
     payout: [
@@ -2052,8 +1974,6 @@ api.get("/admin/readiness", async (req, res) => {
       crypto: [
         { name: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
           missing: ["IBEX_CLIENT_ID", "IBEX_CLIENT_SECRET", "IBEX_ACCOUNT_ID"].filter((k) => !has(k)) },
-        { name: "Blink", env: config.blink.env, configured: blinkConfigured(), live: blinkLive(),
-          missing: ["BLINK_API_KEY", "BLINK_WALLET_ID"].filter((k) => !has(k)) },
       ],
       payout: [
         { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(),

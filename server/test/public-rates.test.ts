@@ -1,6 +1,6 @@
 /* ============================================================
    Public FX rate source test — the decoupled feed that lets a non-IBEX (e.g.
-   Blink-only) deployment price live quotes instead of refusing them. Covers the
+   IBEX rate outage) deployment price live quotes instead of refusing them. Covers the
    pure Coinbase-response parser and the rate cache's freshness + source label.
    Run: pnpm --filter @momome/server test:rates
    ============================================================ */

@@ -39,5 +39,3 @@ jobs:
       # The build is part of the check: a type-clean app can still fail to bundle.
       - name: Build (app)
         run: pnpm --filter @momome/app build
-        env:
-          SKIP_WAVELENGTH_RUNTIME: "1"

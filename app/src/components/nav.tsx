@@ -88,11 +88,6 @@ export function SiteFooter({ current = null }: { current?: FootKey }) {
       </nav>
       <span className="c">{t("lp_foot_copy")}</span>
       <span className="c" style={{ maxWidth: "62ch", lineHeight: 1.5 }}>{t("disclosure_legal")}</span>
-      {/* Plain <a> (full page load), NOT <Link>: /wallet is a cross-origin-isolated
-          island — a client-side navigation would enter it without the COOP/COEP
-          headers and SharedArrayBuffer would be unavailable. Gated on the wallet
-          feature flag (beta surface a super-admin can hide). */}
-      {features.wallet ? <a href="/wallet" className="site-foot-partners">⚡ {t("nav_wallet")}</a> : null}
       <Link to="/admin" className="site-foot-partners">{t("lp_foot_partners")}</Link>
     </footer>
   );

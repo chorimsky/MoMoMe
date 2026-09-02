@@ -278,9 +278,9 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
 }
 
 
-// Rail-NEUTRAL by method — the crypto rail (IBEX/Blink) is an internal detail, so the
+// Rail-NEUTRAL by method — which crypto rail issued the payment is an internal detail, so the
 // badge no longer hardcodes "IBEX". Pass `provider` (payInstruction.provider) to show
-// the actual rail that issued the payment, e.g. "Blink · Lightning".
+// the actual rail that issued the payment, e.g. "IBEX · Lightning".
 const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> = {
   LIGHTNING: { label: "Lightning", color: "var(--lightning)", glyph: "⚡" },
   // Ethereum, not Tron. Both stablecoins are minted as ERC-20 receive addresses on
@@ -293,7 +293,7 @@ const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> 
   PawaPay: { label: "PawaPay", color: "var(--recv)", glyph: "◎" },
   FX: { label: "FX Engine", color: "var(--info)", glyph: "⇄" },
 };
-const PROVIDER_LABEL: Record<string, string> = { ibex: "IBEX", blink: "Blink", sandbox: "Demo" };
+const PROVIDER_LABEL: Record<string, string> = { ibex: "IBEX", sandbox: "Demo" };
 export function RailBadge({ rail, provider }: { rail: string; provider?: string }) {
   const m = RAIL_MAP[rail] ?? RAIL_MAP.LIGHTNING;
   const p = provider ? PROVIDER_LABEL[provider.toLowerCase()] : undefined;

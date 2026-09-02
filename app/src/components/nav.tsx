@@ -61,6 +61,7 @@ const FOOT_LINKS: Array<[to: string, key: string, current: FootKey, feature?: ke
   ["/", "nav_home", null],
   ["/send", "lp_cta_pay", "send"],
   ["/claim", "lp_foot_claim", "claim"],
+  ["/receive", "nav_receive", null, "receive"],
   ["/contact", "lp_foot_help", "contact"],
   ["/discover", "foot_discover", null, "directory"],
   ["/merchant", "foot_merchant", null, "merchant"],

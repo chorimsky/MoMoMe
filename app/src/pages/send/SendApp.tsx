@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
-import { COUNTRIES } from "@shared/domain.js";
+import { COUNTRIES, localDigits, detectProvider } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
@@ -77,6 +77,10 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   // opens directly on that tab instead of the pay flow.
   const [params] = useSearchParams();
   const initialTab: Tab = ((p) => (p === "help" || p === "history" || p === "activity" ? (p === "activity" ? "history" : p) : "pay"))(params.get("tab"));
+  // /send?to=<number> — prefills the recipient. Used when a Lightning Address is scanned
+  // (see payPathFromScan) or a receive link is opened, so "show me your code" leads
+  // straight into paying that person instead of re-typing their number.
+  const toParam = (params.get("to") ?? "").replace(/\D/g, "");
   const [tab, setTab] = useState<Tab>(initialTab);
   const features = useFeatures();
   const [step, setStep] = useState<Step>("details");
@@ -85,7 +89,10 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
   const [s, setS] = useState<Draft>(() => merchant
     ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 5000, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
-    : { country: "CM", phone: "", provider: "MTN", xaf: 50000, method: "LIGHTNING", recipientName: "", nameSource: "idle" });
+    : (() => {
+        const phone = toParam ? localDigits(toParam, "CM") : "";
+        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: 50000, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
+      })());
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 
   const [quote, setQuote] = useState<Quote | null>(null);

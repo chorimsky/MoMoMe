@@ -9,10 +9,13 @@ import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { WEB_ORIGIN } from '@/lib/config';
-import { localDigits } from '@shared/domain';
+import { localDigits, LN_ADDRESS_DOMAIN } from '@shared/domain';
 
-const LN_DOMAIN = WEB_ORIGIN.replace(/^https?:\/\//, '');
+// The Lightning Address domain is a PROTOCOL fact — the host an external wallet resolves
+// /.well-known/lnurlp/<number> against, and the same constant the server builds its LNURL
+// metadata from. Deriving it from WEB_ORIGIN (a UI/deep-link setting) meant a build pointed
+// at another origin would show the user an address that disagrees with what the server serves.
+const LN_DOMAIN = LN_ADDRESS_DOMAIN;
 
 export default function ReceiveScreen() {
   const t = useTheme();

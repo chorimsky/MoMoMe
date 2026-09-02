@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
+import { lnAddressNumber } from "@shared/domain.js";
 
 /** Extract a MoMo›Me app path from a scanned/typed value, or null. Handles the
  *  pay/merchant checkout codes AND a referral link (?ref=…) so scanning any
@@ -29,6 +30,13 @@ export function payPathFromScan(raw: string): string | null {
   } catch { /* not a URL */ }
   if (rel(s)) return s;
   if (/^MOM-[A-Za-z]{2}-\d{4,}$/i.test(s)) return `/m/${s.toUpperCase()}`;
+  // A MoMo›Me Lightning Address — the code the Receive screen shows someone so they can
+  // get paid, as `lightning:<number>@momome.xyz` or the bare address. This app GENERATED
+  // that QR and could not read it back: scanning one answered "not a code", so the most
+  // natural in-app flow (show me your code, I'll pay you) dead-ended. Route it to the send
+  // flow with the number filled in.
+  const addr = lnAddressNumber(s);
+  if (addr) return `/send?to=${addr}`;
   return null;
 }
 

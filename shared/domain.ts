@@ -50,6 +50,30 @@ export const EUR_XAF_PEG = 655.957;
  *  truth for merchant/customer identities and the LNURL-pay server. */
 export const LN_ADDRESS_DOMAIN = "momome.xyz";
 
+/** The Mobile Money number inside a MoMo›Me Lightning Address, or null.
+ *
+ *  Accepts the `lightning:` URI scheme (how the Receive screens encode the QR), a bare
+ *  `<number>@<domain>`, and both the national and dial-code forms of the number — the LNURL
+ *  server resolves either, so anything reading an address must too.
+ *
+ *  Only OUR domain resolves: an address at someone else's host is a Lightning wallet's
+ *  business, not a Mobile Money payout, and treating it as one would send a payer into a
+ *  flow that cannot deliver. Lives here beside LN_ADDRESS_DOMAIN so every surface that
+ *  reads an address agrees with the one that serves it. */
+export function lnAddressNumber(raw: string): string | null {
+  const s = (raw || "").trim().replace(/^lightning:/i, "").replace(/^lnurlp:\/\//i, "");
+  const at = s.indexOf("@");
+  if (at < 1) return null;
+  const user = s.slice(0, at);
+  const domain = s.slice(at + 1).toLowerCase();
+  if (domain !== LN_ADDRESS_DOMAIN.toLowerCase()) return null;
+  const digits = user.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 15) return null;
+  // A bolt11 also starts with "ln" and can contain an @ in some encodings — but it never
+  // reduces to a plausible phone number, so the digit-length gate above already excludes it.
+  return digits;
+}
+
 /** Every crypto pay-in method, in the order the product presents them. Single source of
  *  truth: the send flow, the admin analytics split and the ops dashboard all read this, so
  *  adding a method can't leave one of them silently blind to its volume. Whether a method is

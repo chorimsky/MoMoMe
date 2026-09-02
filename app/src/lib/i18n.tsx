@@ -160,6 +160,20 @@ export const STRINGS: Dict = {
   refund_settling_title: ["Refund submitted", "Remboursement lancé"],
   refund_settling_sub: ["It's being sent back to your wallet — this can take a moment. You'll see it confirmed in Activity.", "Il repart vers votre portefeuille — cela peut prendre un instant. La confirmation apparaîtra dans Activité."],
   nav_home: ["Home", "Accueil"],
+  // --- Receive (/receive): the non-custodial "get paid" surface. Your Mobile Money number
+  // IS the address; anything paid to it is converted and delivered as Mobile Money in one
+  // pass — nothing is ever held for you, so this screen shows no balance.
+  nav_receive: ["Get paid", "Être payé"],
+  rcv_title: ["Get paid in Mobile Money", "Recevez de l'argent en Mobile Money"],
+  rcv_lede: ["Share one code. Anyone can pay you from a Bitcoin or Lightning wallet, anywhere — and it arrives on your Mobile Money in seconds.", "Partagez un seul code. N'importe qui peut vous payer depuis un portefeuille Bitcoin ou Lightning, où qu'il soit — et l'argent arrive sur votre Mobile Money en quelques secondes."],
+  rcv_intro: ["Enter your Mobile Money number to create your payment code.", "Saisissez votre numéro Mobile Money pour créer votre code de paiement."],
+  rcv_your_number: ["Your Mobile Money number", "Votre numéro Mobile Money"],
+  rcv_create: ["Create my code", "Créer mon code"],
+  rcv_your_code: ["Your payment address", "Votre adresse de paiement"],
+  rcv_share: ["Show this code, or share the address. Payments land on your Mobile Money — we never hold your money.", "Montrez ce code, ou partagez l'adresse. Les paiements arrivent sur votre Mobile Money — nous ne détenons jamais votre argent."],
+  rcv_change: ["Use a different number", "Utiliser un autre numéro"],
+  rcv_bad_number: ["Check this number — it doesn't look like a valid MTN / Orange number.", "Vérifiez ce numéro — il ne ressemble pas à un numéro MTN / Orange valide."],
+  rcv_copy_addr: ["Payment address", "Adresse de paiement"],
   demo_label: ["Demo", "Démo"],
   sandbox_title: ["Sandbox demo", "Démo (bac à sable)"],
   sandbox_desc: ["This is not a real invoice — don't pay it with a wallet. Tap “I've paid” below to simulate the payment.", "Ceci n'est pas une vraie facture — ne la payez pas avec un portefeuille. Appuyez sur « J'ai payé » ci-dessous pour simuler."],

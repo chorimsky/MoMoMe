@@ -5,6 +5,7 @@ import { api } from "./api/client.js";
 import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
 import { Claim } from "./pages/Claim.js";
+import { Receive } from "./pages/Receive.js";
 import { AdminGate } from "./pages/admin/AdminGate.js";
 import { Terms } from "./pages/legal/Terms.js";
 import { Privacy } from "./pages/legal/Privacy.js";
@@ -54,6 +55,7 @@ export function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/send" element={<SendApp />} />
       <Route path="/claim" element={<Claim />} />
+      <Route path="/receive" element={<Receive />} />
       <Route path="/admin" element={<AdminGate><Suspense fallback={<ChunkFallback />}><AdminConsole /></Suspense></AdminGate>} />
       {/* Ops exposes the live tx feed, treasury float and rail health — operator-only,
           so it sits behind the same session gate as /admin (was previously ungated). */}

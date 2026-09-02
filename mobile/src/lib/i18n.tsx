@@ -259,6 +259,18 @@ export const STRINGS = {
   rcpt_footer: ['Mobile Money payment successfully completed.', 'Paiement Mobile Money effectué avec succès.'],
   rcpt_delivered_to: ['delivered to', 'livré à'],
   close: ['Close', 'Fermer'],
+  // The Receive screen used to accept any 8+ digits, so it would hand someone an address
+  // for a number no provider claims — which the LNURL server then refuses with "Not a valid
+  // Mobile Money number". Asking for money at an address that cannot be paid is worse than
+  // refusing the input.
+  rcv_bad_number: [
+    "Check this number — it doesn't look like a valid MTN or Orange Money number.",
+    "Vérifiez ce numéro — il ne ressemble pas à un numéro MTN ou Orange Money valide.",
+  ],
+  rcv_fix_saved: [
+    'The number saved here isn\'t a valid MTN or Orange Money number, so nobody could pay it. Enter it again.',
+    "Le numéro enregistré ici n'est pas un numéro MTN ou Orange Money valide, personne ne pouvait donc le payer. Saisissez-le à nouveau.",
+  ],
   // Labels for ICON-ONLY controls. A bare icon has no text for VoiceOver/TalkBack to read,
   // so without these a screen-reader user hears "button" and nothing else — on a star, a
   // pencil, a bin and a back chevron alike.

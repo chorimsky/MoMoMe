@@ -9,7 +9,7 @@ import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { localDigits, LN_ADDRESS_DOMAIN } from '@shared/domain';
+import { detectProvider, localDigits, LN_ADDRESS_DOMAIN } from '@shared/domain';
 
 // The Lightning Address domain is a PROTOCOL fact — the host an external wallet resolves
 // /.well-known/lnurlp/<number> against, and the same constant the server builds its LNURL
@@ -25,18 +25,32 @@ export default function ReceiveScreen() {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // A number is only usable if a Mobile Money provider actually claims it — the same rule
+  // the LNURL server applies (parseLnUser refuses anything detectProvider can't place). The
+  // screen used to accept any 8+ digits, so it would happily show an address like
+  // 60344485@momome.xyz, which the server answers with "Not a valid Mobile Money number".
+  // Handing someone an address they can't be paid at is the one thing this screen must not do.
+  const usable = (d: string) => d.length >= 8 && !!detectProvider(d, 'CM');
+
+  const [savedInvalid, setSavedInvalid] = useState(false);
   useEffect(() => {
     getMyNumber().then((n) => {
+      // A number saved before this check existed can still be unusable — send the user
+      // straight back to fixing it rather than showing a dead address.
+      if (n && !usable(n)) { setSavedInvalid(true); setDraft(n); setEditing(true); setNumber(null); return; }
       setNumber(n);
       if (!n) setEditing(true);
     });
   }, []);
 
+  const digits = localDigits(draft, 'CM');
+  const valid = usable(digits);
+
   const save = async () => {
-    const d = localDigits(draft, 'CM');
-    if (d.length < 8) return;
-    await setMyNumber(d);
-    setNumber(d);
+    if (!valid) return;
+    await setMyNumber(digits);
+    setNumber(digits);
+    setSavedInvalid(false);
     setEditing(false);
   };
 
@@ -57,7 +71,7 @@ export default function ReceiveScreen() {
       {editing || !number ? (
         <Card padded elevated>
           <IconCircle name="arrow-down" color={t.recv} bg={t.recvWash} size={56} />
-          <Body>{tr('receive_intro')}</Body>
+          <Body>{savedInvalid ? tr('rcv_fix_saved') : tr('receive_intro')}</Body>
           <Field
             label={tr('your_mm_number')}
             placeholder="6 7X XX XX XX"
@@ -66,11 +80,14 @@ export default function ReceiveScreen() {
             onChangeText={setDraft}
             left={<Text style={{ fontSize: 18 }}>🇨🇲</Text>}
           />
+          {draft.trim().length > 0 && !valid ? (
+            <Body style={{ color: t.bad, fontSize: 13 }}>{tr('rcv_bad_number')}</Body>
+          ) : null}
           <Button
             title={tr('create_pay_link')}
             icon="link"
             onPress={save}
-            disabled={localDigits(draft, 'CM').length < 8}
+            disabled={!valid}
             style={{ alignSelf: 'stretch' }}
           />
           {number ? (

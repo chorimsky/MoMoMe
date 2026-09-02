@@ -61,7 +61,13 @@ let changedFrom: string | null = null;
 /** Two independent echo services: if one is down or lying, we still get an answer, and a
  *  disagreement means we report nothing rather than a wrong IP an operator would go
  *  register with a payment provider. */
-const SOURCES = ["https://api.ipify.org?format=json", "https://ifconfig.co/json"];
+const DEFAULT_SOURCES = ["https://api.ipify.org?format=json", "https://ifconfig.co/json"];
+/** Overridable so the proxied path can be asserted against a real local proxy, and so an
+ *  operator on a restricted network can point at echo services they can actually reach.
+ *  Comma-separated; each must answer `{"ip": "..."}`. */
+const SOURCES = (process.env.EGRESS_ECHO_URLS ?? "").split(",").map((u) => u.trim()).filter(Boolean).length
+  ? (process.env.EGRESS_ECHO_URLS ?? "").split(",").map((u) => u.trim()).filter(Boolean)
+  : DEFAULT_SOURCES;
 
 async function probe(url: string, proxyUrl?: string): Promise<string | null> {
   try {

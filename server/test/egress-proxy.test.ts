@@ -23,6 +23,9 @@ async function main() {
   // Origin the proxy will tunnel to (stands in for server.peexit.com).
   const origin = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
+    // /ip stands in for the public echo services, so the address the CONSOLE reports can be
+    // asserted against a real tunnel rather than assumed.
+    if ((req.url ?? "").startsWith("/ip")) { res.end(JSON.stringify({ ip: "198.51.100.42" })); return; }
     res.end(JSON.stringify({ disbursement_solde: 4242, seenHeader: req.headers["secretkey"] ?? null }));
   });
   await new Promise<void>((r) => origin.listen(0, "127.0.0.1", r));
@@ -90,6 +93,25 @@ async function main() {
   tunnels = [];
   await Promise.all([1, 2, 3].map(() => fetchT(target, {}, 12_000, proxyUrl).catch(() => null)));
   ok("repeated proxied calls reuse one cached agent (no crash/leak)", true);
+
+  // 5. THE OPERATOR-FACING PATH. With a proxy configured, the console must report the
+  //    address observed THROUGH it — that is the value registered with Peexit. Reporting
+  //    the platform's own address there is the mistake the whole module exists to prevent,
+  //    and until now the proxied branch was never exercised against a real tunnel.
+  process.env.EGRESS_ECHO_URLS = `http://127.0.0.1:${originPort}/ip`;
+  process.env.EGRESS_CACHE_MS = "0";
+  const { railEgressIp, egressStatus } = await import("../src/core/egress.js");
+  const { config } = await import("../src/config.js");
+  config.peexit.proxyUrl = proxyUrl;
+  tunnels = [];
+  const railIp = await railEgressIp();
+  ok("the reported egress IP is observed THROUGH the proxy", railIp === "198.51.100.42", String(railIp));
+  ok("…and it really tunnelled (not a direct probe)", tunnels.length > 0, `${tunnels.length} tunnels`);
+
+  const st = await egressStatus();
+  ok("status reports it as the address to register", st.ip === "198.51.100.42" && st.proxied === true, `${st.ip} proxied=${st.proxied}`);
+  ok("note names that address, so an operator knows what to allowlist", st.note.includes("198.51.100.42"), st.note.slice(0, 80));
+  config.peexit.proxyUrl = "";
 
   origin.close(); proxy.close();
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);

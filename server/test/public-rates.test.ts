@@ -55,6 +55,47 @@ async function main() {
   ok("one venue down → fresh again", ratesFresh());
   ok("one venue down → not divergent", ratesMeta().divergent === false);
 
+  /* ---- The whole fxTick, with the venues DOWN ----
+     The unit checks above pass a degraded pull straight to setRates(). The bug was one
+     level up, in jobs.fxTick(): it always sent `usdtUsd: 1, usdcUsd: 1` — hardcoded PEGS,
+     not observations — so setRates() saw a "real" leg on every single tick. With Coinbase
+     and Kraken both unreachable that re-stamped the cache, ratesFresh() stayed true while
+     the price was frozen, and a live quote would have priced real BTC off the hardcoded
+     $65,000 fallback. Only an end-to-end fxTick catches that, so: */
+  console.log("\nfxTick — a dead public feed must go STALE, not stay fresh on pegs");
+  {
+    const { fxTick } = await import("../src/jobs.js");
+    const realFetch = globalThis.fetch;
+    let venuesUp = true;
+    globalThis.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String((input as { url?: string })?.url ?? input);
+      const J = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("coinbase.com") || url.includes("kraken.com")) {
+        if (!venuesUp) return new Response("upstream down", { status: 503 });
+        if (url.includes("exchange-rates")) return J({ data: { rates: { USD: "1.09" } } });
+        if (url.includes("kraken.com")) return J({ result: { XXBTZUSD: { c: ["70000.0", "0.1"] } } });
+        return J({ data: { amount: "70100.00" } });
+      }
+      return realFetch(input as RequestInfo, init as RequestInit);
+    }) as typeof fetch;
+    try {
+      // Venues up → the feed publishes and is fresh.
+      await fxTick();
+      const liveAt = ratesMeta().updatedAt;
+      ok("venues up → feed fresh", ratesFresh());
+      ok("venues up → both legs priced (mean of 70000/70100)", btcUsd() === 70050, String(btcUsd()));
+
+      // Venues down → the tick must publish NOTHING, leaving the timestamp untouched so
+      // the cache can age out and quoting refuse.
+      await new Promise((r) => setTimeout(r, 5));
+      venuesUp = false;
+      await fxTick();
+      ok("venues down → cache timestamp NOT re-stamped", ratesMeta().updatedAt === liveAt, `${liveAt} → ${ratesMeta().updatedAt}`);
+      ok("venues down → last real price kept (not the $65k fallback)", btcUsd() === 70050, String(btcUsd()));
+      ok("venues down → source still reports the last real feed", ratesMeta().source === "public");
+    } finally { globalThis.fetch = realFetch; }
+  }
+
   console.log(`\n✅ ${passed} assertions passed`);
 }
 

@@ -88,16 +88,6 @@ function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () 
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(id.claimed);
   const [actErr, setActErr] = useState<string | null>(null);
-  // Custodial-wallet state is a per-rail network call, so it is fetched only when a
-  // drawer is open rather than for every row in the list. A failure leaves it null →
-  // the fields render as "…"/"—" rather than inventing a balance.
-  const [wallet, setWallet] = useState<Awaited<ReturnType<typeof api.adminIdentityWallet>> | null>(null);
-  useEffect(() => {
-    let live = true;
-    setWallet(null);
-    api.adminIdentityWallet(id.customerId).then((w) => { if (live) setWallet(w); }).catch(() => { /* leave unknown */ });
-    return () => { live = false; };
-  }, [id.customerId]);
 
   const claim = async () => {
     setClaiming(true); setActErr(null);
@@ -142,19 +132,18 @@ function IdentityDrawer({ id, onClose, onChanged }: { id: Identity; onClose: () 
             {id.firstPaymentRef && <KV k="First payment" v={id.firstPaymentRef} />}
           </Section>
 
-          <Section title="Custodial wallet">
+          {/* Non-custodial: the Lightning Address IS the wallet. Anything paid to it is
+              converted and delivered as Mobile Money in the same pass — no balance is
+              ever held here, so there is none to show. */}
+          <Section title="Receive address (non-custodial)">
             <KV k="Wallet ID" v={id.walletId} />
             <KV k="Lightning address" v={id.lightningAddress} />
-            <KV k="Lightning wallet" v={wallet?.real === false ? `${id.lnWalletRef} · not yet opened` : id.lnWalletRef} />
-            {wallet?.provider && <KV k="Held by" v={wallet.provider.toUpperCase()} />}
-            {/* Unavailable is shown as “—”, never as 0 sats: a zero would assert that the
-                wallet exists and is empty, which is a different claim from “we don't know”. */}
-            <KV k="Wallet balance" v={wallet ? (wallet.balance === null ? "—" : `${Math.round(wallet.balance / 1000).toLocaleString()} sats`) : "…"} />
+            <KV k="Settles to" v={`${id.phone} · Mobile Money`} />
             <KV k="Ledger ID" v={id.ledgerId} />
           </Section>
 
           <Section title="Received">
-            <KV k="Total received" v={`${fmt(id.balances.XAF)} XAF`} />
+            <KV k="Total delivered" v={`${fmt(id.receivedXaf)} XAF`} />
           </Section>
 
           <div style={{ marginTop: 22 }}>

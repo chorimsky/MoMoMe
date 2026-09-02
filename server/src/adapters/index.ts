@@ -90,32 +90,6 @@ export async function payRefund(bolt11: string, amountMsat?: number): Promise<Re
   const r = await rail.payInvoice(bolt11, amountMsat);
   return { ...r, provider: rail.name };
 }
-/* ---------- custodial accounts: one Lightning wallet per end user ---------- */
-/** The rail that can open a custodial account per end user: highest-priority CONFIGURED
- *  + TRUSTED rail exposing createAccount. TRUSTED matters here — an account opened on an
- *  untrusted/sandbox rail would be a wallet that cannot hold real value, which is worse
- *  than no wallet because the UI would show a balance the customer can't have. undefined
- *  = no rail can, and identities keep their simulated placeholder ref. */
-export function walletRail(): RailAdapter | undefined {
-  return activeRails().find((r) => r.trusted() && typeof r.createAccount === "function");
-}
-
-/** Open a custodial wallet for `name` on the wallet rail. Returns the rail name and the
- *  rail's account id. Throws when no rail can — the caller decides what that means (the
- *  identity layer keeps the placeholder and retries on a later delivery). */
-export async function createCustodialAccount(name: string): Promise<{ provider: string; accountId: string }> {
-  const rail = walletRail();
-  if (!rail?.createAccount) throw new Error("no_wallet_rail");
-  return { provider: rail.name, accountId: await rail.createAccount(name) };
-}
-
-/** Balance of one custodial account on the rail that issued it. null = unknown/unavailable. */
-export async function custodialBalance(provider: string | undefined, accountId: string): Promise<{ currencyId: number; balance: number } | null> {
-  const rail = provider ? adapterByName(provider) : walletRail();
-  if (!rail?.accountBalance) return null;
-  return rail.accountBalance(accountId).catch(() => null);
-}
-
 /** Authoritative status of a refund previously paid on `provider` (falls back to the
  *  current outbound rail if the provider wasn't recorded). null = indeterminate. */
 export function refundStatus(provider: string | undefined, txId: string): Promise<SettlementStatus | null> {

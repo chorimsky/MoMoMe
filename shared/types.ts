@@ -297,31 +297,33 @@ export interface LedgerEntry {
 }
 
 /* ---------- identity layer ----------
-   Every Mobile Money number that receives a payment is silently
-   provisioned with a custodial identity: customer + Lightning wallet +
-   ledger account + Lightning address. Invisible in Phase 1; claimable
-   later (Phase 2) via OTP. */
+   Every Mobile Money number that receives a payment is silently provisioned with an
+   identity: customer record + ledger account + Lightning address. Invisible in Phase 1;
+   claimable later (Phase 2) via OTP.
+
+   NON-CUSTODIAL BY CONSTRUCTION. The "wallet" for a number is its Lightning Address and
+   nothing more: an endpoint that RECEIVES, converts, and delivers Mobile Money in one
+   pass. MoMo›Me never holds a crypto balance on anyone's behalf — so there is no wallet
+   ref, no per-user rail account, and no crypto balance field here for one to accumulate
+   in. `receivedXaf` is history (what has been delivered), not a claim on anything. */
 export interface Identity {
   customerId: string; // CUS00001
   name: string;
   phone: string; // local format, as carried on payments
   e164: string; // +237670123456
   country: CountryCode;
-  walletId: string; // LNW00001
-  /** Custodial Lightning wallet ref. A REAL rail account id once a wallet-capable rail
-   *  has opened one (IBEX opens one account per end user); until then a `sim_wal_…`
-   *  placeholder. Use walletIsReal() rather than eyeballing it — the distinction decides
-   *  whether a balance may be shown at all. */
-  lnWalletRef: string;
-  /** Which rail holds lnWalletRef ("ibex"). Absent while the ref is a placeholder — the
-   *  balance lookup needs it to know which rail to ask. */
-  lnWalletProvider?: string;
+  walletId: string; // LNW00001 — a stable label for the receive account, not a balance
+
   ledgerId: string; // LED00001
   /** number@momome.africa — the latent Lightning identity. */
   lightningAddress: string;
   status: "Active";
   claimed: boolean;
-  balances: { XAF: number; BTC: number; USDT: number; USDC: number };
+  /** Lifetime XAF actually DELIVERED to this number. History, not a holdable balance —
+   *  the crypto legs that used to sit beside it (BTC/USDT/USDC, permanently 0) were a
+   *  custody model this product does not have, and a field nothing can credit is an
+   *  invitation to start crediting it. */
+  receivedXaf: number;
   createdAt: string;
   lastSeen: string;
   firstPaymentRef?: string;

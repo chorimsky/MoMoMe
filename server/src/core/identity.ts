@@ -1,24 +1,23 @@
 /* ============================================================
-   Identity layer (the quiet part). On a number's first inbound, MoMo›Me
-   silently provisions a custodial financial identity — no signup, no
-   seed phrase. The number IS the account.
+   Identity layer (the quiet part). On a number's first inbound, MoMo›Me silently
+   provisions a financial identity — no signup, no seed phrase. The number IS the account.
+
+   NON-CUSTODIAL BY CONSTRUCTION. A number's "wallet" is its Lightning Address and nothing
+   more: <number>@momome.xyz receives, and routes/lnurl.ts converts and delivers Mobile
+   Money in the same pass. Nothing is ever held on a customer's behalf, so there is no
+   wallet ref, no per-user rail account, and no crypto balance to accumulate in — see the
+   receive-to-fiat e2e test, which asserts exactly that no value comes to rest.
+
+   That is a deliberate product boundary, not an omission. Opening a rail account per user
+   (IBEX supports it) would make this custody: a materially different regulated activity
+   from converting crypto to Mobile Money in flight.
 
    Phase 1: provisioned + invisible. Phase 2: claimable via OTP.
-
-   The Lightning wallet is REAL when a rail can open custodial accounts (IBEX opens one
-   account per end user — its own documented model). Provisioning happens OFF the
-   critical path: ensureIdentity() stays synchronous and always succeeds with a
-   placeholder ref, then the rail account is opened in the background and swapped in.
-   That ordering is deliberate — a payment has just been DELIVERED when this runs, and a
-   settlement must never fail, block, or slow down because a wallet-provisioning call to
-   an external API was slow or down.
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
 import { COUNTRIES, LN_ADDRESS_DOMAIN } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
-import { background } from "./background.js";
-import { createCustodialAccount, custodialBalance, walletRail } from "../adapters/index.js";
 
 interface Otp { hash: string; expiresAt: number; attempts: number }
 
@@ -32,63 +31,18 @@ register(
   "identity",
   () => ({ byPhone: [...byPhone], seq, otps: [...otps] }),
   (d: { byPhone: [string, Identity][]; seq: number; otps: [string, Otp][] }) => {
-    for (const [k, v] of d.byPhone) byPhone.set(k, v);
+    for (const [k, v] of d.byPhone) {
+      // Records written before the non-custodial re-model carry `balances` + a wallet ref.
+      // Drop them on the way in so the custody-shaped fields cannot outlive the model.
+      const legacy = v as Identity & { balances?: { XAF?: number }; lnWalletRef?: string; lnWalletProvider?: string };
+      if (legacy.receivedXaf === undefined) legacy.receivedXaf = legacy.balances?.XAF ?? 0;
+      delete legacy.balances; delete legacy.lnWalletRef; delete legacy.lnWalletProvider;
+      byPhone.set(k, legacy);
+    }
     seq = d.seq;
     for (const [k, v] of d.otps) otps.set(k, v);
   },
 );
-
-/** Placeholder wallet ref, used until (or unless) a real rail account is opened. The
- *  `sim_` prefix is load-bearing: it is how walletIsReal() tells a placeholder from a
- *  real rail account id, so nothing ever shows a customer a balance for a wallet that
- *  does not exist. (The old prefix was `ibex_wal_`, which was indistinguishable from a
- *  real IBEX id at a glance — exactly the confusion this avoids.) */
-function placeholderWalletRef(): string {
-  return `sim_wal_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-}
-
-/** Is this identity's Lightning wallet a REAL rail account (vs. a placeholder)? */
-export function walletIsReal(id: Identity): boolean {
-  return !!id.lnWalletRef && !id.lnWalletRef.startsWith("sim_wal_");
-}
-
-/** In-flight provisioning, so concurrent deliveries to the same number can't open two
- *  rail accounts for it. Per-instance: the idempotency that actually matters is the
- *  walletIsReal() check below, which is re-read from the (persisted) identity. */
-const provisioning = new Set<string>();
-
-/** Open the REAL custodial wallet for an identity, in the background. Idempotent and
- *  fail-safe: no wallet rail, or a failed/unverified call, simply leaves the placeholder
- *  in place — the identity, its Lightning Address and every payment keep working, and the
- *  next delivery to that number retries. Nothing here can fail a settlement. */
-export function provisionWallet(identity: Identity): void {
-  if (walletIsReal(identity) || !walletRail() || provisioning.has(identity.customerId)) return;
-  provisioning.add(identity.customerId);
-  background(
-    createCustodialAccount(identity.customerId)
-      .then(({ provider, accountId }) => {
-        // Re-read: the identity object may have been replaced by a restore() since.
-        const live = byPhone.get(identity.phone) ?? identity;
-        if (walletIsReal(live)) return; // another instance won the race
-        live.lnWalletRef = accountId;
-        live.lnWalletProvider = provider;
-        touch("identity");
-        console.log(`[identity] ${live.customerId} → custodial wallet opened on ${provider} (${accountId})`);
-      })
-      .catch((e) => {
-        console.error(`[identity] custodial wallet for ${identity.customerId} not opened (keeping placeholder):`, e instanceof Error ? e.message : e);
-      })
-      .finally(() => provisioning.delete(identity.customerId)),
-  );
-}
-
-/** Live balance of an identity's custodial wallet, in the rail account's smallest unit
- *  (msat for BTC). null when the wallet is still a placeholder or the rail can't say —
- *  callers must render "unavailable", never 0, because 0 is a claim about someone's money. */
-export async function walletBalance(id: Identity): Promise<{ currencyId: number; balance: number } | null> {
-  if (!walletIsReal(id)) return null;
-  return custodialBalance(id.lnWalletProvider, id.lnWalletRef);
-}
 
 function ccDigits(country: Recipient["country"]): string {
   return COUNTRIES[country].dial.replace(/\D/g, "");
@@ -100,12 +54,7 @@ function ccDigits(country: Recipient["country"]): string {
  */
 export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identity {
   const existing = byPhone.get(rec.phone);
-  if (existing) {
-    // Retry provisioning for a number provisioned before a wallet rail existed (or whose
-    // earlier attempt failed). No-op once the wallet is real.
-    provisionWallet(existing);
-    return existing;
-  }
+  if (existing) return existing;
 
   seq += 1;
   const phoneDigits = rec.phone.replace(/\D/g, "");
@@ -118,19 +67,17 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
     e164: `+${cc}${phoneDigits}`,
     country: rec.country,
     walletId: `LNW${pad(seq)}`,
-    lnWalletRef: placeholderWalletRef(),
     ledgerId: `LED${pad(seq)}`,
     lightningAddress: `${cc}${phoneDigits}@${LN_ADDRESS_DOMAIN}`,
     status: "Active",
     claimed: false,
-    balances: { XAF: 0, BTC: 0, USDT: 0, USDC: 0 },
+    receivedXaf: 0,
     createdAt: now,
     lastSeen: now,
     firstPaymentRef,
   };
   byPhone.set(rec.phone, id);
   touch("identity");
-  provisionWallet(id); // background; never blocks the settlement that triggered this
   return id;
 }
 

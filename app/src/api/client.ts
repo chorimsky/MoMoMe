@@ -353,11 +353,6 @@ export const api = {
 
   adminIdentities: () => req<Identity[]>("/admin/identities"),
   adminIdentityStats: () => req<IdentityStats>("/admin/identities/stats"),
-  /** Live custodial-wallet state for one identity. `balance` is msat for a BTC account,
-   *  and `null` means UNAVAILABLE (placeholder wallet, or the rail didn't answer) — it
-   *  must never be rendered as 0, which would be a false claim about someone's money. */
-  adminIdentityWallet: (id: string) =>
-    req<{ customerId: string; lightningAddress: string; provider: string | null; accountId: string; real: boolean; balance: number | null; currencyId: number | null }>(`/admin/identities/${id}/wallet`),
   claimIdentity: (id: string) => req<Identity>(`/admin/identities/${id}/claim`, { method: "POST" }),
 
   adminLiquidity: () => req<LiquiditySnapshot>("/admin/liquidity"),

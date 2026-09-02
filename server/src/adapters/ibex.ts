@@ -159,36 +159,6 @@ export async function accountBalances(): Promise<Record<string, { currencyId: nu
   return out;
 }
 
-/** Open a custodial IBEX account — one per end user, which is IBEX's own documented
- *  model ("create an account for each of your users … one IBEXHub account per user"),
- *  and what turns a Mobile-Money number into a Lightning wallet that can HOLD sats
- *  rather than only forward them.
- *
- *  ⚠️ The request path/body below is the one part of this integration that could not be
- *  verified against the live API from the build environment (egress to
- *  docs.poweredbyibex.io and the API is blocked here, and no IBEX credentials are
- *  configured on the deployment). It follows this API's own house style — verb-suffixed
- *  v1 paths (`/invoice/add`, `/invoice/pay`, `/onchain/address`) — and returns the same
- *  account shape `GET /v2/account` lists (`{id, userId, organizationId, name,
- *  currencyId}`). Confirm it against the console before enabling on real money; every
- *  caller is written to fail SAFE if it is wrong (see provisionWallet in core/identity). */
-export async function createAccount(name: string): Promise<string> {
-  const res = await ibex("/account/create", { method: "POST", body: JSON.stringify({ name }) });
-  if (!res.ok) throw new Error(`IBEX create-account failed: ${res.status} ${await res.text()}`);
-  const d = (await res.json()) as { id?: string; accountId?: string };
-  const id = d.id ?? d.accountId;
-  if (!id) throw new Error("IBEX create-account returned no account id");
-  return id;
-}
-
-/** Balance of ONE account (msat for a BTC account). Reads the same org-wide account
- *  list as accountBalances() — IBEX returns every account's balance in one call, so a
- *  per-user balance needs no extra endpoint. null = not an account we hold. */
-export async function accountBalance(accountId: string): Promise<{ currencyId: number; balance: number } | null> {
-  const all = await accountBalances();
-  return all[accountId] ?? null;
-}
-
 /** Withdraw BTC ON-CHAIN to a Bitcoin address. `amountMsat` is the BTC account's
  *  smallest unit (msat). Returns the pay transaction id + provider status. */
 export async function sendOnchain(address: string, amountMsat: number): Promise<{ txId: string; status: string }> {
@@ -409,8 +379,4 @@ export const ibexAdapter: RailAdapter = {
   // outbound status re-uses the same authoritative transaction re-query as inbound.
   payInvoice: (bolt11: string, amountMsat?: number) => payInvoice(bolt11, amountMsat),
   outboundStatus: (txId: string) => transactionStatus(txId),
-
-  // Custodial accounts — one Lightning wallet per Mobile-Money number.
-  createAccount: (name: string) => createAccount(name),
-  accountBalance: (accountId: string) => accountBalance(accountId),
 };

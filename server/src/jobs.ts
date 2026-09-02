@@ -51,7 +51,17 @@ export async function fxTick(): Promise<void> {
   // spot. setDualBtc caches the mean when the venues agree and REFUSES (marks the feed
   // divergent, so ratesFresh() → false) when they don't, rather than pricing off one number.
   const [dual, eurUsd] = await Promise.all([fetchDualBtcUsd(), fetchEurUsd()]);
-  setRates({ usdtUsd: 1, usdcUsd: 1, eurUsd }, "public");
+  // A PEG IS NOT AN OBSERVATION. setRates() decides feed freshness from "did any leg come
+  // back real?", and usdtUsd/usdcUsd here are hardcoded 1s — not something a venue told
+  // us. Passing them unconditionally made that check true on EVERY tick, including ticks
+  // where Coinbase AND Kraken were both unreachable: the cache timestamp was re-stamped,
+  // ratesFresh() stayed true while the price was frozen, and live quotes then priced real
+  // BTC off the hardcoded $65,000 FALLBACK — the precise failure setRates' own comment
+  // says must not happen. Publish only when a venue actually answered; otherwise let the
+  // cache age out so quoting refuses instead of inventing a price.
+  if (eurUsd != null || dual.a != null || dual.b != null) {
+    setRates({ usdtUsd: 1, usdcUsd: 1, eurUsd }, "public");
+  }
   setDualBtc(dual.a, dual.b);
 }
 

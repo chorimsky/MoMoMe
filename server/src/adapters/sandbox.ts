@@ -4,7 +4,7 @@
    Inbound settlement is driven by the /confirm endpoint, not webhooks.
    ============================================================ */
 import type { Method, PayInstruction, InboundAsset } from "../../../shared/types.js";
-import { METHOD_ASSET, QUOTE_TTL_SEC } from "../../../shared/domain.js";
+import { METHOD_ASSET, QUOTE_TTL_SEC, erc20PaymentUri } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
@@ -49,7 +49,9 @@ export const sandboxAdapter: RailAdapter = {
       // real IBEX rail so the sandbox never teaches a wrong (e.g. TRON) network.
       const addr = `0x${rand("0123456789abcdef", 40)}`;
       code = addr;
-      qr = addr;
+      // Same EIP-681 URI the real rail emits — the simulator must never teach a payer a
+      // different (chain-less, amount-less) QR from the one production hands out.
+      qr = erc20PaymentUri(asset as "USDT" | "USDC", addr, amount);
       providerRef = addr;
     }
 

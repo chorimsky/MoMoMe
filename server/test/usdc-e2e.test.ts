@@ -106,7 +106,11 @@ async function main() {
     ok("instruction minted by IBEX (not the simulated rail)", pi?.provider === "ibex", pi?.provider);
     ok("customer is given an ERC-20 address", /^0x[0-9a-f]{40}$/.test(pi?.code ?? ""), pi?.code);
     ok("asset is USDC", pi?.asset === "USDC", pi?.asset);
-    ok("QR is the bare address (wallets scan it as ERC-20)", pi?.qr === pi?.code);
+    // The QR is an EIP-681 URI (chain + token + amount), NOT the bare address — a bare
+    // 0x could be sent on the wrong chain and carried no amount. The address itself stays
+    // in `code` for copy-paste, and remains the settlement match key.
+    ok("QR is an ethereum: payment URI carrying chain + amount",
+      pi?.qr?.startsWith("ethereum:") && pi.qr.includes("@1/transfer") && pi.qr.includes(`address=${pi.code}`), pi?.qr?.slice(0, 40));
     ok("providerRef is the address — the webhook match key", pi?.providerRef === pi?.code);
     ok("minted on the USDC account, not the USDT one",
       calls.some((c) => c.includes("/accounts/usdc-account/crypto/receive-infos")) &&

@@ -57,6 +57,36 @@ export const LN_ADDRESS_DOMAIN = "momome.xyz";
  *  (see /config `methods`). */
 export const ALL_METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT", "USDC"];
 
+/* ---------- ERC-20 stablecoins (Ethereum mainnet) ----------
+   Contract addresses and decimals for the two stablecoins we receive. Needed to build a
+   scannable EIP-681 payment URI: without the CONTRACT a wallet cannot know which token is
+   being asked for, and without the CHAIN ID it cannot know it is Ethereum rather than
+   Tron/BSC/Polygon — where the same-looking 0x address is a different, unrecoverable
+   destination. Both are 6-decimal tokens, so base units = amount × 1e6. */
+export const ERC20 = {
+  USDT: { contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
+  USDC: { contract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
+} as const;
+
+/** Ethereum mainnet. Named rather than inlined so the chain is never an unlabelled `1`. */
+export const ETH_CHAIN_ID = 1;
+
+/** EIP-681 payment URI for an ERC-20 transfer:
+ *    ethereum:<token>@<chainId>/transfer?address=<recipient>&uint256=<baseUnits>
+ *
+ *  This is what goes in the QR. The plain address stays in `code` for copy-paste, exactly
+ *  as Bitcoin keeps a bare address in `code` and a BIP-21 URI in `qr`. Two things the bare
+ *  address could not carry: the CHAIN (a wallet on the wrong network sends to an address
+ *  nobody controls) and the AMOUNT (a hand-typed amount that misses trips the underpayment
+ *  guard and parks the payment in review). Base units are computed with string maths, not
+ *  floats — 1e6 × a float can land a cent off, and here that is a wrong on-chain amount. */
+export function erc20PaymentUri(asset: "USDT" | "USDC", address: string, amount: number): string {
+  const { contract, decimals } = ERC20[asset];
+  const [whole, frac = ""] = amount.toFixed(decimals).split(".");
+  const baseUnits = `${whole}${frac.padEnd(decimals, "0")}`.replace(/^0+(?=\d)/, "");
+  return `ethereum:${contract}@${ETH_CHAIN_ID}/transfer?address=${address}&uint256=${baseUnits}`;
+}
+
 /** Per-rail spread in basis points — wider where confirmation exposure is longer. */
 export const RAIL_SPREAD_BPS: Record<Method, number> = {
   LIGHTNING: 150, // ~1.5% — near-zero exposure

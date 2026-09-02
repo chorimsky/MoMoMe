@@ -17,7 +17,7 @@
 import crypto from "node:crypto";
 import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC, METHOD_ASSET, btcToMsat, msatToBtc } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET, btcToMsat, msatToBtc, erc20PaymentUri } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
@@ -295,7 +295,9 @@ export const ibexAdapter: RailAdapter = {
       const addr = data.data?.address;
       if (!addr) throw new Error(`IBEX ${asset} receive-info returned no address`);
       return {
-        method: req.method, code: addr, qr: addr, asset,
+        // `code` stays the bare address (copy-paste / exchange withdrawal fields); the QR
+        // carries the EIP-681 URI so a scanning wallet gets the chain AND the amount.
+        method: req.method, code: addr, qr: erc20PaymentUri(asset as "USDT" | "USDC", addr, req.amount), asset,
         amount: req.amount, amountLabel: formatAmount(req.amount, asset), expiresAt,
         providerRef: addr, provider: "ibex",
       };

@@ -210,8 +210,11 @@ export interface PayInstruction {
   method: Method;
   /** BOLT11 invoice for Lightning, on-chain BTC address, or Ethereum ERC-20 address for USDT/USDC. */
   code: string;
-  /** What goes in the QR. Lightning: `lightning:` invoice; BTC: `bitcoin:` BIP-21
-   *  URI with amount; USDT/USDC: the bare ERC-20 address (widest wallet support). */
+  /** What goes in the QR — always a payment URI carrying the network AND the amount, so a
+   *  scan needs no typing and cannot be sent on the wrong chain. Lightning: `lightning:`
+   *  BOLT11. BTC: `bitcoin:` BIP-21 with amount. USDT/USDC: `ethereum:` EIP-681 with the
+   *  token contract, chain id 1 and the amount in base units. `code` holds the bare
+   *  invoice/address for copy-paste. */
   qr: string;
   asset: InboundAsset;
   amount: number;

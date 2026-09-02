@@ -134,6 +134,19 @@
 [data-accent="green"]  { --accent: oklch(0.58 0.115 158); --accent-2: oklch(0.52 0.11 158); --accent-wash: oklch(0.95 0.04 158); }
 [data-accent="violet"] { --accent: oklch(0.56 0.155 290); --accent-2: oklch(0.50 0.15 290); --accent-wash: oklch(0.95 0.035 290); }
 [data-accent="ink"]    { --accent: oklch(0.30 0.02 250);  --accent-2: oklch(0.24 0.02 250); --accent-wash: oklch(0.93 0.01 250); }
+/* Dark x accent. The accent presets and [data-theme="dark"] have the SAME specificity
+   (one attribute selector each) and the presets come later in this file, so a preset's
+   LIGHT --accent / --accent-2 / --accent-wash silently overwrote the dark palette. With the
+   default accent (clay) that left --accent-wash at oklch(0.955 ...) -- near-white -- while
+   text on it uses --ink, which in dark is also near-white: the selected amount chip on the
+   send screen was invisible. 27 uses of --accent-wash and 86 of --accent were affected.
+
+   Only the "ink" preset had a two-attribute override, which is why that one alone looked
+   right. Each preset now carries its dark pairing: hue preserved, accent lifted so it reads
+   on a dark ground, wash dropped to a dark tint so --ink stays legible on it. */
+[data-theme="dark"][data-accent="clay"]   { --accent: oklch(0.74 0.17 50);   --accent-2: oklch(0.68 0.165 47); --accent-ink: oklch(0.18 0.02 64);  --accent-wash: oklch(0.34 0.06 50); }
+[data-theme="dark"][data-accent="green"]  { --accent: oklch(0.72 0.125 158); --accent-2: oklch(0.66 0.12 158);  --accent-ink: oklch(0.18 0.02 158); --accent-wash: oklch(0.30 0.05 158); }
+[data-theme="dark"][data-accent="violet"] { --accent: oklch(0.70 0.15 290);  --accent-2: oklch(0.64 0.145 290); --accent-ink: oklch(0.18 0.02 290); --accent-wash: oklch(0.32 0.05 290); }
 [data-theme="dark"][data-accent="ink"] { --accent: oklch(0.80 0.02 250); --accent-ink: oklch(0.20 0.02 250); --accent-wash: oklch(0.34 0.02 250); }
 
 /* density */

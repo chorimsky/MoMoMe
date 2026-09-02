@@ -201,13 +201,22 @@ export async function availableBalanceXaf(country: CountryCode, _provider?: Prov
     const res = await fetchT(`${config.pawapay.apiUrl}/v2/wallet-balances`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Silence here is expensive: a null balance makes aggregatorFloatXaf() return NaN,
+      // which drops availableFloatXaf() into the constant-treasury fallback and blocks
+      // every payout as "payouts_unavailable" with no stated cause. Say what happened.
+      console.error(`[pawapay] wallet-balance read failed: ${res.status} ${(await res.text()).slice(0, 200)} — payout float will fall back to the static ceiling`);
+      return null;
+    }
     const data = (await res.json()) as { balances?: Array<{ country?: string; balance?: string; currency?: string }> };
     const map: Record<string, number> = {};
     for (const b of data.balances ?? []) if (b.currency === "XAF" && b.country) map[b.country] = Number(b.balance ?? 0);
     balCache = { at: Date.now(), map };
     return map[iso] ?? 0;
-  } catch { return null; }
+  } catch (e) {
+    console.error(`[pawapay] wallet-balance read threw: ${e instanceof Error ? e.message : String(e)} — payout float will fall back to the static ceiling`);
+    return null;
+  }
 }
 
 /* ---------- callback authentication ----------

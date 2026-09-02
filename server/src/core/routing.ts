@@ -97,11 +97,19 @@ export async function aggregatorFloatXaf(): Promise<number> {
   let sum = 0;
   let any = false;
   const seen = new Set<string>();
+  const silent: string[] = [];
   for (const p of PAYOUTS) {
     if (seen.has(p.name) || !p.configured() || !eligible(p.name)) continue;
     seen.add(p.name);
     const bal = await p.balance("CM");
-    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; }
+    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; } else { silent.push(p.name); }
+  }
+  // NaN sends availableFloatXaf() into the static-ceiling fallback, which on a long-lived
+  // deployment has been depleted by every past delivery and blocks payouts outright. The
+  // operator saw only "payouts_unavailable". Name the rails that could not answer — that is
+  // the difference between "we are out of money" and "we cannot see our money".
+  if (!any && silent.length) {
+    console.error(`[treasury] NO payout rail could report a balance (${silent.join(", ")}) — falling back to the static ceiling. This is "balance unknown", NOT "balance zero".`);
   }
   return any ? sum : NaN;
 }

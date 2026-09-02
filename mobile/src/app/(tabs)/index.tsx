@@ -316,6 +316,8 @@ export default function SendScreen() {
             <Pressable
               onPress={() => router.push('/contacts')}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={tr('a11y_contacts')}
               style={[styles.contactsBtn, { backgroundColor: t.surface2 }]}>
               <Ionicons name="people" size={18} color={t.accent} />
             </Pressable>

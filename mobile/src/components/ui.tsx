@@ -44,6 +44,13 @@ export function Screen({
       {scroll ? (
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          // iOS does NOT inset a ScrollView for the keyboard on its own, and the app has no
+          // KeyboardAvoidingView anywhere. On a short screen (an SE is 667pt) the keyboard
+          // covers the lower half, so an input or the submit button below that line simply
+          // cannot be reached — and every form in the app (send, receive, contacts, claim,
+          // merchant) is inside one of these. Android resizes the window itself, so this is
+          // the iOS half of the same behaviour.
+          automaticallyAdjustKeyboardInsets
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}>
           {inner}
@@ -185,7 +192,11 @@ export function Button({
         style,
       ]}
       accessibilityRole="button"
-      accessibilityState={{ disabled: off }}>
+      // The label was missing: a Button rendered as icon + text reads unreliably from its
+      // children alone, and `busy` lets a screen reader say the action is in flight rather
+      // than silently doing nothing while `loading` swaps the label for a spinner.
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: off, busy: loading }}>
       {loading ? (
         <ActivityIndicator color={fg} />
       ) : (
@@ -334,10 +345,11 @@ export function StepHeader({
   onBack?: () => void;
 }) {
   const t = useTheme();
+  const { t: tr } = useI18n();
   return (
     <View style={styles.stepHeader}>
       {onBack ? (
-        <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('back')} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={22} color={t.text} />
         </Pressable>
       ) : (

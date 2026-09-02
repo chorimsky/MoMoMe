@@ -441,14 +441,16 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
           ) : null}
           <Mono style={{ fontSize: 11 }} numberOfLines={1}>/pay/{link.code}</Mono>
         </View>
-        <Pressable hitSlop={12} onPress={() => setShowQr((v) => !v)}>
+        <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_show_qr')} onPress={() => setShowQr((v) => !v)}>
           <Ionicons name="qr-code-outline" size={18} color={showQr ? t.accent : t.muted} />
         </Pressable>
-        <Pressable hitSlop={12} onPress={() => Share.share({ message: url })}>
+        <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_share_link')} onPress={() => Share.share({ message: url })}>
           <Ionicons name="share-outline" size={18} color={t.accent} />
         </Pressable>
         <Pressable
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={tr('a11y_copy_link')}
           onPress={async () => {
             await Clipboard.setStringAsync(url);
             setCopied(true);
@@ -456,7 +458,7 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
           }}>
           <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
         </Pressable>
-        <Pressable hitSlop={12} onPress={() => api.disableMerchantLink(link.code).then(onChange).catch(() => {})}>
+        <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_delete_link')} onPress={() => api.disableMerchantLink(link.code).then(onChange).catch(() => {})}>
           <Ionicons name="trash-outline" size={18} color={t.muted} />
         </Pressable>
       </View>

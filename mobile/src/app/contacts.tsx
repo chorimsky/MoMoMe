@@ -72,7 +72,7 @@ export default function ContactsScreen() {
             <View
               key={c.id}
               style={[styles.row, i < items.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line2 }]}>
-              <Pressable hitSlop={12} onPress={() => toggleFav(c)}>
+              <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_favorite')} onPress={() => toggleFav(c)}>
                 <Ionicons name={c.favorite ? 'star' : 'star-outline'} size={20} color={c.favorite ? t.brand : t.muted} />
               </Pressable>
               <Pressable style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })} onPress={() => pay(c)}>
@@ -81,10 +81,10 @@ export default function ContactsScreen() {
                   {FLAG[c.country]} {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
                 </Body>
               </Pressable>
-              <Pressable hitSlop={12} onPress={() => setEditing(c)}>
+              <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_edit_contact')} onPress={() => setEditing(c)}>
                 <Ionicons name="create-outline" size={20} color={t.muted} />
               </Pressable>
-              <Pressable hitSlop={12} onPress={() => pay(c)}>
+              <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_pay_contact')} onPress={() => pay(c)}>
                 <Ionicons name="arrow-forward-circle" size={26} color={t.accent} />
               </Pressable>
             </View>
@@ -171,7 +171,7 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
         <View style={[styles.sheet, { backgroundColor: t.background }]}>
           <View style={styles.sheetHead}>
             <Label>{contact ? tr('contacts_edit') : tr('contacts_new')}</Label>
-            <Pressable hitSlop={8} onPress={onClose}>
+            <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('close')} onPress={onClose}>
               <Ionicons name="close" size={24} color={t.muted} />
             </Pressable>
           </View>

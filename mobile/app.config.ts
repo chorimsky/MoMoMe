@@ -13,9 +13,13 @@ const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE ??
   'https://mo-mo-me-server.vercel.app/api';
 
-// The web origin the app deep-links to / opens for the wasm Lightning wallet.
+// The web origin the app deep-links to.
 const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN ?? 'https://momome.xyz';
 const WEB_HOST = WEB_ORIGIN.replace(/^https?:\/\//, '');
+// The apex 308-redirects to www, and NEITHER Apple nor Google follows a redirect when
+// fetching the association file — so declaring only the apex silently disables deep links.
+// Claiming both hosts costs nothing and makes the link work whichever one the user lands on.
+const WEB_HOSTS = WEB_HOST.startsWith('www.') ? [WEB_HOST, WEB_HOST.slice(4)] : [WEB_HOST, `www.${WEB_HOST}`];
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -45,7 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     // Universal Links: tapping a momome.xyz/pay/... link opens the app.
     // Requires the AASA file hosted at https://momome.xyz/.well-known/apple-app-site-association
-    associatedDomains: [`applinks:${WEB_HOST}`],
+    associatedDomains: WEB_HOSTS.map((h) => `applinks:${h}`),
     infoPlist: {
       NSCameraUsageDescription:
         'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant.',
@@ -69,7 +73,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         action: 'VIEW',
         autoVerify: true,
-        data: [{ scheme: 'https', host: WEB_HOST, pathPrefix: '/pay' }],
+        // Both hosts, same reason as associatedDomains above. `/pay` is the right prefix:
+        // every merchant QR encodes `${origin}/pay/${code}` (see the web Merchant page).
+        data: WEB_HOSTS.map((host) => ({ scheme: 'https', host, pathPrefix: '/pay' })),
         category: ['BROWSABLE', 'DEFAULT'],
       },
     ],

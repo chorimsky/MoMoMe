@@ -259,6 +259,17 @@ export const STRINGS = {
   rcpt_footer: ['Mobile Money payment successfully completed.', 'Paiement Mobile Money effectué avec succès.'],
   rcpt_delivered_to: ['delivered to', 'livré à'],
   close: ['Close', 'Fermer'],
+  // Labels for ICON-ONLY controls. A bare icon has no text for VoiceOver/TalkBack to read,
+  // so without these a screen-reader user hears "button" and nothing else — on a star, a
+  // pencil, a bin and a back chevron alike.
+  a11y_contacts: ['Contacts', 'Contacts'],
+  a11y_favorite: ['Toggle favourite', 'Ajouter aux favoris'],
+  a11y_edit_contact: ['Edit contact', 'Modifier le contact'],
+  a11y_pay_contact: ['Pay this contact', 'Payer ce contact'],
+  a11y_show_qr: ['Show QR code', 'Afficher le code QR'],
+  a11y_share_link: ['Share payment link', 'Partager le lien de paiement'],
+  a11y_copy_link: ['Copy payment link', 'Copier le lien de paiement'],
+  a11y_delete_link: ['Delete payment link', 'Supprimer le lien de paiement'],
 
   // shared / misc
   expired: ['Expired', 'Expiré'],

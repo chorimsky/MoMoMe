@@ -64,6 +64,25 @@ export function createUser(username: string, password: string, role: AdminRole):
   return view(u);
 }
 
+/** Does the STORED seeded-admin credential still match `password`?
+ *  null = there is no admin user yet (nothing has been seeded).
+ *
+ *  This exists because ADMIN_PASSWORD is only ever consulted ONCE, when the first user is
+ *  seeded — after that the password lives as a scrypt hash in the persisted store. Two
+ *  consequences the env var alone cannot see:
+ *    • Rotating ADMIN_PASSWORD does NOT change the login password. An operator rotates it,
+ *      redeploys, and the OLD password still works while the new one does not.
+ *    • config.admin.passwordIsDefault reports on the ENV VAR. If the admin was seeded while
+ *      it was unset and the var was set later, that flag reads "not default" while the
+ *      stored credential is still the built-in default — a false all-clear on the single
+ *      credential guarding the treasury.
+ *  Checking the stored hash answers the question the env var only appears to. */
+export function storedAdminMatches(password: string): boolean | null {
+  const u = findByUsername("admin");
+  if (!u) return null;
+  return pwMatches(u, password);
+}
+
 /** Validate credentials; returns the user (and stamps lastLogin) or null. */
 export function verifyCredentials(username: string, password: string): AdminUser | null {
   const u = findByUsername(username);

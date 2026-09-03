@@ -9,6 +9,34 @@
 import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 import { installProcessGuards } from "./core/processGuards.js";
+import { storedAdminMatches } from "./core/adminUsers.js";
+
+/** ADMIN_PASSWORD is read ONCE, when the first admin is seeded; after that the credential
+ *  is a scrypt hash in the persisted store. assertAdminSecurity() therefore checks the env
+ *  var, which can disagree with reality in both directions:
+ *    • Seeded while ADMIN_PASSWORD was unset, then the var set later → the flag says
+ *      "not default" while `admin` / the built-in default STILL LOGS IN. A false all-clear
+ *      on the one credential guarding the treasury.
+ *    • Rotated after seeding → the operator believes the password changed; the old one
+ *      still works and the new one does not.
+ *  Both are answered by hashing the candidate against the stored salt. */
+function assertStoredAdminCredential(): void {
+  const DEFAULT_PW = "momome-admin";
+  const isDefault = storedAdminMatches(DEFAULT_PW);
+  if (isDefault === null) return; // nothing seeded yet — seedAdminUsers() will use the env var
+  const inProd = process.env.NODE_ENV === "production" || liveMoney();
+  if (isDefault && inProd) {
+    throw new Error("Refusing to start: the admin console still accepts the DEFAULT password. Setting ADMIN_PASSWORD does not change an already-seeded account — reset it in the console, or via POST /admin/forgot with ADMIN_RECOVERY_KEY.");
+  }
+  if (isDefault) {
+    console.warn("⚠️  The admin console still accepts the DEFAULT password. ADMIN_PASSWORD only applies when the first account is seeded — reset it before this deployment handles real money.");
+    return;
+  }
+  // Not the default, but does it match what the operator currently has in the environment?
+  if (process.env.ADMIN_PASSWORD && storedAdminMatches(process.env.ADMIN_PASSWORD) === false) {
+    console.warn("⚠️  ADMIN_PASSWORD does not match the stored admin credential. It is only read when the first account is seeded, so changing it did NOT change the login password — the previous one still works. Change it in the console, or via POST /admin/forgot with ADMIN_RECOVERY_KEY.");
+  }
+}
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail
  *  would run on an unsafe footing; warns on softer misconfigurations. */
@@ -22,6 +50,7 @@ export function runBootChecks(): void {
   assertLiveConfig();
   assertIbexConfig();
   assertAdminSecurity(); // fail closed on a default admin password in production
+  assertStoredAdminCredential(); // …and on the STORED one, which the env var cannot see
   assertCronSecurity(); // fail closed if the cron endpoint would be world-triggerable in production
   assertComplianceConfig(); // fail closed on an UNKEYED (forgeable) compliance chain in production
 

@@ -13,7 +13,7 @@
    DB_PATH=:memory: to opt into in-memory explicitly.
    ============================================================ */
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, copyFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setSnapshot, allSnapshots, getSnapshot } from "../db/repo.js";
@@ -34,7 +34,9 @@ const DB_PATH = RAW_DB_PATH === ":memory:" || isAbsolute(RAW_DB_PATH)
  *  `snapshots` table instead of local SQLite. Selected by STORE_BACKEND=postgres. */
 const PG = (process.env.STORE_BACKEND ?? "").toLowerCase() === "postgres";
 
-interface Stmt { get(key: string): unknown; run(key: string, json: string): void; }
+// Narrow shim over node:sqlite. `run`/`all` are variadic in the real API — the snapshot
+// upsert binds two parameters, the clean-sheet delete binds one, and `all` binds none.
+interface Stmt { get(key: string): unknown; run(...params: unknown[]): void; all(...params: unknown[]): unknown[]; }
 interface Db { exec(sql: string): void; prepare(sql: string): Stmt; }
 
 /** Run `fn` with node:sqlite's "experimental feature" ExperimentalWarning
@@ -70,6 +72,51 @@ function openDb(): Db | null {
 }
 
 const db = openDb();
+
+/* ---------- CLEAN SHEET: discard staging data before anything reads it ----------
+   Going live after a staging period means the books have to start empty. Not cosmetics:
+   this deployment's entire delivery history was SIMULATED, and carrying ~200,000,000 XAF
+   of fabricated transactions into a regulated launch would seed the AML record, the CTR/STR
+   scan and every revenue report with volume that never existed.
+
+   It runs HERE, in the module body of the persistence layer, because every store rehydrates
+   inside its own register() call — which happens when its module is imported, i.e. after
+   this file has already been evaluated. Wiping the rows now means the stores come up empty
+   rather than holding stale data a restart would be needed to shake off.
+
+   A KEEP-list, not a wipe-list, and deliberately so: a store added later is discarded by
+   default. For a clean sheet, forgetting to clear something is the worse mistake, and the
+   things that must survive are few and stable — the admin accounts (wiping them locks
+   everyone out), the session secret, operator settings, partner API keys.
+
+   The database is copied beside itself first. This is irreversible otherwise. */
+const CLEAN_SHEET_KEEP = new Set([
+  "admin_users",   // who can sign in at all — wiping this locks the operator out
+  "admin_secret",  // session signing key; a new one invalidates every live session
+  "settings",      // brand, support contacts, approval threshold, feature flags
+  "apikeys",       // partner credentials that authorize real payments
+  "egress",        // last-seen outbound IP — a diagnostic, not data
+  "rates",         // FX cache; refreshes within seconds either way
+]);
+
+if (db && (process.env.RESET_TO_CLEAN_SHEET ?? "").trim() === "1") {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backup = `${DB_PATH}.pre-golive-${stamp}`;
+    copyFileSync(DB_PATH, backup);
+    const keys = (db.prepare("SELECT key FROM snapshot").all() as Array<{ key: string }>).map((r) => r.key);
+    const wipe = keys.filter((k) => !CLEAN_SHEET_KEEP.has(k));
+    const del = db.prepare("DELETE FROM snapshot WHERE key = ?");
+    for (const k of wipe) del.run(k);
+    console.warn(`[clean-sheet] backup written to ${backup}`);
+    console.warn(`[clean-sheet] discarded ${wipe.length} store(s): ${wipe.join(", ") || "(none)"}`);
+    console.warn(`[clean-sheet] kept ${keys.filter((k) => CLEAN_SHEET_KEEP.has(k)).join(", ") || "(none)"}. Unset RESET_TO_CLEAN_SHEET.`);
+  } catch (e) {
+    // Never take the process down over this — a failed wipe leaves staging data, which is
+    // visible and fixable; a boot loop on a money rail is not.
+    console.error("[clean-sheet] FAILED — staging data is still present, nothing was changed:", e);
+  }
+}
 
 /** True when a durable SQLite database is open (state survives restarts). False when
  *  the layer fell back to in-memory (node:sqlite missing / DB not writable) — in which

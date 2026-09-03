@@ -20,6 +20,7 @@ import { storedAdminMatches } from "./core/adminUsers.js";
  *    • Rotated after seeding → the operator believes the password changed; the old one
  *      still works and the new one does not.
  *  Both are answered by hashing the candidate against the stored salt. */
+let reportedOk = false;
 export function assertStoredAdminCredential(): void {
   const DEFAULT_PW = "momome-admin";
   const isDefault = storedAdminMatches(DEFAULT_PW);
@@ -43,7 +44,12 @@ export function assertStoredAdminCredential(): void {
   // Say so when it is FINE. Silence is indistinguishable from "never checked", and this is
   // the credential guarding the treasury — an operator asking "is my super-admin login
   // sound?" deserves an answer in the log, not the absence of a complaint.
-  console.log(`[admin] super-admin credential OK — account "admin" is not using the default password${process.env.ADMIN_PASSWORD ? " and matches ADMIN_PASSWORD" : ""}.`);
+  // Both call sites are wanted — the boot-time one fails closed EARLY on a restored store,
+  // the post-seed one covers a fresh one — but the all-clear only needs saying once.
+  if (!reportedOk) {
+    reportedOk = true;
+    console.log(`[admin] super-admin credential OK — account "admin" is not using the default password${process.env.ADMIN_PASSWORD ? " and matches ADMIN_PASSWORD" : ""}.`);
+  }
 }
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail

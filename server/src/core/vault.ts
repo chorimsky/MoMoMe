@@ -99,6 +99,20 @@ export function deleteVault(owner: string, recordId: string): VaultRecord | null
 }
 
 /** Re-attribute a device's vault to a new owner id (used by identity migration). */
+/** Erase EVERY record this owner holds. Backs the account-deletion route: Google Play
+ *  requires an app that lets people create an account to offer deletion of that account
+ *  and its data, both in the app and at a public URL. The vault is the bulk of it — the
+ *  records are end-to-end encrypted, so this removes ciphertext we could never read, but
+ *  it is still the user's data and still theirs to destroy. Returns how many went. */
+export function purgeVault(owner: string): number {
+  const m = byOwner.get(owner);
+  if (!m) return 0;
+  const n = m.size;
+  byOwner.delete(owner);
+  touch("vault");
+  return n;
+}
+
 export function reassignVault(fromOwner: string, toOwner: string): void {
   const from = byOwner.get(fromOwner);
   if (!from || fromOwner === toOwner) return;

@@ -39,6 +39,15 @@ export type EnrollResult = { ok: true; device: DeviceAccount } | { ok: false; re
  * Trust-on-first-use enrollment. Idempotent for the same key; a different key
  * for an existing id is a conflict (someone else can't hijack a known id).
  */
+/** Drop this device's enrolment and its public keys. Part of account deletion: the device
+ *  IS the account here, so forgetting the enrolment is what ends it. Returns whether one
+ *  existed, so the caller can report honestly rather than claim a deletion that no-op'd. */
+export function forgetDevice(deviceId: string): boolean {
+  const existed = byId.delete(deviceId);
+  if (existed) touch("deviceAccount");
+  return existed;
+}
+
 export function enrollDevice(deviceId: string, authPub: JsonWebKey, wrapPub: JsonWebKey): EnrollResult {
   const existing = byId.get(deviceId);
   if (existing) {

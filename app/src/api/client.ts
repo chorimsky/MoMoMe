@@ -272,6 +272,12 @@ export const api = {
   adminDeleteUser: (id: string) =>
     req<{ ok: boolean }>(`/admin/users/${id}`, { method: "DELETE" }),
 
+  /** Delete this device's account and its data. Backs the public deletion page Google
+   *  Play requires; the device id the client already sends is the only proof of ownership. */
+  deleteAccount: () =>
+    req<{ ok: boolean; deleted: { contacts: number; device: boolean; referrals: boolean }; retained: { payments: number; reason: string } }>(
+      "/me/delete", { method: "POST" }),
+
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),
 

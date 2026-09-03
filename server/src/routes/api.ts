@@ -27,8 +27,8 @@ import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/set
 import * as treasury from "../core/treasury.js";
 import * as momoOps from "../core/momoOps.js";
 import { claimIdentity, listIdentities, identityStats, requestClaim, verifyClaim, pruneOrphanIdentities, getIdentityByDigits } from "../core/identity.js";
-import { listVault, upsertVault, deleteVault, reassignVault } from "../core/vault.js";
-import { getDevice, enrollDevice } from "../core/deviceAccount.js";
+import { listVault, upsertVault, deleteVault, reassignVault, purgeVault } from "../core/vault.js";
+import { getDevice, enrollDevice, forgetDevice } from "../core/deviceAccount.js";
 import { requestAnchor, verifyAnchorCode, linkDevice, accountOf, putRecovery, getRecovery, accountIdForPhone } from "../core/account.js";
 import { resolveLocation } from "../core/geoip.js";
 import { egressStatus, invalidateEgressCache } from "../core/egress.js";
@@ -37,7 +37,7 @@ import { usingPostgres } from "../db/store.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
-import { refCodeFor, recordReferral, referralsOf } from "../core/referral.js";
+import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
@@ -1007,6 +1007,47 @@ api.post("/me/devices", rateLimitDurableMiddleware("device_enroll", 20, 60_000),
   const r = enrollDevice(id, body.authPub as JsonWebKey, body.wrapPub as JsonWebKey);
   if (!r.ok) return res.status(409).json({ error: "device_conflict", message: "This device id is already enrolled with a different key." });
   res.json({ ok: true, deviceId: id });
+});
+
+/* ---------- account + data deletion ----------
+   Google Play requires an app that lets people create an account to offer deletion of the
+   account AND its data — in the app, and at a public URL for people who have uninstalled
+   it. The Data Safety declaration cannot be completed without one, so this is a store
+   requirement as much as a privacy one.
+
+   What goes: everything that describes the PERSON. The end-to-end encrypted contact vault
+   (ciphertext we could never read, but still theirs), the device enrolment and its public
+   keys, the phone anchor that makes the account portable, and referral attribution.
+
+   What STAYS, and why: settled payment records and their ledger entries. A money
+   transmitter cannot erase transaction history on request — CEMAC/ANIF anti-money-
+   laundering rules require it be retained for years, and the ledger is double-entry, so
+   removing one side would unbalance the books for every other party to those payments.
+   Google accepts partial deletion where law compels retention, on the condition that it is
+   disclosed rather than quietly done, which is what the response and the privacy policy say.
+
+   Deliberately NOT reversible and NOT confirmable by email: the account IS the device, so
+   the device presenting the id is the only party that can prove ownership. */
+api.post("/me/delete", rateLimitDurableMiddleware("account_delete", 5, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+
+  const vaultRecords = purgeVault(owner);
+  const device = forgetDevice(owner);
+  const referrals = forgetReferrals(owner);
+
+  // Count what is being kept, so the person is told plainly rather than left to assume.
+  const retainedPayments = (await store().listPayments()).filter((p) => p.senderId === owner).length;
+
+  console.warn(`[privacy] account deletion for a device: vault=${vaultRecords} device=${device} referrals=${referrals} retainedPayments=${retainedPayments}`);
+  res.json({
+    ok: true,
+    deleted: { contacts: vaultRecords, device, referrals },
+    retained: {
+      payments: retainedPayments,
+      reason: "Completed payment records are kept because anti-money-laundering law requires a money transmitter to retain them. They are no longer linked to a device you control.",
+    },
+  });
 });
 
 /* ---------- Phase 4 — phone-anchor + E2E recovery ----------

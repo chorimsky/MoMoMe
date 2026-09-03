@@ -61,3 +61,21 @@ export function recordReferral(newOwner: string, refCode: string): boolean {
 }
 
 export function referralsOf(owner: string): string[] { return referredList.get(owner) ?? []; }
+
+/** Erase this owner's referral attribution in BOTH directions — their own code, who
+ *  referred them, and their list of referrals. Leaving the reverse index would keep the
+ *  deleted account visible in someone else's ambassador dashboard, which is exactly the
+ *  kind of residue a deletion request is meant to remove. */
+export function forgetReferrals(owner: string): boolean {
+  let touched = false;
+  const code = codeByOwner.get(owner);
+  if (code) { ownerByCode.delete(code); codeByOwner.delete(owner); touched = true; }
+  if (referrerOf.delete(owner)) touched = true;
+  if (referredList.delete(owner)) touched = true;
+  for (const [referrer, list] of referredList) {
+    const next = list.filter((o) => o !== owner);
+    if (next.length !== list.length) { referredList.set(referrer, next); touched = true; }
+  }
+  if (touched) touch("referral");
+  return touched;
+}

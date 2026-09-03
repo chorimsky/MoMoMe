@@ -46,6 +46,12 @@ export function Privacy() {
 
       <Sec n="05" title="Your rights">
         <p>
+          You can <Link to="/delete-account">delete your account and its data</Link> yourself, from the
+          device you use MoMo›Me on. Your saved contacts, that device’s keys and your referral links are
+          removed straight away. Records of payments already sent are kept — anti-money-laundering law
+          requires a money transmitter to retain them — and that page tells you exactly what stayed.
+        </p>
+        <p>
           Subject to local law, you can ask us for a copy of the personal data we hold about you, ask us to
           correct it, or ask us to delete it where we are not required to keep it. To make a request, use the{" "}
           <Link to="/contact">contact page</Link> and include any payment reference involved.

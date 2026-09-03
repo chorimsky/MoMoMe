@@ -174,12 +174,12 @@ async function ensureReserved(p: Payment): Promise<void> {
 /** Available XAF payout float. Two accounting regimes:
  *   • LIVE rails queryable → the aggregator wallet balance is TODAY's real capacity and
  *     ALREADY nets out every delivered payout (money that left the rail). So we subtract
- *     only what's currently RESERVED in-flight (payout_float_XAF, ≤ 0) — NOT the all-time
+ *     only what is genuinely in flight (see inFlightReservedXaf) — NOT the all-time
  *     external_recipient delta, which would double-count deliveries and drift the float
  *     permanently negative. Capped by XAF_FLOAT_MAX so a spoofed/oversized balance can't
  *     authorize unlimited payout.
  *   • No queryable rail (sandbox/tests, or a total balance-API outage) → a static EXPOSURE
- *     ceiling: XAF_FLOAT_MAX − in-flight reserved (payout_float_XAF, a negative credit).
+ *     ceiling: XAF_FLOAT_MAX − what is genuinely in flight.
  *     All-time delivered is NOT subtracted — see the note at the fallback for why that
  *     term bricked production.
  *  Each payment reserves at FX-lock BEFORE this is read, so concurrent settlements can't
@@ -189,9 +189,31 @@ async function ensureReserved(p: Payment): Promise<void> {
 let floatBasis = "not yet computed";
 export function floatBasisNote(): string { return floatBasis; }
 
+/** XAF earmarked by payouts that are ACTUALLY IN FLIGHT — submitted to a rail and awaiting
+ *  their result. Returned as a negative number, matching the ledger's sign for a credit.
+ *
+ *  This deliberately does NOT use the payout_float_XAF account balance. That account is the
+ *  sum of every earmark ever taken and not yet given back, which is a different quantity:
+ *  it includes payments parked for review long ago, whose earmarks the old code kept for
+ *  good. Those are committed to payouts that will never happen, so subtracting them from
+ *  today's capacity understates it — in production by 436,482 XAF against rails holding
+ *  3,440, which is why a 500 XAF payment was being refused by a funded rail.
+ *
+ *  Only PAYOUT_REQUESTED counts. That payment's delivery leg will debit its earmark, so the
+ *  money really is spoken for. A parked payment is not spoken for: adminRetry re-checks this
+ *  very figure before it disburses, so excluding it costs no safety — and if it is retried,
+ *  it enters PAYOUT_REQUESTED and starts counting again. Cheap enough for the hot path:
+ *  payouts in flight are a handful, and only their own ledger entries are read. */
+async function inFlightReservedXaf(): Promise<number> {
+  const inFlight = (await store().listPayments()).filter((p) => p.state === "PAYOUT_REQUESTED");
+  let held = 0;
+  for (const p of inFlight) held += await heldReservationXaf(p.id);
+  return -held;
+}
+
 export async function availableFloatXaf(): Promise<number> {
   const s = store();
-  const reserved = await s.balance("payout_float_XAF", "XAF"); // in-flight reservation (≤ 0)
+  const reserved = await inFlightReservedXaf(); // in-flight only (≤ 0)
   const live = await liveAggregatorXaf();
   // A KNOWN balance is authoritative — including zero. The guard used to be `live > 0`, so a
   // rail that truthfully answered "0 XAF" was treated exactly like a rail that could not be

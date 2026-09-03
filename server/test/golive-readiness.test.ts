@@ -123,14 +123,17 @@ async function main() {
     ok("the in-flight payout is NOT treated as stranded", !found.some((e) => e.paymentId === "pay_inflight"));
     ok("it reports the amount held", found.find((e) => e.paymentId === "pay_stranded")?.xaf === 250_000);
 
+    // Only the IN-FLIGHT payout holds capacity. The stranded one is committed to a payout
+    // that will never happen, so it must not be subtracted from what can be paid today —
+    // that is what made a funded rail refuse payments.
     const depressed = await availableFloatXaf();
-    ok("both earmarks depress the float while held", depressed === before - 290_000, `${depressed} vs ${before - 290_000}`);
+    ok("only the in-flight earmark depresses the float", depressed === before - 40_000, `${depressed} vs ${before - 40_000}`);
 
     const rel = await releaseStrandedEarmarks();
     ok("the release returns the stranded amount", rel.released === 1 && rel.xaf === 250_000, `${rel.released} / ${rel.xaf}`);
 
     const after = await availableFloatXaf();
-    ok("the float recovers by exactly that amount", after === depressed + 250_000, `${after} vs ${depressed + 250_000}`);
+    ok("releasing it changes no spendable capacity — it was never counted", after === depressed, `${after} vs ${depressed}`);
     ok("the in-flight earmark is still held", after === before - 40_000, `${after} vs ${before - 40_000}`);
 
     // Idempotent: an operator double-click must not release twice and invent float.

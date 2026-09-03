@@ -31,6 +31,21 @@ console.log("\nTreasury float — the fallback must not ratchet\n");
 
 const s = store();
 
+
+/** A payment in the given state, so an earmark posted against it is attributable. Only a
+ *  payment in flight may hold capacity — the whole point of the change these tests pin. */
+const now0 = new Date().toISOString();
+const mk = async (id: string, state: string, xaf: number) => {
+  await s.putPayment({
+    id, ref: `MMM-${id}`, quoteId: `q_${id}`, state, displayStatus: "Pending", method: "LIGHTNING",
+    recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "T", nameSource: "manual" },
+    xaf, feeXaf: 0, totalXaf: xaf, usd: 1,
+    payInstruction: { method: "LIGHTNING", code: "ln", qr: "lightning:ln", asset: "BTC", amount: 0.001,
+      amountLabel: "0.001 BTC", expiresAt: now0, providerRef: `ph_${id}`, provider: "ibex" },
+    events: [{ at: now0, state: "QUOTED" }], createdAt: now0, updatedAt: now0,
+  } as never);
+};
+
 /* ---- 1. No queryable rail → the full exposure ceiling, not a depleted one ---- */
 const base = await availableFloatXaf();
 ok("with no queryable rail the float is the exposure ceiling", base === XAF_FLOAT_MAX, `${base} vs ${XAF_FLOAT_MAX}`);
@@ -51,18 +66,32 @@ ok("250M XAF of past deliveries does NOT reduce the float", after === XAF_FLOAT_
 ok("the float never goes negative from history alone", after > 0, `${after} XAF`);
 ok("a payout of 15,000 XAF is still authorized", after >= 15_000);
 
-/* ---- 3. In-flight reservations DO reduce it — that is the real exposure ---- */
+/* ---- 3. Only an IN-FLIGHT earmark reduces the float ----
+   A payment parked for review holds capacity for a payout that will never happen. Counting
+   it understated the float by 436,482 XAF in production, against rails holding 3,440 — a
+   funded rail refusing a 500 XAF payment. adminRetry re-checks this figure before it
+   disburses, so excluding a parked payment costs no safety. */
+await mk("pay_parked", "MANUAL_REVIEW", 9_000_000);
+await s.recordTxn("pay_parked", [
+  { account: "fx_position", direction: "debit", amount: 9_000_000, currency: "XAF" },
+  { account: "payout_float_XAF", direction: "credit", amount: 9_000_000, currency: "XAF" },
+]);
+ok("a PARKED payment's earmark does not reduce the float",
+   (await availableFloatXaf()) === XAF_FLOAT_MAX, `${await availableFloatXaf()} vs ${XAF_FLOAT_MAX}`);
+
+await mk("pay_inflight", "PAYOUT_REQUESTED", 4_000_000);
 await s.recordTxn("pay_inflight", [
   { account: "payout_float_XAF", direction: "credit", amount: 4_000_000, currency: "XAF" },
   { account: "payout_payable", direction: "debit", amount: 4_000_000, currency: "XAF" },
 ]);
 
 const withInflight = await availableFloatXaf();
-ok("an in-flight reservation lowers the float by exactly its amount",
+ok("an IN-FLIGHT earmark lowers the float by exactly its amount",
    withInflight === XAF_FLOAT_MAX - 4_000_000, `${withInflight} vs ${XAF_FLOAT_MAX - 4_000_000}`);
 ok("the basis reports the in-flight figure", floatBasisNote().includes("4000000"), floatBasisNote().slice(0, 120));
 
 /* ---- 4. Enough concurrent exposure still blocks — the cap must actually bind ---- */
+await mk("pay_saturate", "PAYOUT_REQUESTED", XAF_FLOAT_MAX);
 await s.recordTxn("pay_saturate", [
   { account: "payout_float_XAF", direction: "credit", amount: XAF_FLOAT_MAX, currency: "XAF" },
   { account: "payout_payable", direction: "debit", amount: XAF_FLOAT_MAX, currency: "XAF" },
@@ -82,14 +111,21 @@ ok("the cap binds on EXPOSURE, so it recovers when reservations clear — unlike
 const { confirmInbound } = await import("../src/core/stateMachine.js");
 const { PROVIDER_PAYOUT_MAX } = await import("../../shared/domain.js");
 
-// Clear the saturating reservation from case 4 so this starts from a healthy float.
-await s.recordTxn("pay_saturate_release", [
+// Clear the earmarks taken above so this starts from a healthy float. Released against the
+// SAME payment id each time — which is what releaseReservation() does, and what keeps the
+// per-payment attribution the float reads in step with the account total.
+await s.recordTxn("pay_saturate", [
   { account: "payout_float_XAF", direction: "debit", amount: XAF_FLOAT_MAX, currency: "XAF" },
   { account: "fx_position", direction: "credit", amount: XAF_FLOAT_MAX, currency: "XAF" },
 ]);
-await s.recordTxn("pay_inflight_release", [
+await s.recordTxn("pay_inflight", [
   { account: "payout_float_XAF", direction: "debit", amount: 4_000_000, currency: "XAF" },
   { account: "fx_position", direction: "credit", amount: 4_000_000, currency: "XAF" },
+]);
+// …and the deliberately-stale parked earmark from case 3, so case 5 measures only its own.
+await s.recordTxn("pay_parked", [
+  { account: "payout_float_XAF", direction: "debit", amount: 9_000_000, currency: "XAF" },
+  { account: "fx_position", direction: "credit", amount: 9_000_000, currency: "XAF" },
 ]);
 
 // Above the corridor cap → guaranteed to park right after the FX-lock reservation.
@@ -122,6 +158,53 @@ ok("three parked payments destroyed NO float",
    floatAfterParks === floatBeforeParks, `${floatAfterParks} vs ${floatBeforeParks}`);
 ok("the earmark account is clear after parking",
    (await s.balance("payout_float_XAF", "XAF")) === 0, String(await s.balance("payout_float_XAF", "XAF")));
+
+/* ---- 6. THE PRODUCTION CASE: a funded rail must be spendable ----
+   Peexit held 3,440.50 XAF and every payment was refused, because 436,482 XAF of earmarks
+   from payments parked long ago were subtracted from a live rail balance they had nothing
+   to do with. The float went to -433,041.50 — a number describing no money that exists.
+   Reproduced to scale here, against the real accounting path. */
+const RAIL = 3_440.5;
+const STALE = 436_482;
+
+// Wipe the slate so this measures exactly the production shape.
+const acct = await s.balance("payout_float_XAF", "XAF");
+if (acct !== 0) {
+  await s.recordTxn("case6_reset", acct < 0
+    ? [{ account: "payout_float_XAF", direction: "debit", amount: -acct, currency: "XAF" },
+       { account: "fx_position", direction: "credit", amount: -acct, currency: "XAF" }]
+    : [{ account: "payout_float_XAF", direction: "credit", amount: acct, currency: "XAF" },
+       { account: "fx_position", direction: "debit", amount: acct, currency: "XAF" }]);
+}
+
+// Historical earmarks, spread over payments parked for review and never resolved.
+for (let i = 0; i < 4; i++) {
+  const id = `pay_stale_${i}`;
+  await mk(id, "MANUAL_REVIEW", STALE / 4);
+  await s.recordTxn(id, [
+    { account: "fx_position", direction: "debit", amount: STALE / 4, currency: "XAF" },
+    { account: "payout_float_XAF", direction: "credit", amount: STALE / 4, currency: "XAF" },
+  ]);
+}
+ok("the stale earmarks really are on the books",
+   (await s.balance("payout_float_XAF", "XAF")) === -STALE, String(await s.balance("payout_float_XAF", "XAF")));
+
+// The rail reports its real, small balance.
+const live = Math.min(RAIL, XAF_FLOAT_MAX);
+const spendable = live + (await (async () => {
+  const inFlight = (await s.listPayments()).filter((x) => x.state === "PAYOUT_REQUESTED");
+  let held = 0;
+  for (const x of inFlight) {
+    const es = await s.entriesFor(x.id);
+    held += -es.filter((e) => e.account === "payout_float_XAF" && e.currency === "XAF")
+      .reduce((n, e) => n + (e.direction === "debit" ? e.amount : -e.amount), 0);
+  }
+  return -held;
+})());
+
+ok("a funded rail is spendable despite the stale earmarks", spendable === RAIL, `${spendable} vs ${RAIL}`);
+ok("and it is NOT the -433,041.50 production was reporting", spendable > 0, String(spendable));
+ok("a 500 XAF payment — the product minimum — now fits", spendable >= 500, String(spendable));
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

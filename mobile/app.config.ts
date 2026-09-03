@@ -6,12 +6,16 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
  * source builds dev / preview / production without edits (see .env.example, eas.json).
  *
  * The API the app talks to: EXPO_PUBLIC_API_BASE (defaults to the live prod backend).
- * After the Railway→Vercel cutover, just repoint that var — no code change.
+ *
+ * This is the ALWAYS-ON host, deliberately. The serverless deployment cannot be the money
+ * backend: its egress IPs rotate, which breaks the IP allowlist Peexit authenticates us by,
+ * and its cron runs daily — far too slow for the poll-and-reconcile path that settles a
+ * payout when a callback cannot be verified.
  */
 
 const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE ??
-  'https://mo-mo-me-server.vercel.app/api';
+  'https://momome-api-production.up.railway.app/api';
 
 // The web origin the app deep-links to.
 const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN ?? 'https://momome.xyz';

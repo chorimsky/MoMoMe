@@ -4,25 +4,25 @@
   "outputDirectory": "dist",
   "build": {
     "env": {
-      "VITE_API_BASE": "https://mo-mo-me-server.vercel.app/api"
+      "VITE_API_BASE": "https://momome-api-production.up.railway.app/api"
     }
   },
   "rewrites": [
     {
       "source": "/.well-known/lnurlp/:user",
-      "destination": "https://mo-mo-me-server.vercel.app/.well-known/lnurlp/:user"
+      "destination": "https://momome-api-production.up.railway.app/.well-known/lnurlp/:user"
     },
     {
       "source": "/lnurl/pay/:user",
-      "destination": "https://mo-mo-me-server.vercel.app/lnurl/pay/:user"
+      "destination": "https://momome-api-production.up.railway.app/lnurl/pay/:user"
     },
     {
       "source": "/.well-known/apple-app-site-association",
-      "destination": "https://mo-mo-me-server.vercel.app/.well-known/apple-app-site-association"
+      "destination": "https://momome-api-production.up.railway.app/.well-known/apple-app-site-association"
     },
     {
       "source": "/.well-known/assetlinks.json",
-      "destination": "https://mo-mo-me-server.vercel.app/.well-known/assetlinks.json"
+      "destination": "https://momome-api-production.up.railway.app/.well-known/assetlinks.json"
     },
     {
       "source": "/(.*)",

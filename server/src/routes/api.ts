@@ -12,6 +12,7 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
+import { pawapayAdapter } from "../adapters/payouts.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
@@ -2018,8 +2019,11 @@ api.get("/admin/readiness", async (req, res) => {
           missing: ["PEEXIT_API_KEY", "PEEXIT_CALLBACK_PASS"].filter((k) => !has(k)),
           reachability: peexit.reachability(), routes: true },
         { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(),
-          missing: ["PAWAPAY_API_TOKEN"].filter((k) => !has(k)),
-          reachability: null, routes: false }, // supports() === false — out of rotation
+          // config accepts EITHER name, so requiring the token spelling reported a
+          // configured, LIVE rail as missing its credential on the one page an operator
+          // consults before go-live.
+          missing: has("PAWAPAY_API_TOKEN") || has("PAWAPAY_API_KEY") ? [] : ["PAWAPAY_API_TOKEN"],
+          reachability: null, routes: pawapayAdapter.supports("MTN") },
       ],
     },
   });

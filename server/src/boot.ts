@@ -78,7 +78,12 @@ export function runBootChecks(): void {
   // One line naming what this instance actually is. The dangerous mistake with a sandbox
   // environment is not knowing which database you are pointed at; show the host (never the
   // URL, which carries the password).
-  console.log(`[deploy] env=${deployEnv()} · rails=${config.railsMode} · liveMoney=${liveMoney()} · store=${process.env.STORE_BACKEND || "memory"} · db=${databaseHost()}`);
+  // Say whether the LEDGER SURVIVES A RESTART, which is the question the operator of a
+  // real-money deployment is actually asking. The old banner read
+  // "store=memory · db=none (in-process store)" on a deployment whose ledger was durably
+  // snapshotted to SQLite on a mounted volume — it was describing the absence of Postgres,
+  // and reads as "your books are volatile".
+  console.log(`[deploy] env=${deployEnv()} · rails=${config.railsMode} · liveMoney=${liveMoney()} · store=${process.env.STORE_BACKEND || "memory"} · db=${databaseHost()} · durable=${persistDurable() ? "yes" : "NO — ledger is lost on restart"}`);
   if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
     console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
   }

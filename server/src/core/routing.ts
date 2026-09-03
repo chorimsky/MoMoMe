@@ -115,6 +115,11 @@ export async function aggregatorFloatXaf(): Promise<number> {
     if (seen.has(p.name)) continue;
     seen.add(p.name);
     if (!p.configured()) { why.push(`${p.name}: not configured`); continue; }
+    // A rail that supports NO corridor is out of rotation and can never be selected, so its
+    // wallet is money we cannot spend. Counting it inflated the float with unusable funds:
+    // PawaPay (supports() === false while its CMR corridors are unactivated) was
+    // contributing 10,000 of the 13,440 XAF the treasury believed it had.
+    if (!ALL_PROVIDERS.some((prov) => p.supports(prov))) { why.push(`${p.name}: out of rotation (supports no corridor) — balance not counted`); continue; }
     if (!eligible(p.name)) { why.push(`${p.name}: marked unhealthy by the rail health tracker`); continue; }
     const bal = await p.balance("CM");
     // Record what each rail DID contribute, not only why it contributed nothing. A single

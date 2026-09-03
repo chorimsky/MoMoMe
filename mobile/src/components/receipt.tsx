@@ -16,6 +16,7 @@ import { METHOD_LABEL, xaf } from '@/lib/format';
 import { useI18n } from '@/lib/i18n';
 import { COUNTRIES } from '@shared/domain';
 import type { Payment } from '@shared/types';
+import { receiptText as sharedReceiptText, receiptTitle, recipientLine, receiptDate, type ReceiptLabels } from '@shared/receipt';
 
 type Tr = ReturnType<typeof useI18n>['t'];
 
@@ -52,27 +53,32 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   );
 }
 
-/** Plain-text receipt for the Share sheet — mirrors the on-screen rows. */
+/** Labels for the shared receipt builder. The STRUCTURE lives in @shared/receipt so the
+ *  web and this app cannot drift apart again; only the wording is local. */
+export function receiptLabels(tr: Tr): ReceiptLabels {
+  return {
+    titleCompleted: tr('rcpt_success'),
+    titlePending: tr('rcpt_pending'),
+    titleFailed: tr('rcpt_failed'),
+    deliveredTo: tr('r_delivered_to'),
+    intendedFor: tr('r_intended_for'),
+    fee: tr('fee'),
+    youPaid: tr('r_you_paid'),
+    reference: tr('reference'),
+    paidWith: tr('r_paid_with'),
+    amountSent: tr('r_amount_sent'),
+    tagline: tr('r_tagline'),
+  };
+}
+
+/** Plain-text receipt for the Share sheet. */
 export function receiptText(p: Payment, showHow: boolean, tr: Tr): string {
-  const dial = COUNTRIES[p.recipient.country]?.dial ?? '';
-  const lines = [
-    `MoMo›Me — ${tr('rcpt_success')}`,
-    '',
-    `${tr('recipient')}: ${p.recipient.name || '—'}`,
-    `${tr('r_mobile_number')}: ${dial} ${p.recipient.phone}`,
-    `${tr('r_delivered')}: ${xaf(p.xaf)}`,
-    `${tr('fee')}: ${xaf(p.feeXaf)}`,
-    `${tr('r_total_paid')}: ${xaf(p.totalXaf)}`,
-  ];
-  if (showHow) {
-    lines.push(`${tr('r_paid_with')}: ${METHOD_LABEL[p.method]}`);
-    lines.push(`${tr('r_amount_sent')}: ${p.payInstruction.amountLabel} (≈ $${p.usd.toFixed(2)})`);
-  }
-  lines.push(`${tr('reference')}: ${p.ref}`);
-  lines.push(`${tr('r_date')}: ${fmtDate(p.createdAt)}`);
-  lines.push(`${tr('r_status')}: ${tr('r_completed')}`);
-  lines.push('', 'Mobile Money, made simple — momome.xyz');
-  return lines.join('\n');
+  return sharedReceiptText(p, receiptLabels(tr), {
+    includeCrypto: showHow,
+    cryptoAmount: p.payInstruction.amountLabel,
+    cryptoMethod: METHOD_LABEL[p.method],
+    usd: `≈ $${p.usd.toFixed(2)}`,
+  });
 }
 
 export function ReceiptModal({
@@ -138,8 +144,23 @@ export function ReceiptModal({
             <Row label={tr('r_date')} value={fmtDate(payment.createdAt)} />
             <View style={styles.row}>
               <Body muted>{tr('r_status')}</Body>
-              <View style={[styles.statusPill, { backgroundColor: t.recvWash }]}>
-                <Text style={{ color: t.recv, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('r_completed')}</Text>
+              {/* From the PAYMENT, not assumed. This pill used to read "Completed" for
+                  whatever it was handed — true only because the caller happened to open it
+                  for delivered payments, which a receipt must not rely on. */}
+              <View style={[styles.statusPill, {
+                backgroundColor: payment.displayStatus === 'Completed' ? t.recvWash
+                  : payment.displayStatus === 'Failed' ? t.badWash
+                  : t.backgroundSelected,
+              }]}>
+                <Text style={{
+                  color: payment.displayStatus === 'Completed' ? t.recv
+                    : payment.displayStatus === 'Failed' ? t.bad
+                    : t.warn,
+                  fontFamily: Fonts.bodyBold, fontSize: 13,
+                }}>
+                  {payment.displayStatus === 'Completed' ? tr('r_completed')
+                    : payment.displayStatus === 'Failed' ? tr('rcpt_failed') : tr('rcpt_pending')}
+                </Text>
               </View>
             </View>
 

@@ -50,6 +50,9 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
     paidWith: t("receipt_paid_with"), amountSent: t("receipt_amount_sent"), valueUsd: t("receipt_value_usd"),
     reference: t("reference"), date: t("date"),
     status: t("status"), completed: t("completed"), footer: t("receipt_footer"),
+    pending: t("receipt_pending"), failed: t("receipt_failed"),
+    deliveredToTpl: t("receipt_delivered_to"), intendedForTpl: t("receipt_intended_for"),
+    youPaid: t("receipt_you_paid"), tagline: t("receipt_tagline"),
     locale: lang === "fr" ? "fr-FR" : "en-GB",
   };
   const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo, showCrypto); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };

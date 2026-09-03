@@ -255,6 +255,14 @@ export const STRINGS = {
   r_date: ['Date', 'Date'],
   r_status: ['Status', 'Statut'],
   r_completed: ['Completed', 'Terminé'],
+  // Receipt headline by ACTUAL payment state — a receipt must not claim success it can't back.
+  rcpt_pending: ['Payment pending', 'Paiement en cours'],
+  rcpt_failed: ['Payment failed', 'Paiement échoué'],
+  // "{amount} delivered to {who}" — one sentence, so the number is never printed twice.
+  r_delivered_to: ['{amount} delivered to {who}', '{amount} envoyés à {who}'],
+  r_intended_for: ['{amount} to {who}', '{amount} pour {who}'],
+  r_you_paid: ['You paid', 'Vous avez payé'],
+  r_tagline: ['Mobile Money, made simple — momome.xyz', 'Mobile Money, en toute simplicité — momome.xyz'],
   show_how_paid: ['Show how I paid', 'Afficher comment j’ai payé'],
   rcpt_footer: ['Mobile Money payment successfully completed.', 'Paiement Mobile Money effectué avec succès.'],
   rcpt_delivered_to: ['delivered to', 'livré à'],

@@ -7,6 +7,7 @@
    ============================================================ */
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
+import { receiptText as sharedReceiptText, receiptTitle, recipientLine, receiptDate, type ReceiptLabels as SharedLabels } from "@shared/receipt.js";
 import { fmt } from "./format.js";
 
 export interface ReceiptStrings {
@@ -14,6 +15,10 @@ export interface ReceiptStrings {
   recipient: string; mobileNumber: string; amountDelivered: string; fee: string; totalPaid: string;
   paidWith: string; amountSent: string; valueUsd: string;
   reference: string; date: string; status: string; completed: string; footer: string;
+  // Added for the shared builder: a receipt states the payment's ACTUAL outcome, and the
+  // transaction reads as one sentence rather than two rows that repeat the number.
+  pending: string; failed: string; deliveredToTpl: string; intendedForTpl: string;
+  youPaid: string; tagline: string;
   /** BCP-47 locale for the date on the receipt — matches the app language so the
    *  downloaded/shared receipt reads the same as the on-screen one. Defaults en-GB. */
   locale?: string;
@@ -39,26 +44,34 @@ export const cryptoSent = (p: Payment): string => {
 };
 export const usdStr = (p: Payment): string => `≈ $${fmt(p.usd, 2)}`;
 
+/** Labels for the shared receipt builder. The STRUCTURE lives in @shared/receipt so this
+ *  and the mobile app cannot drift apart again — they used to order rows differently, and
+ *  this one silently omitted the fee. Only the wording is local. */
+function labels(s: ReceiptStrings): SharedLabels {
+  return {
+    titleCompleted: s.title,
+    titlePending: s.pending,
+    titleFailed: s.failed,
+    deliveredTo: s.deliveredToTpl,
+    intendedFor: s.intendedForTpl,
+    fee: s.fee,
+    youPaid: s.youPaid,
+    reference: s.reference,
+    paidWith: s.paidWith,
+    amountSent: s.amountSent,
+    tagline: s.tagline,
+  };
+}
+
 /** Plain-text receipt for text share / clipboard fallback. */
 export function receiptText(p: Payment, s: ReceiptStrings, includeCrypto = true): string {
-  return [
-    `MoMo›Me — ${s.title}`,
-    `${s.amountDelivered}: ${fmt(p.xaf)} XAF`,
-    `${s.deliveredTo} ${p.recipient.name || "—"}`,
-    `${s.mobileNumber}: ${fullPhone(p)}`,
-    `${s.totalPaid}: ${fmt(p.xaf + p.feeXaf)} XAF`,
-    ...(includeCrypto ? [
-      `${s.paidWith}: ${cryptoMethod(p)}`,
-      `${s.amountSent}: ${cryptoSent(p)}`,
-      `${s.valueUsd}: ${usdStr(p)}`,
-    ] : []),
-    `${s.reference}: ${p.ref}`,
-    `${s.date}: ${whenStr(p, s.locale)}`,
-    `${s.status}: ${s.completed}`,
-    ``,
-    // Viral tail: every shared receipt is a growth vector back to the product.
-    `Paid with MoMo›Me — Mobile Money, made simple. momome.xyz`,
-  ].join("\n");
+  return sharedReceiptText(p, labels(s), {
+    includeCrypto,
+    cryptoAmount: cryptoSent(p),
+    cryptoMethod: cryptoMethod(p),
+    usd: usdStr(p),
+    locale: s.locale,
+  });
 }
 
 /* ---------- SVG composition ---------- */

@@ -35,6 +35,17 @@ function LabeledInput({ label, value, onChange, mono, type = "text", error, suff
 }
 
 export function SettingsView() {
+  // What is actually behind each toggle. Fetched rather than assumed, so this card cannot
+  // drift back into claiming delivery that isn't happening.
+  const [notifyChannels, setNotifyChannels] = useState<Array<{ name: string; configured: boolean; enabled: boolean }>>([]);
+  useEffect(() => {
+    let alive = true;
+    api.adminNotificationOutbox()
+      .then((r) => { if (alive) setNotifyChannels(r.health.channels); })
+      .catch(() => { /* the settings form is the primary view; don't fail it over this */ });
+    return () => { alive = false; };
+  }, []);
+
   const [company, setCompany] = useState<AdminSettings["company"] | null>(null);
   const [channels, setChannels] = useState<AdminSettings["channels"] | null>(null);
   const [ops, setOps] = useState<AdminSettings["ops"] | null>(null);
@@ -238,13 +249,24 @@ export function SettingsView() {
           </Grid>
         </Card>
 
+        {/* This card used to promise that customers received transfer updates while nothing
+            on the server read the setting. A toggle now says whether anything is behind it. */}
         <Card title="Notification channels" sub="How customers receive transfer updates.">
-          {(Object.keys(channels) as Array<keyof AdminSettings["channels"]>).map((k) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{k}</span>
-              <Toggle on={channels[k]} onChange={(v) => toggle(k, v)} />
-            </div>
-          ))}
+          {(Object.keys(channels) as Array<keyof AdminSettings["channels"]>).map((k) => {
+            const ch = notifyChannels.find((c) => c.name === k.toLowerCase());
+            const state = !ch ? "No channel for this yet — turning it on sends nothing."
+              : !ch.configured ? "No provider configured — set SMS_WEBHOOK_URL to start sending."
+              : channels[k] ? "Delivering." : "Off.";
+            return (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{k}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{state}</div>
+                </div>
+                <Toggle on={channels[k]} onChange={(v) => toggle(k, v)} />
+              </div>
+            );
+          })}
           <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>Changes apply when you press Save changes.</p>
         </Card>
 

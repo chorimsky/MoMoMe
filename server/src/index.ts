@@ -10,6 +10,7 @@ import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
 import { releaseStrandedEarmarks } from "./core/stateMachine.js";
+import { store } from "./db/store.js";
 
 // Boot checks fail CLOSED, which is right — but on Railway's railpack runtime stderr is not
 // captured, so a throw here left literally no trace: the container simply never answered its
@@ -44,11 +45,20 @@ assertStoredAdminCredential();
 
    Never touches a payout in flight: that delivery leg will debit its earmark. */
 if ((process.env.RELEASE_STRANDED_EARMARKS ?? "").trim() === "1") {
-  void releaseStrandedEarmarks()
-    .then(({ released, xaf, skipped }) => {
-      console.warn(`[maintenance] RELEASE_STRANDED_EARMARKS: released ${released} earmark(s) worth ${xaf} XAF; skipped ${skipped} still in flight. Unset the flag now.`);
-    })
-    .catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
+  void (async () => {
+    const before = await store().balance("payout_float_XAF", "XAF");
+    const { released, xaf, skipped } = await releaseStrandedEarmarks();
+    const after = await store().balance("payout_float_XAF", "XAF");
+    console.warn(`[maintenance] RELEASE_STRANDED_EARMARKS: released ${released} earmark(s) worth ${xaf} XAF; skipped ${skipped} still in flight. payout_float_XAF ${before} → ${after}. Unset the flag now.`);
+    // A NON-ZERO account after a clean sweep is worth saying out loud rather than leaving
+    // for someone to find. Negative = earmarks still held (a payout in flight, which is
+    // correct). POSITIVE = more was released historically than was ever reserved, which no
+    // current code path can produce — it predates the fixes and is a bookkeeping artefact,
+    // not money. The float does not read this account, so it has no operational effect.
+    if (after > 0) {
+      console.warn(`[maintenance] payout_float_XAF is POSITIVE (${after} XAF). Historic deliveries debited an earmark that was never credited. Harmless to payouts — the float counts in-flight payments only — but the account will not read zero until it is reconciled.`);
+    }
+  })().catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
 }
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME

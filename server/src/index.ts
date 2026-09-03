@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { runBootChecks } from "./boot.js";
+import { runBootChecks, assertStoredAdminCredential } from "./boot.js";
 import { config, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { egressStatus } from "./core/egress.js";
@@ -26,6 +26,9 @@ try {
 // verifyIntegrity() reads as truncated/invalid on a Postgres-backed Railway deploy.
 if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); await hydrateComplianceChain(); }
 const app = createApp();
+// createApp() seeds the first admin, so the boot-time check above ran before any account
+// existed on a fresh store. Re-run it now that one does.
+assertStoredAdminCredential();
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME
 // jobs run via /api/cron/* (routes/cron.ts) since serverless has no persistent process.

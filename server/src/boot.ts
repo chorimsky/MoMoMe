@@ -20,10 +20,13 @@ import { storedAdminMatches } from "./core/adminUsers.js";
  *    • Rotated after seeding → the operator believes the password changed; the old one
  *      still works and the new one does not.
  *  Both are answered by hashing the candidate against the stored salt. */
-function assertStoredAdminCredential(): void {
+export function assertStoredAdminCredential(): void {
   const DEFAULT_PW = "momome-admin";
   const isDefault = storedAdminMatches(DEFAULT_PW);
-  if (isDefault === null) return; // nothing seeded yet — seedAdminUsers() will use the env var
+  // Nothing seeded yet. This is the normal state at BOOT-check time on a fresh store,
+  // because seedAdminUsers() runs later inside createApp() — which is why index.ts calls
+  // this again afterwards, when there is actually an account to check.
+  if (isDefault === null) return;
   const inProd = process.env.NODE_ENV === "production" || liveMoney();
   if (isDefault && inProd) {
     throw new Error("Refusing to start: the admin console still accepts the DEFAULT password. Setting ADMIN_PASSWORD does not change an already-seeded account — reset it in the console, or via POST /admin/forgot with ADMIN_RECOVERY_KEY.");
@@ -35,7 +38,12 @@ function assertStoredAdminCredential(): void {
   // Not the default, but does it match what the operator currently has in the environment?
   if (process.env.ADMIN_PASSWORD && storedAdminMatches(process.env.ADMIN_PASSWORD) === false) {
     console.warn("⚠️  ADMIN_PASSWORD does not match the stored admin credential. It is only read when the first account is seeded, so changing it did NOT change the login password — the previous one still works. Change it in the console, or via POST /admin/forgot with ADMIN_RECOVERY_KEY.");
+    return;
   }
+  // Say so when it is FINE. Silence is indistinguishable from "never checked", and this is
+  // the credential guarding the treasury — an operator asking "is my super-admin login
+  // sound?" deserves an answer in the log, not the absence of a complaint.
+  console.log(`[admin] super-admin credential OK — account "admin" is not using the default password${process.env.ADMIN_PASSWORD ? " and matches ADMIN_PASSWORD" : ""}.`);
 }
 
 /** Validate config + storage durability. Throws (fail-closed) when a real-money rail

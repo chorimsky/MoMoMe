@@ -206,5 +206,49 @@ ok("a funded rail is spendable despite the stale earmarks", spendable === RAIL, 
 ok("and it is NOT the -433,041.50 production was reporting", spendable > 0, String(spendable));
 ok("a 500 XAF payment — the product minimum — now fits", spendable >= 500, String(spendable));
 
+/* ---- 7. Squaring the earmark account ----
+   Releasing the stranded earmarks left production at +163,688 XAF — a POSITIVE earmark
+   balance, which is nonsense: historic deliveries debited an earmark never credited. The
+   reconciliation supplies the missing half against fx_position, leaves anything genuinely
+   in flight alone, and must keep the books balanced. */
+const { reconcileEarmarkAccount, releaseStrandedEarmarks } = await import("../src/core/stateMachine.js");
+
+// Production's exact sequence: sweep the stranded earmarks first, which is what exposed the
+// positive residue underneath them.
+await releaseStrandedEarmarks();
+ok("the sweep clears the stranded earmarks", (await s.balance("payout_float_XAF", "XAF")) === 0,
+   String(await s.balance("payout_float_XAF", "XAF")));
+
+// Reproduce the shape: a delivery-style debit with no matching reserve.
+await s.recordTxn("pay_orphan_debit", [
+  { account: "payout_float_XAF", direction: "debit", amount: 163_688, currency: "XAF" },
+  { account: "external_recipient", direction: "credit", amount: 163_688, currency: "XAF" },
+]);
+ok("the account really is positive before reconciling",
+   (await s.balance("payout_float_XAF", "XAF")) === 163_688, String(await s.balance("payout_float_XAF", "XAF")));
+
+// …alongside a payout genuinely in flight, which must survive untouched.
+await mk("pay_live", "PAYOUT_REQUESTED", 25_000);
+await s.recordTxn("pay_live", [
+  { account: "fx_position", direction: "debit", amount: 25_000, currency: "XAF" },
+  { account: "payout_float_XAF", direction: "credit", amount: 25_000, currency: "XAF" },
+]);
+
+const floatBefore = await availableFloatXaf();
+const rec = await reconcileEarmarkAccount();
+const acctAfter = await s.balance("payout_float_XAF", "XAF");
+
+ok("the account lands at exactly minus what is in flight", acctAfter === -25_000, String(acctAfter));
+ok("the adjustment is reported, not silent", rec.adjusted !== 0 && rec.from === 163_688 - 25_000, `${rec.from} → ${rec.to}`);
+ok("the in-flight payout still holds its earmark", (await availableFloatXaf()) === floatBefore,
+   `${await availableFloatXaf()} vs ${floatBefore}`);
+
+const netAfter = (await s.allEntries()).filter((e) => e.currency === "XAF")
+  .reduce((n, e) => n + (e.direction === "debit" ? e.amount : -e.amount), 0);
+ok("XAF still nets to zero after the reconciliation", Math.abs(netAfter) < 1e-6, String(netAfter));
+
+const twice = await reconcileEarmarkAccount();
+ok("reconciling again is a no-op", twice.adjusted === 0, String(twice.adjusted));
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

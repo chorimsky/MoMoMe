@@ -132,6 +132,38 @@ export async function releaseStrandedEarmarks(): Promise<{ released: number; xaf
   return { released, xaf, skipped };
 }
 
+/** Bring payout_float_XAF to what it should be: minus exactly what is in flight, and
+ *  nothing else.
+ *
+ *  Releasing the stranded earmarks left this account at +163,688 XAF in production — a
+ *  POSITIVE earmark balance, which is nonsense on its face. It comes from historic
+ *  deliveries: onPayoutResult debits an earmark when a payout completes, and some payments
+ *  reached delivery without a matching FX-lock credit ever being posted, so the debits
+ *  outnumbered the credits. No current path can do that — adminRetry takes an earmark
+ *  before it submits, and settle() reserves at FX-lock — so this is residue, not a leak.
+ *
+ *  The correction is the missing half of those reserve legs: credit the earmark account and
+ *  debit fx_position, which is what the FX-lock would have done. Booked as one balanced,
+ *  named transaction so it reads as a reconciliation in the journal rather than appearing
+ *  as money from nowhere. The fee split of those old payments is unrecoverable, so this
+ *  does not attempt to restate fee_revenue — it squares the one account that was wrong.
+ *
+ *  Operator-initiated, never automatic. No effect on payouts: the float has counted only
+ *  in-flight payments since that change, and this leaves in-flight untouched by construction. */
+export async function reconcileEarmarkAccount(): Promise<{ adjusted: number; from: number; to: number }> {
+  const current = await store().balance("payout_float_XAF", "XAF");
+  const target = await inFlightReservedXaf(); // ≤ 0 — what SHOULD be held
+  const delta = target - current;
+  if (Math.abs(delta) < 1e-9) return { adjusted: 0, from: current, to: current };
+  await store().recordTxn("reconcile_payout_float", delta < 0
+    ? [{ account: "payout_float_XAF", direction: "credit", amount: -delta, currency: "XAF" },
+       { account: "fx_position", direction: "debit", amount: -delta, currency: "XAF" }]
+    : [{ account: "payout_float_XAF", direction: "debit", amount: delta, currency: "XAF" },
+       { account: "fx_position", direction: "credit", amount: delta, currency: "XAF" }]);
+  console.warn(`[treasury] reconciled payout_float_XAF ${current} → ${target} XAF (adjustment ${delta}).`);
+  return { adjusted: delta, from: current, to: target };
+}
+
 /** Park a payment for operator review and GIVE BACK its payout-float earmark.
  *
  *  The earmark exists to stop CONCURRENT settlements from over-committing the treasury.

@@ -9,7 +9,7 @@ import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
-import { releaseStrandedEarmarks } from "./core/stateMachine.js";
+import { releaseStrandedEarmarks, reconcileEarmarkAccount } from "./core/stateMachine.js";
 import { store } from "./db/store.js";
 
 // Boot checks fail CLOSED, which is right — but on Railway's railpack runtime stderr is not
@@ -55,9 +55,13 @@ if ((process.env.RELEASE_STRANDED_EARMARKS ?? "").trim() === "1") {
     // correct). POSITIVE = more was released historically than was ever reserved, which no
     // current code path can produce — it predates the fixes and is a bookkeeping artefact,
     // not money. The float does not read this account, so it has no operational effect.
-    if (after > 0) {
-      console.warn(`[maintenance] payout_float_XAF is POSITIVE (${after} XAF). Historic deliveries debited an earmark that was never credited. Harmless to payouts — the float counts in-flight payments only — but the account will not read zero until it is reconciled.`);
-    }
+    // Square the account. A POSITIVE balance means historic deliveries debited an earmark
+    // that was never credited — residue no current path can produce. Booked as one named
+    // reconciliation rather than left for someone to find.
+    const rec = await reconcileEarmarkAccount();
+    console.warn(rec.adjusted === 0
+      ? `[maintenance] payout_float_XAF already square at ${rec.to} XAF. Unset RELEASE_STRANDED_EARMARKS.`
+      : `[maintenance] reconciled payout_float_XAF ${rec.from} → ${rec.to} XAF (adjustment ${rec.adjusted}, booked against fx_position). Unset RELEASE_STRANDED_EARMARKS.`);
   })().catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
 }
 

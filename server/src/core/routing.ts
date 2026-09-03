@@ -93,6 +93,13 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
  *  aggregator holds a single XAF payout wallet, so we query it once (provider-agnostic)
  *  and dedupe by name. Returns NaN when NO rail can be queried, so the caller falls back
  *  to the static ceiling rather than treating "unknown" as "zero float". */
+/** Why each payout rail contributed nothing to the last float read. Surfaced so the ONE
+ *  log line that reliably survives (the payout-gate refusal) can carry the diagnosis —
+ *  Railway's log API truncates this service to a handful of lines, so a separate
+ *  explanatory line is written and then thrown away. */
+let lastBalanceReasons: string[] = [];
+export function balanceReasons(): string[] { return lastBalanceReasons; }
+
 export async function aggregatorFloatXaf(): Promise<number> {
   let sum = 0;
   let any = false;
@@ -117,6 +124,7 @@ export async function aggregatorFloatXaf(): Promise<number> {
   // deployment has been depleted by every past delivery and blocks payouts outright. The
   // operator saw only "payouts_unavailable". Name the rails that could not answer — that is
   // the difference between "we are out of money" and "we cannot see our money".
+  lastBalanceReasons = why;
   if (!any) {
     console.error(`[treasury] NO payout rail contributed a balance — falling back to the static ceiling. This is "balance unknown", NOT "balance zero". Reasons: ${why.length ? why.join(" | ") : "no payout rails registered at all"}`);
   }

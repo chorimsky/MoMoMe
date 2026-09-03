@@ -12,7 +12,7 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
-import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, reconcileOneInbound } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
@@ -682,7 +682,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // 3) Internal XAF treasury float must cover this payout.
   const floatXaf = await availableFloatXaf();
   if (floatXaf < quote.xaf) {
-    console.warn(`[payout-gate] BLOCKED float: treasury ${floatXaf} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country})`);
+    console.warn(`[payout-gate] BLOCKED float: treasury ${floatXaf} < ${quote.xaf} XAF (${recipient.provider}/${recipient.country}) — basis: ${floatBasisNote()}`);
     return block(503, "payouts_unavailable", "Payouts are temporarily unavailable. Please try again shortly.");
   }
   // 4) A payout rail must be functional (up/healthy) AND funded ≥ amount — live when the

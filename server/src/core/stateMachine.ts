@@ -13,7 +13,7 @@ import { store } from "../db/store.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
-import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, recordExecution, markRailHardDown } from "./routing.js";
+import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, balanceReasons, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings, refreshSettingsIfStale } from "./settings.js";
@@ -73,6 +73,11 @@ async function liveAggregatorXaf(): Promise<number> {
  *     − in-flight reserved (payout_float_XAF). Both ledger balances are negative credits.
  *  Each payment reserves at FX-lock BEFORE this is read, so concurrent settlements can't
  *  all see the full float and over-commit the treasury. */
+/** How the last availableFloatXaf() figure was arrived at — a live rail balance, or the
+ *  static-ceiling fallback and why. Logged with the refusal so the number is explicable. */
+let floatBasis = "not yet computed";
+export function floatBasisNote(): string { return floatBasis; }
+
 export async function availableFloatXaf(): Promise<number> {
   const s = store();
   const reserved = await s.balance("payout_float_XAF", "XAF"); // in-flight reservation (≤ 0)
@@ -86,12 +91,14 @@ export async function availableFloatXaf(): Promise<number> {
   // one says "the rail is empty, fund it" and the other invents an accounting figure that
   // sends you looking for a bug in the ledger.
   if (Number.isFinite(live)) {
+    floatBasis = `live rail balance ${live} XAF`;
     if (live <= 0) {
       console.error(`[treasury] payout rail balance is ${live} XAF — payouts are blocked because the rail is UNFUNDED, not because the treasury ceiling is exhausted.`);
     }
     return Math.min(live, XAF_FLOAT_MAX) + reserved;
   }
   // Balance genuinely UNKNOWN (no rail could answer) → constant-treasury model.
+  floatBasis = `NO rail balance available (${balanceReasons().join("; ") || "no rails"}) → static ceiling ${XAF_FLOAT_MAX} minus all-time deliveries. This figure is an accounting fallback, NOT a real balance.`;
   return XAF_FLOAT_MAX + (await s.balance("external_recipient", "XAF")) + reserved;
 }
 

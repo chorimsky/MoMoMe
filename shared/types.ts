@@ -315,6 +315,35 @@ export type LedgerAccount =
    *  operator to refund. A non-zero balance is money that is not ours. */
   | "refund_payable";
 
+/** Crypto that arrived with no payment to attach it to.
+ *
+ *  The rail webhook used to answer 200 and drop these, so money landed on an address or
+ *  invoice we issued and the platform kept no record of it: a customer had paid and was
+ *  waiting on a screen that would never change. They are real receipts of funds, held as a
+ *  liability until an operator attributes or returns them, and they belong in the
+ *  transaction list beside the payments. */
+export interface UnattributedInbound {
+  id: string;
+  /** The rail that reported it — "ibex", "sandbox". */
+  rail: string;
+  /** The rail's own reference: an invoice/transaction id, or a receive address. */
+  providerRef: string;
+  eventId?: string;
+  method: Method;
+  /** "BTC", or "UNKNOWN_STABLECOIN" when an 0x address cannot say whether it is USDT or
+   *  USDC — in which case the receipt is recorded but deliberately NOT booked, because
+   *  guessing a currency to keep the books tidy would put a wrong number in them. */
+  asset: string;
+  amount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** How many times the rail has reported this same receipt. */
+  seenCount: number;
+  resolvedAt?: string;
+  resolution?: "attributed" | "refunded" | "ignored";
+  note?: string;
+}
+
 export interface LedgerEntry {
   id: string;
   txnId: string;

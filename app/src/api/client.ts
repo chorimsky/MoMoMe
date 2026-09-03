@@ -3,6 +3,7 @@
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
 import type {
+  UnattributedInbound,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
   Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceReport, SuspiciousTransactionReport, PeexPanel,
@@ -350,6 +351,11 @@ export const api = {
   adminOverview: () => req<AdminOverview>("/admin/overview"),
   adminCustomers: () => req<AdminCustomer[]>("/admin/customers"),
   adminPayments: () => req<Payment[]>("/admin/payments"),
+  /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
+   *  as a liability until an operator attributes or returns them. */
+  adminUnattributed: () => req<{ open: number; items: UnattributedInbound[] }>("/admin/unattributed"),
+  resolveUnattributed: (id: string, resolution: "attributed" | "refunded" | "ignored", note?: string) =>
+    req<{ ok: boolean }>(`/admin/unattributed/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ resolution, note }) }),
 
   // Developer API keys (Super-Admin). Create returns the plaintext `secret` ONCE.
   adminApiKeys: () => req<{ keys: ApiKey[] }>("/admin/apikeys"),

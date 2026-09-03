@@ -7,7 +7,7 @@ import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
 import { store } from "../db/store.js";
-import { markDetected, confirmInbound } from "../core/stateMachine.js";
+import { markDetected, confirmInbound, recordUnattributedInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
@@ -79,14 +79,41 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   if (!event) return res.json({ ok: true, ignored: true });
 
   const payment = await store().findByProviderRef(event.providerRef);
-  if (!payment) return res.json({ ok: true, unmatched: true });
+  if (!payment) {
+    // Money landed on something we issued and there is no payment to attach it to. This
+    // used to be a bare 200 — no ledger entry, no log, nothing an operator could see, while
+    // a customer waited on a screen that would never change. Capture it instead: booked as
+    // a liability and listed for someone to attribute or return. Never auto-delivered —
+    // without a quote there is no recipient, no rate and no obligation.
+    if (event.kind === "confirmed" && (event.amount ?? 0) > 0) {
+      await recordUnattributedInbound({
+        rail: req.params.provider,
+        providerRef: event.providerRef,
+        eventId: event.eventId,
+        amount: event.amount ?? 0,
+      });
+    }
+    return res.json({ ok: true, unmatched: true, captured: event.kind === "confirmed" });
+  }
 
   // Bind the webhook to the payment's ISSUING rail. Matching by providerRef ALONE would let
   // a webhook verified by rail X settle a payment minted on rail Y — so a forged webhook to a
   // fail-open / unconfigured rail (whose verifyWebhook can't reject) could settle a real IBEX
   // payment for crypto never received. Require the URL rail == the rail that minted the invoice.
   if ((payment.payInstruction.provider ?? "") !== req.params.provider) {
-    return res.json({ ok: true, ignored: true }); // not this rail's payment — refuse to settle it
+    // Refusing to settle is right; staying silent is not. A rail reporting a receipt against
+    // a payment minted on a DIFFERENT rail is either an attack or a real deposit we cannot
+    // safely attribute — both are things an operator must be told about.
+    console.warn(`[webhook] ${req.params.provider} reported ${event.providerRef} for a payment minted on ${payment.payInstruction.provider ?? "?"} — refused, captured for review.`);
+    if (event.kind === "confirmed" && (event.amount ?? 0) > 0) {
+      await recordUnattributedInbound({
+        rail: req.params.provider,
+        providerRef: event.providerRef,
+        eventId: event.eventId,
+        amount: event.amount ?? 0,
+      });
+    }
+    return res.json({ ok: true, ignored: true, captured: event.kind === "confirmed" });
   }
 
   // Ack now; settle asynchronously.

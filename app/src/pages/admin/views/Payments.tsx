@@ -3,7 +3,7 @@
    Row → drawer showing the double-entry ledger (api.ledger).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import type { LedgerEntry, Method, Payment } from "@shared/types.js";
+import type { LedgerEntry, Method, Payment, UnattributedInbound } from "@shared/types.js";
 import { METHOD_META } from "@shared/domain.js";
 import { canMovePaymentFunds } from "@shared/roles.js";
 import { api } from "../../../api/client.js";
@@ -55,11 +55,19 @@ export function PaymentsView() {
   const [status, setStatus] = useState<string>("All");
   const [sel, setSel] = useState<Payment | null>(null);
 
+  // Receipts with no payment to attach them to. They belong HERE — the transaction list is
+  // where an operator looks to see everything that came in, and money nobody can account
+  // for is the entry that most needs looking at.
+  const [unattributed, setUnattributed] = useState<UnattributedInbound[]>([]);
+
   useEffect(() => {
     let alive = true;
     api.adminPayments()
       .then((p) => { if (alive) setRows(p); })
       .catch(() => { if (alive) setErr("Couldn't load payments."); });
+    api.adminUnattributed()
+      .then((u) => { if (alive) setUnattributed(u.items.filter((r) => !r.resolvedAt)); })
+      .catch(() => { /* the payments list is the primary view; don't fail it over this */ });
     return () => { alive = false; };
   }, []);
 
@@ -81,7 +89,37 @@ export function PaymentsView() {
   return (
     <div>
       <SectionTitle t="Payments" s="Every Mobile Money payment that moves through the platform." />
-      <div className="mm-toolbar" style={{ marginBottom: 14 }}>
+
+      {/* Money that arrived with nothing to attach it to. Held as a liability, and shown
+          FIRST because someone has paid and is waiting — this is the entry in the
+          transaction list that most needs a person. */}
+      {unattributed.length > 0 && (
+        <Card pad={false}>
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)" }}>
+            <strong style={{ fontSize: 13.5 }}>
+              {unattributed.length} unattributed receipt{unattributed.length === 1 ? "" : "s"}
+            </strong>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 3 }}>
+              Crypto arrived with no payment to attach it to. It is held as a liability — attribute or refund it.
+            </div>
+          </div>
+          <div style={{ maxHeight: 200, overflowY: "auto" }}>
+            {unattributed.map((r) => (
+              <div key={r.id} style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap", padding: "11px 20px", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                <strong style={{ fontVariantNumeric: "tabular-nums" }}>{r.amount} {r.asset === "UNKNOWN_STABLECOIN" ? "(asset unknown)" : r.asset}</strong>
+                <RailBadge rail={r.rail} />
+                <span style={{ color: "var(--ink-3)", fontFamily: "var(--mono, monospace)", fontSize: 11.5, wordBreak: "break-all" }}>{r.providerRef}</span>
+                <div style={{ flex: 1 }} />
+                <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
+                  {new Date(r.firstSeenAt).toLocaleString()}{r.seenCount > 1 ? ` · seen ${r.seenCount}×` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <div className="mm-toolbar" style={{ marginBottom: 14, marginTop: unattributed.length > 0 ? 14 : 0 }}>
         <SegToggle options={[...FILTERS]} value={status} onChange={setStatus} />
         {q && <span className="pill" style={{ fontSize: 11.5 }}>“{query}” · {filtered.length}</span>}
         <div style={{ flex: 1 }} />

@@ -13,6 +13,7 @@ import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
+import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
@@ -151,7 +152,7 @@ api.post("/admin/elevate", async (req, res) => {
 function sectionForPath(sub: string): Section | null {
   const p = sub.replace(/^\//, "").split("/")[0] ?? "";
   const map: Record<string, Section> = {
-    overview: "overview", payments: "payments", quotes: "payments", delivery: "delivery",
+    overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
     "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
@@ -185,6 +186,7 @@ api.use("/admin", (req, res, next) => {
   const ELEVATED_ONLY: RegExp[] = [
     /^\/treasury\/(withdraw|destinations)$/,          // sweeps real crypto out of the platform wallet
     /^\/liquidity\/release-earmarks$/,                // returns committed float to the spendable pool
+    /^\/unattributed\/[^/]+\/resolve$/,               // closes the book on funds that are not ours
     /^\/momo\/(cashout|cashin|transfer)$/,            // moves real Mobile Money funds
     /^\/payments\/[^/]+\/(retry|refund)$/,           // re-pays or refunds a real payment
     /^\/users(\/|$)/,                                // who can access the console at all
@@ -1407,6 +1409,35 @@ api.get("/admin/customers", async (_req, res) => {
 
 api.get("/admin/payments", async (_req, res) => {
   res.json((await store().listPayments()));
+});
+
+/* ---------- unattributed inbound ----------
+   Crypto that arrived with no payment to attach it to. Previously the webhook answered 200
+   and dropped it, so a customer had paid and nobody could see it. These are real receipts of
+   funds, held as a liability until an operator attributes or returns them — so they belong
+   in the transaction list beside the payments, not in a log nobody reads. */
+api.get("/admin/unattributed", async (_req, res) => {
+  const all = listUnattributed();
+  res.json({
+    open: all.filter((r) => !r.resolvedAt).length,
+    items: all.slice(0, 200),
+  });
+});
+
+/* Mark one dealt with. Elevation-gated in the /admin middleware: it closes the book on
+   money that is not ours. The record is KEPT either way — the audit question is what
+   happened to it, which an erased row cannot answer. */
+api.post("/admin/unattributed/:id/resolve", async (req, res) => {
+  if (!canMovePaymentFunds(sessionOf(req)!.role)) {
+    return res.status(403).json({ error: "forbidden", message: "Your role can't resolve unattributed funds." });
+  }
+  const { resolution, note } = (req.body ?? {}) as { resolution?: string; note?: string };
+  if (resolution !== "attributed" && resolution !== "refunded" && resolution !== "ignored") {
+    return res.status(400).json({ error: "bad_resolution", message: "Resolution must be attributed, refunded or ignored." });
+  }
+  const r = resolveUnattributed(req.params.id, resolution, typeof note === "string" ? note : undefined);
+  if (!r) return res.status(404).json({ error: "no_record", message: "No such record." });
+  res.json({ ok: true, record: r });
 });
 
 /* ---------- settings (Settings + Crypto Rails config) ---------- */

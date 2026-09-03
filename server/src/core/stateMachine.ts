@@ -8,8 +8,9 @@
    - live webhooks call markDetected() / confirmInbound() directly
    Both converge on confirmInbound(), which is idempotent.
    ============================================================ */
-import type { Payment, PaymentState, DisplayStatus } from "../../../shared/types.js";
+import type { Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
 import { store } from "../db/store.js";
+import { captureUnattributed } from "./unattributed.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
@@ -162,6 +163,50 @@ export async function reconcileEarmarkAccount(): Promise<{ adjusted: number; fro
        { account: "fx_position", direction: "credit", amount: delta, currency: "XAF" }]);
   console.warn(`[treasury] reconciled payout_float_XAF ${current} → ${target} XAF (adjustment ${delta}).`);
   return { adjusted: delta, from: current, to: target };
+}
+
+/** Capture an inbound we cannot attribute to any payment, and book what it implies.
+ *
+ *  The asset is inferred from the rail's own reference, because the event does not carry
+ *  one: an ERC-20 receive address is 0x-prefixed, a Bitcoin address is bech32 or base58,
+ *  and anything else is a Lightning payment hash. That is enough to separate BTC from a
+ *  stablecoin — but NOT USDT from USDC, which share an address format. Where it cannot be
+ *  told, the receipt is still recorded; only the ledger posting is withheld, because
+ *  guessing a currency to keep the books tidy would put a wrong number in them. The record
+ *  says so, and an operator attributing it supplies the answer.
+ *
+ *  Booked exactly like a duplicate deposit — inbound_clearing debit against refund_payable
+ *  credit — since it is the same situation: crypto we hold that is not ours. */
+export async function recordUnattributedInbound(input: {
+  rail: string;
+  providerRef: string;
+  eventId?: string;
+  amount: number;
+}): Promise<{ id: string; asset: string; booked: boolean }> {
+  const ref = input.providerRef.trim();
+  const erc20 = /^0x[0-9a-fA-F]{40}$/.test(ref);
+  const onchainBtc = /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,}$/.test(ref);
+  const method: Method = erc20 ? "USDT" : onchainBtc ? "ONCHAIN" : "LIGHTNING";
+  // BTC either way for the two Bitcoin methods; a stablecoin address cannot be told apart.
+  const asset = erc20 ? "UNKNOWN_STABLECOIN" : "BTC";
+
+  const { record, isNew } = captureUnattributed({
+    rail: input.rail, providerRef: ref, eventId: input.eventId,
+    method, asset, amount: input.amount,
+  });
+
+  let booked = false;
+  if (isNew && asset === "BTC") {
+    await store().recordTxn(record.id, [
+      { account: "inbound_clearing", direction: "debit", amount: input.amount, currency: "BTC" },
+      { account: "refund_payable", direction: "credit", amount: input.amount, currency: "BTC" },
+    ]);
+    booked = true;
+  }
+  if (isNew) {
+    console.error(`[inbound] UNATTRIBUTED ${input.amount} ${asset} on ${input.rail} ref=${ref}${input.eventId ? ` event=${input.eventId}` : ""} — held as a liability${booked ? "" : " (NOT booked: the asset cannot be told from the reference)"}, id=${record.id}. Attribute or refund it.`);
+  }
+  return { id: record.id, asset, booked };
 }
 
 /** Park a payment for operator review and GIVE BACK its payout-float earmark.

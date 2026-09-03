@@ -9,7 +9,7 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://mo-mo-me-server.vercel.app/api",
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
       }
     },
@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://mo-mo-me-server.vercel.app/api",
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
       }
     },
@@ -30,7 +30,7 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://mo-mo-me-server.vercel.app/api",
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
       }
     },
@@ -45,7 +45,7 @@
         "credentialsSource": "remote"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://mo-mo-me-server.vercel.app/api",
+        "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
         "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
       }
     }

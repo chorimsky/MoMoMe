@@ -27,6 +27,9 @@ const vercel = JSON.parse(readFileSync(`${root}app/vercel.json`, "utf8")) as {
 };
 const mobileCfg = readFileSync(`${root}mobile/app.config.ts`, "utf8");
 const mobileEnv = readFileSync(`${root}mobile/.env.example`, "utf8");
+const eas = JSON.parse(readFileSync(`${root}mobile/eas.json`, "utf8")) as {
+  build?: Record<string, { env?: Record<string, string> }>;
+};
 
 console.log("\nClient → backend wiring\n");
 
@@ -45,6 +48,17 @@ ok("web and mobile agree on the backend", mobileMatch?.[1] === webBase, `${mobil
 
 const envMatch = mobileEnv.match(/EXPO_PUBLIC_API_BASE=(\S+)/);
 ok("the documented mobile env matches what ships", envMatch?.[1] === webBase, `${envMatch?.[1]} vs ${webBase}`);
+
+/* ---- EAS build profiles ----
+   These OVERRIDE the fallback in app.config.ts, so a stale value here ships a store build
+   pointed at the wrong backend no matter what the config default says. That is exactly how
+   the mobile half of the cutover was missed: the fallback was updated, four build profiles
+   still named the demo backend, and nothing compared them. */
+const profiles = Object.entries(eas.build ?? {});
+ok("EAS declares build profiles", profiles.length > 0, `${profiles.length}`);
+const stale = profiles.filter(([, p]) => p.env?.EXPO_PUBLIC_API_BASE && p.env.EXPO_PUBLIC_API_BASE !== webBase);
+ok("every EAS build profile targets the same backend as the web app", stale.length === 0,
+   stale.map(([n, p]) => `${n}=${p.env?.EXPO_PUBLIC_API_BASE}`).join("; ") || "none");
 
 /* ---- every proxied path follows the SAME backend ----
    The web app rewrites LNURL and the app-link association files through to the server.

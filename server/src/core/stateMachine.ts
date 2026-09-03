@@ -77,9 +77,21 @@ export async function availableFloatXaf(): Promise<number> {
   const s = store();
   const reserved = await s.balance("payout_float_XAF", "XAF"); // in-flight reservation (≤ 0)
   const live = await liveAggregatorXaf();
-  if (Number.isFinite(live) && live > 0) {
+  // A KNOWN balance is authoritative — including zero. The guard used to be `live > 0`, so a
+  // rail that truthfully answered "0 XAF" was treated exactly like a rail that could not be
+  // reached, and fell through to the constant-treasury fallback below. On a long-lived
+  // deployment that fallback subtracts every delivery ever made from a static ceiling, so an
+  // unfunded rail produced a large NEGATIVE float (-423,041 XAF in production) and blocked
+  // payouts with a number that describes nothing real. Both paths refuse the payout — but
+  // one says "the rail is empty, fund it" and the other invents an accounting figure that
+  // sends you looking for a bug in the ledger.
+  if (Number.isFinite(live)) {
+    if (live <= 0) {
+      console.error(`[treasury] payout rail balance is ${live} XAF — payouts are blocked because the rail is UNFUNDED, not because the treasury ceiling is exhausted.`);
+    }
     return Math.min(live, XAF_FLOAT_MAX) + reserved;
   }
+  // Balance genuinely UNKNOWN (no rail could answer) → constant-treasury model.
   return XAF_FLOAT_MAX + (await s.balance("external_recipient", "XAF")) + reserved;
 }
 

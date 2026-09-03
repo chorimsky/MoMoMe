@@ -4,6 +4,7 @@
    ============================================================ */
 import type {
   UnattributedInbound,
+  NotificationRecord,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
   Identity, IdentityStats, LiquiditySnapshot, PricingInfo, RevenueReport, ComplianceReport, SuspiciousTransactionReport, PeexPanel,
@@ -436,6 +437,13 @@ export const api = {
     setAdminToken(r.token);
     return r;
   },
+  /** The dispatch RECORD — what was sent, what failed, and what was skipped because a
+   *  channel is switched on with no provider behind it. */
+  adminNotificationOutbox: () => req<{
+    health: { total: number; sent: number; failed: number; skipped: number;
+      channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }> };
+    items: NotificationRecord[];
+  }>("/admin/notifications/outbox"),
   adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
   retryPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),

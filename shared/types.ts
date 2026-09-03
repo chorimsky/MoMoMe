@@ -344,6 +344,49 @@ export interface UnattributedInbound {
   note?: string;
 }
 
+/* ---------- Notifications ----------
+   The admin console has always shown a "Notification channels — how customers receive
+   transfer updates" card with Email and SMS switched ON, and nothing on the server ever
+   read it. No customer has ever been sent anything; there was no email or SMS provider in
+   the dependency tree at all. These types back a real pipeline, and — just as importantly —
+   let the console say when a channel is enabled but not wired, instead of implying it works. */
+
+export type NotificationKind =
+  | "payment_delivered"      // the recipient's money has landed
+  | "payment_failed"         // it did not, and a refund is owed
+  | "refund_needed"          // the sender must supply a destination
+  | "unattributed_inbound"   // funds arrived that nobody can account for
+  | "manual_review";         // a payment is held and needs a person
+
+/** Who the message is for. This is not cosmetic — it decides which channels can carry it.
+ *  We hold the RECIPIENT's phone number, so they are reachable by SMS. We hold nothing for
+ *  the sender but a device id (the account IS the device; there is no sign-up), so they are
+ *  reachable only by push, which needs a registered token. The operator is reachable in the
+ *  console. Anything claiming otherwise would be pretending. */
+export type NotificationAudience = "recipient" | "sender" | "operator";
+
+export type NotificationStatus = "queued" | "sent" | "failed" | "skipped";
+
+export interface NotificationRecord {
+  id: string;
+  kind: NotificationKind;
+  audience: NotificationAudience;
+  /** Channel that carried it, or was meant to. */
+  channel: string;
+  /** Destination, stored as given. Empty for operator-audience messages. */
+  to: string;
+  /** The message as sent. */
+  body: string;
+  paymentRef?: string;
+  createdAt: string;
+  status: NotificationStatus;
+  attempts: number;
+  sentAt?: string;
+  /** Why it failed, or why it was skipped — "SMS is enabled in settings but no provider is
+   *  configured" is the one an operator most needs to see. */
+  detail?: string;
+}
+
 export interface LedgerEntry {
   id: string;
   txnId: string;

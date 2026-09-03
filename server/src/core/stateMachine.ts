@@ -11,6 +11,7 @@
 import type { Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
 import { store } from "../db/store.js";
 import { captureUnattributed } from "./unattributed.js";
+import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed } from "./notifications.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
@@ -206,6 +207,7 @@ export async function recordUnattributedInbound(input: {
   if (isNew) {
     console.error(`[inbound] UNATTRIBUTED ${input.amount} ${asset} on ${input.rail} ref=${ref}${input.eventId ? ` event=${input.eventId}` : ""} — held as a liability${booked ? "" : " (NOT booked: the asset cannot be told from the reference)"}, id=${record.id}. Attribute or refund it.`);
   }
+  if (isNew) void notifyUnattributed(input.amount, asset, input.rail, ref);
   return { id: record.id, asset, booked };
 }
 
@@ -235,6 +237,7 @@ async function releaseReservation(p: Payment): Promise<void> {
 async function parkForReview(p: Payment, reason: string): Promise<void> {
   await releaseReservation(p);
   await transition(p, "MANUAL_REVIEW", reason);
+  void notifyHeldForReview(p, reason);
 }
 
 /** Re-take the earmark before a retried payout is submitted, since parkForReview gave it
@@ -704,6 +707,9 @@ async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerR
       { account: "external_recipient", direction: "credit", amount: p.xaf, currency: "XAF" },
     ]);
     await transition(p, "DELIVERED");
+    // Tell the recipient their money landed. Best-effort and awaited-but-swallowing: a
+    // delivered payment is delivered whether or not an SMS gateway answered.
+    void notifyDelivered(p);
     // First successful delivery → the number becomes an account: provision the
     // recipient's custodial identity + phone-derived Lightning address. Idempotent.
     ensureIdentity(p.recipient, p.ref);
@@ -716,6 +722,7 @@ async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerR
     // The provider rejected the payout after accepting it → the inbound crypto must go
     // back to the sender. Enter the refund-claim flow (sender supplies an invoice); the
     // ledger is unwound only when the refund actually pays out (finalizeRefund).
+    void notifyPayoutFailed(p, "the provider rejected it after accepting");
     await beginRefund(p, "payout failed at provider");
   }
   // PENDING → leave as-is; reconciliation will re-check.

@@ -14,6 +14,7 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
+import { listNotifications, notificationHealth } from "../core/notifications.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
@@ -2161,6 +2162,15 @@ api.get("/admin/readiness", async (req, res) => {
       ],
     },
   });
+});
+
+/* Notification delivery — what we actually told people, and what we didn't.
+   Separate from the derived alert feed below: that one is a live read of payment state,
+   this is the RECORD of dispatch. A channel switched on in Settings with no provider behind
+   it shows up here as skipped, with the reason — which is how the console stops implying it
+   is sending messages nobody receives. */
+api.get("/admin/notifications/outbox", async (_req, res) => {
+  res.json({ health: notificationHealth(), items: listNotifications(100) });
 });
 
 /** Real operational notifications derived from payment activity. */

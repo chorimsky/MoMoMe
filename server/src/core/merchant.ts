@@ -193,6 +193,18 @@ export async function resolveMerchant(
 }
 
 /* ---------- the learning loop (called on a successful payout) ---------- */
+/** Forget every learned merchant. The merchant graph is taught by recordSuccessfulPayout on
+ *  each delivery, so on a deployment whose deliveries were all simulated it describes
+ *  businesses that were never actually paid — and it feeds the same trust surface senders
+ *  rely on. Discards derived data only; money records are untouched, and the graph relearns
+ *  from real payouts. */
+export function forgetAllMerchants(): number {
+  const n = byId.size;
+  byId.clear();
+  touch("merchants");
+  return n;
+}
+
 export function recordSuccessfulPayout(opts: { phone: string; name: string; provider: ProviderId; country: CountryCode; merchantCode?: string | null; aggregatorRef?: string | null }): Merchant {
   let merchant = findByPhone(opts.phone) ?? (opts.merchantCode ? findByCode(opts.merchantCode) : undefined);
   if (!merchant) {

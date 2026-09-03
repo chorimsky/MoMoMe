@@ -119,6 +119,25 @@ export function getIdentityByPhone(phone: string): Identity | undefined {
  *  received money (no national-significant-number in `deliveredNsn`). Safe and
  *  self-healing: a pruned number is re-provisioned on its next delivery.
  *  Returns the customerIds removed. */
+/** Forget every learned identity. The identity graph is the trust layer's STRONGEST claim
+ *  — resolveRecipient returns a name from it as "internal", verified, trustLevel 2 — and it
+ *  is populated by ensureIdentity() on delivered payouts. On a deployment whose entire
+ *  delivery history was SIMULATED, every name in it was learned from a payout that never
+ *  happened, and a real sender paying that number sees a confirmed name for a stranger.
+ *
+ *  In this market name confirmation is the safeguard against paying the wrong number, so a
+ *  name learned from fiction is worse than none: it turns "unknown — confirm manually" into
+ *  false confidence. Clearing it fails SAFE — resolveRecipient falls through to "unknown" —
+ *  and the graph relearns from real payouts. Operator-initiated; it discards derived trust
+ *  data, never money records. */
+export function forgetAllIdentities(): number {
+  const n = byPhone.size;
+  byPhone.clear();
+  otps.clear(); // pending claim codes reference identities that no longer exist
+  touch("identity");
+  return n;
+}
+
 export function pruneOrphanIdentities(deliveredNsn: Set<string>): string[] {
   const removed: string[] = [];
   for (const [key, id] of [...byPhone]) {

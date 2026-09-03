@@ -147,6 +147,34 @@ async function main() {
       .reduce((n, e) => n + (e.direction === "debit" ? e.amount : -e.amount), 0);
     ok("XAF still nets to zero after the release", Math.abs(net) < 1e-6, String(net));
 
+    /* ---- the trust layer must not vouch for names learned from simulated payouts ----
+       resolveRecipient answers from the identity graph as "internal", verified, trustLevel 2
+       — the strongest claim it makes — and that graph is taught on every delivery. A
+       deployment whose deliveries were simulated shows a confirmed name for a number nobody
+       was paid at, on a live Lightning Address. Clearing it must fail SAFE. */
+    const { ensureIdentity, forgetAllIdentities, getIdentityByDigits } = await import("../src/core/identity.js");
+    const { resolveRecipient } = await import("../src/core/nameResolver.js");
+
+    ensureIdentity({ phone: "677000111", country: "CM", provider: "MTN", name: "DEMO LEARNED", nameSource: "manual" } as never, "MMM-FAKE");
+    ok("a delivery teaches the identity graph", !!getIdentityByDigits("677000111"));
+
+    const vouched = await resolveRecipient("677000111", "CM");
+    ok("and the trust layer vouches for it at its strongest level",
+       vouched.status === "internal" && vouched.verified === true && vouched.trustLevel === 2,
+       `${vouched.status}/${vouched.trustLevel}`);
+
+    const forgotten = forgetAllIdentities();
+    ok("the reset forgets what was learned", forgotten >= 1, String(forgotten));
+
+    const after2 = await resolveRecipient("677000111", "CM");
+    // The learned claim is gone — that is the point. What it falls through TO depends on the
+    // rail: this suite runs sandbox, where pawapay.lookupName returns a deterministic fake,
+    // a path gated on !liveMoney() precisely so it cannot reach a real-money deployment.
+    // In production liveMoney() is true, that lookup returns null, and status is "unknown".
+    ok("the learned identity no longer vouches for the number",
+       after2.status !== "internal" && after2.name !== "DEMO LEARNED", `${after2.status}/${after2.name}`);
+    ok("nothing claims trustLevel 2 for it any more", after2.trustLevel !== 2, String(after2.trustLevel));
+
     /* ---- readiness gates ---- */
     const login = await fetch(`${base}/api/admin/login`, {
       method: "POST", headers: { "content-type": "application/json" },

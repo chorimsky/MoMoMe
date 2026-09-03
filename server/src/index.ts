@@ -11,6 +11,8 @@ import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
 import { releaseStrandedEarmarks, reconcileEarmarkAccount } from "./core/stateMachine.js";
 import { store } from "./db/store.js";
+import { forgetAllIdentities } from "./core/identity.js";
+import { forgetAllMerchants } from "./core/merchant.js";
 
 // Boot checks fail CLOSED, which is right — but on Railway's railpack runtime stderr is not
 // captured, so a throw here left literally no trace: the container simply never answered its
@@ -63,6 +65,24 @@ if ((process.env.RELEASE_STRANDED_EARMARKS ?? "").trim() === "1") {
       ? `[maintenance] payout_float_XAF already square at ${rec.to} XAF. Unset RELEASE_STRANDED_EARMARKS.`
       : `[maintenance] reconciled payout_float_XAF ${rec.from} → ${rec.to} XAF (adjustment ${rec.adjusted}, booked against fx_position). Unset RELEASE_STRANDED_EARMARKS.`);
   })().catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
+}
+
+/* ---------- one-shot maintenance: forget trust learned from simulated payouts ----------
+   resolveRecipient answers with a name from the identity graph as "internal", verified,
+   trustLevel 2 — the strongest claim the trust layer makes — and that graph is taught by
+   ensureIdentity() on every delivery. A deployment whose deliveries were all SIMULATED has
+   therefore learned confirmed-looking names for numbers nobody was ever paid at, and shows
+   them to real senders on a live Lightning Address.
+
+   In this market name confirmation IS the safeguard against paying the wrong number, so a
+   name learned from fiction is worse than none: it turns "unknown — confirm manually" into
+   false confidence. Clearing fails SAFE, and both graphs relearn from real payouts.
+
+   Derived trust data only. No money record is touched. */
+if ((process.env.RESET_DEMO_TRUST ?? "").trim() === "1") {
+  const identities = forgetAllIdentities();
+  const merchants = forgetAllMerchants();
+  console.warn(`[maintenance] RESET_DEMO_TRUST: forgot ${identities} learned identit${identities === 1 ? "y" : "ies"} and ${merchants} merchant(s). Recipient names now resolve as "unknown — confirm manually" until real payouts teach them again. Unset the flag.`);
 }
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME

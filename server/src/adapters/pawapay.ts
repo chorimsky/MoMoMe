@@ -192,13 +192,19 @@ export function refForPayoutId(payoutId: string): string | undefined {
 /** Available wallet balance (XAF) for a country — drives balance-aware routing.
  *  null unless PawaPay is LIVE (a sandbox rail has no real balance and simulates
  *  its payouts, so it routes via the simulated fallback). Cached briefly. */
-let balCache: { at: number; map: Record<string, number> } | null = null;
+// Cached PER COUNTRY. A single shared map keyed by ISO was wrong: one country's response
+// populated the whole cache, so a second country asked within the TTL missed the map and
+// was told "0 XAF" — an unfunded rail — when its balance had simply never been fetched.
+const balCache = new Map<string, { at: number; xaf: number }>();
 export async function availableBalanceXaf(country: CountryCode, _provider?: ProviderId): Promise<number | null> {
   if (!pawapayLive()) return null;
   const iso = ISO3[country] ?? "CMR";
-  if (balCache && Date.now() - balCache.at < 15_000) return balCache.map[iso] ?? 0;
+  const hit = balCache.get(iso);
+  if (hit && Date.now() - hit.at < 15_000) return hit.xaf;
   try {
-    const res = await fetchT(`${config.pawapay.apiUrl}/v2/wallet-balances`, {
+    // ?country= is how PawaPay documents this call; we always know which country we are
+    // asking about, so ask for that one rather than filtering a multi-country response.
+    const res = await fetchT(`${config.pawapay.apiUrl}/v2/wallet-balances?country=${iso}`, {
       headers: { authorization: `Bearer ${config.pawapay.apiKey}` },
     });
     if (!res.ok) {
@@ -209,10 +215,16 @@ export async function availableBalanceXaf(country: CountryCode, _provider?: Prov
       return null;
     }
     const data = (await res.json()) as { balances?: Array<{ country?: string; balance?: string; currency?: string }> };
-    const map: Record<string, number> = {};
-    for (const b of data.balances ?? []) if (b.currency === "XAF" && b.country) map[b.country] = Number(b.balance ?? 0);
-    balCache = { at: Date.now(), map };
-    return map[iso] ?? 0;
+    // Sum the XAF wallets for this country. A country filtered response may omit the
+    // country field entirely, so only reject an entry that names a DIFFERENT country.
+    let xaf = 0;
+    for (const b of data.balances ?? []) {
+      if (b.currency !== "XAF") continue;
+      if (b.country && b.country !== iso) continue;
+      xaf += Number(b.balance ?? 0) || 0;
+    }
+    balCache.set(iso, { at: Date.now(), xaf });
+    return xaf;
   } catch (e) {
     console.error(`[pawapay] wallet-balance read threw: ${e instanceof Error ? e.message : String(e)} — payout float will fall back to the static ceiling`);
     return null;

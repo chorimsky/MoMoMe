@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:ln": "tsx test/lightning.e2e.ts",
-    "test:settle": "tsx test/settlement-idempotency.test.ts",
+    "test:settle": "tsx test/settlement-idempotency.test.ts && DB_PATH=:memory: RAILS_MODE=sandbox tsx test/treasury-float.test.ts",
     "test:health": "tsx test/rail-health.test.ts",
     "test:registry": "tsx test/rail-registry.test.ts",
     "test:registry:cfg": "tsx test/rail-registry-configured.test.ts",

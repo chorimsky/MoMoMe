@@ -68,9 +68,10 @@ async function liveAggregatorXaf(): Promise<number> {
  *     external_recipient delta, which would double-count deliveries and drift the float
  *     permanently negative. Capped by XAF_FLOAT_MAX so a spoofed/oversized balance can't
  *     authorize unlimited payout.
- *   • No queryable rail (sandbox/tests, or a total balance-API outage) → the original
- *     constant-treasury model: static ceiling − all-time delivered (external_recipient)
- *     − in-flight reserved (payout_float_XAF). Both ledger balances are negative credits.
+ *   • No queryable rail (sandbox/tests, or a total balance-API outage) → a static EXPOSURE
+ *     ceiling: XAF_FLOAT_MAX − in-flight reserved (payout_float_XAF, a negative credit).
+ *     All-time delivered is NOT subtracted — see the note at the fallback for why that
+ *     term bricked production.
  *  Each payment reserves at FX-lock BEFORE this is read, so concurrent settlements can't
  *  all see the full float and over-commit the treasury. */
 /** How the last availableFloatXaf() figure was arrived at — a live rail balance, or the
@@ -97,9 +98,24 @@ export async function availableFloatXaf(): Promise<number> {
     }
     return Math.min(live, XAF_FLOAT_MAX) + reserved;
   }
-  // Balance genuinely UNKNOWN (no rail could answer) → constant-treasury model.
-  floatBasis = `NO rail balance available (${balanceReasons().join("; ") || "no rails"}) → static ceiling ${XAF_FLOAT_MAX} minus all-time deliveries. This figure is an accounting fallback, NOT a real balance.`;
-  return XAF_FLOAT_MAX + (await s.balance("external_recipient", "XAF")) + reserved;
+  // Balance genuinely UNKNOWN (no rail could answer) → fall back to the static EXPOSURE
+  // ceiling: how much we are willing to have committed at once, less what is committed now.
+  //
+  // This deliberately does NOT subtract external_recipient (all-time delivered). That term
+  // made the fallback a ONE-WAY RATCHET: the account is only ever credited (settle() posts a
+  // delivery leg, nothing ever posts back), and no top-up path exists anywhere in the
+  // codebase, so the figure could only descend. Production reached -423,041 XAF and refused
+  // EVERY payment — not because any treasury was short, but because ~200,000,000 XAF of
+  // *simulated* sandbox payouts had eaten a ceiling denominated in real money. A number that
+  // can only fall, cannot be replenished, and counts fake money against real capacity is not
+  // a balance; it is a countdown to a permanently bricked platform.
+  //
+  // The LIVE branch above already excludes this term, for the same stated reason ("would
+  // double-count deliveries and drift the float permanently negative"). The fallback now
+  // matches it: capacity minus in-flight, refreshed as payouts settle. Money that already
+  // left is gone — it neither adds to nor subtracts from what we can commit next.
+  floatBasis = `NO rail balance available (${balanceReasons().join("; ") || "no rails"}) → static exposure ceiling ${XAF_FLOAT_MAX} less in-flight ${-reserved}. This is a commitment cap, NOT a measured balance.`;
+  return XAF_FLOAT_MAX + reserved;
 }
 
 /** True once the inbound has been booked to the ledger (the INBOUND_CONFIRMED

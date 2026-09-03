@@ -61,6 +61,56 @@ async function liveAggregatorXaf(): Promise<number> {
   return run;
 }
 
+/** This payment's OUTSTANDING payout-float earmark (a positive XAF figure, 0 when none
+ *  is held). Derived from the payment's own ledger entries, so it is exact and needs no
+ *  extra state. Reservations are credits, which the ledger signs negative. */
+async function heldReservationXaf(paymentId: string): Promise<number> {
+  const es = await store().entriesFor(paymentId);
+  const net = es
+    .filter((e) => e.account === "payout_float_XAF" && e.currency === "XAF")
+    .reduce((n, e) => n + (e.direction === "debit" ? e.amount : -e.amount), 0);
+  return net < 0 ? -net : 0;
+}
+
+/** Park a payment for operator review and GIVE BACK its payout-float earmark.
+ *
+ *  The earmark exists to stop CONCURRENT settlements from over-committing the treasury.
+ *  A payment held for review is not concurrent — it is suspended, possibly forever, and
+ *  adminRetry re-checks the corridor cap and the float from scratch before it disburses.
+ *  So holding the earmark through a park buys no safety, and it costs everything: every
+ *  parked payment permanently subtracted its amount from the float it would never spend.
+ *  Once the float went negative the "insufficient XAF float" guard parked each new
+ *  payment in turn, each one taking its own amount out of circulation — a float that
+ *  destroyed itself at the rate of attempted payments. Production accumulated 436,482 XAF
+ *  of earmarks held by payments nobody will ever resolve, on rails holding 13,440 XAF.
+ *
+ *  Only ever called BEFORE a payout is submitted. A payment already in flight keeps its
+ *  earmark: the delivery leg debits it, so releasing there would over-release. */
+async function releaseReservation(p: Payment): Promise<void> {
+  const held = await heldReservationXaf(p.id);
+  if (held <= 0) return;
+  await store().recordTxn(p.id, [
+    { account: "payout_float_XAF", direction: "debit", amount: held, currency: "XAF" },
+    { account: "fx_position", direction: "credit", amount: held, currency: "XAF" },
+  ]);
+}
+
+async function parkForReview(p: Payment, reason: string): Promise<void> {
+  await releaseReservation(p);
+  await transition(p, "MANUAL_REVIEW", reason);
+}
+
+/** Re-take the earmark before a retried payout is submitted, since parkForReview gave it
+ *  back. Idempotent: a payment that still holds one (parked in flight, or an older payment
+ *  parked before this behaviour existed) is left alone. The delivery leg debits this. */
+async function ensureReserved(p: Payment): Promise<void> {
+  if ((await heldReservationXaf(p.id)) > 0) return;
+  await store().recordTxn(p.id, [
+    { account: "fx_position", direction: "debit", amount: p.xaf, currency: "XAF" },
+    { account: "payout_float_XAF", direction: "credit", amount: p.xaf, currency: "XAF" },
+  ]);
+}
+
 /** Available XAF payout float. Two accounting regimes:
  *   • LIVE rails queryable → the aggregator wallet balance is TODAY's real capacity and
  *     ALREADY nets out every delivered payout (money that left the rail). So we subtract
@@ -374,24 +424,24 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
 
   // Pre-payout guards: corridor limit + available float.
   if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) {
-    await transition(p, "MANUAL_REVIEW", `exceeds ${p.recipient.provider} payout limit`);
+    await parkForReview(p, `exceeds ${p.recipient.provider} payout limit`);
     return;
   }
   // availableFloatXaf() already includes THIS payment's FX-lock reservation, so a
   // negative result means the treasury is over-committed across all delivered +
   // in-flight payouts — hold this marginal payment rather than over-draw real money.
   if ((await availableFloatXaf()) < 0) {
-    await transition(p, "MANUAL_REVIEW", "insufficient XAF float");
+    await parkForReview(p, "insufficient XAF float");
     return;
   }
   // Operator approval threshold: large payouts hold for manual sign-off.
   if (p.xaf >= getSettings().ops.payoutApprovalXaf) {
-    await transition(p, "MANUAL_REVIEW", `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
+    await parkForReview(p, `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
     return;
   }
   // Trust gate: a flagged / very-low-trust merchant needs manual confirmation.
   if (payoutBlocked(p.recipient.phone)) {
-    await transition(p, "MANUAL_REVIEW", "low-trust merchant — manual confirmation required");
+    await parkForReview(p, "low-trust merchant — manual confirmation required");
     return;
   }
 
@@ -406,7 +456,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // aggregator can never simulate a payout and falsely "deliver" a real payment.
   const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal);
   if (!agg) {
-    await transition(p, "MANUAL_REVIEW", cryptoReal
+    await parkForReview(p, cryptoReal
       ? "no funded LIVE payout rail — real settlement held for review"
       : "no payout aggregator with sufficient balance");
     return;
@@ -415,7 +465,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // paired with non-real crypto). The selection above already guarantees the
   // converse — real crypto only ever routes to a live rail.
   if (aggregatorLive(agg.name) && !cryptoReal) {
-    await transition(p, "MANUAL_REVIEW", "live payout blocked — crypto inbound is not real");
+    await parkForReview(p, "live payout blocked — crypto inbound is not real");
     return;
   }
   p.aggregator = agg.name;
@@ -651,10 +701,16 @@ async function adminRetryLocked(paymentId: string): Promise<boolean> {
   if (aggregatorLive(agg.name) && !cryptoReal) return false;
   p.aggregator = agg.name;
 
+  // parkForReview gave the earmark back when this payment was held — take it again
+  // before submitting, because the delivery leg debits it. Idempotent.
+  await ensureReserved(p);
   let res;
   try {
     res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
   } catch {
+    // Nothing was submitted, so give the earmark straight back. No transition: the
+    // payment is already held for review and a second MANUAL_REVIEW event says nothing.
+    await releaseReservation(p);
     return false;
   }
   // The adapter already had this ref in flight — do NOT re-enter PAYOUT_REQUESTED (that

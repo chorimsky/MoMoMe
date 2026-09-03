@@ -73,5 +73,55 @@ ok("committing the whole ceiling exhausts the float", saturated <= 0, `${saturat
 ok("the cap binds on EXPOSURE, so it recovers when reservations clear — unlike history",
    saturated === XAF_FLOAT_MAX - 4_000_000 - XAF_FLOAT_MAX, `${saturated} XAF`);
 
+/* ---- 5. A parked payment must not keep an earmark it will never spend ----
+   The float used to destroy itself at the rate of attempted payments: each payment
+   reserved at FX-lock, got parked for review, and kept the earmark forever. Once the
+   float went negative the "insufficient XAF float" guard parked every new payment in
+   turn, each one taking its own amount out of circulation permanently. Production ran
+   this to 436,482 XAF of earmarks held by payments nobody will ever resolve. */
+const { confirmInbound } = await import("../src/core/stateMachine.js");
+const { PROVIDER_PAYOUT_MAX } = await import("../../shared/domain.js");
+
+// Clear the saturating reservation from case 4 so this starts from a healthy float.
+await s.recordTxn("pay_saturate_release", [
+  { account: "payout_float_XAF", direction: "debit", amount: XAF_FLOAT_MAX, currency: "XAF" },
+  { account: "fx_position", direction: "credit", amount: XAF_FLOAT_MAX, currency: "XAF" },
+]);
+await s.recordTxn("pay_inflight_release", [
+  { account: "payout_float_XAF", direction: "debit", amount: 4_000_000, currency: "XAF" },
+  { account: "fx_position", direction: "credit", amount: 4_000_000, currency: "XAF" },
+]);
+
+// Above the corridor cap → guaranteed to park right after the FX-lock reservation.
+const overCap = PROVIDER_PAYOUT_MAX.MTN + 500_000;
+const mkPayment = async (pid: string) => {
+  const now = new Date().toISOString();
+  const feeXaf = Math.round(overCap * 0.025);
+  const pay = {
+    id: pid, ref: `MMM-PARK-${pid}`, quoteId: `q_${pid}`,
+    state: "AWAITING_INBOUND", displayStatus: "Pending", method: "LIGHTNING",
+    recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "Test", nameSource: "manual" },
+    xaf: overCap, feeXaf, totalXaf: overCap + feeXaf, usd: 2500,
+    payInstruction: { method: "LIGHTNING", code: `lnbc_${pid}`, qr: `lightning:lnbc_${pid}`, asset: "BTC",
+      amount: 0.015, amountLabel: "0.015 BTC", expiresAt: now, providerRef: `ph_${pid}`, provider: "ibex" },
+    events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],
+    createdAt: now, updatedAt: now,
+  } as unknown as Parameters<typeof confirmInbound>[0];
+  await s.putPayment(pay);
+  return pay;
+};
+
+const floatBeforeParks = await availableFloatXaf();
+for (const pid of ["park1", "park2", "park3"]) {
+  const pay = await mkPayment(pid);
+  await confirmInbound(pay, 0.015);
+  ok(`${pid} parked for review`, pay.state === "MANUAL_REVIEW", pay.state);
+}
+const floatAfterParks = await availableFloatXaf();
+ok("three parked payments destroyed NO float",
+   floatAfterParks === floatBeforeParks, `${floatAfterParks} vs ${floatBeforeParks}`);
+ok("the earmark account is clear after parking",
+   (await s.balance("payout_float_XAF", "XAF")) === 0, String(await s.balance("payout_float_XAF", "XAF")));
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

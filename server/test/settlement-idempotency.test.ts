@@ -58,7 +58,11 @@ async function main() {
   ok("held at MANUAL_REVIEW (above corridor limit)", p.state === "MANUAL_REVIEW", p.state);
   ok("booked exactly one INBOUND_CONFIRMED event", p.events.filter((e) => e.state === "INBOUND_CONFIRMED").length === 1);
   const before = await snapshot();
-  ok("float reserved", before.float !== 0, String(before.float));
+  // Parking for review GIVES THE EARMARK BACK. It is only there to stop concurrent
+  // settlements over-committing the treasury; a payment suspended for review is not
+  // concurrent, and adminRetry re-checks the corridor cap and the float before it
+  // disburses. Holding it through a park destroyed float no one would ever spend.
+  ok("parking for review released the float earmark", before.float === 0, String(before.float));
   ok("fee booked", before.fee !== 0, String(before.fee));
 
   // 2. A duplicate settled webhook re-posts confirmInbound → MUST be a no-op.

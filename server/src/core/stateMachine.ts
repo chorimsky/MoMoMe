@@ -92,7 +92,7 @@ export async function availableFloatXaf(): Promise<number> {
   // one says "the rail is empty, fund it" and the other invents an accounting figure that
   // sends you looking for a bug in the ledger.
   if (Number.isFinite(live)) {
-    floatBasis = `live rail balance ${live} XAF`;
+    floatBasis = `live rail balance ${live} XAF (${balanceReasons().join("; ")}) less in-flight ${-reserved} XAF`;
     if (live <= 0) {
       console.error(`[treasury] payout rail balance is ${live} XAF — payouts are blocked because the rail is UNFUNDED, not because the treasury ceiling is exhausted.`);
     }

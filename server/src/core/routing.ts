@@ -117,7 +117,9 @@ export async function aggregatorFloatXaf(): Promise<number> {
     if (!p.configured()) { why.push(`${p.name}: not configured`); continue; }
     if (!eligible(p.name)) { why.push(`${p.name}: marked unhealthy by the rail health tracker`); continue; }
     const bal = await p.balance("CM");
-    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; }
+    // Record what each rail DID contribute, not only why it contributed nothing. A single
+    // summed figure cannot tell an operator which wallet needs funding.
+    if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; why.push(`${p.name}: ${bal} XAF`); }
     else { why.push(`${p.name}: balance unreadable (not live, or the balance API failed)`); }
   }
   // NaN sends availableFloatXaf() into the static-ceiling fallback, which on a long-lived

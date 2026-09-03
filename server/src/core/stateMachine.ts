@@ -72,6 +72,66 @@ async function heldReservationXaf(paymentId: string): Promise<number> {
   return net < 0 ? -net : 0;
 }
 
+/** An earmark held by a payment that is NOT in flight — float committed to a payout that
+ *  is never going to happen. Before parkForReview released them, every guard that held a
+ *  payment kept its earmark for good, so a long-lived deployment accumulated these until
+ *  the float went negative and refused everything. New ones are no longer created; these
+ *  are the historical ones, and only an operator should decide to clear them. */
+export interface StrandedEarmark {
+  paymentId: string;
+  ref: string;
+  state: string;
+  xaf: number;
+  updatedAt: string;
+}
+
+/** Every earmark currently held by a payment at rest. PAYOUT_REQUESTED is excluded: that
+ *  payout IS in flight and its delivery leg will debit the earmark, so releasing it would
+ *  over-release. Derived from the ledger, so it cannot drift from the books. */
+export async function strandedEarmarks(): Promise<StrandedEarmark[]> {
+  const held = new Map<string, number>();
+  for (const e of await store().allEntries()) {
+    if (e.account !== "payout_float_XAF" || e.currency !== "XAF") continue;
+    held.set(e.paymentId, (held.get(e.paymentId) ?? 0) + (e.direction === "debit" ? e.amount : -e.amount));
+  }
+  const out: StrandedEarmark[] = [];
+  for (const [paymentId, net] of held) {
+    if (net >= 0) continue; // nothing outstanding
+    const p = await store().getPayment(paymentId);
+    if (!p || p.state === "PAYOUT_REQUESTED") continue;
+    out.push({ paymentId, ref: p.ref, state: p.state, xaf: -net, updatedAt: p.updatedAt });
+  }
+  return out.sort((a, b) => b.xaf - a.xaf);
+}
+
+/** Give the stranded earmarks back to the float. Each release is a balanced posting under
+ *  that payment's own lock, and re-checks the payment is still at rest — a payout that
+ *  went in flight between the scan and the release keeps its earmark. Idempotent: a second
+ *  run finds nothing. Operator-initiated only; this moves the books, so it is never
+ *  automatic. */
+export async function releaseStrandedEarmarks(): Promise<{ released: number; xaf: number; skipped: number }> {
+  let released = 0, xaf = 0, skipped = 0;
+  for (const s of await strandedEarmarks()) {
+    const done = await store().lockPayment(s.paymentId, async () => {
+      const p = await store().getPayment(s.paymentId); // fresh read under the lock
+      if (!p || p.state === "PAYOUT_REQUESTED") return false;
+      const held = await heldReservationXaf(s.paymentId);
+      if (held <= 0) return false;
+      await store().recordTxn(s.paymentId, [
+        { account: "payout_float_XAF", direction: "debit", amount: held, currency: "XAF" },
+        { account: "fx_position", direction: "credit", amount: held, currency: "XAF" },
+      ]);
+      xaf += held;
+      return true;
+    });
+    if (done) released++; else skipped++;
+  }
+  if (released > 0) {
+    console.warn(`[treasury] released ${released} stranded earmark(s) worth ${xaf} XAF back to the payout float (operator action).`);
+  }
+  return { released, xaf, skipped };
+}
+
 /** Park a payment for operator review and GIVE BACK its payout-float earmark.
  *
  *  The earmark exists to stop CONCURRENT settlements from over-committing the treasury.

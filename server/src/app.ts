@@ -3,6 +3,7 @@ import cors from "cors";
 import { api } from "./routes/api.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
+import { applinks } from "./routes/applinks.js";
 import { cron } from "./routes/cron.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
@@ -113,6 +114,9 @@ export function createApp() {
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).
   app.use("/", lnurl);
+  // Apple/Google app-link association files, same .well-known root. The web app rewrites
+  // these two paths here so its SPA catch-all cannot answer them with index.html.
+  app.use("/", applinks);
   app.use("/api/cron", cron); // Vercel Cron drives the background jobs here (before /api)
   app.use("/api", api);
 

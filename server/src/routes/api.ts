@@ -12,8 +12,9 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
-import { pawapayAdapter } from "../adapters/payouts.js";
-import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, reconcileOneInbound } from "../core/stateMachine.js";
+import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
+import { appLinksStatus } from "./applinks.js";
+import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
@@ -183,6 +184,7 @@ api.use("/admin", (req, res, next) => {
   // settings) is unaffected.
   const ELEVATED_ONLY: RegExp[] = [
     /^\/treasury\/(withdraw|destinations)$/,          // sweeps real crypto out of the platform wallet
+    /^\/liquidity\/release-earmarks$/,                // returns committed float to the spendable pool
     /^\/momo\/(cashout|cashin|transfer)$/,            // moves real Mobile Money funds
     /^\/payments\/[^/]+\/(retry|refund)$/,           // re-pays or refunds a real payment
     /^\/users(\/|$)/,                                // who can access the console at all
@@ -1480,12 +1482,14 @@ api.post("/admin/identities/:id/claim", async (req, res) => {
 /* ---------- liquidity ---------- */
 const XAF_FLOAT_CAPACITY = 50_000_000; // configured payout-float treasury size
 api.get("/admin/liquidity", async (_req, res) => {
-  // XAF float DEPLETES as money is paid out and is restored by refunds — a real,
-  // moving number (was a constant seed). Floor at 20% of capacity so "below floor"
-  // is a meaningful low-liquidity signal (it used to equal capacity → always on).
-  const pays = (await store().listPayments());
-  const deliveredXaf = pays.filter((p) => p.state === "DELIVERED").reduce((s, p) => s + p.xaf, 0);
-  const xafFloat = Math.max(0, XAF_FLOAT_CAPACITY - deliveredXaf);
+  // Report the float the ENGINE actually gates on, not a second opinion. This view used
+  // to compute capacity minus all-time delivered — the same ratchet the payout path was
+  // built on and no longer uses — so an operator looking here saw a healthy float while
+  // every payment was being refused, with no way to reconcile the two numbers.
+  const xafFloat = Math.max(0, await availableFloatXaf());
+  // Float committed to payouts that will never happen. Surfaced HERE because this is the
+  // page where an operator asks "why is the float low", and it is the answer.
+  const stranded = await strandedEarmarks();
   // Crypto inventory held = net FX position from the ledger (≥0; the engine
   // converts inbound to XAF, so at rest it holds little — shown honestly).
   const btc = Math.max(0, await store().balance("fx_position", "BTC"));
@@ -1497,7 +1501,21 @@ api.get("/admin/liquidity", async (_req, res) => {
       { asset: "USDT", label: "USDT inventory", balance: usdt, capacity: 50_000 },
       { asset: "XAF", label: "XAF payout float", balance: xafFloat, capacity: XAF_FLOAT_CAPACITY },
     ],
+    floatBasis: floatBasisNote(),
+    stranded: {
+      count: stranded.length,
+      xaf: stranded.reduce((n, e) => n + e.xaf, 0),
+      items: stranded.slice(0, 50),
+    },
   });
+});
+
+/* Give stranded earmarks back to the float. Elevation + Super-Admin gated in the /admin
+   middleware: it moves the books. Idempotent — a second run finds nothing to release. */
+api.post("/admin/liquidity/release-earmarks", async (req, res) => {
+  if (!isSuperAdmin(sessionOf(req)!.role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+  const result = await releaseStrandedEarmarks();
+  res.json({ ok: true, ...result, floatXaf: await availableFloatXaf() });
 });
 
 /* ---------- treasury (crypto wallet sweep) ----------
@@ -2002,12 +2020,56 @@ api.get("/admin/readiness", async (req, res) => {
       "IBEX will not deliver webhooks to a non-https callback."),
   ];
 
+  /* ---------- CAN MONEY ACTUALLY LEAVE? ----------
+     The gates above are all "is this configured". Every one of them passed while the
+     platform refused every single payment, because none of them asked the question a
+     go-live console exists to answer: if a customer paid right now, would they be paid?
+     These check that, from the same functions the payout path gates on. */
+  const providers = Object.keys(PROVIDER_PAYOUT_MAX) as ProviderId[];
+  const routable = PAYOUTS.filter((r) => providers.some((prov) => r.supports(prov)));
+  const routableLive = routable.filter((r) => r.configured());
+  const floatXaf = await availableFloatXaf();
+  const stranded = await strandedEarmarks();
+  const strandedXaf = stranded.reduce((n, e) => n + e.xaf, 0);
+
+  const money = [
+    check("Payout capacity", floatXaf > 0 ? "ok" : "blocked",
+      `${Math.round(floatXaf).toLocaleString()} XAF available · ${floatBasisNote()}`,
+      floatXaf > 0 ? undefined : "No payment can be delivered. Fund a routable rail, and release any float committed to payments that will never complete."),
+    check("Routable payout rails", routableLive.length === 0 ? "blocked" : routableLive.length === 1 ? "warn" : "ok",
+      routableLive.length === 0
+        ? "NONE — every rail serves no corridor or is unconfigured"
+        : `${routableLive.map((r) => r.name).join(", ")}${routable.length !== PAYOUTS.length ? ` · out of rotation: ${PAYOUTS.filter((r) => !routable.includes(r)).map((r) => r.name).join(", ")}` : ""}`,
+      routableLive.length === 1 ? "Only one rail can route, so its outage is a full outage — there is nothing to fail over to." : undefined),
+    check("Float committed to nothing", strandedXaf > 0 ? "warn" : "ok",
+      strandedXaf > 0
+        ? `${Math.round(strandedXaf).toLocaleString()} XAF held by ${stranded.length} payment(s) that are not in flight`
+        : "none",
+      strandedXaf > 0 ? "This float is reserved for payouts that will never happen. Release it from Liquidity." : undefined),
+  ];
+
+  /* App links: the two files Apple and Google fetch before letting a link open the app.
+     Absent, every payment link opens a browser tab instead — silently, with no error
+     anywhere, which is exactly why this belongs on a readiness page. */
+  const al = appLinksStatus();
+  const links = [
+    check("iOS Universal Links", al.ios.ready ? "ok" : "warn",
+      al.ios.ready ? `claimed for ${al.ios.appID}` : "APPLE_TEAM_ID not set — payment links open a browser, not the app",
+      al.ios.ready ? undefined : "Set APPLE_TEAM_ID (10 characters, from the Apple Developer account)."),
+    check("Android App Links", al.android.ready ? "ok" : "warn",
+      al.android.ready ? `${al.android.fingerprints} fingerprint(s) for ${al.android.package}` : "ANDROID_CERT_SHA256 not set — payment links open a browser, not the app",
+      al.android.ready ? undefined : "Set ANDROID_CERT_SHA256 to the signing certificate SHA-256. Include BOTH the Play App Signing certificate and the upload key, or links break for one of them."),
+  ];
+
   const egress = await egressStatus();
   res.json({
     liveMoney: liveMoney(),
     deployEnv: deployEnv(),
+    // Ordered so the reader meets the blocking question first: can money move at all?
+    money,
     gates,
     secrets,
+    links,
     egress,
     rails: {
       crypto: [

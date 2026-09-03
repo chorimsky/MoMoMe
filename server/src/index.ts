@@ -9,6 +9,7 @@ import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
+import { releaseStrandedEarmarks } from "./core/stateMachine.js";
 
 // Boot checks fail CLOSED, which is right — but on Railway's railpack runtime stderr is not
 // captured, so a throw here left literally no trace: the container simply never answered its
@@ -29,6 +30,26 @@ const app = createApp();
 // createApp() seeds the first admin, so the boot-time check above ran before any account
 // existed on a fresh store. Re-run it now that one does.
 assertStoredAdminCredential();
+
+/* ---------- one-shot maintenance: clear stranded payout earmarks ----------
+   A deployment that ran the old code accumulated earmarks held by payments parked for
+   review and never resolved — float committed to payouts that will never happen. The float
+   no longer counts them, so this is not what unblocks a payout; it is bookkeeping, putting
+   payout_float_XAF back to what it should always have been.
+
+   Gated on an env flag and run once at boot because it MOVES THE LEDGER, and that should be
+   a deliberate act with a name on it rather than something a restart does quietly. Safe to
+   leave set — releaseStrandedEarmarks is idempotent and finds nothing on a clean book — but
+   unset it once the log shows zero, so the intent stays explicit.
+
+   Never touches a payout in flight: that delivery leg will debit its earmark. */
+if ((process.env.RELEASE_STRANDED_EARMARKS ?? "").trim() === "1") {
+  void releaseStrandedEarmarks()
+    .then(({ released, xaf, skipped }) => {
+      console.warn(`[maintenance] RELEASE_STRANDED_EARMARKS: released ${released} earmark(s) worth ${xaf} XAF; skipped ${skipped} still in flight. Unset the flag now.`);
+    })
+    .catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
+}
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME
 // jobs run via /api/cron/* (routes/cron.ts) since serverless has no persistent process.

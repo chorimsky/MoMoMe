@@ -287,8 +287,12 @@ const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> 
   // IBEX (`network: "ethereum"`), and every pay screen tells the customer to send on
   // ERC-20 — a badge naming the wrong chain is how a deposit gets sent somewhere
   // unrecoverable.
-  USDT: { label: "USDT · Ethereum", color: "var(--tron)", glyph: "◆" },
-  USDC: { label: "USDC · Ethereum", color: "var(--tron)", glyph: "◆" },
+  // Distinct glyph AND colour, matching the send flow's method picker. These were both a
+  // diamond in the same colour, so a USDT and a USDC deposit were told apart only by
+  // reading the label — on the admin payments list, where an operator reconciling deposits
+  // is scanning a column of badges, that is exactly the wrong thing to make them read.
+  USDT: { label: "USDT · Ethereum", color: "oklch(0.62 0.13 162)", glyph: "₮" },
+  USDC: { label: "USDC · Ethereum", color: "oklch(0.58 0.14 250)", glyph: "$" },
   ONCHAIN: { label: "Bitcoin · on-chain", color: "var(--lightning)", glyph: "₿" },
   PawaPay: { label: "PawaPay", color: "var(--recv)", glyph: "◎" },
   FX: { label: "FX Engine", color: "var(--info)", glyph: "⇄" },

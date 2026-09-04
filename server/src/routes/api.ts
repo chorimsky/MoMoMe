@@ -2271,6 +2271,24 @@ api.get("/admin/readiness", async (req, res) => {
         { name: "IBEX Hub", env: config.ibex.env, configured: ibexConfigured(), live: ibexLive(),
           missing: ["IBEX_CLIENT_ID", "IBEX_CLIENT_SECRET", "IBEX_ACCOUNT_ID"].filter((k) => !has(k)) },
       ],
+      /* IBEX is ACCOUNT-PER-CURRENCY, so a method is only mintable when its own account id
+         is set — and "the rail is configured" says nothing about whether a particular
+         stablecoin can actually receive. A method switched on in Settings with no account
+         behind it fails at address-minting time, which the customer meets as
+         method_unavailable after they have already chosen it. Report both, so the mismatch
+         is visible here instead. */
+      methods: ALL_METHODS.map((m) => {
+        const key = m === "USDT" ? "IBEX_USDT_ACCOUNT_ID" : m === "USDC" ? "IBEX_USDC_ACCOUNT_ID" : "IBEX_ACCOUNT_ID";
+        const account = has(key);
+        const enabled = getSettings().methods[m] !== false;
+        return {
+          method: m, enabledInSettings: enabled, accountVar: key, accountConfigured: account,
+          state: !enabled ? "off" : account ? "ok" : "blocked",
+          detail: !enabled ? "Switched off in Settings → Crypto pay-in methods."
+            : account ? "Offered to customers, with an IBEX account to receive it."
+              : `Offered to customers, but ${key} is not set — minting an address will fail.`,
+        };
+      }),
       payout: [
         { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(),
           missing: ["PEEXIT_API_KEY", "PEEXIT_CALLBACK_PASS"].filter((k) => !has(k)),

@@ -11,6 +11,8 @@ import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
 import { releaseStrandedEarmarks, reconcileEarmarkAccount } from "./core/stateMachine.js";
 import { store } from "./db/store.js";
+import { getSettings, updateSettings, DEFAULT_METHODS } from "./core/settings.js";
+import { ALL_METHODS } from "../../shared/domain.js";
 import { forgetAllIdentities } from "./core/identity.js";
 import { forgetAllMerchants } from "./core/merchant.js";
 
@@ -65,6 +67,31 @@ if ((process.env.RELEASE_STRANDED_EARMARKS ?? "").trim() === "1") {
       ? `[maintenance] payout_float_XAF already square at ${rec.to} XAF. Unset RELEASE_STRANDED_EARMARKS.`
       : `[maintenance] reconciled payout_float_XAF ${rec.from} → ${rec.to} XAF (adjustment ${rec.adjusted}, booked against fx_position). Unset RELEASE_STRANDED_EARMARKS.`);
   })().catch((e) => console.error("[maintenance] stranded-earmark release failed", e));
+}
+
+/* ---------- one-shot: restore the crypto pay-in methods to the code's defaults ----------
+   settings.methods is persisted, so a method switched off once stays off across every
+   deploy — including through the clean sheet, which deliberately keeps operator settings.
+   USDC shipped complete (its own IBEX account, its own address format, its own pay screen)
+   and was sitting off in the stored settings, so customers were never offered it and no
+   amount of deploying changed that.
+
+   Only ever turns a method ON, and only to the code default. It cannot switch one off — an
+   operator who deliberately disabled a rail keeps that decision unless they are also the
+   one setting this flag. */
+if ((process.env.RESTORE_DEFAULT_METHODS ?? "").trim() === "1") {
+  const cur = getSettings().methods;
+  const next = { ...cur };
+  let changed: string[] = [];
+  for (const m of ALL_METHODS) {
+    if (DEFAULT_METHODS[m] && !cur[m]) { next[m] = true; changed.push(m); }
+  }
+  if (changed.length) {
+    updateSettings({ methods: next });
+    console.warn(`[maintenance] RESTORE_DEFAULT_METHODS: enabled ${changed.join(", ")}. Unset the flag.`);
+  } else {
+    console.warn("[maintenance] RESTORE_DEFAULT_METHODS: nothing to enable. Unset the flag.");
+  }
 }
 
 /* ---------- one-shot maintenance: forget trust learned from simulated payouts ----------

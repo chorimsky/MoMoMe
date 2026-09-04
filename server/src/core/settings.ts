@@ -7,6 +7,11 @@ import type { AdminSettings } from "../../../shared/types.js";
 import { FEE_PCT, RAIL_SPREAD_BPS, MAX_XAF } from "../../../shared/domain.js";
 import { register, touch, rehydrate } from "./persist.js";
 
+/** The crypto pay-in methods the product ships with. Named so a one-shot can restore a
+ *  persisted settings row to it: settings.methods survives every deploy AND the clean
+ *  sheet, so a method switched off once stays off forever with no way to notice. */
+export const DEFAULT_METHODS = { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: true } as const;
+
 const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
   channels: { Email: true, SMS: true, WhatsApp: false },
@@ -27,7 +32,7 @@ const DEFAULTS: AdminSettings = {
   // USDC receive combo for the org, minting the address fails and POST /payments answers a
   // clean method_unavailable with the quote un-claimed — it cannot strand a payment. An
   // operator can still switch any method off here.
-  methods: { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: true },
+  methods: DEFAULT_METHODS,
   // Product surfaces — all on by default; a super-admin can disable any of them.
   features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, receive: true, contacts: true },
   // Treasury sweep destinations — all unset until an operator configures them.

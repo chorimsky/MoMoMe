@@ -85,10 +85,11 @@ export function Bar({ pct, tone = "accent" }: { pct: number; tone?: Tone }) {
   );
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+export function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button type="button" onClick={() => onChange(!on)} role="switch" aria-checked={on}
-      style={{ width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", padding: 3, background: on ? "var(--recv)" : "var(--ink-3)", transition: "background .2s", display: "flex" }}>
+    <button type="button" onClick={() => { if (!disabled) onChange(!on); }} role="switch" aria-checked={on}
+      disabled={disabled} aria-disabled={disabled || undefined}
+      style={{ width: 44, height: 26, borderRadius: 999, border: "none", cursor: disabled ? "not-allowed" : "pointer", padding: 3, background: on ? "var(--recv)" : "var(--ink-3)", opacity: disabled ? 0.45 : 1, transition: "background .2s", display: "flex" }}>
       <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#fff", boxShadow: "var(--shadow-sm)", transform: on ? "translateX(18px)" : "none", transition: "transform .2s" }} />
     </button>
   );

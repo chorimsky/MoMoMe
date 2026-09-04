@@ -13,6 +13,8 @@ import { Logo } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
 import { processLogo, analyzeLogo } from "../../../lib/logo.js";
 import { Loading } from "./Overview.js";
+import { useAdminUser } from "../AdminGate.js";
+import { isSuperAdmin } from "@shared/roles.js";
 
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"];
 const LOGO_MAX = 256 * 1024;
@@ -35,6 +37,11 @@ function LabeledInput({ label, value, onChange, mono, type = "text", error, suff
 }
 
 export function SettingsView() {
+  // The server drops methods/ops/compliance/features from a settings save unless the caller
+  // is a Super Admin. Without the same gate here a Finance Manager — who has Settings access
+  // — flips a toggle, saves, is told it worked, and nothing changes.
+  const canEditRestricted = isSuperAdmin(useAdminUser().role);
+
   // Live per-method availability, fetched rather than inferred from the toggles.
   const [methodState, setMethodState] = useState<Array<{ method: string; enabled: boolean; offered: boolean; blocked: string | null; state: string }>>([]);
   useEffect(() => {
@@ -297,7 +304,9 @@ export function SettingsView() {
           </div>
         </Card>
 
-        <Card title="Crypto pay-in methods" sub="Turn a rail off to hide it from customers — they only see and can pay with what's enabled.">
+        <Card title="Crypto pay-in methods" sub={canEditRestricted
+          ? "Turn a rail off to hide it from customers — they only see and can pay with what's enabled."
+          : "Which rails customers can pay with. Only a Super Admin can change these."}>
           {(() => {
             const rows = [["LIGHTNING", "Lightning", "Instant, lowest fee"], ["ONCHAIN", "Bitcoin (on-chain)", "For larger amounts"], ["USDT", "USDT (stablecoin)", "Ethereum · ERC-20"], ["USDC", "USDC (stablecoin)", "Ethereum · ERC-20"]] as const;
             return rows.map(([k, name, desc], i) => (
@@ -322,7 +331,7 @@ export function SettingsView() {
                       </span>
                     );
                   })()}
-                  <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
+                  <Toggle on={methods[k]} disabled={!canEditRestricted} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
                 </div>
               </div>
             ));

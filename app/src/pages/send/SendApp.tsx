@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment } from "@shared/types.js";
+import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, localDigits, detectProvider } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -24,6 +24,12 @@ export interface Draft {
 }
 
 type Step = "details" | "method" | "review" | "pay" | "processing" | "success";
+// The open payment this tab is in the middle of. A reload on the Pay screen used to lose
+// the live invoice: the customer could still pay it (it settles server-side and shows in
+// Activity) but the screen they came back to was an empty form — which is how people pay
+// twice. Remembered per tab; picked up again on load; never re-quoted, never re-minted.
+const RESUME_KEY = "momome_send_resume";
+const IN_FLIGHT: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED"];
 type Tab = "pay" | "history" | "contacts" | "help";
 
 /** Bottom-nav glyphs — filled bolt for Pay, clock for Activity, person for Contacts, ? for Help. */
@@ -90,6 +96,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const [confirmRecipient, setConfirmRecipient] = useState<
     { message: string; token: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | null>(null);
   const [riskToken, setRiskToken] = useState<string | undefined>(undefined);
+  const [resumed, setResumed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const [s, setS] = useState<Draft>(() => merchant
@@ -105,6 +112,40 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>> } | null>(null);
   useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
+  // Pick up an open payment left by a reload (see RESUME_KEY). Only an existing payment is
+  // ever adopted: if it has expired or finished, the record is dropped and the form shows.
+  useEffect(() => {
+    if (merchant || toParam) return;
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem(RESUME_KEY); } catch { return; }
+    if (!raw) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = JSON.parse(raw) as { paymentId: string; draft: Draft; quote: Quote | null };
+        const p = await api.getPayment(saved.paymentId);
+        if (cancelled) return;
+        const payable = p.state === "AWAITING_INBOUND" && Date.parse(p.payInstruction.expiresAt) > Date.now();
+        if (payable || IN_FLIGHT.includes(p.state)) {
+          setS(saved.draft); setQuote(saved.quote ?? null); setPayment(p); setResumed(true); setTab("pay");
+          setStep(payable ? "pay" : "processing");
+        } else {
+          sessionStorage.removeItem(RESUME_KEY);
+        }
+      } catch { try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage disabled */ } }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (merchant) return;
+    try {
+      if ((step === "pay" || step === "processing") && payment) sessionStorage.setItem(RESUME_KEY, JSON.stringify({ paymentId: payment.id, draft: s, quote }));
+      else if (step === "success") sessionStorage.removeItem(RESUME_KEY);
+    } catch { /* storage disabled */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, payment?.id]);
+
   // A11y: when the pay step changes, move focus to the flow region so keyboard
   // and screen-reader users are taken to the new step instead of being dropped
   // to <body> (which silently loses their place). Skips the initial mount.
@@ -116,6 +157,18 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   }, [step]);
 
   const go = (to: Step) => { window.scrollTo({ top: 0 }); setStep(to); };
+  /** The server's "is this who you meant?" refusal — usually a number one digit away from
+   *  someone this sender pays regularly. True when it was one, and the question is now on
+   *  screen instead of a raw error. Carried by every path that creates a payment, so an
+   *  invoice that expires after the sender has already answered does not ask again. */
+  const askIfWrongPerson = (e: unknown): boolean => {
+    if (e instanceof ApiError && e.status === 409 && e.code === "confirm_recipient") {
+      const d = e.data as { riskToken?: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | undefined;
+      setConfirmRecipient({ message: e.message, token: d?.riskToken ?? "", didYouMean: d?.didYouMean });
+      return true;
+    }
+    return false;
+  };
   const recipient = () => ({ phone: s.phone, country: s.country, provider: s.provider, name: s.recipientName, nameSource: s.nameSource });
   const isExpiry = (e: unknown) => e instanceof ApiError && (e.status === 409 || e.status === 404);
 
@@ -171,16 +224,9 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
       setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code, riskToken }));
       go("pay");
     } catch (e) {
-      // The server thinks this may be the wrong person — usually a number one digit away
-      // from someone this sender pays regularly. Ask, rather than showing a raw error, and
-      // carry the token so the same payment goes through once they say they meant it. The
-      // quote is deliberately not consumed by that refusal, so no re-quote is needed.
-      if (e instanceof ApiError && e.status === 409 && e.code === "confirm_recipient") {
-        const d = e.data as { riskToken?: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | undefined;
-        setConfirmRecipient({ message: e.message, token: d?.riskToken ?? "", didYouMean: d?.didYouMean });
-        setBusy(false);
-        return;
-      }
+      // Ask rather than error. The quote is deliberately not consumed by that refusal, so
+      // the confirmed retry needs no re-quote.
+      if (askIfWrongPerson(e)) return;
       // ORPHAN RECOVERY — must run BEFORE any re-quote. The request can fail on this
       // side while the server SUCCEEDED: the 20s client timeout aborts a slow
       // POST /payments that goes on to consume the quote and mint a REAL invoice. The
@@ -214,8 +260,11 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
       }
       const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
       setQuote(q);
-      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code }));
-    } catch (e) { fail(e); } finally { setBusy(false); }
+      // Same recipient, same amount → the acknowledgement already given still applies. This
+      // path used to drop it, so a sender who had confirmed "yes, this new number is right"
+      // and then let the invoice lapse got the refusal back as an unexplained error.
+      setPayment(await api.createPayment({ quoteId: q.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code, riskToken }));
+    } catch (e) { if (askIfWrongPerson(e)) return; fail(e); } finally { setBusy(false); }
   }
 
   /** pay → processing: tell the engine the inbound has been sent. */
@@ -237,7 +286,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   }
 
   function reset() {
-    setQuote(null); setPayment(null); setErr(null);
+    setQuote(null); setPayment(null); setErr(null); setRiskToken(undefined); setConfirmRecipient(null); setResumed(false);
+    try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage disabled */ }
     setS((p) => ({ ...p, recipientName: "", nameSource: "idle", phone: "" }));
     go("details");
   }
@@ -318,25 +368,31 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
                 does not reverse, so this is a decision, not a toast. */}
             {confirmRecipient && (
               <div role="alertdialog" aria-labelledby="cr-title" style={{ border: "1px solid var(--warn, #b4690e)", borderRadius: 10, padding: 16, margin: "0 0 14px", background: "var(--warn-wash, rgba(180,105,14,.06))" }}>
-                <div id="cr-title" style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Is this the right number?</div>
+                <div id="cr-title" style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{t("cr_title")}</div>
                 <p style={{ fontSize: 13.5, margin: "0 0 10px", color: "var(--ink-2)" }}>{confirmRecipient.message}</p>
                 {confirmRecipient.didYouMean && (
                   <p style={{ fontSize: 13.5, margin: "0 0 12px" }}>
-                    You may have meant <strong>{confirmRecipient.didYouMean.name ?? confirmRecipient.didYouMean.phone}</strong>
-                    {confirmRecipient.didYouMean.name ? <> &mdash; {confirmRecipient.didYouMean.phone}</> : null}.
+                    {t("cr_meant")} <strong>{confirmRecipient.didYouMean.name ?? confirmRecipient.didYouMean.phone}</strong>
+                    {confirmRecipient.didYouMean.name ? <> &mdash; <span className="num">{confirmRecipient.didYouMean.phone}</span></> : null}.
                   </p>
                 )}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button type="button" className="btn btn-primary" onClick={() => { setConfirmRecipient(null); go("details"); }}>
-                    Change the number
+                    {t("cr_change")}
                   </button>
                   <button type="button" className="btn btn-ghost" onClick={() => { setRiskToken(confirmRecipient.token); setConfirmRecipient(null); void toPay(); }}>
-                    No, this is correct &mdash; send it
+                    {t("cr_proceed")}
                   </button>
                 </div>
               </div>
             )}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
+            {resumed && step === "pay" && (
+              <div role="status" style={{ padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", fontSize: 13, lineHeight: 1.45 }}>
+                <div style={{ fontWeight: 700, color: "var(--ink)" }}>{t("resume_title")}</div>
+                <div style={{ color: "var(--ink-2)", marginTop: 2 }}>{t("resume_sub")}</div>
+              </div>
+            )}
             {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}
             {step === "processing" && payment && <ProcessingStep paymentId={payment.id} method={s.method} onDone={() => { go("success"); void rememberPaidContact({ name: s.recipientName || s.phone, phone: s.phone, country: s.country, provider: s.provider }); }} reset={reset} onViewActivity={() => { setTab("history"); }} />}
             {step === "success" && payment && <SuccessStep payment={payment} reset={reset} onViewActivity={() => { setTab("history"); }} />}

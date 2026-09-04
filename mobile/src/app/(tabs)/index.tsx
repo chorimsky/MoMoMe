@@ -2,10 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
-import { api, errMessage } from '@/api/client';
+import { api, ApiError, errMessage } from '@/api/client';
 import { MomoMark } from '@/components/brand';
 import { ReceiptModal } from '@/components/receipt';
 import {
@@ -30,7 +30,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, COUNTRIES, detectProvider, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -118,6 +118,13 @@ export default function SendScreen() {
   const [busy, setBusy] = useState(false);
   const [quoteExpired, setQuoteExpired] = useState(false);
   const [ack, setAck] = useState(false);
+  // "Yes, I meant this number" — the server's token for THIS recipient and amount, kept for
+  // the whole send so a replacement invoice does not ask the question twice.
+  const [riskToken, setRiskToken] = useState<string | undefined>(undefined);
+  // What the sender typed as the name, kept out of React state so the debounced resolve
+  // (which fires after they may have started typing) does not wipe it.
+  const manualName = useRef('');
+  const nameSourceRef = useRef<NameSource>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const [enabledMethods, setEnabledMethods] = useState<Method[]>(ALL_METHODS);
@@ -171,13 +178,25 @@ export default function SendScreen() {
   // "Verified" = name came from the operator or our own prior record. Anything
   // else (typed manually / unknown) requires an irreversibility acknowledgment.
   const nameVerified = nameSource === 'provider' || nameSource === 'internal';
-  const detailsValid =
-    phone.replace(/\D/g, '').length >= 8 && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap;
+  nameSourceRef.current = nameSource;
+  // The same test the server applies before it mints anything. Eight digits used to be
+  // enough here, so a foreign number or one digit too many walked through Method and
+  // Review and was refused on the Pay screen — and a number whose operator could not be
+  // read left "Confirm & pay" doing nothing at all, because the provider it needed was null.
+  const digits = phone.replace(/\D/g, '');
+  const check = useMemo(() => checkPhone(phone, country), [phone, country]);
+  const phoneIssue = !check.ok && (check.reason === 'foreign_country' ? digits.length >= 6 : digits.length >= 8) ? check : null;
+  // A name is required unless the operator or a past delivery vouches for one: it is the
+  // thing that lets a sender notice they have the wrong person. The number typed again is
+  // not a name.
+  const nameOk = nameVerified || isRealName(recipientName, phone);
+  const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk;
 
   // Best-effort recipient-name resolve (debounced, non-blocking).
   useEffect(() => {
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 8) {
+      manualName.current = '';
       setRecipientName('');
       setNameSource('idle');
       setResolvedProvider(null);
@@ -189,8 +208,15 @@ export default function SendScreen() {
         .resolveRecipient(digits, country)
         .then((r) => {
           if (!alive) return;
-          setRecipientName(r.name ?? '');
-          setNameSource(r.name ? r.status : 'idle');
+          if (r.name) {
+            setRecipientName(r.name);
+            setNameSource(r.status);
+          } else if (nameSourceRef.current !== 'internal') {
+            // Nobody vouches for this number: keep whatever the sender has typed, and ask
+            // for a name if they haven't. 'idle' here used to hide that question entirely.
+            setRecipientName(manualName.current);
+            setNameSource(manualName.current ? 'manual' : 'unknown');
+          }
           setResolvedProvider(r.provider ?? null);
         })
         .catch(() => {});
@@ -202,7 +228,8 @@ export default function SendScreen() {
   }, [phone, country]);
 
   const goMethod = () => {
-    setProvider(resolvedProvider ?? detected);
+    // The number's prefix decides the operator — the server routes on it regardless.
+    setProvider(check.provider ?? resolvedProvider ?? detected);
     setError(null);
     setStep('method');
   };
@@ -238,25 +265,55 @@ export default function SendScreen() {
     return () => clearInterval(id);
   }, [step, quote]);
 
-  const confirm = async () => {
-    if (!quote || !provider || quoteExpired) return;
+  const recipientBody = () => ({
+    phone: phone.replace(/\D/g, ''),
+    country,
+    provider: (provider ?? check.provider) as ProviderId,
+    name: recipientName,
+    nameSource: recipientName ? nameSource : ('unknown' as NameSource),
+  });
+
+  const confirmWith = async (token?: string) => {
+    if (!quote || quoteExpired) return;
+    if (!provider && !check.provider) {
+      // Unreachable past Details now — but never again a button that does nothing.
+      setError(tr('phone_operator'));
+      setStep('details');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const p = await api.createPayment({
         quoteId: quote.id,
-        recipient: {
-          phone: phone.replace(/\D/g, ''),
-          country,
-          provider,
-          name: recipientName,
-          nameSource: recipientName ? nameSource : 'unknown',
-        },
+        recipient: recipientBody(),
+        ...(token ? { riskToken: token } : {}),
         ...(merchantCode ? { merchantCode } : {}),
       });
       setPayment(p);
       setStep('pay');
     } catch (e) {
+      // "Is this the person you meant?" — the server has spotted a number one digit away
+      // from someone this device pays. The web asked; the app showed the refusal as a bare
+      // error with no way to answer it, so a legitimate payment to a new number next to an
+      // old one was simply impossible from the phone.
+      if (e instanceof ApiError && e.status === 409 && e.code === 'confirm_recipient') {
+        const d = (e.data ?? {}) as { riskToken?: string; didYouMean?: { phone: string; name?: string } };
+        const meant = d.didYouMean;
+        const hint = meant ? `\n\n${tr('cr_meant')} ${meant.name ?? meant.phone}${meant.name ? ` — ${meant.phone}` : ''}` : '';
+        Alert.alert(tr('cr_title'), `${e.message}${hint}`, [
+          { text: tr('cr_change'), style: 'cancel', onPress: () => setStep('details') },
+          {
+            text: tr('cr_proceed'),
+            style: 'destructive',
+            onPress: () => {
+              setRiskToken(d.riskToken);
+              void confirmWith(d.riskToken);
+            },
+          },
+        ]);
+        return;
+      }
       // ORPHAN RECOVERY: the request can fail here while the server SUCCEEDED — a
       // client-side timeout aborts a slow POST /payments that goes on to consume the
       // quote and mint a REAL invoice. Confirming again then sends a spent quoteId
@@ -273,6 +330,7 @@ export default function SendScreen() {
       setBusy(false);
     }
   };
+  const confirm = () => confirmWith(riskToken);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
@@ -312,7 +370,43 @@ export default function SendScreen() {
     setPayment(null);
     setMerchantCode(undefined);
     setAck(false);
+    setRiskToken(undefined);
+    manualName.current = '';
     setError(null);
+  };
+
+  // The code on the Pay screen has died (a Lightning invoice lives ten minutes). Mint a
+  // replacement — unless the old one was paid at the last second, in which case the payment
+  // has already moved on and a second invoice would be a second payment. The app used to
+  // offer nothing here: no refresh, no back, no way out but killing it.
+  const refreshCode = async () => {
+    if (!payment || !method) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const cur = await api.getPayment(payment.id).catch(() => null);
+      if (cur && cur.state !== 'AWAITING_INBOUND') { setPayment(cur); return; }
+      const q = await api.createQuote({ xaf: xafNum, method, country });
+      setQuote(q);
+      const p = await api.createPayment({
+        quoteId: q.id,
+        recipient: recipientBody(),
+        ...(riskToken ? { riskToken } : {}),
+        ...(merchantCode ? { merchantCode } : {}),
+      });
+      setPayment(p);
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startOver = () => {
+    Alert.alert(tr('start_over'), tr('start_over_confirm'), [
+      { text: tr('keep_waiting'), style: 'cancel' },
+      { text: tr('start_over'), style: 'destructive', onPress: reset },
+    ]);
   };
 
   const stepIndex = { details: 0, method: 1, review: 2, pay: 3, success: 3 }[step];
@@ -445,10 +539,57 @@ export default function SendScreen() {
                 ))}
               </View>
             ) : null}
-            {recipientName ? (
+            {phoneIssue ? (
+              <View style={[styles.issueBox, { borderColor: t.warn, backgroundColor: t.brandWash }]}>
+                <Body style={{ color: t.text, fontSize: 13 }}>
+                  {phoneIssue.reason === 'foreign_country' && phoneIssue.belongsTo
+                    ? tr('phone_foreign', { country: COUNTRIES[phoneIssue.belongsTo].name, own: COUNTRIES[country].name })
+                    : phoneIssue.reason === 'bad_length'
+                      ? tr('phone_length', { country: COUNTRIES[country].name, n: COUNTRIES[country].nsnLen.join(' / '), dial: COUNTRIES[country].dial })
+                      : tr('phone_operator')}
+                </Body>
+                {phoneIssue.reason === 'foreign_country' && phoneIssue.belongsTo && COUNTRIES[phoneIssue.belongsTo].active ? (
+                  <Pressable
+                    onPress={() => {
+                      const cc = phoneIssue.belongsTo!;
+                      setCountry(cc);
+                      setPhone(phoneIssue.local);
+                    }}
+                    hitSlop={8}>
+                    <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>{tr('phone_switch', { country: COUNTRIES[phoneIssue.belongsTo].name })}</Body>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+            {nameVerified && recipientName ? (
               <View style={styles.nameRow}>
                 <Ionicons name="checkmark-circle" size={18} color={t.recv} />
-                <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName}</Body>
+                <View style={{ flex: 1 }}>
+                  <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName}</Body>
+                  <Body muted style={{ fontSize: 12 }}>{nameSource === 'provider' ? tr('nm_verified') : tr('nm_sent_before')}</Body>
+                </View>
+              </View>
+            ) : check.ok ? (
+              // Nobody vouches for this number, so the sender says who it is. The app used to
+              // send an EMPTY name here — the one signal that catches a wrong recipient was
+              // never asked for, and Review then showed the digits as if they were a person.
+              <View style={{ gap: Spacing.one, marginTop: Spacing.three }}>
+                <Label>{tr('name_prompt')}</Label>
+                <TextInput
+                  value={recipientName}
+                  onChangeText={(x) => {
+                    manualName.current = x;
+                    setRecipientName(x);
+                    setNameSource('manual');
+                  }}
+                  placeholder={tr('name_ph')}
+                  placeholderTextColor={t.muted}
+                  autoCapitalize="words"
+                  style={[styles.nameInput, { color: t.text, borderColor: t.line, backgroundColor: t.surface2 }]}
+                />
+                {recipientName.trim().length > 0 && !isRealName(recipientName, phone) ? (
+                  <Body style={{ color: t.warn, fontSize: 12.5 }}>{tr('name_needs_letters')}</Body>
+                ) : null}
               </View>
             ) : null}
           </Card>
@@ -569,6 +710,16 @@ export default function SendScreen() {
             <Row label={tr('fee')} value={xaf(quote.feeXaf)} />
             <Divider />
             <Row label={tr('total_to_pay')} value={xaf(quote.xaf + quote.feeXaf)} strong />
+            <Divider />
+            {/* What leaves the sender's wallet, and on which network — the two facts a
+                stablecoin payer must get right, shown before they commit rather than after. */}
+            <Row label={tr('you_send')} value={quote.inboundAmountLabel} />
+            {method ? (
+              <View style={styles.kv}>
+                <Body muted>{tr('network')}</Body>
+                <Body style={{ color: method === 'USDT' || method === 'USDC' ? t.warn : t.textSecondary, fontFamily: Fonts.bodyBold }}>{tr(METHOD_META[method].network)}</Body>
+              </View>
+            ) : null}
             <View style={styles.rateRow}>
               <Body muted>≈ ${quote.usd.toFixed(2)} · {method ? METHOD_LABEL[method] : ''}</Body>
               <Countdown to={quote.expiresAt} prefix={tr('price_locked')} />
@@ -630,6 +781,9 @@ export default function SendScreen() {
             recipientLabel={recipientName || phone}
             providerShort={provider ? PROVIDERS[provider].short : ''}
             demoMode={demoMode}
+            busy={busy}
+            onRefresh={refreshCode}
+            onStartOver={startOver}
             onSimulate={async () => {
               try {
                 const p = await api.simulatePayment(payment.id);
@@ -728,18 +882,33 @@ function PayStep({
   recipientLabel,
   providerShort,
   demoMode,
+  busy,
+  onRefresh,
+  onStartOver,
   onSimulate,
 }: {
   payment: Payment;
   recipientLabel: string;
   providerShort: string;
   demoMode: boolean;
+  busy: boolean;
+  onRefresh: () => void;
+  onStartOver: () => void;
   onSimulate: () => void;
 }) {
   const t = useTheme();
   const { t: tr, ml } = useI18n();
   const status = statusLabel(payment.state);
   const pi = payment.payInstruction;
+  // A dead code must not be shown as payable: a wallet that scans an expired invoice reports
+  // a failure, and an address it still pays TO is one nobody is watching for this payment.
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const chk = () => setExpired(!!pi.expiresAt && Date.parse(pi.expiresAt) <= Date.now());
+    chk();
+    const id = setInterval(chk, 1000);
+    return () => clearInterval(id);
+  }, [pi.expiresAt]);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await Clipboard.setStringAsync(pi.code);
@@ -773,7 +942,7 @@ function PayStep({
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>{tr('sandbox_title')}</Text>
           <Body muted center>{tr('sandbox_desc')}</Body>
         </View>
-      ) : (
+      ) : expired ? null : (
         <>
           <View style={[styles.qrCard, Shadow.md]}>
             <QRCode value={qrValue(pi)} size={214} backgroundColor="#fff" color="#111" />
@@ -791,7 +960,7 @@ function PayStep({
       {/* The copyable code is fabricated in demo mode too, so it is hidden along with the
           QR — otherwise the notice above says "not a real invoice" while the screen still
           offers the address to copy and send to. */}
-      {!demoMode ? (
+      {!demoMode && !expired ? (
         <View style={{ alignSelf: 'stretch', gap: Spacing.one }}>
           <Label>{ml(pi.method, 'codeLabel')}</Label>
           <Pressable
@@ -810,14 +979,24 @@ function PayStep({
         </View>
       ) : null}
 
-      <View style={[styles.statusRow, { backgroundColor: t.surface, borderColor: t.line }]}>
-        <View style={styles.pulseWrap}>
-          <View style={[styles.pulse, { backgroundColor: tone === 'recv' ? t.recv : tone === 'bad' ? t.bad : t.accent }]} />
+      {expired && !demoMode ? (
+        <View style={[styles.issueBox, { borderColor: t.warn, backgroundColor: t.brandWash, alignSelf: 'stretch', marginTop: 0 }]}>
+          <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>{tr('code_expired_title')}</Text>
+          <Body muted>{tr('code_expired_sub')}</Body>
+          <Button title={tr('refresh_code')} icon="refresh" onPress={onRefresh} loading={busy} />
         </View>
-        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{tr(statusKey(payment.state))}</Body>
-        {pi.expiresAt ? <Countdown to={pi.expiresAt} /> : null}
-      </View>
-      <Body muted center>{tr('waiting_auto')}</Body>
+      ) : (
+        <>
+          <View style={[styles.statusRow, { backgroundColor: t.surface, borderColor: t.line }]}>
+            <View style={styles.pulseWrap}>
+              <View style={[styles.pulse, { backgroundColor: tone === 'recv' ? t.recv : tone === 'bad' ? t.bad : t.accent }]} />
+            </View>
+            <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{tr(statusKey(payment.state))}</Body>
+            {pi.expiresAt ? <Countdown to={pi.expiresAt} /> : null}
+          </View>
+          <Body muted center>{tr('waiting_auto')}</Body>
+        </>
+      )}
 
       {/* recipient / reference context */}
       <View style={[styles.payRecipCard, { backgroundColor: t.surface, borderColor: t.line }]}>
@@ -840,6 +1019,9 @@ function PayStep({
       {demoMode ? (
         <Button title={tr('simulate_demo')} variant="outline" icon="flask" onPress={onSimulate} style={{ alignSelf: 'stretch' }} />
       ) : null}
+      {/* A way out. Guarded by a question, because "start over" after paying is how a
+          second payment happens — the first one still lands and shows in Activity. */}
+      <Button title={tr('start_over')} variant="outline" icon="close" onPress={onStartOver} style={{ alignSelf: 'stretch' }} />
     </View>
   );
 }
@@ -997,7 +1179,9 @@ const styles = StyleSheet.create({
   recentSub: { fontSize: 11 },
   phoneInput: { flex: 1, fontFamily: Fonts.bodyBold, fontSize: 18, paddingVertical: Spacing.three, letterSpacing: 0.5 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.three },
+  nameInput: { borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: Spacing.four, paddingVertical: Spacing.three, fontFamily: Fonts.bodyBold, fontSize: 16 },
+  issueBox: { marginTop: Spacing.three, padding: Spacing.three, borderWidth: 1, borderRadius: Radius.md, gap: Spacing.two },
   amountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: Spacing.two },
   amountInput: {
     fontFamily: Fonts.displayBold,

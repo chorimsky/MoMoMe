@@ -78,6 +78,11 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
+    /** The whole error body. Some refusals carry what the caller needs to act on — the
+     *  "is this the right person?" refusal returns the token that lets the same payment
+     *  through once the sender has actually seen the question. Without this the app could
+     *  show that refusal but never answer it. */
+    public data?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -112,7 +117,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const code = (data as { error?: string })?.error;
     const message = (data as { message?: string })?.message ?? `HTTP ${res.status}`;
-    throw new ApiError(message, res.status, code);
+    throw new ApiError(message, res.status, code, (data ?? undefined) as Record<string, unknown> | undefined);
   }
   return data as T;
 }
@@ -156,7 +161,7 @@ export const api = {
     req<Quote>('/quotes', { method: 'POST', body: JSON.stringify(body) }),
 
   createPayment: (
-    body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string },
+    body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string; riskToken?: string },
   ) => req<Payment>('/payments', { method: 'POST', body: JSON.stringify(body) }),
 
   confirmPayment: (id: string) =>

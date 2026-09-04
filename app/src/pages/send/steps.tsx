@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider, checkPhone, isRealName } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -20,6 +20,12 @@ const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MA
 const METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT", "USDC"];
 const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮", USDC: "$" };
 const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)", USDC: "oklch(0.58 0.14 250)" };
+// The network is the irreversible mistake for a stablecoin — both resolve to a 0x address,
+// and funds sent on another chain are gone. So it is named on the row, on the review and
+// beside the address, rather than left for the wallet to get right.
+const NET_KEY: Record<Method, string> = { LIGHTNING: "net_lightning", ONCHAIN: "net_onchain", USDT: "net_erc20", USDC: "net_erc20" };
+/** t() with {placeholders}. */
+const fill = (s: string, vars: Record<string, string>): string => s.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
 
 /* ---------- contact-picker helpers ---------- */
 type CC = Draft["country"];
@@ -126,14 +132,29 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
   }, [s.phone]);
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
+  // The same test the server applies before it will mint anything. It used to be applied
+  // only THERE — so a Gabon number typed under Cameroon, or a number one digit too long,
+  // sailed through Details, Method and Review and was refused on the fourth screen with a
+  // message about the first. The refusal now lands beside the field, while it is typed.
+  const digits = s.phone.replace(/\D/g, "");
+  const check = checkPhone(s.phone, s.country);
+  const phoneIssue = !check.ok && (check.reason === "foreign_country" ? digits.length >= 6 : digits.length >= 8) ? check : null;
+  // The operator comes from the number's prefix, and the server routes on that whatever
+  // was picked here. A choice the server overrules is a way to show a sender "Orange" while
+  // paying MTN — so once the number identifies its operator, that is the only chip shown.
+  useEffect(() => {
+    if (check.ok && check.provider && s.provider !== check.provider) set({ provider: check.provider });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [check.ok, check.provider]);
   // Operator payout ceiling — surfaced up-front (CEMAC compliance-by-design), so
   // the sender isn't rejected only after confirming.
   const payoutCap = PROVIDER_PAYOUT_MAX[s.provider] ?? MAX_XAF;
   const overCap = s.xaf > payoutCap;
-  const valid = s.xaf >= MIN_XAF && !overCap && s.phone.replace(/\D/g, "").length >= 8 && (s.recipientName || "").trim().length >= 2 && !resolving;
-  // Early typo signal: a long-enough number that matches no known MTN/Orange prefix.
-  // Soft (doesn't block — prefix lists evolve) — the real guard is the review-step tick.
-  const numLooksOff = s.phone.replace(/\D/g, "").length >= 8 && !resolving && !verified && !detectProvider(s.phone.replace(/\D/g, ""), s.country);
+  // Two characters used to satisfy the name check, and so did the number typed again. The
+  // name is the one thing that lets a sender notice they have the wrong person; a verified
+  // one comes from the operator or from a payment that actually landed.
+  const nameOk = verified || isRealName(s.recipientName, s.phone);
+  const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving;
 
   return (
     <FlowCard>
@@ -191,9 +212,27 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
           </div>
           {contactNote && <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{contactNote}</div>}
 
+          {phoneIssue && (
+            <div role="alert" style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.45 }}>
+              {phoneIssue.reason === "foreign_country" && phoneIssue.belongsTo
+                ? fill(t("phone_foreign"), { country: COUNTRIES[phoneIssue.belongsTo].name, own: c.name })
+                : phoneIssue.reason === "bad_length"
+                  ? fill(t("phone_length"), { country: c.name, n: c.nsnLen.join(" / "), dial: c.dial })
+                  : t("phone_operator")}
+              {phoneIssue.reason === "foreign_country" && phoneIssue.belongsTo && COUNTRIES[phoneIssue.belongsTo].active && !lockRecipient && (
+                <button type="button" className="btn btn-quiet" style={{ display: "block", marginTop: 8, padding: "6px 10px", fontSize: 12.5 }}
+                  onClick={() => { const cc = phoneIssue.belongsTo!; set({ country: cc, provider: COUNTRIES[cc].providers[0], phone: phoneIssue.local }); }}>
+                  {fill(t("phone_switch"), { country: COUNTRIES[phoneIssue.belongsTo].name })}
+                </button>
+              )}
+            </div>
+          )}
           <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
-            {c.providers.map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={s.provider === pid} onClick={() => set({ provider: pid })} />)}
+            {(check.ok && check.provider ? [check.provider] : c.providers).map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={s.provider === pid} onClick={() => { if (!check.ok) set({ provider: pid }); }} />)}
           </div>
+          {check.ok && check.provider && (
+            <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4 }}>{t("operator_detected")}</div>
+          )}
 
           <div style={{ marginTop: 12 }} aria-live="polite">
             {resolving ? (
@@ -217,13 +256,12 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
                 </div>
                 <input value={s.recipientName} onChange={(e) => set({ recipientName: e.target.value })} placeholder={t("enter_name_ph")} aria-label={t("enter_name_ph")}
                   style={{ width: "100%", padding: "11px 13px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
+                {s.recipientName.trim().length > 0 && !isRealName(s.recipientName, s.phone) && (
+                  <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.4 }}>{t("name_needs_letters")}</div>
+                )}
               </div>
             ) : null}
           </div>
-
-      {numLooksOff && (
-        <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.4 }}>{t("num_check")}</div>
-      )}
 
       <div style={{ marginTop: 14 }}>
         <Label>{t("amount_q")}</Label>
@@ -323,7 +361,8 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
                   <span style={{ fontWeight: 700, fontSize: 16 }}>{METHOD_META[k].name}</span>
                   {k === "LIGHTNING" && <span style={{ fontSize: 9.5, fontWeight: 750, letterSpacing: ".04em", color: "var(--recv)", background: "var(--recv-wash)", padding: "2px 7px", borderRadius: 999 }}>{t("recommended")}</span>}
                 </span>
-                <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 2 }}>{ml(k, "sub")}</span>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: METHOD_COLOR[k], marginTop: 2 }}>{t(NET_KEY[k])}</span>
+                <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{ml(k, "sub")}</span>
                 {preview[k] && (
                   <span style={{ display: "block", marginTop: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
                     <span className="num" style={{ fontWeight: 700 }}>{t("m_you_send")} {preview[k].amountLabel}</span>
@@ -395,8 +434,14 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         <Row k={t("total_to_pay")} v={fmt(quote.totalXaf) + " XAF"} sub={"≈ $" + fmt(quote.usd, 2)} strong />
         <hr className="hair" />
         <Row k={t("pay_with")} v={METHOD_META[s.method].name} />
+        {/* What leaves the sender's wallet, and on which network — the two facts a stablecoin
+            payer must get right, shown before they commit rather than beside the address after. */}
+        <Row k={t("you_send")} v={quote.inboundAmountLabel} sub={t(NET_KEY[s.method])} />
         <Row k={t("arrival")} v={ml(s.method, "arrival")} tone={METHOD_META[s.method].fast ? "recv" : undefined} />
       </div>
+      {(s.method === "USDT" || s.method === "USDC") && (
+        <div role="note" style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 14, fontSize: 12, fontWeight: 600, color: expired ? "var(--warn)" : "var(--ink-3)" }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", background: expired ? "var(--warn)" : "var(--recv)" }} />
@@ -508,6 +553,9 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       </div>
 
       {!demoMode && <CopyField label={ml(method, "codeLabel")} value={inst.code} />}
+      {!demoMode && (method === "USDT" || method === "USDC") && (
+        <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
+      )}
 
       {expired ? (
         <>
@@ -526,7 +574,9 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         </>
       )}
       <button className="btn btn-quiet" onClick={back} style={{ width: "100%", marginTop: 6, fontSize: 13 }}>{t("back")}</button>
-      <p style={{ textAlign: "center", fontSize: 11, color: "var(--ink-3)", marginTop: 10 }}>{t("demo_note")}</p>
+      {/* "Tapping simulates your payment" is sandbox copy. It was printed under the LIVE pay
+          screen too, telling a real payer that the button below fakes a payment. */}
+      {demoMode && <p style={{ textAlign: "center", fontSize: 11, color: "var(--ink-3)", marginTop: 10 }}>{t("demo_note")}</p>}
     </FlowCard>
   );
 }

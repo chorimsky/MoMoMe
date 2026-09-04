@@ -26,6 +26,17 @@
         "mobile:ios"
       ],
       "port": 8081
+    },
+    {
+      "name": "momome-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "./server",
+        "dev"
+      ],
+      "port": 4000,
+      "autoPort": false
     }
   ]
 }

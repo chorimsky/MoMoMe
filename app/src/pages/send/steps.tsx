@@ -273,6 +273,27 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
     if (available.length && !available.includes(s.method)) set({ method: available[0] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available.join(",")]);
+
+  // What each option actually costs. The methods are not interchangeable — the FX spread is
+  // configured per method, so the same XAF buys a different amount of crypto — and the
+  // settlement times differ by orders of magnitude. Without this the sender picks blind.
+  // Stateless: no quote is minted here, so comparing options costs nothing.
+  const [preview, setPreview] = useState<Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }>>({});
+  useEffect(() => {
+    let alive = true;
+    if (!s.xaf) return;
+    api.previewMethods(s.xaf)
+      .then((r) => {
+        if (!alive) return;
+        const by: Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> = {};
+        for (const m of r.methods) by[m.method] = { amountLabel: m.amountLabel, etaSeconds: m.etaSeconds, senderPaysNetworkFee: m.senderPaysNetworkFee };
+        setPreview(by);
+      })
+      .catch(() => { /* the choice still works without the figures */ });
+    return () => { alive = false; };
+  }, [s.xaf]);
+
+  const eta = (secs: number) => secs <= 30 ? t("m_eta_seconds") : secs <= 600 ? t("m_eta_minutes") : t("m_eta_onchain");
   return (
     <FlowCard>
       <Stepper i={1} />
@@ -284,6 +305,10 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
           <span style={{ color: "var(--warn)", fontWeight: 800 }}>!</span>
           <span style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{t("large_hint")}</span>
         </div>
+      )}
+
+      {available.length === 0 && (
+        <p role="alert" style={{ fontSize: 13.5, color: "var(--ink-2)", padding: "14px 0" }}>{t("m_none")}</p>
       )}
 
       <div style={{ display: "grid", gap: 11 }}>
@@ -299,6 +324,15 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
                   {k === "LIGHTNING" && <span style={{ fontSize: 9.5, fontWeight: 750, letterSpacing: ".04em", color: "var(--recv)", background: "var(--recv-wash)", padding: "2px 7px", borderRadius: 999 }}>{t("recommended")}</span>}
                 </span>
                 <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 2 }}>{ml(k, "sub")}</span>
+                {preview[k] && (
+                  <span style={{ display: "block", marginTop: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
+                    <span className="num" style={{ fontWeight: 700 }}>{t("m_you_send")} {preview[k].amountLabel}</span>
+                    <span style={{ color: "var(--ink-3)" }}> · {eta(preview[k].etaSeconds)}</span>
+                    {preview[k].senderPaysNetworkFee && (
+                      <span style={{ display: "block", color: "var(--ink-3)", marginTop: 2 }}>{t("m_network_fee")}</span>
+                    )}
+                  </span>
+                )}
               </span>
               <span style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${on ? "var(--accent)" : "var(--line)"}`, display: "grid", placeItems: "center", flex: "none" }}>
                 {on && <span style={{ width: 11, height: 11, borderRadius: "50%", background: "var(--accent)" }} />}
@@ -308,9 +342,13 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
         })}
       </div>
 
+      {Object.keys(preview).length > 0 && (
+        <p style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 12, lineHeight: 1.45 }}>{t("m_indicative")}</p>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
         <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>
-        <button className="btn btn-primary" onClick={next} disabled={busy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>
+        <button className="btn btn-primary" onClick={next} disabled={busy || available.length === 0} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>
       </div>
     </FlowCard>
   );

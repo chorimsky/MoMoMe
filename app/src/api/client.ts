@@ -289,6 +289,14 @@ export const api = {
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),
 
+  /** Indicative cost of each way of paying, for the "choose how to pay" step. Stateless —
+   *  mints no quote and locks no rate; the binding number is the quote on the next step. */
+  previewMethods: (xaf: number) =>
+    req<{ xaf: number; feeXaf: number; totalXaf: number; ratesFresh: boolean; methods: Array<{
+      method: Method; asset: string; amount: number; amountLabel: string; usd: number;
+      spreadBps: number; etaSeconds: number; senderPaysNetworkFee: boolean;
+    }> }>(`/preview?xaf=${encodeURIComponent(String(xaf))}`),
+
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),
 

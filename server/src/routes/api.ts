@@ -505,6 +505,51 @@ function isValidLogo(v: unknown): v is string {
 }
 
 /* ---------- public app config (demo hints + branding, never crypto) ---------- */
+/* ---------- what each way of paying actually costs ----------
+   "Choose how to pay" listed a name and a vague subtitle, so the sender picked blind. The
+   methods are not interchangeable: the FX spread is configured per method, so the same XAF
+   costs a different amount of crypto depending on the choice, and the settlement times
+   differ by orders of magnitude — seconds for Lightning against block confirmations
+   on-chain. Someone choosing "best for large amounts" had no way to learn it might take an
+   hour, or that the miner fee comes out of their own wallet on top of what we quote.
+
+   Deliberately STATELESS: it mints no quote, consumes no id and locks no rate. A quote is
+   single-use, so pricing three options by issuing three quotes would burn two of them. The
+   numbers here are indicative and the screen says so; the binding rate is the quote the
+   sender gets on the next step. */
+api.get("/preview", rateLimitMiddleware("preview", 120, 60_000), async (req, res) => {
+  const xaf = Number(req.query.xaf);
+  if (!Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
+    return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
+  }
+  await ensureFreshRates().catch(() => {});
+  const fresh = ratesFresh();
+  const enabled = getSettings().methods;
+  const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
+  const totalXaf = xaf + feeXaf;
+
+  const methods = ALL_METHODS.filter((m) => enabled[m] !== false).map((method) => {
+    const rq = rateFor(method);
+    const amount = inboundAmount(totalXaf, rq);
+    return {
+      method,
+      asset: rq.asset,
+      amount,
+      amountLabel: formatAmount(amount, rq.asset),
+      usd: usdValue(totalXaf, rq),
+      spreadBps: rq.spreadBps,
+      /** Rough settlement time, for choosing between them. */
+      etaSeconds: method === "LIGHTNING" ? 5 : method === "ONCHAIN" ? 1800 : 180,
+      /** Does the SENDER pay a network fee from their own wallet, on top of `amount`?
+       *  Lightning routing fees are negligible; a miner fee or ERC-20 gas is not, and a
+       *  sender comparing options has no way to know that from a name alone. */
+      senderPaysNetworkFee: method !== "LIGHTNING",
+    };
+  });
+
+  res.json({ xaf, feeXaf, totalXaf, ratesFresh: fresh, methods });
+});
+
 api.get("/config", async (_req, res) => {
   const demoMode = !liveMoney(); // no real-money rail active → safe to simulate
   res.json({

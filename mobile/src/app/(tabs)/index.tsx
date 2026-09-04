@@ -74,11 +74,18 @@ const QUICK = [1000, 2000, 5000, 10000];
 const CDD_XAF = 1_000_000;
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
-const METHOD_META: Record<Method, { icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent'; blurb: StringKey }> = {
-  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'blurb_lightning' },
-  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'blurb_usdt' },
-  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'blurb_onchain' },
-  USDC: { icon: 'logo-usd', tone: 'recv', blurb: 'blurb_usdc' },
+// USDT and USDC were the SAME icon in the SAME colour, so the rows differed only by the
+// ticker buried in the label — and both resolve to a 0x address on the same chain, where
+// paying the wrong one loses the money. Distinct mark, distinct colour, and the network
+// stated on the row itself.
+const METHOD_META: Record<Method, {
+  icon: keyof typeof Ionicons.glyphMap; tone: 'brand' | 'recv' | 'accent' | 'warn';
+  blurb: StringKey; network: StringKey;
+}> = {
+  LIGHTNING: { icon: 'flash', tone: 'brand', blurb: 'blurb_lightning', network: 'net_lightning' },
+  ONCHAIN: { icon: 'logo-bitcoin', tone: 'accent', blurb: 'blurb_onchain', network: 'net_onchain' },
+  USDT: { icon: 'logo-usd', tone: 'recv', blurb: 'blurb_usdt', network: 'net_erc20' },
+  USDC: { icon: 'ellipse', tone: 'warn', blurb: 'blurb_usdc', network: 'net_erc20' },
 };
 const providerTone = (p: ProviderId | null): 'brand' | 'accent' | 'neutral' =>
   p === 'MTN' ? 'brand' : p === 'ORANGE' ? 'accent' : 'neutral';
@@ -91,6 +98,10 @@ export default function SendScreen() {
   const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string }>();
 
   const [step, setStep] = useState<Step>('details');
+  // What each method actually costs and how long it takes. Fetched when the picker opens —
+  // the rows otherwise differ only by name, which is what let someone pick a stablecoin
+  // without knowing the amount, the speed, or that the network fee is theirs to pay.
+  const [preview, setPreview] = useState<Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }>>({});
   const [country, setCountry] = useState<CountryCode>('CM');
   const [pickCountry, setPickCountry] = useState(false);
   const [recents, setRecents] = useState<Array<{ phone: string; country: CountryCode; provider: ProviderId; name: string }>>([]);
@@ -306,6 +317,22 @@ export default function SendScreen() {
 
   const stepIndex = { details: 0, method: 1, review: 2, pay: 3, success: 3 }[step];
 
+
+  // Only while the picker is open, and only once per amount.
+  useEffect(() => {
+    if (step !== 'method' || !xafNum) return;
+    let alive = true;
+    api.previewMethods(xafNum)
+      .then((r) => {
+        if (!alive) return;
+        const by: Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> = {};
+        for (const m of r.methods) by[m.method] = { amountLabel: m.amountLabel, etaSeconds: m.etaSeconds, senderPaysNetworkFee: m.senderPaysNetworkFee };
+        setPreview(by);
+      })
+      .catch(() => { /* the picker still works without the figures */ });
+    return () => { alive = false; };
+  }, [step, xafNum]);
+
   return (
     <Screen scroll>
       {step === 'details' ? (
@@ -478,8 +505,9 @@ export default function SendScreen() {
           <View style={{ gap: Spacing.three }}>
             {enabledMethods.map((m) => {
               const meta = METHOD_META[m];
-              const c = meta.tone === 'brand' ? t.brand : meta.tone === 'recv' ? t.recv : t.accent;
-              const wash = meta.tone === 'brand' ? t.brandWash : meta.tone === 'recv' ? t.recvWash : t.accentWash;
+              const c = meta.tone === 'brand' ? t.brand : meta.tone === 'recv' ? t.recv : meta.tone === 'warn' ? t.warn : t.accent;
+              const wash = meta.tone === 'brand' ? t.brandWash : meta.tone === 'recv' ? t.recvWash : meta.tone === 'warn' ? t.backgroundSelected : t.accentWash;
+              const pv = preview[m];
               return (
                 <Pressable
                   key={m}
@@ -493,7 +521,19 @@ export default function SendScreen() {
                   <IconCircle name={meta.icon} color={c} bg={wash} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.methodName, { color: t.text }]}>{METHOD_LABEL[m]}</Text>
-                    <Body muted>{tr(meta.blurb)}</Body>
+                    {/* The network is the irreversible mistake for a stablecoin, so it sits
+                        directly under the name rather than on the next screen. */}
+                    <Text style={{ color: c, fontFamily: Fonts.bodyMedium, fontSize: 12.5, marginTop: 1 }}>
+                      {tr(meta.network)}
+                    </Text>
+                    {pv ? (
+                      <Text style={{ color: t.textSecondary, fontSize: 12.5, marginTop: 3 }}>
+                        {tr('m_you_send')} {pv.amountLabel} · {pv.etaSeconds <= 30 ? tr('m_eta_secs') : pv.etaSeconds <= 600 ? tr('m_eta_mins') : tr('m_eta_slow')}
+                        {pv.senderPaysNetworkFee ? `\n${tr('m_net_fee')}` : ''}
+                      </Text>
+                    ) : (
+                      <Body muted>{tr(meta.blurb)}</Body>
+                    )}
                   </View>
                   {busy && method === m ? (
                     <Ionicons name="ellipsis-horizontal" size={20} color={t.muted} />
@@ -504,6 +544,9 @@ export default function SendScreen() {
               );
             })}
           </View>
+          {Object.keys(preview).length > 0 && (
+            <Body muted style={{ fontSize: 12 }}>{tr('m_indicative')}</Body>
+          )}
         </View>
       )}
 

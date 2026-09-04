@@ -145,6 +145,13 @@ export const api = {
       `/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`,
     ),
 
+  /** Indicative cost, speed and network-fee burden per method — so the picker can show
+   *  what differs between them instead of four rows that look the same. Stateless: mints
+   *  no quote and locks no rate. */
+  previewMethods: (xaf: number) =>
+    req<{ methods: Array<{ method: Method; amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> }>(
+      `/preview?xaf=${encodeURIComponent(String(xaf))}`),
+
   createQuote: (body: QuoteRequest) =>
     req<Quote>('/quotes', { method: 'POST', body: JSON.stringify(body) }),
 

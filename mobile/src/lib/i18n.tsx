@@ -82,6 +82,18 @@ export const STRINGS = {
   blurb_usdt: ['Stable value · arrives in seconds', 'Valeur stable · arrive en quelques secondes'],
   blurb_onchain: ['Best for large amounts · 10–60 min', 'Idéal pour les gros montants · 10–60 min'],
   blurb_usdc: ['Stable value · arrives in seconds', 'Valeur stable · arrive en quelques secondes'],
+  // The network is the mistake that cannot be undone with a stablecoin: both are 0x
+  // addresses, and sending on TRON or BSC instead of Ethereum loses the money. It belongs
+  // on the row where the choice is made, not only on the pay screen after it.
+  net_lightning: ['Lightning Network', 'Réseau Lightning'],
+  net_onchain: ['Bitcoin network', 'Réseau Bitcoin'],
+  net_erc20: ['Ethereum · ERC-20 only', 'Ethereum · ERC-20 uniquement'],
+  m_you_send: ['You send', 'Vous envoyez'],
+  m_eta_secs: ['Seconds', 'Quelques secondes'],
+  m_eta_mins: ['2–5 minutes', '2–5 minutes'],
+  m_eta_slow: ['10–60 minutes', '10–60 minutes'],
+  m_net_fee: ['+ network fee from your wallet', '+ frais de réseau depuis votre portefeuille'],
+  m_indicative: ['Amounts are indicative — your rate is locked next.', 'Montants indicatifs — votre taux est fixé à l\'étape suivante.'],
 
   // send — pay
   send_exactly: ['Send exactly', 'Envoyez exactement'],

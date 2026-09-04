@@ -35,6 +35,16 @@ function LabeledInput({ label, value, onChange, mono, type = "text", error, suff
 }
 
 export function SettingsView() {
+  // Live per-method availability, fetched rather than inferred from the toggles.
+  const [methodState, setMethodState] = useState<Array<{ method: string; enabled: boolean; offered: boolean; blocked: string | null; state: string }>>([]);
+  useEffect(() => {
+    let alive = true;
+    api.adminMethods()
+      .then((r) => { if (alive) setMethodState(r.methods); })
+      .catch(() => { /* the toggles still work without the annotation */ });
+    return () => { alive = false; };
+  }, []);
+
   // What is actually behind each toggle. Fetched rather than assumed, so this card cannot
   // drift back into claiming delivery that isn't happening.
   const [notifyChannels, setNotifyChannels] = useState<Array<{ name: string; configured: boolean; enabled: boolean }>>([]);
@@ -296,10 +306,32 @@ export function SettingsView() {
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{name}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{desc}</div>
                 </div>
-                <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {/* What the customer can ACTUALLY use. A toggle reading ON says only what
+                      was asked for: a method can be enabled, have its account configured, and
+                      still be refused by the rail at minting time — which is where both
+                      stablecoins sit today. Someone deciding what to hide needs to see that. */}
+                  {(() => {
+                    const st = methodState.find((x) => x.method === k);
+                    if (!st || !methods[k]) return null;
+                    if (st.state === "live") return null;
+                    return (
+                      <span title={st.blocked ?? undefined}
+                        style={{ fontSize: 11.5, fontWeight: 650, color: "var(--warn-ink, var(--ink-3))", textAlign: "right", maxWidth: 190, lineHeight: 1.35 }}>
+                        {st.state === "unavailable" ? "On, but the rail can't receive it" : "On, but no rail serves it"}
+                      </span>
+                    );
+                  })()}
+                  <Toggle on={methods[k]} onChange={(v) => { setMethods((m) => ({ ...m!, [k]: v })); setDirty(true); }} />
+                </div>
               </div>
             ));
           })()}
+          {methodState.some((x) => x.state === "unavailable") && (
+            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12, lineHeight: 1.45 }}>
+              A method the rail refuses is already hidden from customers automatically, and returns on its own once the rail accepts it. Turn it off here to hide it from this list too.
+            </p>
+          )}
         </Card>
 
         <Card title="Product features" sub="Turn any product surface on or off platform-wide. Disabled features are hidden from users and refused by the API.">

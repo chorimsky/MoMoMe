@@ -455,6 +455,9 @@ export const api = {
   },
   /** The dispatch RECORD — what was sent, what failed, and what was skipped because a
    *  channel is switched on with no provider behind it. */
+  /** Live state of each crypto pay-in method — what the operator asked for AND whether the
+   *  rail can actually receive it, which are not the same thing. */
+  adminMethods: () => req<{ methods: Array<{ method: Method; enabled: boolean; offered: boolean; blocked: string | null; state: "off" | "unavailable" | "no_rail" | "live" }> }>("/admin/methods"),
   adminNotificationOutbox: () => req<{
     health: { total: number; sent: number; failed: number; skipped: number;
       channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }> };

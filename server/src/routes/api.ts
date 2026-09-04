@@ -1564,6 +1564,28 @@ api.post("/admin/unattributed/:id/resolve", async (req, res) => {
   res.json({ ok: true, record: r });
 });
 
+/* Live state of each crypto pay-in method, for the Settings toggles.
+   A switch reading ON says only what the operator asked for, not what customers can
+   actually use: IBEX is account-per-currency AND per-organisation, so a method can be
+   enabled here, have its account id configured, and still be refused at address-minting
+   time. Both stablecoins are in exactly that state today. An operator deciding what to
+   hide needs to see which ones are dead. */
+api.get("/admin/methods", async (_req, res) => {
+  res.json({
+    methods: ALL_METHODS.map((m) => {
+      const enabled = getSettings().methods[m] !== false;
+      const blocked = mintBlockedReason(m);
+      return {
+        method: m,
+        enabled,
+        offered: enabled && methodServable(m),
+        blocked,
+        state: !enabled ? "off" : blocked ? "unavailable" : methodServable(m) ? "live" : "no_rail",
+      };
+    }),
+  });
+});
+
 /* ---------- settings (Settings + Crypto Rails config) ---------- */
 api.get("/admin/settings", async (_req, res) => {
   res.json(getSettings());

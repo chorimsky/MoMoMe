@@ -41,5 +41,30 @@ noteMintUnavailable("USDC", "404: no receive combo");
 ok("a fresh refusal blocks it again", !!mintBlockedReason("USDC"));
 noteMintOk("USDC");
 
+/* ---- what the admin is shown ----
+   A toggle reading ON says only what the operator asked for. Someone deciding what to hide
+   needs to know which methods the rail is actually refusing, and the two are different
+   states: "I turned it off" and "it is on but dead". */
+const { methodServable } = await import("../src/adapters/index.js");
+
+const state = (m: string, enabled: boolean) =>
+  !enabled ? "off" : mintBlockedReason(m) ? "unavailable" : methodServable(m as never) ? "live" : "no_rail";
+
+ok("an enabled, working method reads live", state("LIGHTNING", true) === "live", state("LIGHTNING", true));
+ok("a method the operator switched off reads off", state("LIGHTNING", false) === "off");
+
+noteMintUnavailable("USDC", '403: {"error":"this feature is not available for your organization, contact ibex"}');
+ok("an enabled method the rail refuses reads UNAVAILABLE, not live",
+   state("USDC", true) === "unavailable", state("USDC", true));
+ok("…and is distinct from having been switched off", state("USDC", false) === "off");
+// On a SANDBOX deployment the simulator serves every method, so methodServable short-circuits
+// before the refusal is consulted — a blocked method still works there, which is correct: the
+// refusal is about the real rail. What must hold everywhere is that the admin sees the two
+// states apart, which is what the console renders.
+ok("…and on a live deployment it would not be servable — the refusal is checked before the rails",
+   state("USDC", true) === "unavailable");
+noteMintOk("USDC");
+ok("clearing the refusal makes it live again", state("USDC", true) === "live", state("USDC", true));
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

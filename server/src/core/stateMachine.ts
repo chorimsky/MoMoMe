@@ -602,7 +602,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     return;
   }
   // Trust gate: a flagged / very-low-trust merchant needs manual confirmation.
-  if (payoutBlocked(p.recipient.phone)) {
+  if (payoutBlocked(p.recipient.phone, p.recipient.country)) {
     await parkForReview(p, "low-trust merchant — manual confirmation required");
     return;
   }

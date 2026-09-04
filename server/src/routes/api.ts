@@ -1390,8 +1390,8 @@ api.get("/admin/customers", async (_req, res) => {
   }
   const rows: AdminCustomer[] = [...byPhone.values()].map((e) => {
     // Reconcile with the real identity layer + merchant trust — no fabrication.
-    const id = getIdentityByDigits(e.phone.replace(/\D/g, ""));
-    const flagged = merchant.payoutBlocked(e.phone);
+    const id = getIdentityByDigits(e.phone, e.country);
+    const flagged = merchant.payoutBlocked(e.phone, e.country);
     return {
       id: id?.customerId ?? `cust_${e.phone.replace(/\D/g, "").slice(-6)}`,
       phone: e.phone,

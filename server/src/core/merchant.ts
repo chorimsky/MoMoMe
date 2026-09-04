@@ -11,7 +11,7 @@ import type {
   Merchant, MerchantInputType, MerchantStatus, ResolveMerchantResult, ResolutionLogEntry,
   CountryCode, ProviderId, VerificationSource,
 } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, phoneKey } from "../../../shared/domain.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 import * as pawapay from "../adapters/pawapay.js";
@@ -44,8 +44,8 @@ export function getResolutionLog(): ResolutionLogEntry[] {
 }
 
 /** Trust/fraud gate: should a payout to this number be held for manual review? */
-export function payoutBlocked(phone: string): boolean {
-  const m = findByPhone(phone);
+export function payoutBlocked(phone: string, country: CountryCode = "CM"): boolean {
+  const m = findByPhone(phone, country);
   return !!m && (m.status === "flagged" || m.trustScore < 0.2);
 }
 
@@ -54,7 +54,10 @@ export function payoutBlocked(phone: string): boolean {
 // lightningAddresses(). A const arrow here would be in the temporal dead zone
 // then (ReferenceError → merchants fail to restore). Keep these hoisted.
 function digits(s: string): string { return s.replace(/\D/g, ""); }
-function nsn(d: string): string { return d.length > 9 ? d.slice(-9) : d; } // national significant number
+// A merchant record whose country was never captured is compared under the CALLER's
+// country — the best information available — never on a bare digit run. The old rule here
+// was its own copy of "last 9 digits", country-blind, which matched numbers across borders
+// and could not match an 8-digit country's number to itself.
 
 /* ---------- classifier: what kind of input is this? ---------- */
 export function classify(raw: string): { type: MerchantInputType; value: string } {
@@ -81,13 +84,32 @@ function findByCode(code: string): Merchant | undefined {
   const c = code.toUpperCase();
   return [...byId.values()].find((m) => m.merchantCode?.toUpperCase() === c);
 }
-function findByPhone(phone: string): Merchant | undefined {
-  const k = nsn(digits(phone));
-  return [...byId.values()].find((m) => m.phone && nsn(digits(m.phone)) === k);
+function findByPhone(phone: string, country: CountryCode = "CM"): Merchant | undefined {
+  const k = phoneKey(phone, country);
+  return [...byId.values()].find((m) => {
+    if (!m.phone) return false;
+    const c = m.country ?? country;
+    if (c !== country) return false; // never match a number across countries
+    return phoneKey(m.phone, c) === k;
+  });
 }
+
+/** Resolve by display name — and REFUSE when it is ambiguous.
+ *
+ *  This backs scan-to-pay: a scanned alias becomes a merchant, and that merchant's number
+ *  is who gets paid. Returning the first of several businesses sharing a name would send
+ *  someone's money to a stranger with no signal that anything was uncertain. Two matches
+ *  means we do not know, so the caller falls through to "unknown — confirm manually",
+ *  which is the safe answer rather than a confident wrong one. */
 function findByAlias(alias: string): Merchant | undefined {
-  const a = alias.toLowerCase();
-  return [...byId.values()].find((m) => m.displayName.toLowerCase() === a);
+  const a = alias.trim().toLowerCase();
+  if (!a) return undefined;
+  const hits = [...byId.values()].filter((m) => m.displayName.trim().toLowerCase() === a);
+  if (hits.length !== 1) {
+    if (hits.length > 1) console.warn(`[merchant] alias "${alias}" matches ${hits.length} merchants — refusing to guess.`);
+    return undefined;
+  }
+  return hits[0];
 }
 
 export function getMerchant(internalId: string): Merchant | undefined {
@@ -151,7 +173,7 @@ export async function resolveMerchant(
   // 1. Identity-graph lookup.
   let merchant =
     type === "merchant_code" ? findByCode(value)
-    : type === "phone" ? findByPhone(value)
+    : type === "phone" ? findByPhone(value, hint?.country ?? "CM")
     : findByAlias(value);
 
   if (merchant) {
@@ -206,7 +228,7 @@ export function forgetAllMerchants(): number {
 }
 
 export function recordSuccessfulPayout(opts: { phone: string; name: string; provider: ProviderId; country: CountryCode; merchantCode?: string | null; aggregatorRef?: string | null }): Merchant {
-  let merchant = findByPhone(opts.phone) ?? (opts.merchantCode ? findByCode(opts.merchantCode) : undefined);
+  let merchant = findByPhone(opts.phone, opts.country) ?? (opts.merchantCode ? findByCode(opts.merchantCode) : undefined);
   if (!merchant) {
     merchant = create({
       phone: opts.phone, merchantCode: opts.merchantCode ?? null, country: opts.country,

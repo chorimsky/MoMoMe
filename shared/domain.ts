@@ -24,6 +24,36 @@ export function localDigits(phone: string, country: CountryCode): string {
   return d.startsWith(dial) ? d.slice(dial.length) : d;
 }
 
+/** The CANONICAL key for a Mobile Money number: country plus local subscriber digits.
+ *
+ *  Every place that stores, compares or looks up a number must use this, and the reason is
+ *  not tidiness. The identity graph used to key on the raw string a person typed and match
+ *  on "the last 9 digits", which produced four distinct ways to pay the wrong person:
+ *
+ *    · "677000789", "677 000 789" and "+237677000789" made THREE identities for one person,
+ *      so the trust layer could vouch with a name attached to whichever record it hit first;
+ *    · the last-9-digits rule is country-blind, so a Congo +242 number and a Cameroon +237
+ *      number sharing nine digits collided — a lookup of the Congo number answered with the
+ *      Cameroonian's name, at the highest trust level the system has;
+ *    · it also assumes a 9-digit national number, which is true of Cameroon and false of
+ *      Gabon, Chad and CAR, where the same person entered locally and with their country
+ *      code did not match at all;
+ *    · and it silently reused an existing identity across countries, so a Congo recipient
+ *      BECAME the Cameroonian.
+ *
+ *  In this market name confirmation is the safeguard against paying the wrong number, so a
+ *  matching rule that can cross people is worse than having no names. Country is part of the
+ *  key because a subscriber number is only unique within its country. */
+export function phoneKey(phone: string, country: CountryCode): string {
+  return `${country}:${localDigits(phone, country)}`;
+}
+
+/** Two numbers are the same subscriber only if they are the same country AND the same local
+ *  digits. Never compare raw strings or bare digit runs. */
+export function samePhone(a: string, b: string, country: CountryCode): boolean {
+  return phoneKey(a, country) === phoneKey(b, country);
+}
+
 /** Map a Mobile Money number to its operator by prefix — the routing/identity
  *  anchor (the customer's dropdown choice is only a hint). Cameroon allocation:
  *  MTN 650-654 / 67x / 680-684, Orange 655-659 / 69x / 685-689. Returns null for

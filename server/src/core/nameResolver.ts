@@ -22,9 +22,11 @@ export async function resolveRecipient(phone: string, country: CountryCode = "CM
 
   // 1. Internal identity graph — a number we've paid before. The previously
   //    confirmed name takes precedence over the provider's record.
-  const known = getIdentityByDigits(digits);
+  // Country-scoped: a subscriber number is only unique inside its own country, and the
+  // old country-blind match answered a Congo number with a Cameroonian's name.
+  const known = getIdentityByDigits(phone, country);
   if (known?.name) {
-    touchLastSeen(known.phone);
+    touchLastSeen(known.phone, known.country);
     return { status: "internal", name: known.name, verified: true, trustLevel: 2, provider };
   }
 

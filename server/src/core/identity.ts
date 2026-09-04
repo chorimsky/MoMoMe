@@ -16,7 +16,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
 
 interface Otp { hash: string; expiresAt: number; attempts: number }
@@ -53,11 +53,18 @@ function ccDigits(country: Recipient["country"]): string {
  * new one (customer + wallet + ledger + Lightning address) on first sight.
  */
 export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identity {
-  const existing = byPhone.get(rec.phone);
+  // Keyed on country + local digits, NOT the raw string. Keying on what a person typed made
+  // "677000789", "677 000 789" and "+237677000789" three identities for one human — and,
+  // because the key ignored country, let a Congo recipient silently reuse a Cameroonian's.
+  const key = phoneKey(rec.phone, rec.country);
+  const existing = byPhone.get(key);
   if (existing) return existing;
 
   seq += 1;
-  const phoneDigits = rec.phone.replace(/\D/g, "");
+  // LOCAL digits. Using the raw digit run appended the country code to a number that already
+  // carried one: "+237677000789" became e164 "+237237677000789" and a Lightning address of
+  // 237237677000789@momome.xyz — an address nobody can pay, on the customer's own identity.
+  const phoneDigits = localDigits(rec.phone, rec.country);
   const cc = ccDigits(rec.country);
   const now = new Date().toISOString();
   const id: Identity = {
@@ -76,25 +83,21 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
     lastSeen: now,
     firstPaymentRef,
   };
-  byPhone.set(rec.phone, id);
+  byPhone.set(key, id);
   touch("identity");
   return id;
 }
 
-/** National significant number (last 9 digits) — tolerates country-code presence. */
-const nsn = (d: string) => (d.length > 9 ? d.slice(-9) : d);
-
-/** Match an identity by digits, ignoring spacing and an optional country code. */
-export function getIdentityByDigits(digits: string): Identity | undefined {
-  const k = nsn(digits);
-  for (const id of byPhone.values()) {
-    if (nsn(id.phone.replace(/\D/g, "")) === k) return id;
-  }
-  return undefined;
+/** Match an identity by number WITHIN A COUNTRY, tolerating spacing and an optional country
+ *  code. Country is required: a subscriber number is only unique inside its own country, and
+ *  the previous country-blind "last 9 digits" rule matched a Congo number to a Cameroonian
+ *  and returned their name as verified. */
+export function getIdentityByDigits(phone: string, country: Recipient["country"] = "CM"): Identity | undefined {
+  return byPhone.get(phoneKey(phone, country));
 }
 
-export function touchLastSeen(phone: string): void {
-  const id = byPhone.get(phone);
+export function touchLastSeen(phone: string, country: Recipient["country"] = "CM"): void {
+  const id = byPhone.get(phoneKey(phone, country));
   if (id) { id.lastSeen = new Date().toISOString(); touch("identity"); }
 }
 
@@ -108,10 +111,6 @@ export function claimIdentity(customerId: string): Identity | null {
     }
   }
   return null;
-}
-
-export function getIdentityByPhone(phone: string): Identity | undefined {
-  return byPhone.get(phone);
 }
 
 /** Maintenance: remove "phantom" identities provisioned under the old
@@ -138,11 +137,11 @@ export function forgetAllIdentities(): number {
   return n;
 }
 
-export function pruneOrphanIdentities(deliveredNsn: Set<string>): string[] {
+export function pruneOrphanIdentities(deliveredKeys: Set<string>): string[] {
   const removed: string[] = [];
   for (const [key, id] of [...byPhone]) {
     if (id.claimed) continue; // never drop a claimed account
-    if (deliveredNsn.has(nsn(id.phone.replace(/\D/g, "")))) continue; // received money → keep
+    if (deliveredKeys.has(phoneKey(id.phone, id.country))) continue; // received money → keep
     byPhone.delete(key);
     removed.push(id.customerId);
   }
@@ -164,9 +163,8 @@ export function identityStats(): IdentityStats {
    A number can only be claimed once it has received a payment (it has an
    identity). The OTP would be sent by SMS in production; in sandbox the
    code is returned so the demo can complete. (otps map declared up top.) */
-export function requestClaim(phone: string): { found: boolean; alreadyClaimed?: boolean; code?: string } {
-  const digits = phone.replace(/\D/g, "");
-  const id = getIdentityByDigits(digits);
+export function requestClaim(phone: string, country: Recipient["country"] = "CM"): { found: boolean; alreadyClaimed?: boolean; code?: string } {
+  const id = getIdentityByDigits(phone, country);
   if (!id) return { found: false };
   if (id.claimed) return { found: true, alreadyClaimed: true };
   // Cryptographically random 6-digit code; only its hash is stored.
@@ -176,8 +174,8 @@ export function requestClaim(phone: string): { found: boolean; alreadyClaimed?: 
   return { found: true, code };
 }
 
-export function verifyClaim(phone: string, code: string): { ok: boolean; identity?: Identity; reason?: string } {
-  const id = getIdentityByDigits(phone.replace(/\D/g, ""));
+export function verifyClaim(phone: string, code: string, country: Recipient["country"] = "CM"): { ok: boolean; identity?: Identity; reason?: string } {
+  const id = getIdentityByDigits(phone, country);
   if (!id) return { ok: false, reason: "no_account" };
   const otp = otps.get(id.phone);
   if (!otp || otp.expiresAt < Date.now()) return { ok: false, reason: "expired" };

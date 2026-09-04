@@ -66,5 +66,22 @@ ok("…and on a live deployment it would not be servable — the refusal is chec
 noteMintOk("USDC");
 ok("clearing the refusal makes it live again", state("USDC", true) === "live", state("USDC", true));
 
+/* ---- the block MUST expire ----
+   A refusal that only lifts on a successful mint cannot lift at all: the method is hidden,
+   so nobody attempts one, so there is never a success to clear it. That deadlock made
+   "it comes back on its own" true only via a redeploy — which is not on its own. */
+noteMintUnavailable("USDC", "403: not available");
+ok("a fresh refusal hides the method", mintBlockedReason("USDC") !== null);
+
+// Re-blocking with a retry window already in the past is how an aged refusal looks.
+process.env.MINT_RETRY_MS = "0";
+const fresh = await import(`../src/adapters/ibex.js?expiry=${Date.now()}`);
+fresh.noteMintUnavailable("USDT", "403: not available");
+ok("a refusal past its retry window lets the next attempt through",
+   fresh.mintBlockedReason("USDT") === null, String(fresh.mintBlockedReason("USDT")));
+ok("…and having aged out, it does not keep answering blocked",
+   fresh.mintBlockedReason("USDT") === null);
+delete process.env.MINT_RETRY_MS;
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

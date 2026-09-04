@@ -257,18 +257,45 @@ function stablecoinAccountId(m: Method): string {
    state is worse than a missing one: the customer picks it, and only then is told it is
    unavailable. Recorded here so the method list can stop offering it, and so readiness can
    say WHY rather than reporting the account id as present and therefore fine. */
-const mintUnavailable = new Map<string, string>();
+const mintUnavailable = new Map<string, { reason: string; until: number }>();
+
+/** How long a refusal hides a method before the rail is tried again.
+ *
+ *  It MUST expire. A block that only lifts on a successful mint cannot lift at all: the
+ *  method is hidden, so nobody attempts one, so there is never a success to clear it —
+ *  a deadlock whose only escape was a redeploy. An entitlement someone enables at IBEX has
+ *  to be picked up by the running process.
+ *
+ *  Fifteen minutes trades two costs. Too long and a fix nobody can see stays invisible; too
+ *  short and every customer in the window meets a method that fails at the pay screen, which
+ *  is the thing this exists to prevent. One customer every quarter-hour meeting a stale
+ *  refusal — and re-hiding it for another quarter-hour — is the price of it healing at all. */
+const MINT_RETRY_MS = Number(process.env.MINT_RETRY_MS ?? 15 * 60_000);
 
 export function noteMintUnavailable(method: string, reason: string): void {
-  if (!mintUnavailable.has(method)) console.error(`[rail] ibex cannot mint ${method} — ${reason}. It will not be offered until a mint succeeds.`);
-  mintUnavailable.set(method, reason);
+  if (!mintUnavailable.has(method)) {
+    console.error(`[rail] ibex cannot mint ${method} — ${reason}. Hidden from customers; the rail is tried again in ${Math.round(MINT_RETRY_MS / 60000)} min.`);
+  }
+  mintUnavailable.set(method, { reason, until: Date.now() + MINT_RETRY_MS });
 }
+
 export function noteMintOk(method: string): void {
   if (mintUnavailable.delete(method)) console.warn(`[rail] ibex can mint ${method} again — it is back in the method list.`);
 }
-/** Why this method cannot currently be received, or null when it can. */
+
+/** Why this method cannot currently be received, or null when it can — or when the refusal
+ *  is old enough that the rail deserves another try. */
 export function mintBlockedReason(method: string): string | null {
-  return mintUnavailable.get(method) ?? null;
+  const e = mintUnavailable.get(method);
+  if (!e) return null;
+  if (Date.now() >= e.until) {
+    // Expired: let the next attempt through. A success clears it for good; another refusal
+    // re-hides it, so a persistently unavailable currency costs one attempt per window.
+    mintUnavailable.delete(method);
+    console.warn(`[rail] retrying ${method} on ibex — the last refusal has aged out.`);
+    return null;
+  }
+  return e.reason;
 }
 
 export const ibexAdapter: RailAdapter = {

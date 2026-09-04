@@ -38,6 +38,8 @@ const GROUPS: { titleKey: StringKey; items: Item[] }[] = [
       { icon: 'document-text', labelKey: 'tos', tone: 'neutral', route: '/legal/terms' },
       { icon: 'lock-closed', labelKey: 'privacy_policy', tone: 'neutral', route: '/legal/privacy' },
       { icon: 'mail', labelKey: 'contact_support', tone: 'neutral', route: '/legal/contact' },
+      // Google Play requires deletion to be offered INSIDE the app, not only at a URL.
+      { icon: 'trash-outline', labelKey: 'del_title', tone: 'neutral', route: '/delete-account' as Href },
     ],
   },
 ];

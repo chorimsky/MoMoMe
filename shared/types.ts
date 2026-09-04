@@ -360,7 +360,8 @@ export type NotificationKind =
   | "payment_failed"         // it did not, and a refund is owed
   | "refund_needed"          // the sender must supply a destination
   | "unattributed_inbound"   // funds arrived that nobody can account for
-  | "manual_review";         // a payment is held and needs a person
+  | "manual_review"          // a payment is held and needs a person
+  | "deletion_request";      // someone asked for their data to go, from a device we cannot verify
 
 /** Who the message is for. This is not cosmetic — it decides which channels can carry it.
  *  We hold the RECIPIENT's phone number, so they are reachable by SMS. We hold nothing for
@@ -962,4 +963,23 @@ export interface PeexPanel {
 export interface ApiError {
   error: string;
   message: string;
+}
+
+/* ---------- account deletion requests ----------
+   The account IS the device, so only the device can prove ownership and delete on the spot.
+   Google Play's deletion URL must also work for someone who has already uninstalled the
+   app — they cannot prove anything, so what they can do is ASK, and what we must do is keep
+   the request on record and answer it. */
+export interface DeletionRequest {
+  id: string;
+  /** Short human reference the requester is given, e.g. DR-7K3M2Q. */
+  ref: string;
+  /** Local subscriber digits, canonical (see phoneKey). */
+  phone: string;
+  country: CountryCode;
+  note?: string;
+  createdAt: string;
+  resolvedAt?: string;
+  resolution?: "deleted" | "no_account" | "rejected";
+  resolvedNote?: string;
 }

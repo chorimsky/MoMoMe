@@ -226,6 +226,7 @@ export function Landing() {
             <Link to="/contact">{t("lp_foot_help")}</Link>
             <Link to="/terms">{t("lp_foot_terms")}</Link>
             <Link to="/privacy">{t("lp_foot_privacy")}</Link>
+            <Link to="/delete-account">{t("foot_delete")}</Link>
             <Link to="/admin">{t("lp_foot_partners")}</Link>
           </nav>
         </footer>

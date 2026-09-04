@@ -311,6 +311,8 @@ export const STRINGS: Dict = {
   lp_foot_help: ["Help", "Aide"],
   lp_foot_terms: ["Terms", "Conditions"],
   lp_foot_privacy: ["Privacy", "Confidentialité"],
+  foot_delete: ["Delete account", "Supprimer le compte"],
+  help_delete: ["Delete my account and data", "Supprimer mon compte et mes données"],
   lp_foot_partners: ["For partners →", "Pour les partenaires →"],
   lp_foot_contact: ["Contact", "Contact"],
   foot_developers: ["Developers", "Développeurs"],

@@ -3,7 +3,7 @@
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
 import type {
-  UnattributedInbound,
+  UnattributedInbound, DeletionRequest,
   NotificationRecord,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
   AdminOverview, AdminCustomer, OpsSnapshot, LedgerEntry, AdminSettings,
@@ -282,6 +282,10 @@ export const api = {
 
   /** Delete this device's account and its data. Backs the public deletion page Google
    *  Play requires; the device id the client already sends is the only proof of ownership. */
+  /** For someone who no longer has the device: file a deletion request against a number.
+   *  Nothing is deleted on the spot — it is put on record for an operator to verify. */
+  requestDeletion: (body: { phone: string; country: CountryCode; note?: string }) =>
+    req<{ ok: boolean; ref: string; receivedAt: string; alreadyOpen: boolean }>("/me/delete-request", { method: "POST", body: JSON.stringify(body) }),
   deleteAccount: () =>
     req<{ ok: boolean; deleted: { contacts: number; device: boolean; referrals: boolean }; retained: { payments: number; reason: string } }>(
       "/me/delete", { method: "POST" }),
@@ -370,6 +374,9 @@ export const api = {
   adminPayments: () => req<Payment[]>("/admin/payments"),
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
+  adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),
+  resolveDeletionRequest: (id: string, resolution: "deleted" | "no_account" | "rejected", note?: string) =>
+    req<{ ok: boolean; request: DeletionRequest }>(`/admin/deletion-requests/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ resolution, note }) }),
   adminUnattributed: () => req<{ open: number; items: UnattributedInbound[] }>("/admin/unattributed"),
   resolveUnattributed: (id: string, resolution: "attributed" | "refunded" | "ignored", note?: string) =>
     req<{ ok: boolean }>(`/admin/unattributed/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ resolution, note }) }),

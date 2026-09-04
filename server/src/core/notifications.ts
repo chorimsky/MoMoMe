@@ -18,7 +18,7 @@
    that has been delivered has been delivered, whether or not an SMS gateway answered.
    ============================================================ */
 import type {
-  NotificationAudience, NotificationKind, NotificationRecord, Payment,
+  NotificationAudience, NotificationKind, NotificationRecord, Payment, DeletionRequest,
 } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { channelsFor, smsChannel } from "../adapters/notify.js";
@@ -176,6 +176,16 @@ export async function notifyUnattributed(amount: number, asset: string, rail: st
     kind: "unattributed_inbound",
     audience: "operator",
     body: `Unattributed ${amount} ${asset} received on ${rail} (${ref}). Held as a liability — attribute or refund it.`,
+  }).catch(() => {});
+}
+
+/** Someone asked for their account to go, from a device that cannot prove it is theirs.
+ *  The request is on record (core/deletionRequests); this makes sure a person sees it. */
+export async function notifyDeletionRequest(r: DeletionRequest): Promise<void> {
+  await notify({
+    kind: "deletion_request",
+    audience: "operator",
+    body: `${r.ref}: account deletion requested for ${COUNTRIES[r.country]?.dial ?? ""} ${r.phone} from a device we could not verify. Verify ownership and answer it within 30 days — Admin → Deletion requests.`,
   }).catch(() => {});
 }
 

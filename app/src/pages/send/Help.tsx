@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useI18n } from "../../lib/i18n.js";
 import { DEFAULT_SUPPORT, waLink, telLink } from "../../lib/support.js";
 import { FlowCard } from "./ui.js";
@@ -41,6 +42,11 @@ export function Help({ support }: { support?: { email: string; phone: string } }
           <a className="btn btn-ghost" href={telLink(phone)} style={{ flex: "1 1 140px", padding: "12px", textDecoration: "none" }}>{t("call_support")}</a>
         </div>
       </div>
+      {/* The in-app path to deletion. The web app IS the app for people who never install
+          one, and the store requirement is that deletion be offered inside it. */}
+      <p style={{ textAlign: "center", marginTop: 14, fontSize: 12.5 }}>
+        <Link to="/delete-account" style={{ color: "var(--ink-3)" }}>{t("help_delete")}</Link>
+      </p>
     </FlowCard>
   );
 }

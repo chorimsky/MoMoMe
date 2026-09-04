@@ -3,7 +3,7 @@
    the sidebar badge via the admin context.
    ============================================================ */
 import { useEffect, useState } from "react";
-import type { NotificationRecord } from "@shared/types.js";
+import type { NotificationRecord, DeletionRequest } from "@shared/types.js";
 import { api } from "../../../api/client.js";
 import { Card, SectionTitle, toneColor, toneWash } from "../AdminUI.js";
 import { useAdmin } from "../context.js";
@@ -18,6 +18,15 @@ export function NotificationsView() {
   // actually delivered.
   const [health, setHealth] = useState<Health | null>(null);
   const [sent, setSent] = useState<NotificationRecord[]>([]);
+  // Deletion requests filed from the public page by people who no longer have the device.
+  // A request that nobody sees is a request that goes nowhere — so it sits here, in the
+  // place an operator already looks, until it is answered.
+  const [delReqs, setDelReqs] = useState<DeletionRequest[]>([]);
+  const loadDel = () => { api.adminDeletionRequests().then((r) => setDelReqs(r.items)).catch(() => {}); };
+  useEffect(loadDel, []);
+  const answer = async (r: DeletionRequest, resolution: "deleted" | "no_account" | "rejected") => {
+    try { await api.resolveDeletionRequest(r.id, resolution); loadDel(); } catch { /* shown on next load */ }
+  };
   useEffect(() => {
     let alive = true;
     api.adminNotificationOutbox()
@@ -29,6 +38,26 @@ export function NotificationsView() {
   return (
     <div>
       <SectionTitle t="Notifications" s="Operational alerts in priority order." />
+
+      {delReqs.some((r) => !r.resolvedAt) && (
+        <Card title="Deletion requests" sub="Filed from momome.xyz/delete-account by people who cannot present the device. Verify the number is theirs, delete what the law allows, then answer here.">
+          {delReqs.filter((r) => !r.resolvedAt).map((r) => (
+            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ fontFamily: "var(--font-mono)" }}>{r.ref}</strong>
+                <span style={{ marginLeft: 10, fontFamily: "var(--font-mono)" }}>{r.country} {r.phone}</span>
+                <span style={{ color: "var(--ink-3)", marginLeft: 10, fontSize: 12 }}>{new Date(r.createdAt).toLocaleString()}</span>
+                {r.note && <div style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 2 }}>{r.note}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 6, flex: "none" }}>
+                <button type="button" className="btn btn-quiet" style={{ fontSize: 12 }} onClick={() => void answer(r, "deleted")}>Deleted</button>
+                <button type="button" className="btn btn-quiet" style={{ fontSize: 12 }} onClick={() => void answer(r, "no_account")}>No account</button>
+                <button type="button" className="btn btn-quiet" style={{ fontSize: 12 }} onClick={() => void answer(r, "rejected")}>Rejected</button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
 
       {health && (
         <Card title="Delivery to customers" sub="Whether messages are actually reaching people — not just switched on.">

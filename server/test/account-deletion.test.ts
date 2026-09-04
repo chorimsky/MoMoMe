@@ -102,6 +102,25 @@ async function main() {
 
     const anon = await fetch(`${base}/api/me/delete`, { method: "POST", headers: { "content-type": "application/json" } });
     ok("a caller with no device id is refused, not silently 'succeeded'", anon.status === 401, String(anon.status));
+
+    /* ---- someone who no longer has the device can still ASK, and it is on record ---- */
+    const ask = (b: unknown) => fetch(`${base}/api/me/delete-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+    const bad = await ask({ phone: "12", country: "CM" });
+    ok("a request with an unusable number is refused", bad.status === 400, String(bad.status));
+
+    const r1 = await ask({ phone: "+237 6 80 34 44 85", country: "CM", note: "I uninstalled the app" });
+    const o1 = await r1.json() as any;
+    ok("a request needs no device id and is accepted with a reference", r1.status === 200 && o1.ok === true && /^DR-[A-Z2-9]{6}$/.test(o1.ref), `${r1.status} ${o1.ref}`);
+
+    const o2 = await (await ask({ phone: "680344485", country: "CM" })).json() as any;
+    ok("asking again for the same number returns the same open case", o2.ref === o1.ref && o2.alreadyOpen === true, o2.ref);
+
+    const { listDeletionRequests } = await import("../src/core/deletionRequests.js");
+    const open = listDeletionRequests().filter((r) => !r.resolvedAt);
+    ok("the request is on record for an operator, keyed by the canonical number", open.length === 1 && open[0].phone === "680344485", JSON.stringify(open[0]).slice(0, 90));
+
+    const { listNotifications } = await import("../src/core/notifications.js");
+    ok("and an operator was told, with the reference", listNotifications().some((n) => n.kind === "deletion_request" && n.body.includes(o1.ref)), "");
   } finally {
     server.close();
   }

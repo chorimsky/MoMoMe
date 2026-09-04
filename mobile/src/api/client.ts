@@ -71,6 +71,17 @@ export function ensureSenderId(): Promise<string> {
 export function getSenderId(): string | null {
   return senderId;
 }
+/** After the account has been deleted server-side, the id that WAS the account must go
+ *  too — otherwise the next request quietly re-enrols the same identity. */
+export async function forgetSenderId(): Promise<void> {
+  senderId = null;
+  senderReady = null;
+  try {
+    await SecureStore.deleteItemAsync(SENDER_KEY);
+  } catch {
+    /* keychain unavailable — nothing was persisted */
+  }
+}
 
 /* ---------- typed error + core request ---------- */
 export class ApiError extends Error {
@@ -171,6 +182,12 @@ export const api = {
     req<Payment>(`/payments/${id}/simulate`, { method: 'POST' }),
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
+
+  /** Delete this device's account and the data tied to it. Partial by law — the response
+   *  says exactly what went and what had to stay. */
+  deleteAccount: () =>
+    req<{ ok: boolean; deleted: { contacts: number; device: boolean; referrals: boolean }; retained: { payments: number; reason: string } }>(
+      '/me/delete', { method: 'POST' }),
 
   resolvePayLink: (code: string) =>
     req<MerchantLinkPublic>(`/merchant/pay/${encodeURIComponent(code)}`),

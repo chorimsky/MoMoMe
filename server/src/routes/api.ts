@@ -14,7 +14,8 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth, sendOtpSms, canSendSms } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest } from "../core/notifications.js";
+import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
 import { assessRecipient, verifyRiskToken } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
@@ -1151,6 +1152,21 @@ api.post("/me/delete", rateLimitDurableMiddleware("account_delete", 5, 60_000), 
   });
 });
 
+/* Someone who has uninstalled the app has no device to present, and Google Play requires
+   the deletion URL to serve them anyway. They cannot prove ownership, so nothing is deleted
+   here — the request is put on record against the canonical number, an operator is told,
+   and the requester gets a reference. Idempotent: asking again returns the same case. */
+api.post("/me/delete-request", rateLimitDurableMiddleware("account_delete_req", 5, 60 * 60_000), async (req, res) => {
+  const b = (req.body ?? {}) as { phone?: unknown; country?: unknown; note?: unknown };
+  const country = (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode;
+  const check = checkPhone(String(b.phone ?? ""), country);
+  if (!check.ok) return res.status(400).json({ error: "bad_phone", message: "Enter the Mobile Money number you used with MoMo›Me, with its country." });
+  const note = typeof b.note === "string" ? b.note.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 500) : undefined;
+  const { record, isNew } = fileDeletionRequest({ phone: check.local, country, note });
+  if (isNew) void notifyDeletionRequest(record);
+  res.json({ ok: true, ref: record.ref, receivedAt: record.createdAt, alreadyOpen: !isNew });
+});
+
 /* ---------- Phase 4 — phone-anchor + E2E recovery ----------
    Anchor a device to a phone (portable account); a recovery-code-wrapped vault
    key is escrowed so a new device can restore it. The OTP authorises account
@@ -1540,6 +1556,21 @@ api.get("/admin/payments", async (_req, res) => {
    and dropped it, so a customer had paid and nobody could see it. These are real receipts of
    funds, held as a liability until an operator attributes or returns them — so they belong
    in the transaction list beside the payments, not in a log nobody reads. */
+api.get("/admin/deletion-requests", async (_req, res) => {
+  const all = listDeletionRequests();
+  res.json({ open: all.filter((r) => !r.resolvedAt).length, items: all.slice(0, 200) });
+});
+
+api.post("/admin/deletion-requests/:id/resolve", async (req, res) => {
+  const { resolution, note } = (req.body ?? {}) as { resolution?: unknown; note?: unknown };
+  if (resolution !== "deleted" && resolution !== "no_account" && resolution !== "rejected") {
+    return res.status(400).json({ error: "bad_resolution", message: "resolution must be deleted, no_account or rejected." });
+  }
+  const r = resolveDeletionRequest(String(req.params.id), resolution, typeof note === "string" ? note : undefined);
+  if (!r) return res.status(404).json({ error: "not_found", message: "No such request." });
+  res.json({ ok: true, request: r });
+});
+
 api.get("/admin/unattributed", async (_req, res) => {
   const all = listUnattributed();
   res.json({

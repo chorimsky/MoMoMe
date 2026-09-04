@@ -28,6 +28,7 @@ const FOOT_LINKS: Array<[string, string, Current]> = [
   ["/", "nav_home", null],
   ["/terms", "lp_foot_terms", "terms"],
   ["/privacy", "lp_foot_privacy", "privacy"],
+  ["/delete-account", "foot_delete", null],
   ["/contact", "lp_foot_contact", "contact"],
   ["/admin", "lp_foot_partners", null],
 ];

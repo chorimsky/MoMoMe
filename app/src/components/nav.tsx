@@ -68,6 +68,9 @@ const FOOT_LINKS: Array<[to: string, key: string, current: FootKey, feature?: ke
   ["/developers", "foot_developers", null, "developerApi"],
   ["/terms", "lp_foot_terms", "terms"],
   ["/privacy", "lp_foot_privacy", "privacy"],
+  // Reachable from every customer page, not only a sentence inside the privacy policy —
+  // Google Play checks that the deletion address is findable, and so does a person.
+  ["/delete-account", "foot_delete", null],
 ];
 
 /**

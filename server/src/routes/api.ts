@@ -5,7 +5,7 @@ import type {
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, ALL_METHODS, bip21,
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, ALL_METHODS, bip21,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
@@ -650,10 +650,24 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   ) {
     return res.status(400).json({ error: "bad_recipient", message: "Invalid recipient details." });
   }
-  // Anchor the operator to the NUMBER's prefix — the dropdown is only a hint, so
-  // the payout always routes to the operator that actually owns the number.
-  const detected = detectProvider(recipient.phone, recipient.country);
-  if (detected && country.providers.includes(detected)) recipient.provider = detected;
+  // Does the number make sense for this country, and whose network is it on? The check
+  // above only asked for eight digits, which accepted a Gabon +241 number entered as
+  // Cameroon — producing the MSISDN 23724112345678, fourteen digits handed to a real payout
+  // rail — and accepted a number three digits too long that still matched an MTN prefix.
+  // Mobile Money does not reverse, so this refuses BEFORE anything is minted or moved.
+  const check = checkPhone(recipient.phone, recipient.country);
+  if (!check.ok) {
+    const msg = check.reason === "foreign_country" && check.belongsTo
+      ? `That looks like a ${COUNTRIES[check.belongsTo].name} number. Switch the country to ${COUNTRIES[check.belongsTo].name}, or enter a ${country.name} number.`
+      : check.reason === "bad_length"
+        ? `A ${country.name} Mobile Money number has ${country.nsnLen.join(" or ")} digits after ${country.dial}.`
+        : "We can't tell which operator that number belongs to. Check it and try again.";
+    return res.status(400).json({ error: "bad_phone", message: msg });
+  }
+  // Anchor the operator to the NUMBER's prefix — the dropdown is only a hint, so the payout
+  // always routes to the operator that actually owns the number. checkPhone has already
+  // refused the case where that cannot be determined, so this never falls back to the guess.
+  recipient.provider = check.provider!;
   // Never store a null/blank name — fall back to the number so downstream UI
   // (activity, receipts) and the identity layer always have a string. Sanitize +
   // cap (it's forwarded to the payout aggregator's disburse({name}) and stored): strip
@@ -661,7 +675,12 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   const cleanName = typeof recipient.name === "string"
     ? recipient.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60)
     : "";
+  // The payout rails want a label and some require one, so an unnamed recipient still gets
+  // the number as the string sent to the rail. What must NOT happen is that string becoming
+  // the person's NAME: it flowed into the identity graph and came back at trustLevel 2 as
+  // verified, telling the next sender that this number belongs to "680344485".
   recipient.name = cleanName || recipient.phone;
+  recipient.nameSource = isRealName(cleanName, recipient.phone) ? (recipient.nameSource ?? "manual") : "unknown";
   // Atomically claim the quote BEFORE any async work — a locked rate becomes
   // exactly one payment even if two requests race on the same quoteId (the
   // loser gets 404). A claimed quote is gone, so the rate can't be replayed.

@@ -10,7 +10,7 @@
 process.env.DB_PATH = ":memory:";
 process.env.RAILS_MODE = "sandbox";
 
-import { phoneKey, samePhone, localDigits } from "../../shared/domain.js";
+import { phoneKey, samePhone, localDigits, checkPhone, isRealName, COUNTRIES } from "../../shared/domain.js";
 import type { Recipient } from "../../shared/types.js";
 
 let pass = 0, fail = 0;
@@ -87,6 +87,66 @@ ok("…and does not hand her name to a different country's number",
 ok("one digit different is a different person", !getIdentityByDigits("677000788", "CM"));
 ok("a truncated number is a different person", !getIdentityByDigits("67700078", "CM"));
 ok("extra leading digits do not silently match", !getIdentityByDigits("99677000789", "CM"));
+
+/* ---- the number must FIT the country it was entered under ----
+   Payment creation only ever asked for eight digits. That accepted a Gabon number sent as
+   Cameroon — MSISDN 23724112345678, fourteen digits, handed to a real payout rail — and a
+   number three digits too long that still matched an MTN prefix. Mobile Money does not
+   reverse, so these have to be refused before anything is minted. */
+const good = checkPhone("677000789", "CM");
+ok("a real Cameroon MTN number passes", good.ok && good.provider === "MTN", `${good.reason ?? ""}${good.provider}`);
+ok("…and yields the local digits", good.local === "677000789", good.local);
+
+const foreign = checkPhone("+24112345678", "CM");
+ok("a Gabon number entered as Cameroon is REFUSED", !foreign.ok, foreign.reason);
+ok("…and names the country it actually belongs to", foreign.belongsTo === "GA", foreign.belongsTo);
+
+const tooLong = checkPhone("677000789000", "CM");
+ok("three digits too many is refused, despite matching an MTN prefix",
+   !tooLong.ok && tooLong.reason === "bad_length", `${tooLong.reason}/${tooLong.provider}`);
+ok("too short is refused", !checkPhone("6770007", "CM").ok);
+
+// The dropdown is the thing a sender is most likely to get wrong, so an operator we cannot
+// determine is refused rather than routed on the guess.
+for (const n of ["620000789", "660000789", "222000789"]) {
+  const c = checkPhone(n, "CM");
+  ok(`${n} (not an MTN/Orange prefix) is refused, not routed on the dropdown`,
+     !c.ok && c.reason === "unknown_operator", c.reason);
+}
+ok("an Orange prefix routes to Orange, whatever the dropdown said",
+   checkPhone("690000789", "CM").provider === "ORANGE", String(checkPhone("690000789", "CM").provider));
+ok("every country declares its accepted lengths",
+   Object.values(COUNTRIES).every((c) => Array.isArray(c.nsnLen) && c.nsnLen.length > 0));
+
+/* ---- every number must carry the CORRECT name ----
+   Payment creation stores `name || phone` because the rails want a label. That string used
+   to become the person's NAME in the identity graph and come back at trustLevel 2 as
+   verified — the platform asserting that this number belongs to "680344485". */
+ok("a real name is a name", isRealName("ALICE MBARGA", "677000789"));
+ok("the number written back is NOT a name", !isRealName("677000789", "677000789"));
+ok("…nor with the country code on it", !isRealName("237677000789", "677000789"));
+ok("…nor formatted", !isRealName("677 000 789", "677000789"));
+ok("a blank is not a name", !isRealName("", "677000789") && !isRealName(null, "677000789"));
+ok("digits alone are never a name", !isRealName("12345", "677000789"));
+
+const unnamed = ensureIdentity(R("699000111", "699000111"), "r5");
+ok("an unnamed recipient does NOT get the digits stored as their name", unnamed.name === "", `"${unnamed.name}"`);
+const stillUnknown = await resolveRecipient("699000111", "CM");
+ok("…so the trust layer says unknown rather than vouching for a number",
+   stillUnknown.status !== "internal", `${stillUnknown.status}/${stillUnknown.name ?? ""}`);
+
+// …and a later real name must be able to correct it. First-write-wins meant it never could.
+ensureIdentity(R("699000111", "MARIE FOTSO"), "r6");
+ok("a later real name UPGRADES the record", getIdentityByDigits("699000111", "CM")?.name === "MARIE FOTSO",
+   getIdentityByDigits("699000111", "CM")?.name);
+const named = await resolveRecipient("699000111", "CM");
+ok("…and the trust layer now vouches for it", named.status === "internal" && named.name === "MARIE FOTSO",
+   `${named.status}/${named.name}`);
+
+// The upgrade is one-way: a blank later payment must not erase a name we trust.
+ensureIdentity(R("699000111", "699000111"), "r7");
+ok("a later BLANK name does not erase the real one",
+   getIdentityByDigits("699000111", "CM")?.name === "MARIE FOTSO", getIdentityByDigits("699000111", "CM")?.name);
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

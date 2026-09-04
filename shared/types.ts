@@ -18,6 +18,10 @@ export interface Country {
   /** Whether the corridor is live. Inactive countries are shown as "coming soon"
    *  in pickers (so users see the roadmap) but can't be selected. Only CM today. */
   active: boolean;
+  /** Accepted lengths for the national significant number (the digits after the dial
+   *  code). Payment creation only ever checked "at least 8 digits", which let a number
+   *  with three digits too many through to a real payout rail. */
+  nsnLen: number[];
 }
 
 export interface Provider {

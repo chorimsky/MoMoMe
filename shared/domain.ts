@@ -10,11 +10,14 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
 };
 
 export const COUNTRIES: Record<CountryCode, Country> = {
-  CM: { name: "Cameroon", code: "CM", dial: "+237", ccy: "XAF", providers: ["MTN", "ORANGE"], active: true },
-  GA: { name: "Gabon", code: "GA", dial: "+241", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false },
-  TD: { name: "Chad", code: "TD", dial: "+235", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false },
-  CG: { name: "Congo", code: "CG", dial: "+242", ccy: "XAF", providers: ["MTN", "AIRTEL"], active: false },
-  CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"], active: false },
+  CM: { name: "Cameroon", code: "CM", dial: "+237", ccy: "XAF", providers: ["MTN", "ORANGE"], active: true, nsnLen: [9] },
+  // The inactive corridors carry a PERMISSIVE length until their numbering plan is
+  // confirmed against the operator, rather than a precise-looking guess. Narrow each one
+  // when you activate it — a wrong length here refuses real customers.
+  GA: { name: "Gabon", code: "GA", dial: "+241", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false, nsnLen: [8, 9] },
+  TD: { name: "Chad", code: "TD", dial: "+235", ccy: "XAF", providers: ["AIRTEL", "MTN"], active: false, nsnLen: [8, 9] },
+  CG: { name: "Congo", code: "CG", dial: "+242", ccy: "XAF", providers: ["MTN", "AIRTEL"], active: false, nsnLen: [9] },
+  CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"], active: false, nsnLen: [8] },
 };
 
 /** Local subscriber digits for a number (strips the country dial code). */
@@ -22,6 +25,70 @@ export function localDigits(phone: string, country: CountryCode): string {
   const d = phone.replace(/\D/g, "");
   const dial = COUNTRIES[country].dial.replace(/\D/g, "");
   return d.startsWith(dial) ? d.slice(dial.length) : d;
+}
+
+/** Is this string a real name, or just the number written back?
+ *
+ *  Payment creation stores `name || phone`, because the payout rails want a label and some
+ *  require one. That is fine as a label and wrong as an identity: the digits then flowed
+ *  into the identity graph as the person's NAME and came back out at trustLevel 2, verified
+ *  — the platform telling a sender that this number belongs to "680344485". */
+export function isRealName(name: string | null | undefined, phone: string): boolean {
+  const n = (name ?? "").trim();
+  if (n.length < 2) return false;
+  const nd = n.replace(/\D/g, "");
+  const pd = phone.replace(/\D/g, "");
+  if (nd && pd && (nd === pd || pd.endsWith(nd) || nd.endsWith(pd))) return false; // the number back again
+  return /\p{L}/u.test(n); // must contain an actual letter
+}
+
+export interface PhoneCheck {
+  ok: boolean;
+  /** Local subscriber digits, when they could be determined. */
+  local: string;
+  /** Operator that owns the number, by prefix. */
+  provider: ProviderId | null;
+  /** Machine-readable failure, for the caller to map to a message. */
+  reason?: "empty" | "foreign_country" | "bad_length" | "unknown_operator";
+  /** The country a foreign number actually belongs to, when we can tell. */
+  belongsTo?: CountryCode;
+}
+
+/** Does this number make sense for this country, and whose network is it on?
+ *
+ *  Payment creation only ever checked "at least 8 digits". That accepted a number entered
+ *  under the wrong country — a Gabon +241 number sent as Cameroon produced the MSISDN
+ *  23724112345678, fourteen digits handed to a real payout rail — and accepted a number
+ *  with three digits too many, which still matched an MTN prefix and would have been
+ *  disbursed. Neither is recoverable once the rail acts on it.
+ *
+ *  A number whose operator cannot be determined is refused rather than routed on the
+ *  dropdown's guess: paying MTN for an Orange number is a failed or misdirected payout, and
+ *  the dropdown is the one part of this the sender is most likely to get wrong. */
+export function checkPhone(phone: string, country: CountryCode): PhoneCheck {
+  const raw = (phone ?? "").replace(/\D/g, "");
+  if (!raw) return { ok: false, local: "", provider: null, reason: "empty" };
+
+  // Typed with SOMEONE ELSE'S country code — say whose, so the UI can offer to switch.
+  const own = COUNTRIES[country].dial.replace(/\D/g, "");
+  if (!raw.startsWith(own)) {
+    for (const c of Object.values(COUNTRIES)) {
+      const d = c.dial.replace(/\D/g, "");
+      if (c.code !== country && raw.startsWith(d) && raw.length > d.length) {
+        return { ok: false, local: raw.slice(d.length), provider: null, reason: "foreign_country", belongsTo: c.code };
+      }
+    }
+  }
+
+  const local = localDigits(raw, country);
+  if (!COUNTRIES[country].nsnLen.includes(local.length)) {
+    return { ok: false, local, provider: null, reason: "bad_length" };
+  }
+  const provider = detectProvider(local, country);
+  if (!provider || !COUNTRIES[country].providers.includes(provider)) {
+    return { ok: false, local, provider: null, reason: "unknown_operator" };
+  }
+  return { ok: true, local, provider };
 }
 
 /** The CANONICAL key for a Mobile Money number: country plus local subscriber digits.

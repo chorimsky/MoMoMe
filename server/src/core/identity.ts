@@ -16,7 +16,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey, isRealName } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
 
 interface Otp { hash: string; expiresAt: number; attempts: number }
@@ -58,7 +58,18 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
   // because the key ignored country, let a Congo recipient silently reuse a Cameroonian's.
   const key = phoneKey(rec.phone, rec.country);
   const existing = byPhone.get(key);
-  if (existing) return existing;
+  if (existing) {
+    // A number must carry the CORRECT name, and first-write-wins meant it never could. A
+    // number whose first delivery had no name was stored as its own digits, and served that
+    // back at trustLevel 2 as verified, permanently — a later, real name never corrected it.
+    // Only ever an upgrade: a real name can replace a non-name, never the reverse, so a
+    // blank later payment cannot erase a name we already trust.
+    if (isRealName(rec.name, rec.phone) && !isRealName(existing.name, existing.phone)) {
+      existing.name = rec.name;
+      touch("identity");
+    }
+    return existing;
+  }
 
   seq += 1;
   // LOCAL digits. Using the raw digit run appended the country code to a number that already
@@ -69,7 +80,10 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
   const now = new Date().toISOString();
   const id: Identity = {
     customerId: `CUS${pad(seq)}`,
-    name: rec.name,
+    // Empty rather than the digits: the trust layer reads this, and "no name yet" must stay
+    // distinguishable from a name. resolveRecipient falls through to "unknown — confirm
+    // manually", which is the safe answer.
+    name: isRealName(rec.name, rec.phone) ? rec.name : "",
     phone: rec.phone,
     e164: `+${cc}${phoneDigits}`,
     country: rec.country,

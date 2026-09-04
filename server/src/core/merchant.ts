@@ -11,7 +11,7 @@ import type {
   Merchant, MerchantInputType, MerchantStatus, ResolveMerchantResult, ResolutionLogEntry,
   CountryCode, ProviderId, VerificationSource,
 } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, phoneKey } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, phoneKey, isRealName } from "../../../shared/domain.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 import * as pawapay from "../adapters/pawapay.js";
@@ -232,7 +232,10 @@ export function recordSuccessfulPayout(opts: { phone: string; name: string; prov
   if (!merchant) {
     merchant = create({
       phone: opts.phone, merchantCode: opts.merchantCode ?? null, country: opts.country,
-      displayName: opts.name, provider: opts.provider, aggregatorRef: opts.aggregatorRef ?? null,
+      // Never seed a merchant name with the number written back — that string is a payout
+      // label, and it used to become a business's display name and be shown as confirmed.
+      displayName: isRealName(opts.name, opts.phone) ? opts.name : "Unconfirmed merchant",
+      provider: opts.provider, aggregatorRef: opts.aggregatorRef ?? null,
       trustScore: 0.6, verificationSource: "aggregator", status: "active",
     });
   }
@@ -241,6 +244,10 @@ export function recordSuccessfulPayout(opts: { phone: string; name: string; prov
   if (!merchant.phone) merchant.phone = opts.phone;
   if (!merchant.provider) merchant.provider = opts.provider;
   if (!merchant.country) merchant.country = opts.country;
+  // A real name upgrades a placeholder, never the other way round.
+  if (isRealName(opts.name, opts.phone) && !isRealName(merchant.displayName, merchant.phone ?? opts.phone)) {
+    merchant.displayName = opts.name;
+  }
   if (opts.aggregatorRef) merchant.aggregatorRef = opts.aggregatorRef;
   merchant.lightningAddresses = lightningAddresses(merchant.phone);
   merchant.txCount += 1;

@@ -8,7 +8,7 @@
    address is the Mobile Money number.
    ============================================================ */
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, MIN_XAF, MAX_XAF, detectProvider, localDigits } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, MIN_XAF, MAX_XAF, detectProvider, localDigits, checkPhone } from "../../../shared/domain.js";
 import { getSettings } from "./settings.js";
 import { rateFor } from "./fx.js";
 
@@ -33,11 +33,15 @@ export function parseLnUser(user: string): LnRecipient | null {
     const dial = co.dial.replace(/\D/g, "");
     if (d.startsWith(dial) && d.length > dial.length) { country = co.code; break; }
   }
-  const national = localDigits(d, country);
-  if (national.length < 8) return null;
-  const provider = detectProvider(national, country);
-  if (!provider || !COUNTRIES[country].providers.includes(provider)) return null;
-  return { national, country, provider };
+  // The SAME shape check a payout recipient gets. This rule used to be its own copy —
+  // "at least 8 digits and a known prefix", with no upper bound — so a Lightning Address
+  // for 677000789000 resolved, returned a payable request, and a wallet anywhere in the
+  // world could pay it. The crypto would land against a number that can never be paid out:
+  // the payout MSISDN would be 237677000789000. Minting an invoice for a number we cannot
+  // settle to is taking money we cannot deliver.
+  const check = checkPhone(d, country);
+  if (!check.ok) return null;
+  return { national: check.local, country, provider: check.provider! };
 }
 
 /** Convert a payer-chosen msat amount into the XAF the recipient receives.

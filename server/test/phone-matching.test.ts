@@ -148,5 +148,20 @@ ensureIdentity(R("699000111", "699000111"), "r7");
 ok("a later BLANK name does not erase the real one",
    getIdentityByDigits("699000111", "CM")?.name === "MARIE FOTSO", getIdentityByDigits("699000111", "CM")?.name);
 
+/* ---- a Lightning Address must not be payable for a number we cannot settle to ----
+   parseLnUser carried its own copy of the old rule, so /.well-known/lnurlp/677000789000
+   resolved and returned a payable request. A wallet anywhere in the world could pay it, the
+   crypto would land, and the payout MSISDN would be 237677000789000. Minting an invoice for
+   a number we cannot settle to is taking money we cannot deliver. */
+const { parseLnUser } = await import("../src/core/lnurl.js");
+ok("a real number resolves to a Lightning Address", parseLnUser("677000789")?.national === "677000789");
+ok("…and with its country code", parseLnUser("237677000789")?.national === "677000789",
+   parseLnUser("237677000789")?.national);
+ok("an over-long number is NOT payable", parseLnUser("677000789000") === null);
+ok("a non-MTN/Orange number is not payable", parseLnUser("620000789") === null);
+ok("a too-short number is not payable", parseLnUser("6770007") === null);
+ok("an Orange number resolves to Orange", parseLnUser("690000789")?.provider === "ORANGE",
+   String(parseLnUser("690000789")?.provider));
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

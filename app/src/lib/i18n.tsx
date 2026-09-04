@@ -178,6 +178,12 @@ export const STRINGS: Dict = {
   rcv_share: ["Show this code, or share the address. Payments land on your Mobile Money — we never hold your money.", "Montrez ce code, ou partagez l'adresse. Les paiements arrivent sur votre Mobile Money — nous ne détenons jamais votre argent."],
   rcv_change: ["Use a different number", "Utiliser un autre numéro"],
   rcv_bad_number: ["Check this number — it doesn't look like a valid MTN / Orange number.", "Vérifiez ce numéro — il ne ressemble pas à un numéro MTN / Orange valide."],
+  // A single "that's wrong" tells someone nothing. Say WHICH thing is wrong, because each
+  // has a different fix — count the digits, switch the country, or use a different number.
+  rcv_bad_length: ["A Cameroon Mobile Money number has 9 digits, starting with 6.", "Un numéro Mobile Money camerounais compte 9 chiffres et commence par 6."],
+  rcv_bad_foreign: ["That looks like a number from another country. MoMo›Me is live in Cameroon today.", "Ce numéro semble venir d'un autre pays. MoMo›Me est disponible au Cameroun pour l'instant."],
+  rcv_bad_operator: ["Only MTN and Orange Money numbers can receive payments today.", "Seuls les numéros MTN et Orange Money peuvent recevoir des paiements aujourd'hui."],
+  rcv_on_network: ["This is an {op} Mobile Money number", "Ceci est un numéro Mobile Money {op}"],
   rcv_copy_addr: ["Payment address", "Adresse de paiement"],
   demo_label: ["Demo", "Démo"],
   sandbox_title: ["Sandbox demo", "Démo (bac à sable)"],

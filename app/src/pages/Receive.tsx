@@ -13,7 +13,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LN_ADDRESS_DOMAIN, localDigits, detectProvider } from "@shared/domain.js";
+import { LN_ADDRESS_DOMAIN, checkPhone } from "@shared/domain.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
@@ -31,11 +31,18 @@ export function Receive() {
   const [draft, setDraft] = useState("");
   const [number, setNumber] = useState<string | null>(null);
 
-  const digits = localDigits(draft, "CM");
-  // Same validity rule the send flow uses — a number no provider claims cannot be paid to,
-  // so promising someone an address for it would be a broken promise.
-  const valid = digits.length >= 8 && !!detectProvider(digits, "CM");
+  // The SAME rule the send flow and the LNURL server use. This screen used to carry its own
+  // copy — "at least 8 digits and a known prefix" — which accepted 677000789000 and would
+  // have handed someone a payment address for a number that can never be paid out.
+  const check = checkPhone(draft, "CM");
+  const valid = check.ok;
   const address = number ? receiveAddress(number) : "";
+  // Which thing is wrong decides what the person should do about it.
+  const problem = !draft.trim() || valid ? null
+    : check.reason === "bad_length" ? t("rcv_bad_length")
+    : check.reason === "foreign_country" ? t("rcv_bad_foreign")
+    : check.reason === "unknown_operator" ? t("rcv_bad_operator")
+    : t("rcv_bad_number");
 
   if (!features.receive) {
     return (
@@ -72,15 +79,23 @@ export function Receive() {
                 placeholder="6 7X XX XX XX"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && valid) setNumber(digits); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && valid) setNumber(check.local); }}
                 aria-label={t("rcv_your_number")}
                 style={{ flex: 1, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--paper)", color: "var(--ink)", fontSize: 16 }}
               />
             </div>
-            {draft.trim().length > 0 && !valid && (
-              <p style={{ color: "var(--warn-ink)", fontSize: 12.5, marginTop: 8 }}>{t("rcv_bad_number")}</p>
+            {problem && (
+              <p role="alert" style={{ color: "var(--warn-ink)", fontSize: 12.5, marginTop: 8 }}>{problem}</p>
             )}
-            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => setNumber(digits)}>
+            {/* Confirm the network back to them. Someone entering their own number should
+                recognise their operator — if it says Orange and they are on MTN, they have
+                mistyped, and that is far easier to notice than a wrong digit. */}
+            {valid && check.provider && (
+              <p style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 8 }}>
+                {t("rcv_on_network").replace("{op}", check.provider === "ORANGE" ? "Orange Money" : "MTN MoMo")}
+              </p>
+            )}
+            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => setNumber(check.local)}>
               {t("rcv_create")}
             </button>
           </div>

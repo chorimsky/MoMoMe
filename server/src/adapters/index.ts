@@ -22,7 +22,7 @@ import { config, liveMoney } from "../config.js";
 import { HealthTracker } from "../core/railHealth.js";
 import type { InstructionRequest, RailAdapter, SettlementStatus } from "./types.js";
 import { sandboxAdapter } from "./sandbox.js";
-import { ibexAdapter } from "./ibex.js";
+import { ibexAdapter, mintBlockedReason } from "./ibex.js";
 
 /** Every known crypto inbound rail. Order here is irrelevant — selection is by
  *  `priority` among the CONFIGURED rails. Sandbox is always configured (catch-all). */
@@ -169,6 +169,12 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
  *  everything, so every method is servable. */
 export function methodServable(m: Method): boolean {
   if (!liveMoney()) return true;
+  // A rail that has REFUSED to mint an address for this method cannot serve it, whatever
+  // its supports() says. IBEX is account-per-currency AND per-organisation: the account id
+  // can be configured and the currency still refused — USDC answers 403 "this feature is
+  // not available for your organization". Treating that as servable means the customer
+  // picks the method and only then meets method_unavailable.
+  if (mintBlockedReason(m)) return false;
   return activeRails().some((r) => r.name !== "sandbox" && r.supports(m));
 }
 

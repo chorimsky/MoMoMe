@@ -250,6 +250,27 @@ function stablecoinAccountId(m: Method): string {
   return "";
 }
 
+/* ---------- which methods can actually receive ----------
+   IBEX is account-per-currency AND per-organisation: an account id can be configured and
+   the currency still refused, which is exactly what USDC does today —
+   403 "this feature is not available for your organization, contact ibex". A method in that
+   state is worse than a missing one: the customer picks it, and only then is told it is
+   unavailable. Recorded here so the method list can stop offering it, and so readiness can
+   say WHY rather than reporting the account id as present and therefore fine. */
+const mintUnavailable = new Map<string, string>();
+
+export function noteMintUnavailable(method: string, reason: string): void {
+  if (!mintUnavailable.has(method)) console.error(`[rail] ibex cannot mint ${method} — ${reason}. It will not be offered until a mint succeeds.`);
+  mintUnavailable.set(method, reason);
+}
+export function noteMintOk(method: string): void {
+  if (mintUnavailable.delete(method)) console.warn(`[rail] ibex can mint ${method} again — it is back in the method list.`);
+}
+/** Why this method cannot currently be received, or null when it can. */
+export function mintBlockedReason(method: string): string | null {
+  return mintUnavailable.get(method) ?? null;
+}
+
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
   // IBEX is the BASE crypto rail — priority 0 so it's chosen ahead of any other
@@ -298,10 +319,20 @@ export const ibexAdapter: RailAdapter = {
         method: "POST",
         body: JSON.stringify({ name: req.ref.slice(0, 40), network: "ethereum" }),
       });
-      if (!res.ok) throw new Error(`IBEX ${asset} receive-info failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) {
+        const body = await res.text();
+        // Remember an ENTITLEMENT refusal. IBEX answers 403 "this feature is not available
+        // for your organization" when the org has no receive combo for that currency, and
+        // that does not fix itself between one payment and the next. Offering the method
+        // anyway means every customer who picks it meets method_unavailable AFTER choosing
+        // — so the method list stops advertising it until a mint succeeds again.
+        if (res.status === 403 || res.status === 404) noteMintUnavailable(req.method, `${res.status}: ${body.slice(0, 160)}`);
+        throw new Error(`IBEX ${asset} receive-info failed: ${res.status} ${body}`);
+      }
       const data = (await res.json()) as { id: string; type?: string; data?: { address?: string } };
       const addr = data.data?.address;
       if (!addr) throw new Error(`IBEX ${asset} receive-info returned no address`);
+      noteMintOk(req.method); // it works now — stop hiding it
       return {
         // `code` stays the bare address (copy-paste / exchange withdrawal fields); the QR
         // carries the EIP-681 URI so a scanning wallet gets the chain AND the amount.

@@ -16,6 +16,7 @@ import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { listNotifications, notificationHealth, sendOtpSms, canSendSms } from "../core/notifications.js";
 import { assessRecipient, verifyRiskToken } from "../core/recipientRisk.js";
+import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
@@ -524,7 +525,7 @@ api.get("/preview", rateLimitMiddleware("preview", 120, 60_000), async (req, res
   }
   await ensureFreshRates().catch(() => {});
   const fresh = ratesFresh();
-  const enabled = getSettings().methods;
+  const enabled = offeredMethods();
   const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
   const totalXaf = xaf + feeXaf;
 
@@ -2283,10 +2284,12 @@ api.get("/admin/readiness", async (req, res) => {
         const enabled = getSettings().methods[m] !== false;
         return {
           method: m, enabledInSettings: enabled, accountVar: key, accountConfigured: account,
-          state: !enabled ? "off" : account ? "ok" : "blocked",
+          blocked: mintBlockedReason(m),
+          state: !enabled ? "off" : mintBlockedReason(m) ? "blocked" : account ? "ok" : "blocked",
           detail: !enabled ? "Switched off in Settings → Crypto pay-in methods."
-            : account ? "Offered to customers, with an IBEX account to receive it."
-              : `Offered to customers, but ${key} is not set — minting an address will fail.`,
+            : mintBlockedReason(m) ? `The rail refuses to mint an address for this: ${mintBlockedReason(m)}. Not offered to customers until it works.`
+              : account ? "Offered to customers, with an IBEX account to receive it."
+                : `Offered to customers, but ${key} is not set — minting an address will fail.`,
         };
       }),
       payout: [

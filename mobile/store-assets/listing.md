@@ -18,7 +18,8 @@ WHY MOMO›ME
   directly in your Mobile Money.
 • Pay merchants — scan a shop's QR or enter their code to pay on the spot.
 • Clear, upfront pricing — you see the fee and the exact total before you confirm.
-• Works across the region — Cameroon, Gabon, Chad, Congo and the CAR.
+• Cameroon today — MTN Mobile Money and Orange Money. Gabon, Chad, Congo and the CAR
+  are coming.
 
 BUILT FOR TRUST
 • Your contacts are end-to-end encrypted and stay on your device.

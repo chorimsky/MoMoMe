@@ -24,8 +24,10 @@ collected or stored. (Do **not** list camera as data collection.)
 - **Data is encrypted in transit** (HTTPS/TLS): **Yes**.
 - **Contacts are end-to-end encrypted** at rest and in transit (AES-256-GCM; the key
   never leaves the user's device / secure keystore).
-- **Users can request deletion**: provide the support contact
-  (More → Contact & support, or the email in `app config → support`).
+- **Users can request deletion**: **Yes** — in the app (More → Legal → Delete my account)
+  and at the public URL **https://www.momome.xyz/delete-account** (enter this in
+  App content → Data safety → account deletion URL). Payment records are retained as
+  AML law requires; the page and the in-app screen disclose exactly what is kept.
 - **Committed to Play Families policy**: app is not directed at children.
 
 ## Account creation / login

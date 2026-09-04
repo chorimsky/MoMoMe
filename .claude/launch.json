@@ -37,6 +37,22 @@
       ],
       "port": 4000,
       "autoPort": false
+    },
+    {
+      "name": "momome-android",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "mobile:android"
+      ],
+      "port": 8081
+    },
+    {
+      "name": "momome-metro",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "mobile:start"
+      ],
+      "port": 8081
     }
   ]
 }

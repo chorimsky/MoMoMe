@@ -5,7 +5,7 @@ import type {
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import {
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, ALL_METHODS, bip21,
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
@@ -14,7 +14,7 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtpSms, canSendSms } from "../core/notifications.js";
 import { assessRecipient, verifyRiskToken } from "../core/recipientRisk.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
@@ -843,7 +843,9 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   if (linkCode) {
     const link = getLink(linkCode);
     const m = link && !link.disabledAt ? merchantById(link.merchantId) : undefined;
-    if (m && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+    // Canonical comparison: raw digit equality silently failed to attribute a sale when
+    // the stored and submitted forms differed (one carrying the country code).
+    if (m && samePhone(m.settlementPhone, recipient.phone, recipient.country)) {
       payment.merchantId = m.id;
       payment.merchantLinkCode = link!.code;
     }
@@ -852,7 +854,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     // the recipient matches its settlement number — so counter-poster scans are
     // attributed by merchantId, not just the loose phone fallback.
     const m = merchantByCode(merchantCode);
-    if (m && m.status === "active" && m.settlementPhone.replace(/\D/g, "") === recipient.phone.replace(/\D/g, "")) {
+    if (m && m.status === "active" && samePhone(m.settlementPhone, recipient.phone, recipient.country)) {
       payment.merchantId = m.id;
     }
   }
@@ -1177,9 +1179,21 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   // Don't onboard into a corridor that can never pay out (mirrors /quotes) — else the
   // merchant would list on the map but every checkout to them would 400 country_inactive.
   if (!COUNTRIES[country]?.active) return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
-  if (settlementPhone.length < 8) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
-  const provider = detectProvider(settlementPhone, country);
-  if (!provider) return res.status(400).json({ error: "bad_number", message: "That number isn't a recognised MTN or Orange Money number." });
+  // The same shape check a payout recipient gets. This number IS a payout target — every
+  // sale settles to it — and it was only checked for "at least 8 digits" and a known prefix,
+  // so a number three digits too long was accepted and would have been disbursed to.
+  const sCheck = checkPhone(settlementPhone, country);
+  if (!sCheck.ok) {
+    return res.status(400).json({
+      error: sCheck.reason === "bad_length" ? "bad_phone" : "bad_number",
+      message: sCheck.reason === "foreign_country" && sCheck.belongsTo
+        ? `That looks like a ${COUNTRIES[sCheck.belongsTo].name} number.`
+        : sCheck.reason === "bad_length"
+          ? `A ${COUNTRIES[country].name} Mobile Money number has ${COUNTRIES[country].nsnLen.join(" or ")} digits after ${COUNTRIES[country].dial}.`
+          : "That number isn't a recognised MTN or Orange Money number.",
+    });
+  }
+  const provider = sCheck.provider!;
   const tier = b.tier === "business" ? "business" : "individual";
   // Sanitize the client-supplied location: cap the label, and only keep coordinates
   // that are finite and in range — never trust the raw body (this is echoed publicly
@@ -1202,7 +1216,9 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   // the "Verified" badge buyers see. Marking it here let anyone list an arbitrary
   // settlement phone as "Verified" (impersonation/phishing). Re-enable self-serve
   // verification by wiring an SMS provider and setting SMS_ENABLED=true.
-  if (!config.smsEnabled) m = activateUnverified(m.id) ?? m;
+  // Gate on whether an SMS can ACTUALLY be delivered, not on a separate flag that could
+  // be true while the channel behind it is unwired.
+  if (!canSendSms()) m = activateUnverified(m.id) ?? m;
   // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
   // (once — recordReferral is a no-op if already attributed or self-referral). Skipped
   // when the referrals feature is switched off.
@@ -1219,7 +1235,18 @@ api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6,
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
   const r = requestAnchor(m.settlementPhone);
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
-  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
+  // This used to answer `sent: true` having sent nothing — requestAnchor only GENERATES a
+  // code. In production the dev code is withheld, so a merchant waited for an SMS that did
+  // not exist, never reached verifiedPhone, and could never create a pay link. Send it, and
+  // report what actually happened.
+  const sent = await sendOtpSms(`${COUNTRIES[m.country].dial}${m.settlementPhone}`, r.code!, "verify your business number");
+  if (!sent && liveMoney()) {
+    return res.status(503).json({
+      error: "sms_unavailable",
+      message: "We can't send verification codes right now. Please contact support so we can verify your number.",
+    });
+  }
+  res.json({ sent, devCode: liveMoney() ? undefined : r.code });
 });
 
 /** Verify the OTP → the merchant account goes live. */

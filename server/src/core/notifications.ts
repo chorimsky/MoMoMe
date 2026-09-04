@@ -21,7 +21,7 @@ import type {
   NotificationAudience, NotificationKind, NotificationRecord, Payment,
 } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
-import { channelsFor } from "../adapters/notify.js";
+import { channelsFor, smsChannel } from "../adapters/notify.js";
 import { getSettings } from "./settings.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
@@ -69,13 +69,18 @@ export async function notify(input: {
   to?: string;
   body: string;
   paymentRef?: string;
+  /** What to write in the outbox INSTEAD of the body. One-time codes are sent but never
+   *  recorded: the outbox is readable by every operator with the notifications section, and
+   *  a stored OTP is a stored ability to complete somebody else's verification. */
+  recordAs?: string;
 }): Promise<NotificationRecord[]> {
+  const logged = input.recordAs ?? input.body;
   const out: NotificationRecord[] = [];
   const candidates = channelsFor(input.audience);
 
   if (candidates.length === 0) {
     out.push(record({
-      kind: input.kind, audience: input.audience, channel: "-", to: input.to ?? "", body: input.body,
+      kind: input.kind, audience: input.audience, channel: "-", to: input.to ?? "", body: logged,
       paymentRef: input.paymentRef, status: "skipped",
       detail: `No channel can reach the ${input.audience}. We hold no contact details for them.`,
     }));
@@ -85,21 +90,21 @@ export async function notify(input: {
   for (const ch of candidates) {
     if (!enabledInSettings(ch.name)) {
       out.push(record({
-        kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: input.body,
+        kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
         paymentRef: input.paymentRef, status: "skipped", detail: "Turned off in Settings → Notification channels.",
       }));
       continue;
     }
     if (!ch.configured()) {
       out.push(record({
-        kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: input.body,
+        kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
         paymentRef: input.paymentRef, status: "skipped",
         detail: `${ch.name.toUpperCase()} is enabled in Settings but no provider is configured, so nothing was sent.`,
       }));
       continue;
     }
     const rec = record({
-      kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: input.body,
+      kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
       paymentRef: input.paymentRef, status: "queued",
     });
     try {
@@ -172,6 +177,31 @@ export async function notifyUnattributed(amount: number, asset: string, rail: st
     audience: "operator",
     body: `Unattributed ${amount} ${asset} received on ${rail} (${ref}). Held as a liability — attribute or refund it.`,
   }).catch(() => {});
+}
+
+/** Can we actually deliver an SMS right now? One source of truth, so a flow that depends on
+ *  a code arriving cannot be enabled by a flag while the channel behind it is unwired. */
+export function canSendSms(): boolean {
+  return smsChannel.configured() && getSettings().channels.SMS;
+}
+
+/** Send a one-time code, and say whether it actually went.
+ *
+ *  Merchant verification used to call requestAnchor(), which only GENERATES a code, and then
+ *  answer `{ sent: true }`. Nothing was ever sent. In production the dev code is withheld, so
+ *  the merchant waited for an SMS that did not exist, never reached verifiedPhone, and could
+ *  never create a pay link — the whole merchant flow dead-ended on a message that was never
+ *  dispatched. The code is sent but NOT recorded: see `recordAs`. */
+export async function sendOtpSms(to: string, code: string, purpose: string): Promise<boolean> {
+  if (!canSendSms()) return false;
+  const recs = await notify({
+    kind: "manual_review", // operational, not a payment event
+    audience: "recipient",
+    to,
+    body: `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.`,
+    recordAs: `One-time code sent to ${to} (${purpose}). The code itself is not recorded.`,
+  }).catch(() => []);
+  return recs.some((r) => r.status === "sent");
 }
 
 /* ---------- reading the outbox ---------- */

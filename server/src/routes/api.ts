@@ -15,6 +15,7 @@ import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { listNotifications, notificationHealth } from "../core/notifications.js";
+import { assessRecipient, verifyRiskToken } from "../core/recipientRisk.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
@@ -681,6 +682,36 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // verified, telling the next sender that this number belongs to "680344485".
   recipient.name = cleanName || recipient.phone;
   recipient.nameSource = isRealName(cleanName, recipient.phone) ? (recipient.nameSource ?? "manual") : "unknown";
+  /* ---------- "is this the person you meant?" ----------
+     Every check above asks whether the number is WELL FORMED. The commonest real mistake
+     passes all of them: one digit wrong is still nine digits, still a valid MTN prefix,
+     still a real subscriber — and Mobile Money does not reverse. What can see it is the
+     sender's own history, and that lives here rather than only in the send screen: a tick
+     box protects people using that build of the UI and nobody else. */
+  // Read the quote WITHOUT claiming it: a refusal here must leave it usable, so the
+  // confirmed retry works instead of forcing the sender to re-quote at a new rate.
+  const quotePeek = await store().getQuote(quoteId);
+  const risk = await assessRecipient({
+    senderId: senderOf(req) ?? undefined,
+    phone: recipient.phone, country: recipient.country, xaf: quotePeek?.xaf ?? 0,
+  });
+  if (risk.level === "stop") {
+    const ack = (req.body ?? {}).riskToken;
+    const acknowledged = typeof ack === "string" && risk.code
+      && verifyRiskToken(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, risk.code, ack);
+    if (!acknowledged) {
+      // 409, not 400: nothing is wrong with the request — we are asking a question, and the
+      // same request with the token proceeds.
+      return res.status(409).json({
+        error: "confirm_recipient",
+        message: risk.message,
+        code: risk.code,
+        didYouMean: risk.didYouMean,
+        riskToken: risk.token,
+      });
+    }
+  }
+
   // Atomically claim the quote BEFORE any async work — a locked rate becomes
   // exactly one payment even if two requests race on the same quoteId (the
   // loser gets 404). A claimed quote is gone, so the rate can't be replayed.

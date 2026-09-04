@@ -85,6 +85,11 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const features = useFeatures();
   const [step, setStep] = useState<Step>("details");
   const [busy, setBusy] = useState(false);
+  // The server's "is this who you meant?" refusal, and the token that clears it. Held here
+  // rather than in the step so a re-render cannot lose an acknowledgement already given.
+  const [confirmRecipient, setConfirmRecipient] = useState<
+    { message: string; token: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | null>(null);
+  const [riskToken, setRiskToken] = useState<string | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
 
   const [s, setS] = useState<Draft>(() => merchant
@@ -163,9 +168,19 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     if (payment && payment.quoteId === quote.id && payment.state === "AWAITING_INBOUND") { go("pay"); return; }
     setBusy(true); setErr(null);
     try {
-      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code }));
+      setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code, riskToken }));
       go("pay");
     } catch (e) {
+      // The server thinks this may be the wrong person — usually a number one digit away
+      // from someone this sender pays regularly. Ask, rather than showing a raw error, and
+      // carry the token so the same payment goes through once they say they meant it. The
+      // quote is deliberately not consumed by that refusal, so no re-quote is needed.
+      if (e instanceof ApiError && e.status === 409 && e.code === "confirm_recipient") {
+        const d = e.data as { riskToken?: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | undefined;
+        setConfirmRecipient({ message: e.message, token: d?.riskToken ?? "", didYouMean: d?.didYouMean });
+        setBusy(false);
+        return;
+      }
       // ORPHAN RECOVERY — must run BEFORE any re-quote. The request can fail on this
       // side while the server SUCCEEDED: the 20s client timeout aborts a slow
       // POST /payments that goes on to consume the quote and mint a REAL invoice. The
@@ -298,6 +313,29 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} lockRecipient={!!merchant} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} />}
+            {/* "Is this who you meant?" — shown INSTEAD of proceeding when the server spots a
+                number one digit away from someone this sender pays regularly. Mobile Money
+                does not reverse, so this is a decision, not a toast. */}
+            {confirmRecipient && (
+              <div role="alertdialog" aria-labelledby="cr-title" style={{ border: "1px solid var(--warn, #b4690e)", borderRadius: 10, padding: 16, margin: "0 0 14px", background: "var(--warn-wash, rgba(180,105,14,.06))" }}>
+                <div id="cr-title" style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Is this the right number?</div>
+                <p style={{ fontSize: 13.5, margin: "0 0 10px", color: "var(--ink-2)" }}>{confirmRecipient.message}</p>
+                {confirmRecipient.didYouMean && (
+                  <p style={{ fontSize: 13.5, margin: "0 0 12px" }}>
+                    You may have meant <strong>{confirmRecipient.didYouMean.name ?? confirmRecipient.didYouMean.phone}</strong>
+                    {confirmRecipient.didYouMean.name ? <> &mdash; {confirmRecipient.didYouMean.phone}</> : null}.
+                  </p>
+                )}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="btn btn-primary" onClick={() => { setConfirmRecipient(null); go("details"); }}>
+                    Change the number
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={() => { setRiskToken(confirmRecipient.token); setConfirmRecipient(null); void toPay(); }}>
+                    No, this is correct &mdash; send it
+                  </button>
+                </div>
+              </div>
+            )}
             {step === "review" && quote && <ReviewStep s={s} quote={quote} back={() => go("method")} next={toPay} refresh={refreshQuote} busy={busy} />}
             {step === "pay" && payment && <PayStep payment={payment} method={s.method} back={() => go("review")} next={toProcessing} refresh={repay} busy={busy} demoMode={!!demo?.demoMode} />}
             {step === "processing" && payment && <ProcessingStep paymentId={payment.id} method={s.method} onDone={() => { go("success"); void rememberPaidContact({ name: s.recipientName || s.phone, phone: s.phone, country: s.country, provider: s.provider }); }} reset={reset} onViewActivity={() => { setTab("history"); }} />}

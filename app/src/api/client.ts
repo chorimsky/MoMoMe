@@ -213,8 +213,10 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
     }
     let message = `Request failed (${res.status})`;
     let code: string | undefined;
+    let payload: Record<string, unknown> | undefined;
     try {
       const body = await res.json();
+      payload = body as Record<string, unknown>;
       if (body?.message) message = body.message;
       if (typeof body?.error === "string") code = body.error; // stable code for i18n mapping
     } catch {
@@ -230,7 +232,7 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
         return req<T>(path, init, true);
       }
     }
-    throw new ApiError(message, res.status, code);
+    throw new ApiError(message, res.status, code, payload as Record<string, unknown> | undefined);
   }
   return res.json() as Promise<T>;
 }
@@ -238,7 +240,11 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
 export class ApiError extends Error {
   // `code` is the server's stable error slug (e.g. "quote_expired") — map it to a
   // localized string; `message` is the English fallback for unknown codes.
-  constructor(message: string, public status: number, public code?: string) {
+  constructor(message: string, public status: number, public code?: string,
+              /** The whole error body. Some refusals carry data the caller needs to act on —
+               *  a recipient-confirmation warning returns the token that lets the same
+               *  payment through once the sender has actually seen it. */
+              public data?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
   }
@@ -286,7 +292,9 @@ export const api = {
   createQuote: (body: QuoteRequest) =>
     req<Quote>("/quotes", { method: "POST", body: JSON.stringify(body) }),
 
-  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string }) =>
+  /** `riskToken` echoes back a "is this who you meant?" warning the sender has actually
+   *  seen — the server refuses a near-miss payment without it. */
+  createPayment: (body: CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string; riskToken?: string }) =>
     req<Payment>("/payments", { method: "POST", body: JSON.stringify(body) }),
 
   confirmPayment: (id: string) =>

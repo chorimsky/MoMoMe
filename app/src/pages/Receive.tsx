@@ -48,7 +48,7 @@ export function Receive() {
     return (
       <>
         <SiteHeader />
-        <main className="wrap" style={{ padding: "48px 0", textAlign: "center" }}>
+        <main className="wrap" style={{ maxWidth: 520, margin: "0 auto", padding: "48px clamp(16px,5vw,24px)", textAlign: "center" }}>
           <p style={{ color: "var(--ink-2)" }}>{t("mrc_link_invalid_d")}</p>
           <Link className="btn btn-primary" to="/" style={{ marginTop: 16 }}>{t("nav_home")}</Link>
         </main>
@@ -60,7 +60,7 @@ export function Receive() {
   return (
     <>
       <SiteHeader />
-      <main className="wrap" style={{ padding: "36px 0 56px", maxWidth: 520 }}>
+      <main className="wrap" style={{ maxWidth: 520, margin: "0 auto", padding: "36px clamp(16px,5vw,24px) 56px" }}>
         <h1 style={{ fontSize: 26, lineHeight: 1.2 }}>{t("rcv_title")}</h1>
         <p style={{ color: "var(--ink-2)", fontSize: 15, lineHeight: 1.55, margin: "10px 0 26px" }}>{t("rcv_lede")}</p>
 
@@ -104,10 +104,12 @@ export function Receive() {
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_your_code")}</div>
             {/* `lightning:` so a wallet camera recognises it as a Lightning Address rather
                 than plain text — the same scheme the mobile Receive screen encodes. */}
-            <div style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
+            <div role="img" aria-label={`${t("rcv_your_code")}: ${address}`}
+                 style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
               <QR value={`lightning:${address}`} size={196} />
             </div>
-            <div className="num" style={{ fontSize: 15, fontWeight: 700, wordBreak: "break-all", textAlign: "center" }}>{address}</div>
+            {/* One address, not two. This used to print the string as a heading and then
+                again inside the copy field immediately below it. */}
             <div style={{ alignSelf: "stretch" }}><CopyField label={t("rcv_copy_addr")} value={address} /></div>
             <p style={{ color: "var(--ink-2)", fontSize: 13, lineHeight: 1.5, textAlign: "center", margin: 0 }}>{t("rcv_share")}</p>
             <button className="btn btn-ghost" onClick={() => { setNumber(null); setDraft(""); }}>{t("rcv_change")}</button>

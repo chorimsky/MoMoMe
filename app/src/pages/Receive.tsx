@@ -92,7 +92,7 @@ export function Receive() {
                 mistyped, and that is far easier to notice than a wrong digit. */}
             {valid && check.provider && (
               <p style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 8 }}>
-                {t("rcv_on_network").replace("{op}", check.provider === "ORANGE" ? "Orange Money" : "MTN MoMo")}
+                {t("rcv_on_network").replace("{op}", check.provider === "ORANGE" ? "Orange" : "MTN")}
               </p>
             )}
             <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => setNumber(check.local)}>

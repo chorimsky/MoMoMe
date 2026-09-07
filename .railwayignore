@@ -1,0 +1,11 @@
+# Railway only builds the server (pnpm --filter @momome/server). Everything the
+# server does not need stays out of the upload; mobile/ios alone is 1.4 GB and
+# made `railway up` time out.
+mobile/
+app/
+docs/
+_fixes/
+*.png
+*.jpg
+*.log
+node_modules/

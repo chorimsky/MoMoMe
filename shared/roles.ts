@@ -19,16 +19,16 @@ export const ADMIN_ROLES: AdminRole[] = [
 export type Section =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "merchants" | "customers" | "identities" | "compliance" | "peex"
-  | "reports" | "notifications" | "health" | "settings" | "administration";
+  | "reports" | "notifications" | "health" | "settings" | "administration" | "testing";
 
 /** What each role may access. "all" = every section. */
 export const ROLE_SECTIONS: Record<AdminRole, Section[] | "all"> = {
   "Super Admin": "all",
   "Read Only": "all", // sees everything — but never mutates (enforced separately)
-  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "merchants", "health", "peex", "notifications"],
+  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "merchants", "health", "peex", "notifications", "testing"],
   "Finance Manager": ["overview", "pricing", "liquidity", "reports", "settings", "health"],
   "Compliance Officer": ["overview", "compliance", "customers", "identities", "merchants", "health", "peex", "notifications"],
-  "Support Agent": ["overview", "customers", "payments", "delivery", "merchants"],
+  "Support Agent": ["overview", "customers", "payments", "delivery", "merchants", "testing"],
 };
 
 /** Short human label of a role's access (shown in the console). */

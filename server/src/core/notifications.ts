@@ -18,7 +18,7 @@
    that has been delivered has been delivered, whether or not an SMS gateway answered.
    ============================================================ */
 import type {
-  NotificationAudience, NotificationKind, NotificationRecord, Payment, DeletionRequest,
+  NotificationAudience, NotificationKind, NotificationRecord, Payment, DeletionRequest, TestReport,
 } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { channelsFor, smsChannel } from "../adapters/notify.js";
@@ -186,6 +186,17 @@ export async function notifyDeletionRequest(r: DeletionRequest): Promise<void> {
     kind: "deletion_request",
     audience: "operator",
     body: `${r.ref}: account deletion requested for ${COUNTRIES[r.country]?.dial ?? ""} ${r.phone} from a device we could not verify. Verify ownership and answer it within 30 days — Admin → Deletion requests.`,
+  }).catch(() => {});
+}
+
+/** A tester filed a checklist run. The operator is told at once, with the failures in the
+ *  body, so a run full of red does not sit unread until someone opens the Testing page. */
+export async function notifyTestReport(r: TestReport, failedTitles: string[]): Promise<void> {
+  const fails = failedTitles.length ? ` Failed: ${failedTitles.slice(0, 5).join("; ")}${failedTitles.length > 5 ? "…" : ""}.` : " Nothing failed.";
+  await notify({
+    kind: "test_report",
+    audience: "operator",
+    body: `${r.ref}: ${r.name} (${COUNTRIES[r.country]?.dial ?? ""} ${r.phone}) tested ${r.platform}${r.build ? ` build ${r.build}` : ""}: ${r.passed} passed, ${r.failed} failed, ${r.skipped} skipped.${fails} Admin → Testing.`,
   }).catch(() => {});
 }
 

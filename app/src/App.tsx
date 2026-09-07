@@ -41,6 +41,7 @@ function useReferralCapture() {
 // Scan pulls in the jsQR software decoder (~130 KB) — only load it when the user
 // actually opens the scanner, keeping it out of the initial bundle.
 const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan })));
+const Testing = lazy(() => import("./pages/Testing.js").then((m) => ({ default: m.Testing })));
 const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m) => ({ default: m.AdminConsole })));
 const OpsDashboard = lazy(() => import("./pages/ops/OpsDashboard.js").then((m) => ({ default: m.OpsDashboard })));
 
@@ -77,6 +78,7 @@ export function App() {
       <Route path="/contact" element={<Contact />} />
       {/* Public deletion URL — Google Play requires one reachable after uninstall. */}
       <Route path="/delete-account" element={<DeleteAccount />} />
+      <Route path="/test" element={<Testing />} />
       <Route path="*" element={<NotFound />} />
       </Routes>
     </>

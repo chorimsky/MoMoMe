@@ -14,8 +14,10 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest, notifyTestReport } from "../core/notifications.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
+import { fileTestReport, listTestReports, normaliseResults } from "../core/testReports.js";
+import { TEST_CASES } from "../../../shared/testing.js";
 import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
@@ -164,6 +166,7 @@ function sectionForPath(sub: string): Section | null {
     notifications: "notifications", health: "health", settings: "settings",
     readiness: "administration", // go-live console — Super Admin only (checked in the route)
     users: "administration", audit: "administration",
+    testing: "testing",
   };
   return map[p] ?? null;
 }
@@ -1197,6 +1200,33 @@ api.post("/me/delete-request", rateLimitDurableMiddleware("account_delete_req", 
   res.json({ ok: true, ref: record.ref, receivedAt: record.createdAt, alreadyOpen: !isNew });
 });
 
+/* ---------- tester programme ----------
+   momome.xyz/test. A tester is identified by name + Mobile Money number (what the team
+   recognises) plus a stable per-browser id (what groups their runs). Results are checked
+   against the shared case list so a stale page cannot file cases that no longer exist. */
+api.post("/testing/report", rateLimitDurableMiddleware("test_report", 20, 60 * 60_000), async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const country = (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode;
+  const name = typeof b.name === "string" ? b.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  if (name.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your name so the team knows who tested." });
+  const check = checkPhone(String(b.phone ?? ""), country);
+  if (!check.ok) return res.status(400).json({ error: "bad_phone", message: "Enter your own Mobile Money number, with its country." });
+  const testerId = typeof b.testerId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(b.testerId) ? b.testerId : "";
+  if (!testerId) return res.status(400).json({ error: "bad_tester", message: "Reload the page and try again." });
+  const platform = b.platform === "web" || b.platform === "android" || b.platform === "ios" ? b.platform : null;
+  if (!platform) return res.status(400).json({ error: "bad_platform", message: "Pick the platform you tested on." });
+  const results = normaliseResults(b.results);
+  if (results.length === 0) return res.status(400).json({ error: "no_results", message: "Answer at least one case before sending." });
+  const lang = b.lang === "fr" ? "fr" : "en";
+  const r = fileTestReport({ testerId, name, phone: check.local, country, platform, device: b.device, build: b.build, lang, results });
+  const failedTitles = r.results.filter((x) => x.outcome === "fail").map((x) => {
+    const c = TEST_CASES.find((tc) => tc.id === x.caseId);
+    return `${x.caseId} ${c ? c.title[0] : ""}`.trim();
+  });
+  void notifyTestReport(r, failedTitles);
+  res.json({ ok: true, ref: r.ref, receivedAt: r.createdAt, passed: r.passed, failed: r.failed, skipped: r.skipped });
+});
+
 /* ---------- Phase 4 — phone-anchor + E2E recovery ----------
    Anchor a device to a phone (portable account); a recovery-code-wrapped vault
    key is escrowed so a new device can restore it. The OTP authorises account
@@ -1599,6 +1629,12 @@ api.post("/admin/deletion-requests/:id/resolve", async (req, res) => {
   const r = resolveDeletionRequest(String(req.params.id), resolution, typeof note === "string" ? note : undefined);
   if (!r) return res.status(404).json({ error: "not_found", message: "No such request." });
   res.json({ ok: true, request: r });
+});
+
+api.get("/admin/testing/reports", async (_req, res) => {
+  const all = listTestReports();
+  const testers = new Set(all.map((r) => r.testerId)).size;
+  res.json({ total: all.length, testers, items: all.slice(0, 500), cases: TEST_CASES.map((c) => ({ id: c.id, title: c.title[0], section: c.section })) });
 });
 
 api.get("/admin/unattributed", async (_req, res) => {

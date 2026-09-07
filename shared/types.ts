@@ -361,7 +361,8 @@ export type NotificationKind =
   | "refund_needed"          // the sender must supply a destination
   | "unattributed_inbound"   // funds arrived that nobody can account for
   | "manual_review"          // a payment is held and needs a person
-  | "deletion_request";      // someone asked for their data to go, from a device we cannot verify
+  | "deletion_request"       // someone asked for their data to go, from a device we cannot verify
+  | "test_report";           // a tester submitted a checklist run
 
 /** Who the message is for. This is not cosmetic — it decides which channels can carry it.
  *  We hold the RECIPIENT's phone number, so they are reachable by SMS. We hold nothing for
@@ -982,4 +983,35 @@ export interface DeletionRequest {
   resolvedAt?: string;
   resolution?: "deleted" | "no_account" | "rejected";
   resolvedNote?: string;
+}
+
+/* ---------- tester programme ---------- */
+export interface TestCaseResult {
+  caseId: string;
+  outcome: "pass" | "fail" | "skip";
+  note?: string;
+}
+
+/** One run of the tester checklist (momome.xyz/test), filed by an identified tester. */
+export interface TestReport {
+  id: string;
+  /** Short human reference, e.g. TR-7K3M2Q. */
+  ref: string;
+  /** Stable per-browser id so repeated runs by the same person group together even if
+   *  they spell their name differently. Generated client-side, opaque. */
+  testerId: string;
+  name: string;
+  /** Local subscriber digits, canonical. The identity the team recognises. */
+  phone: string;
+  country: CountryCode;
+  platform: "web" | "android" | "ios";
+  /** Free text: "Pixel 7a, Android 14". */
+  device?: string;
+  build?: string;
+  lang: "en" | "fr";
+  results: TestCaseResult[];
+  passed: number;
+  failed: number;
+  skipped: number;
+  createdAt: string;
 }

@@ -12,7 +12,7 @@ import type {
   Merchant, MerchantGraph, CountryCode, ProviderId, RoutingSnapshot,
   TreasuryPool, TreasuryWithdrawal, TreasuryRail, MomoOp, MomoRailBalance, MomoFeeInfo,
   VaultRecord, ApiKey, MerchantAccount, MerchantLink, MerchantLinkPublic, MerchantSummary, MerchantDirectoryEntry, AmbassadorSummary,
-  Method, AppFeatures,
+  Method, AppFeatures, TestReport, TestCaseResult,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -375,6 +375,10 @@ export const api = {
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
   adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),
+  /** Tester programme: file one checklist run (momome.xyz/test) and read them all back. */
+  submitTestReport: (body: { testerId: string; name: string; phone: string; country: CountryCode; platform: TestReport["platform"]; device?: string; build?: string; lang: "en" | "fr"; results: TestCaseResult[] }) =>
+    req<{ ok: boolean; ref: string; receivedAt: string; passed: number; failed: number; skipped: number }>("/testing/report", { method: "POST", body: JSON.stringify(body) }),
+  adminTestReports: () => req<{ total: number; testers: number; items: TestReport[]; cases: Array<{ id: string; title: string; section: string }> }>("/admin/testing/reports"),
   resolveDeletionRequest: (id: string, resolution: "deleted" | "no_account" | "rejected", note?: string) =>
     req<{ ok: boolean; request: DeletionRequest }>(`/admin/deletion-requests/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ resolution, note }) }),
   adminUnattributed: () => req<{ open: number; items: UnattributedInbound[] }>("/admin/unattributed"),

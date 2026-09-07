@@ -29,6 +29,7 @@ import { PeexView } from "./views/Peex.js";
 import { NotificationsView } from "./views/Notifications.js";
 import { SettingsView } from "./views/Settings.js";
 import { ApiKeysView } from "./views/ApiKeys.js";
+import { TestingView } from "./views/Testing.js";
 import "./admin.css";
 
 /* ---------- icons ---------- */
@@ -52,6 +53,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
     readiness: <g><path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z" /><path d="M5.8 8l1.6 1.6L10.4 6.6" /></g>,
     administration: <g><circle cx="8" cy="4.5" r="2.2" /><path d="M3.5 13c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" /><circle cx="12.5" cy="3.5" r="1" /></g>,
     notifications: <g><path d="M8 2a4 4 0 00-4 4c0 4-1.5 5-1.5 5h11S12 10 12 6a4 4 0 00-4-4z" /><path d="M6.8 14a1.4 1.4 0 002.4 0" /></g>,
+    testing: <g><path d="M3 3h10v10H3z" /><path d="M5.5 8.2l1.8 1.8 3.4-3.8" /></g>,
     settings: <g><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" /></g>,
   };
   return <svg {...p}>{I[name] ?? I.overview}</svg>;
@@ -61,7 +63,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
-  | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness";
+  | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness" | "testing";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: null, items: [["overview", "Overview"]] },
@@ -70,7 +72,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Rails", items: [["mobilemoney", "Mobile Money"], ["rails", "Payment Rails"]] },
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
-  { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"]] },
+  { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"], ["testing", "Testing"]] },
   { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items)) as Record<Key, string>;
@@ -94,6 +96,7 @@ const VIEWS: Record<Key, ComponentType> = {
   developers: ApiKeysView,
   administration: AdministrationView,
   readiness: ReadinessView,
+  testing: TestingView,
 };
 
 // The console nav keys are exactly the shared role Sections — the same module

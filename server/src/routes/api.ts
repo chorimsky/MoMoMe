@@ -4,19 +4,19 @@ import type {
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
-import {
+import { namesMatch,
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21,
 } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
-import { resolveRecipient } from "../core/nameResolver.js";
+import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest } from "../core/notifications.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
-import { assessRecipient, verifyRiskToken } from "../core/recipientRisk.js";
+import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
 import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
@@ -738,6 +738,36 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // Read the quote WITHOUT claiming it: a refusal here must leave it usable, so the
   // confirmed retry works instead of forcing the sender to re-quote at a new rate.
   const quotePeek = await store().getQuote(quoteId);
+
+  /* ---------- the number's registered name ----------
+     Every Mobile Money number belongs to a named account holder. Where that name is known
+     — from the operator, or from a payout that actually landed under it — the payment has
+     to be to THAT person. A sender who typed "Alice" for a number registered to
+     "MANGA SERGE" is about to pay a stranger, and Mobile Money does not reverse. So the
+     stated name is checked against the registered one; a mismatch is a question the
+     sender must answer, with a token bound to this payment; and the registered name is
+     what goes on the payment, the receipt and the SMS — never the typed label. */
+  const registered = await registeredName(recipient.phone, recipient.country).catch(() => null);
+  const toMerchant = !!(req.body ?? {}).merchantLinkCode || !!(req.body ?? {}).merchantCode;
+  if (registered) {
+    if (!toMerchant && isRealName(cleanName, recipient.phone) && !namesMatch(cleanName, registered.name)) {
+      const ack = (req.body ?? {}).riskToken;
+      const acknowledged = typeof ack === "string"
+        && verifyRiskToken(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch", ack);
+      if (!acknowledged) {
+        return res.status(409).json({
+          error: "confirm_recipient",
+          code: "name_mismatch",
+          message: `This number is registered to ${registered.name}, not to ${cleanName}. Check the number before you pay — Mobile Money payments cannot be reversed.`,
+          operatorName: registered.name,
+          riskToken: riskTokenFor(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch"),
+        });
+      }
+    }
+    recipient.name = registered.name;
+    recipient.nameSource = registered.source;
+  }
+
   const risk = await assessRecipient({
     senderId: senderOf(req) ?? undefined,
     phone: recipient.phone, country: recipient.country, xaf: quotePeek?.xaf ?? 0,

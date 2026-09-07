@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider, checkPhone, isRealName } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -63,6 +63,10 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
   const fee = Math.round(s.xaf * (feePct ?? FEE_PCT));
   const [resolving, setResolving] = useState(false);
   const [contactNote, setContactNote] = useState<string | null>(null);
+  // The name this number was opened WITH (a contact, a recent, a typed name) when the
+  // registered name turns out to be someone else. It used to be replaced silently — the
+  // sender chose "Alice" and saw "MANGA SERGE" with a green tick and no comment.
+  const [enteredAs, setEnteredAs] = useState<string | null>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
@@ -101,7 +105,7 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
     const d = s.phone.replace(/\D/g, "");
     // Reset resolving on the early return too — otherwise deleting digits back under
     // 8 while a resolve is in flight leaves the spinner stuck and Continue disabled.
-    if (d.length < 8) { setResolving(false); set({ recipientName: "", nameSource: "idle" }); return; }
+    if (d.length < 8) { setResolving(false); setEnteredAs(null); set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     let active = true;
     const id = setTimeout(async () => {
@@ -120,7 +124,11 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
           // re-acknowledgment on Review for someone they've already paid.
           if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
           else set({ recipientName: "", nameSource: "unknown", ...prov });
-        } else set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
+        } else {
+          const prev = (s.recipientName || "").trim();
+          setEnteredAs(prev && isRealName(prev, s.phone) && r.name && !namesMatch(prev, r.name) ? prev : null);
+          set({ recipientName: r.name ?? "", nameSource: r.status, ...prov });
+        }
       } catch {
         if (active) set({ nameSource: "manual" });
       } finally {
@@ -245,6 +253,7 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{s.recipientName}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{s.nameSource === "provider" ? t("verified_mm") : t("sent_before")}</div>
+                  {enteredAs && <div role="alert" style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 4, lineHeight: 1.4 }}>{fill(t("name_mismatch"), { n: enteredAs })}</div>}
                 </div>
                 <button onClick={() => set({ nameSource: "manual" })} className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12.5 }}>{t("edit")}</button>
               </div>

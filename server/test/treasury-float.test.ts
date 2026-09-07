@@ -136,7 +136,7 @@ const mkPayment = async (pid: string) => {
   const pay = {
     id: pid, ref: `MMM-PARK-${pid}`, quoteId: `q_${pid}`,
     state: "AWAITING_INBOUND", displayStatus: "Pending", method: "LIGHTNING",
-    recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "Test", nameSource: "manual" },
+    recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "", nameSource: "manual" },
     xaf: overCap, feeXaf, totalXaf: overCap + feeXaf, usd: 2500,
     payInstruction: { method: "LIGHTNING", code: `lnbc_${pid}`, qr: `lightning:lnbc_${pid}`, asset: "BTC",
       amount: 0.015, amountLabel: "0.015 BTC", expiresAt: now, providerRef: `ph_${pid}`, provider: "ibex" },

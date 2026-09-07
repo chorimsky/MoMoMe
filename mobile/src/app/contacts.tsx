@@ -1,16 +1,43 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Href, router, Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { errMessage } from '@/api/client';
-import { Body, Button, Card, Field, H2, IconCircle, Label, Screen } from '@/components/ui';
+import { api, errMessage } from '@/api/client';
+import { Body, Button, Card, Field, IconCircle, Label, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
 import { loadContacts, newContact, removeContact, saveContact } from '@/lib/vault';
-import { checkPhone, COUNTRIES, isRealName, phoneKey, PROVIDERS } from '@shared/domain';
+import { checkPhone, COUNTRIES, isRealName, namesMatch, phoneKey, PROVIDERS } from '@shared/domain';
+
+/** "Paid today / yesterday / 3 days ago" — the one fact that tells two similar names apart. */
+function paidAgo(iso: string | undefined, tr: (k: 'paid_today' | 'paid_yesterday' | 'paid_days_ago', v?: Record<string, string | number>) => string): string | null {
+  if (!iso) return null;
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+  if (!Number.isFinite(days) || days < 0) return null;
+  if (days === 0) return tr('paid_today');
+  if (days === 1) return tr('paid_yesterday');
+  return tr('paid_days_ago', { n: days });
+}
 import type { Contact, CountryCode } from '@shared/types';
+
+/** A phone-book number → a CEMAC country + national number. Recognises any supported dial
+ *  code (+237, +241, …) or a 00 prefix; a bare national number falls back to the current
+ *  country. Prefers a number that maps to a Mobile Money operator we can pay. */
+function bestPhoneBookNumber(numbers: string[], fallback: CountryCode): { country: CountryCode; national: string } | null {
+  const parsed = numbers.map((raw) => {
+    let d = raw.replace(/\D/g, '');
+    if (!d) return null;
+    if (d.startsWith('00')) d = d.slice(2);
+    for (const co of Object.values(COUNTRIES)) {
+      const dial = co.dial.replace(/\D/g, '');
+      if (d.startsWith(dial) && d.length - dial.length >= 8) return { country: co.code as CountryCode, national: d.slice(dial.length) };
+    }
+    return d.length >= 8 ? { country: fallback, national: d } : null;
+  }).filter((x): x is { country: CountryCode; national: string } => !!x);
+  return parsed.find((p) => checkPhone(p.national, p.country).ok) ?? parsed[0] ?? null;
+}
 
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
@@ -19,6 +46,15 @@ export default function ContactsScreen() {
   const { t: tr } = useI18n();
   const [items, setItems] = useState<Contact[] | null>(null);
   const [editing, setEditing] = useState<Contact | 'new' | null>(null);
+  // A list that is meant to hold everyone a person pays needs a way to find one of them.
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => {
+    if (!items) return null;
+    const q = query.trim().toLowerCase();
+    const qd = q.replace(/\D/g, '');
+    if (!q) return items;
+    return items.filter((c) => c.name.toLowerCase().includes(q) || (qd.length >= 2 && c.phone.includes(qd)));
+  }, [items, query]);
 
   const load = useCallback(() => {
     loadContacts()
@@ -40,10 +76,9 @@ export default function ContactsScreen() {
     <Screen scroll>
       <Stack.Screen options={{ title: tr('contacts_title') }} />
 
-      <View style={styles.head}>
-        <H2>{tr('contacts_title')}</H2>
-        <Body muted>{tr('contacts_sub')}</Body>
-      </View>
+      {/* The stack header already says "Contacts"; a second heading under it was a duplicate
+          title over a block of empty space, pushing the list below the fold. */}
+      <Body muted style={styles.head}>{tr('contacts_sub')}</Body>
 
       <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.four }}>
         <Button title={tr('contacts_add')} icon="person-add" onPress={() => setEditing('new')} style={{ flex: 1 }} />
@@ -56,9 +91,26 @@ export default function ContactsScreen() {
         />
       </View>
 
-      {items === null ? (
+      {items && items.length > 5 ? (
+        <Field
+          placeholder={tr('contacts_search')}
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
+          left={<Ionicons name="search" size={16} color={t.muted} />}
+          style={{ marginBottom: Spacing.three }}
+        />
+      ) : null}
+
+      {items === null || shown === null ? (
         <View style={styles.center}>
           <ActivityIndicator color={t.accent} />
+        </View>
+      ) : items.length > 0 && shown.length === 0 ? (
+        <View style={styles.center}>
+          <Body muted center>{tr('contacts_no_match', { q: query.trim() })}</Body>
         </View>
       ) : items.length === 0 ? (
         <View style={styles.center}>
@@ -68,17 +120,22 @@ export default function ContactsScreen() {
         </View>
       ) : (
         <Card padded={false}>
-          {items.map((c, i) => (
+          {shown.map((c, i) => (
             <View
               key={c.id}
-              style={[styles.row, i < items.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line2 }]}>
-              <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_favorite')} onPress={() => toggleFav(c)}>
+              style={[styles.row, i < shown.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line2 }]}>
+              <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_favorite')} accessibilityState={{ selected: !!c.favorite }} onPress={() => toggleFav(c)}>
                 <Ionicons name={c.favorite ? 'star' : 'star-outline'} size={20} color={c.favorite ? t.brand : t.muted} />
               </Pressable>
-              <Pressable style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })} onPress={() => pay(c)}>
-                <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{c.name}</Body>
-                <Body muted style={{ fontSize: 12.5 }}>
+              <Pressable
+                style={({ pressed }) => ({ flex: 1, minWidth: 0, opacity: pressed ? 0.6 : 1 })}
+                accessibilityRole="button"
+                accessibilityLabel={`${tr('a11y_pay_contact')}: ${c.name}`}
+                onPress={() => pay(c)}>
+                <Body numberOfLines={1} style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{c.name}</Body>
+                <Body muted numberOfLines={1} style={{ fontSize: 12.5 }}>
                   {FLAG[c.country]} {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
+                  {paidAgo(c.lastPaidAt, tr) ? ` · ${paidAgo(c.lastPaidAt, tr)}` : ''}
                 </Body>
               </Pressable>
               <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_edit_contact')} onPress={() => setEditing(c)}>
@@ -123,6 +180,34 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
   const [favorite, setFavorite] = useState(contact?.favorite ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Who the number is registered to. Every Mobile Money number has a named holder; a
+  // contact saved under another name is a wrong-recipient risk, and the sender should see
+  // it here, before the number is in their book — not at the moment of paying.
+  const [registered, setRegistered] = useState<string | null>(null);
+  const [pickNote, setPickNote] = useState<string | null>(null);
+
+  // Pick someone from the phone's own address book — the system picker, so the app never
+  // reads the whole contact list and needs no permission dialog on iOS.
+  const pickFromPhone = async () => {
+    setPickNote(null);
+    try {
+      // Loaded on demand: the native module is only in builds made after it was added. An
+      // install that received this screen over the air would crash at startup on a static
+      // import; this way it just gets told to update.
+      const DeviceContacts = await import('expo-contacts');
+      const c = await DeviceContacts.presentContactPickerAsync();
+      if (!c) return;
+      const best = bestPhoneBookNumber((c.phoneNumbers ?? []).map((p) => p.number ?? ''), country);
+      if (!best) { setPickNote(tr('c_pick_no_number')); return; }
+      const full = [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '';
+      if (full) setName(full);
+      setCountry(best.country);
+      setPhone(best.national);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      setPickNote(/native module|ExpoContacts|not found|undefined is not/i.test(msg) ? tr('c_pick_update') : errMessage(e));
+    }
+  };
 
   // The same checks as the send screen. The old rule was "eight digits and any one
   // character of name", and the operator defaulted to MTN when it could not be read from
@@ -138,6 +223,19 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
     ? existing.find((c) => c.id !== contact?.id && phoneKey(c.phone, c.country) === phoneKey(digits, country))
     : undefined;
   const valid = nameOk && check.ok && !duplicate;
+  const differs = !!registered && nameOk && !namesMatch(name, registered);
+
+  useEffect(() => {
+    setRegistered(null);
+    if (!check.ok) return;
+    let alive = true;
+    const id = setTimeout(() => {
+      api.resolveRecipient(check.local, country)
+        .then((r) => { if (alive) setRegistered(r.name && (r.status === 'provider' || r.status === 'internal') ? r.name : null); })
+        .catch(() => {});
+    }, 400);
+    return () => { alive = false; clearTimeout(id); };
+  }, [check.ok, check.local, country]);
 
   const save = async () => {
     setBusy(true);
@@ -189,13 +287,16 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
       {/* A Modal renders outside the Screen's ScrollView, so the keyboard insets that every
           other form gets do not apply here: on iOS the keyboard sat over the note field and
           the Save button, and the sheet could not be scrolled to reach them. */}
-      <KeyboardAvoidingView style={styles.modalWrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* 'padding' on BOTH platforms: Android is edge-to-edge and does not resize the
+          window for the keyboard, so the sheet has to move itself. */}
+      <KeyboardAvoidingView style={styles.modalWrap} behavior="padding">
         <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={tr('close')} />
         <ScrollView
           style={[styles.sheet, { backgroundColor: t.background }]}
           contentContainerStyle={{ paddingBottom: Spacing.seven }}
           keyboardShouldPersistTaps="handled"
           bounces={false}>
+          <View style={[styles.grabber, { backgroundColor: t.line }]} />
           <View style={styles.sheetHead}>
             <Label>{contact ? tr('contacts_edit') : tr('contacts_new')}</Label>
             <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('close')} onPress={onClose}>
@@ -203,7 +304,14 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
             </Pressable>
           </View>
 
-          <Field label={tr('c_name')} placeholder={tr('c_name')} value={name} onChangeText={setName} autoCapitalize="words" autoCorrect={false} />
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two }}>
+            <Field label={tr('c_name')} placeholder={tr('c_name')} value={name} onChangeText={setName} autoCapitalize="words" autoCorrect={false} style={{ flex: 1 }} />
+            <Pressable onPress={pickFromPhone} accessibilityRole="button" accessibilityLabel={tr('c_from_phone')} style={[styles.pickBtn, { backgroundColor: t.surface2, borderColor: t.line }]}>
+              <Ionicons name="person-circle-outline" size={20} color={t.accent} />
+              <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 12.5 }}>{tr('c_from_phone')}</Body>
+            </Pressable>
+          </View>
+          {pickNote ? <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>{pickNote}</Body> : null}
           {name.trim().length > 0 && !nameOk ? (
             <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>{tr('name_needs_letters')}</Body>
           ) : null}
@@ -237,6 +345,22 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
           ) : null}
           {duplicate ? (
             <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>{tr('c_duplicate', { n: duplicate.name })}</Body>
+          ) : null}
+          {registered ? (
+            <View style={[styles.registered, { borderColor: differs ? t.warn : t.line, backgroundColor: differs ? t.brandWash : t.surface2 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                <Ionicons name={differs ? 'alert-circle' : 'shield-checkmark'} size={16} color={differs ? t.warn : t.recv} />
+                <Body style={{ color: t.text, fontSize: 13, flex: 1 }}>{tr('c_registered')} <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{registered}</Body></Body>
+              </View>
+              {differs ? (
+                <>
+                  <Body style={{ color: t.warn, fontSize: 12.5 }}>{tr('c_name_differs', { n: name.trim() })}</Body>
+                  <Pressable onPress={() => setName(registered)} hitSlop={8} accessibilityRole="button">
+                    <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('c_use_name')}</Body>
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
           ) : null}
           {pickCountry ? (
             <View style={styles.countryRow}>
@@ -283,12 +407,13 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
 }
 
 const styles = StyleSheet.create({
-  head: { paddingTop: Spacing.four, gap: Spacing.two, marginBottom: Spacing.four },
+  head: { paddingTop: Spacing.two, marginBottom: Spacing.four },
   center: { alignItems: 'center', justifyContent: 'center', gap: Spacing.two, paddingTop: Spacing.seven },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingHorizontal: Spacing.four, paddingVertical: Spacing.three },
   encrypted: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five },
   modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl, padding: Spacing.five, maxHeight: '88%', flexGrow: 0 },
+  sheet: { borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl, paddingHorizontal: Spacing.five, paddingTop: Spacing.two, maxHeight: '88%', flexGrow: 0 },
+  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, marginBottom: Spacing.three },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.three },
   phoneWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: Spacing.four, gap: Spacing.two, marginTop: Spacing.two },
   phoneInput: { flex: 1, fontFamily: Fonts.bodyBold, fontSize: 17, paddingVertical: Spacing.three, letterSpacing: 0.5 },
@@ -296,4 +421,6 @@ const styles = StyleSheet.create({
   countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.two },
   countryChip: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderWidth: 1, borderRadius: Radius.pill, paddingHorizontal: Spacing.three, paddingVertical: Spacing.two },
   favRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.four },
+  registered: { marginTop: Spacing.two, padding: Spacing.three, borderWidth: 1, borderRadius: Radius.md, gap: Spacing.one },
+  pickBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: Spacing.three, height: 52 },
 });

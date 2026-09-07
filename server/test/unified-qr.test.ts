@@ -134,7 +134,7 @@ async function main() {
     ok("and it is explained on the payment", after.events.some((e) => (e.note ?? "").includes("refund owed")));
 
     // 3) The other direction: an on-chain payment paid ON-CHAIN still re-prices as before.
-    const pay2 = await newOnchainPayment("677000790");
+    const pay2 = await newOnchainPayment("677000598");
     await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: onchainWebhook("ibex-onchain-tx-10", pay2.payInstruction.amount) });
     const cur2 = await settleTo(pay2.id);
     ok("an on-chain payment paid on-chain still settles", cur2.state === "DELIVERED", cur2.state);

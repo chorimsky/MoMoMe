@@ -94,7 +94,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   // The server's "is this who you meant?" refusal, and the token that clears it. Held here
   // rather than in the step so a re-render cannot lose an acknowledgement already given.
   const [confirmRecipient, setConfirmRecipient] = useState<
-    { message: string; token: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | null>(null);
+    { message: string; token: string; didYouMean?: { phone: string; name?: string; timesPaid: number }; operatorName?: string } | null>(null);
   const [riskToken, setRiskToken] = useState<string | undefined>(undefined);
   const [resumed, setResumed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -163,8 +163,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
    *  invoice that expires after the sender has already answered does not ask again. */
   const askIfWrongPerson = (e: unknown): boolean => {
     if (e instanceof ApiError && e.status === 409 && e.code === "confirm_recipient") {
-      const d = e.data as { riskToken?: string; didYouMean?: { phone: string; name?: string; timesPaid: number } } | undefined;
-      setConfirmRecipient({ message: e.message, token: d?.riskToken ?? "", didYouMean: d?.didYouMean });
+      const d = e.data as { riskToken?: string; didYouMean?: { phone: string; name?: string; timesPaid: number }; operatorName?: string } | undefined;
+      setConfirmRecipient({ message: e.message, token: d?.riskToken ?? "", didYouMean: d?.didYouMean, operatorName: d?.operatorName });
       return true;
     }
     return false;
@@ -370,6 +370,11 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
               <div role="alertdialog" aria-labelledby="cr-title" style={{ border: "1px solid var(--warn, #b4690e)", borderRadius: 10, padding: 16, margin: "0 0 14px", background: "var(--warn-wash, rgba(180,105,14,.06))" }}>
                 <div id="cr-title" style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{t("cr_title")}</div>
                 <p style={{ fontSize: 13.5, margin: "0 0 10px", color: "var(--ink-2)" }}>{confirmRecipient.message}</p>
+                {confirmRecipient.operatorName && (
+                  <p style={{ fontSize: 13.5, margin: "0 0 12px" }}>
+                    {t("cr_registered")} <strong>{confirmRecipient.operatorName}</strong>.
+                  </p>
+                )}
                 {confirmRecipient.didYouMean && (
                   <p style={{ fontSize: 13.5, margin: "0 0 12px" }}>
                     {t("cr_meant")} <strong>{confirmRecipient.didYouMean.name ?? confirmRecipient.didYouMean.phone}</strong>

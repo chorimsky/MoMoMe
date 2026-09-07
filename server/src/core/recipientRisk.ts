@@ -71,6 +71,12 @@ function tokenFor(senderId: string, key: string, xaf: number, code: string): str
   return crypto.createHmac("sha256", secret).update(`${senderId}|${key}|${xaf}|${code}`).digest("hex").slice(0, 16);
 }
 
+/** A token for an interlock raised elsewhere (the registered-name check in the payment
+ *  route), bound to the same (sender, number, amount, reason) so it opens only that door. */
+export function riskTokenFor(senderId: string, phone: string, country: CountryCode, xaf: number, code: string): string {
+  return tokenFor(senderId, phoneKey(phone, country), xaf, code);
+}
+
 export function verifyRiskToken(senderId: string, phone: string, country: CountryCode, xaf: number, code: string, token: string): boolean {
   const expected = tokenFor(senderId, phoneKey(phone, country), xaf, code);
   const a = Buffer.from(expected), b = Buffer.from(String(token ?? ""));

@@ -162,7 +162,7 @@ async function main() {
     r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 30000, method: "USDC", country: "CM" }) });
     const q2 = await r.json() as { id: string };
     r = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({
-      quoteId: q2.id, recipient: { phone: "677000790", country: "CM", provider: "MTN", name: "USDC Underpay" } }) });
+      quoteId: q2.id, recipient: { phone: "677000598", country: "CM", provider: "MTN", name: "USDC Underpay" } }) });
     const pay2 = await r.json() as { id: string; payInstruction: { code: string; amount: number } };
     ok("second payment gets a DIFFERENT address", pay2.payInstruction.code !== pi.code, pay2.payInstruction.code);
     await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: depositBody(pay2.payInstruction.code, pay2.payInstruction.amount / 2) });

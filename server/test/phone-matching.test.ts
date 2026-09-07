@@ -129,24 +129,24 @@ ok("…nor formatted", !isRealName("677 000 789", "677000789"));
 ok("a blank is not a name", !isRealName("", "677000789") && !isRealName(null, "677000789"));
 ok("digits alone are never a name", !isRealName("12345", "677000789"));
 
-const unnamed = ensureIdentity(R("699000111", "699000111"), "r5");
+const unnamed = ensureIdentity(R("699000118", "699000118"), "r5");
 ok("an unnamed recipient does NOT get the digits stored as their name", unnamed.name === "", `"${unnamed.name}"`);
-const stillUnknown = await resolveRecipient("699000111", "CM");
+const stillUnknown = await resolveRecipient("699000118", "CM");
 ok("…so the trust layer says unknown rather than vouching for a number",
    stillUnknown.status !== "internal", `${stillUnknown.status}/${stillUnknown.name ?? ""}`);
 
 // …and a later real name must be able to correct it. First-write-wins meant it never could.
-ensureIdentity(R("699000111", "MARIE FOTSO"), "r6");
-ok("a later real name UPGRADES the record", getIdentityByDigits("699000111", "CM")?.name === "MARIE FOTSO",
-   getIdentityByDigits("699000111", "CM")?.name);
-const named = await resolveRecipient("699000111", "CM");
+ensureIdentity(R("699000118", "MARIE FOTSO"), "r6");
+ok("a later real name UPGRADES the record", getIdentityByDigits("699000118", "CM")?.name === "MARIE FOTSO",
+   getIdentityByDigits("699000118", "CM")?.name);
+const named = await resolveRecipient("699000118", "CM");
 ok("…and the trust layer now vouches for it", named.status === "internal" && named.name === "MARIE FOTSO",
    `${named.status}/${named.name}`);
 
 // The upgrade is one-way: a blank later payment must not erase a name we trust.
-ensureIdentity(R("699000111", "699000111"), "r7");
+ensureIdentity(R("699000118", "699000118"), "r7");
 ok("a later BLANK name does not erase the real one",
-   getIdentityByDigits("699000111", "CM")?.name === "MARIE FOTSO", getIdentityByDigits("699000111", "CM")?.name);
+   getIdentityByDigits("699000118", "CM")?.name === "MARIE FOTSO", getIdentityByDigits("699000118", "CM")?.name);
 
 /* ---- a Lightning Address must not be payable for a number we cannot settle to ----
    parseLnUser carried its own copy of the old rule, so /.well-known/lnurlp/677000789000

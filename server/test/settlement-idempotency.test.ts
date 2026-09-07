@@ -33,7 +33,7 @@ async function main() {
     const p: Payment = {
       id, ref: `MMM-TEST-${id}`, quoteId: `q_${id}`,
       state: "AWAITING_INBOUND", displayStatus: "Pending", method: "LIGHTNING",
-      recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "Test", nameSource: "manual" },
+      recipient: { phone: "677000000", country: "CM", provider: "MTN", name: "", nameSource: "manual" },
       xaf, feeXaf, totalXaf: xaf + feeXaf, usd: 2500,
       payInstruction: { method: "LIGHTNING", code: `lnbc_${id}`, qr: `lightning:lnbc_${id}`, asset: "BTC", amount: 0.015, amountLabel: "0.015 BTC", expiresAt: now, providerRef: `ph_${id}`, provider: "ibex" },
       events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],
@@ -95,7 +95,7 @@ async function main() {
     const p: Payment = {
       id, ref: `MMM-OC-${id}`, quoteId: `q_${id}`,
       state: "AWAITING_INBOUND", displayStatus: "Pending", method: "ONCHAIN",
-      recipient: { phone: "677000001", country: "CM", provider: "MTN", name: "OC", nameSource: "manual" },
+      recipient: { phone: "677000001", country: "CM", provider: "MTN", name: "", nameSource: "manual" },
       xaf, feeXaf, totalXaf: xaf + feeXaf, usd: 85, estimateOnly: true,
       payInstruction: { method: "ONCHAIN", code: `bc1${id}`, qr: `bitcoin:bc1${id}`, asset: "BTC", amount, amountLabel: `${amount} BTC`, expiresAt: now, providerRef: `bc1${id}`, provider: "ibex" },
       events: [{ at: now, state: "QUOTED" }, { at: now, state: "AWAITING_INBOUND" }],

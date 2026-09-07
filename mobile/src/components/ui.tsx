@@ -4,7 +4,7 @@
  */
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import {
+import { KeyboardAvoidingView, Platform,
   ActivityIndicator,
   Animated,
   DimensionValue,
@@ -39,8 +39,13 @@ export function Screen({
 }) {
   const t = useTheme();
   const inner = <View style={[styles.screenInner, contentStyle]}>{children}</View>;
+  // Android: SDK 54 draws edge-to-edge, and an edge-to-edge window is NOT resized for the
+  // keyboard — "Android resizes the window itself" stopped being true. Without this, on
+  // every input screen the keyboard sits over whatever is in the lower half and the
+  // submit button cannot be reached. iOS keeps its own inset handling below.
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.background }} edges={edges}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'android' ? 'padding' : undefined} enabled={Platform.OS === 'android'}>
       {scroll ? (
         <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -58,6 +63,7 @@ export function Screen({
       ) : (
         inner
       )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -106,15 +112,19 @@ export function Body({
   muted,
   center,
   style,
+  numberOfLines,
 }: {
   children: ReactNode;
   muted?: boolean;
   center?: boolean;
   style?: object;
+  /** Clamp to N lines with an ellipsis — for list rows where a long value must not wrap. */
+  numberOfLines?: number;
 }) {
   const t = useTheme();
   return (
     <Text
+      numberOfLines={numberOfLines}
       style={[
         styles.body,
         { color: muted ? t.muted : t.textSecondary },

@@ -42,6 +42,24 @@ export function isRealName(name: string | null | undefined, phone: string): bool
   return /\p{L}/u.test(n); // must contain an actual letter
 }
 
+/** Do two spellings name the same person?
+ *
+ *  Operators register names in shouting capitals ("MANGA SERGE"); people type "Serge
+ *  Manga", "manga serge" or "S. Manga". Accents, case and order must not count as a
+ *  difference, but "Alice Ngo" against "MANGA SERGE" must. Tokens are compared as sets:
+ *  a match is when every token of the shorter name appears in the longer one (initials
+ *  count when they match a token's first letter), or the two share at least two tokens. */
+export function namesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const toks = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+  const ta = toks(a ?? ""), tb = toks(b ?? "");
+  if (ta.length === 0 || tb.length === 0) return false;
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  const hit = (t: string) => long.includes(t) || (t.length === 1 && long.some((l) => l[0] === t));
+  const shared = short.filter(hit).length;
+  return shared === short.length || shared >= 2;
+}
+
 export interface PhoneCheck {
   ok: boolean;
   /** Local subscriber digits, when they could be determined. */

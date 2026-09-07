@@ -152,7 +152,7 @@ async function main() {
       let r2 = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 20000, method: "USDC", country: "CM" }) });
       const q2 = await r2.json() as { id: string };
       r2 = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({
-        quoteId: q2.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Backstop" } }) });
+        quoteId: q2.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "" } }) });
       const p2 = await r2.json() as { id: string; payInstruction: { amount: number } };
       // /simulate settles with no deposit id, exactly like the reconcile backstop.
       await fetch(`${base}/api/payments/${p2.id}/simulate`, { method: "POST", headers: DEV });

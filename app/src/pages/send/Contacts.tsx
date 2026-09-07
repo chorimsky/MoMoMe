@@ -7,7 +7,8 @@
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
 import type { Contact } from "@shared/types.js";
-import { COUNTRIES } from "@shared/domain.js";
+import { COUNTRIES, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
+import { api } from "../../api/client.js";
 import { ProviderChip, Spinner } from "../../components/atoms.js";
 import { initials } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
@@ -25,6 +26,24 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
   const [backup, setBackup] = useState<"backup" | "restore" | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  // Who the operator says this number belongs to. Every Mobile Money number has a
+  // registered holder; a contact saved under another name is a wrong-recipient risk the
+  // sender should see BEFORE the number is in their book.
+  const [registered, setRegistered] = useState<string | null>(null);
+  const draftPhone = mode.kind === "form" ? mode.draft.phone : "";
+  const draftCountry = mode.kind === "form" ? mode.draft.country : "CM";
+  useEffect(() => {
+    setRegistered(null);
+    const chk = checkPhone(draftPhone, draftCountry);
+    if (!chk.ok) return;
+    let alive = true;
+    const id = setTimeout(() => {
+      api.resolveRecipient(draftPhone, draftCountry)
+        .then((r) => { if (alive) setRegistered(r.name && (r.status === "provider" || r.status === "internal") ? r.name : null); })
+        .catch(() => {});
+    }, 400);
+    return () => { alive = false; clearTimeout(id); };
+  }, [draftPhone, draftCountry]);
   // Set true on (re)mount too — React StrictMode's dev double-invoke runs the
   // cleanup once before the real mount, which would otherwise leave this false.
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -37,7 +56,10 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
 
   async function persist(c: Contact) {
     setBusy(true);
-    try { await saveContact(c); await reload(); if (mounted.current) setMode({ kind: "list" }); }
+    // The operator that owns the number is the one the payout goes to; store that, not a guess.
+    const chk = checkPhone(c.phone, c.country);
+    const fixed = chk.ok && chk.provider ? { ...c, provider: chk.provider, phone: chk.local } : c;
+    try { await saveContact(fixed); await reload(); if (mounted.current) setMode({ kind: "list" }); }
     catch { if (mounted.current) window.alert(t("error_generic")); } // surface a save failure instead of an unhandled rejection
     finally { if (mounted.current) setBusy(false); }
   }
@@ -60,7 +82,10 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
     const d = mode.draft;
     const set = (patch: Partial<Contact>) => setMode({ ...mode, draft: { ...d, ...patch } });
     const co = COUNTRIES[d.country];
-    const valid = d.name.trim().length >= 2 && d.phone.replace(/\D/g, "").length >= 8;
+    const check = checkPhone(d.phone, d.country);
+    const differs = !!registered && isRealName(d.name, d.phone) && !namesMatch(d.name, registered);
+    const valid = isRealName(d.name, d.phone) && check.ok;
+    const fill = (s: string, vars: Record<string, string>) => s.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
     return (
       <FlowCard>
         <h2 style={{ fontSize: 20 }}>{t(mode.isNew ? "contacts_new" : "contacts_edit_title")}</h2>
@@ -83,8 +108,22 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
               style={{ ...inputStyle, flex: 1, fontFamily: "var(--font-mono)" }} />
           </div>
         </div>
+        {d.phone.replace(/\D/g, "").length >= 8 && !check.ok && (
+          <div role="alert" style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: "var(--warn-ink)" }}>{t("phone_operator")}</div>
+        )}
+        {registered && (
+          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${differs ? "var(--warn)" : "var(--line)"}`, background: differs ? "var(--send-wash)" : "var(--surface-2)", fontSize: 13 }}>
+            <div>{t("contacts_registered")} <strong>{registered}</strong></div>
+            {differs && (
+              <div style={{ marginTop: 6, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ color: "var(--warn-ink)", fontSize: 12.5 }}>{fill(t("contacts_name_differs"), { n: d.name.trim() })}</span>
+                <button type="button" className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12.5 }} onClick={() => set({ name: registered })}>{t("contacts_use_name")}</button>
+              </div>
+            )}
+          </div>
+        )}
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
-          {co.providers.map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={d.provider === pid} onClick={() => set({ provider: pid })} />)}
+          {(check.ok && check.provider ? [check.provider] : co.providers).map((pid) => <ProviderChip key={pid} id={pid} size="lg" active={d.provider === pid || (check.ok && check.provider === pid)} onClick={() => { if (!check.ok) set({ provider: pid }); }} />)}
         </div>
         <div style={{ marginTop: 12 }}>
           <Label>{t("contacts_note_ph")}</Label>

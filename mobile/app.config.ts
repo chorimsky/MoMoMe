@@ -57,6 +57,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     infoPlist: {
       NSCameraUsageDescription:
         'MoMo›Me uses the camera to scan payment QR codes so you can pay a merchant.',
+      NSContactsUsageDescription:
+        'MoMo›Me opens your contacts only when you choose “From phone” to pick someone to pay. Nothing is uploaded.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -70,7 +72,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       monochromeImage: './assets/images/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
-    permissions: ['android.permission.CAMERA'],
+    permissions: ['android.permission.CAMERA', 'android.permission.READ_CONTACTS'],
     // App Links: verified https links to momome.xyz open the app directly.
     // Requires https://momome.xyz/.well-known/assetlinks.json (see DEPLOY.md).
     intentFilters: [

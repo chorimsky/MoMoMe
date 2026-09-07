@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CountryCode, TestCaseResult } from "@shared/types.js";
 import { COUNTRIES, checkPhone } from "@shared/domain.js";
-import { TEST_SECTIONS, casesFor, type TestOutcome, type TestPlatform } from "@shared/testing.js";
+import { TEST_LINKS, TEST_SECTIONS, casesFor, type TestOutcome, type TestPlatform } from "@shared/testing.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { api, ApiError } from "../api/client.js";
 import { useI18n } from "../lib/i18n.js";
@@ -44,7 +44,9 @@ const C = {
   build: ["Build (More › Settings)", "Version (Plus › Réglages)"],
   get_web: ["Open momome.xyz/send in your browser. Try it on your phone's browser too.", "Ouvrez momome.xyz/send dans votre navigateur. Essayez aussi sur le navigateur du téléphone."],
   get_android: ["Remove any older MoMo›Me, then install the APK. Play Store testers with a Cameroon account can use the Play test link instead.", "Supprimez toute ancienne version, puis installez l'APK. Les testeurs Play Store avec un compte camerounais peuvent utiliser le lien Play."],
-  get_ios: ["Install TestFlight from the App Store, then open the invite email from the team.", "Installez TestFlight depuis l'App Store, puis ouvrez l'e-mail d'invitation de l'équipe."],
+  get_ios: ["Install TestFlight from the App Store, then open the link below on your iPhone.", "Installez TestFlight depuis l'App Store, puis ouvrez le lien ci-dessous sur votre iPhone."],
+  get_ios_invite: ["Install TestFlight from the App Store, then open the invite email from the team.", "Installez TestFlight depuis l'App Store, puis ouvrez l'e-mail d'invitation de l'équipe."],
+  testflight: ["Join on TestFlight", "Rejoindre sur TestFlight"],
   apk: ["Download APK", "Télécharger l'APK"],
   play: ["Play test link", "Lien de test Play"],
   try: ["Try", "Essayez"],
@@ -208,8 +210,10 @@ export function Testing() {
             </div>
             <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "10px 0 0", lineHeight: 1.5 }}>
               {d.platform === "web" && s("get_web")}
-              {d.platform === "android" && <>{s("get_android")} <a href="https://expo.dev/artifacts/eas/BCQW3h7lSRao5ob5LozgY0l_8mI2QpkkTQFU4aoRy9I.apk">{s("apk")}</a> · <a href="https://play.google.com/apps/internaltest/4701620065637222709">{s("play")}</a></>}
-              {d.platform === "ios" && s("get_ios")}
+              {d.platform === "android" && <>{s("get_android")} <a href={TEST_LINKS.apk}>{s("apk")}</a> · <a href={TEST_LINKS.play}>{s("play")}</a></>}
+              {d.platform === "ios" && (TEST_LINKS.testflight
+                ? <>{s("get_ios")} <a href={TEST_LINKS.testflight}>{s("testflight")}</a></>
+                : s("get_ios_invite"))}
             </p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>

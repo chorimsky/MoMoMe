@@ -100,6 +100,13 @@ export const TEST_CASES: TestCase[] = [
     expect: ["It says what is deleted and what is kept, and gives a reference.", "Il indique ce qui est supprimé et conservé, et donne une référence."] },
 ];
 
+/** Where testers get each build. Empty = not yet available; the page then says how to get it. */
+export const TEST_LINKS = {
+  apk: "https://expo.dev/artifacts/eas/BCQW3h7lSRao5ob5LozgY0l_8mI2QpkkTQFU4aoRy9I.apk",
+  play: "https://play.google.com/apps/internaltest/4701620065637222709",
+  testflight: "",
+};
+
 export const TEST_CASE_IDS = new Set(TEST_CASES.map((c) => c.id));
 
 export function casesFor(platform: TestPlatform): TestCase[] {

@@ -90,12 +90,13 @@ const METHOD_META: Record<Method, {
 const providerTone = (p: ProviderId | null): 'brand' | 'accent' | 'neutral' =>
   p === 'MTN' ? 'brand' : p === 'ORANGE' ? 'accent' : 'neutral';
 const group = (d: string) => d.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 export default function SendScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const features = useFeatures();
-  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string }>();
+  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string; t?: string }>();
 
   const [step, setStep] = useState<Step>('details');
   // What each method actually costs and how long it takes. Fetched when the picker opens —
@@ -111,6 +112,12 @@ export default function SendScreen() {
   const [provider, setProvider] = useState<ProviderId | null>(null);
   const [resolvedProvider, setResolvedProvider] = useState<ProviderId | null>(null);
   const [nameSource, setNameSource] = useState<NameSource>('idle');
+  // The name this number was opened WITH — a saved contact or a scanned code. When the
+  // operator then vouches for a different name, the screen used to swap it in silently:
+  // the sender chose "Alice" and was shown "MANGA SERGE" with a green tick, and nothing
+  // said those are two different people. That is the wrong-recipient signal in its purest
+  // form, so it is said out loud.
+  const [openedAs, setOpenedAs] = useState<string | null>(null);
   const [method, setMethod] = useState<Method | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
@@ -139,8 +146,11 @@ export default function SendScreen() {
     if (typeof params.name === 'string' && params.name) {
       setRecipientName(params.name);
       setNameSource('internal');
+      setOpenedAs(params.name);
     }
-  }, [params.scanned, params.amount, params.merchantCode, params.country, params.name]);
+    // `t` is a nonce from the contact list: opening the SAME contact twice must re-seed the
+    // form, and without it the params are identical and this effect never re-runs.
+  }, [params.scanned, params.amount, params.merchantCode, params.country, params.name, params.t]);
 
   useEffect(() => {
     api
@@ -193,13 +203,23 @@ export default function SendScreen() {
   const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk;
 
   // Best-effort recipient-name resolve (debounced, non-blocking).
+  const prevDigits = useRef('');
   useEffect(() => {
     const digits = phone.replace(/\D/g, '');
+    const hadNumber = prevDigits.current.length >= 8;
+    prevDigits.current = digits;
     if (digits.length < 8) {
-      manualName.current = '';
-      setRecipientName('');
-      setNameSource('idle');
-      setResolvedProvider(null);
+      // Only a real edit that breaks a valid number clears the recipient. This effect also
+      // runs on mount, BEFORE the contact/scan params have filled the field — and it used
+      // to wipe the name those params had just seeded, so a contact the operator could not
+      // name arrived on the form with no name at all.
+      if (hadNumber) {
+        manualName.current = '';
+        setRecipientName('');
+        setNameSource('idle');
+        setResolvedProvider(null);
+        setOpenedAs(null);
+      }
       return;
     }
     let alive = true;
@@ -211,6 +231,8 @@ export default function SendScreen() {
           if (r.name) {
             setRecipientName(r.name);
             setNameSource(r.status);
+            // Keep the name the sender came in with only while it is the same person.
+            setOpenedAs((prev) => (prev && norm(prev) !== norm(r.name ?? '') ? prev : null));
           } else if (nameSourceRef.current !== 'internal') {
             // Nobody vouches for this number: keep whatever the sender has typed, and ask
             // for a name if they haven't. 'idle' here used to hide that question entirely.
@@ -513,7 +535,7 @@ export default function SendScreen() {
               </Pressable>
               <TextInput
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={(x) => setPhone(x.replace(/[^\d+]/g, ''))}
                 placeholder="6 7X XX XX XX"
                 placeholderTextColor={t.muted}
                 keyboardType="phone-pad"
@@ -563,10 +585,13 @@ export default function SendScreen() {
             ) : null}
             {nameVerified && recipientName ? (
               <View style={styles.nameRow}>
-                <Ionicons name="checkmark-circle" size={18} color={t.recv} />
+                <Ionicons name={openedAs ? 'alert-circle' : 'checkmark-circle'} size={18} color={openedAs ? t.warn : t.recv} />
                 <View style={{ flex: 1 }}>
                   <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName}</Body>
                   <Body muted style={{ fontSize: 12 }}>{nameSource === 'provider' ? tr('nm_verified') : tr('nm_sent_before')}</Body>
+                  {openedAs ? (
+                    <Body style={{ color: t.warn, fontSize: 12.5, marginTop: 2 }}>{tr('name_mismatch', { n: openedAs })}</Body>
+                  ) : null}
                 </View>
               </View>
             ) : check.ok ? (

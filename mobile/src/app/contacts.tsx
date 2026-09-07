@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Href, router, Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { errMessage } from '@/api/client';
 import { Body, Button, Card, Field, H2, IconCircle, Label, Screen } from '@/components/ui';
@@ -9,7 +9,7 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
 import { loadContacts, newContact, removeContact, saveContact } from '@/lib/vault';
-import { COUNTRIES, detectProvider, localDigits, PROVIDERS } from '@shared/domain';
+import { checkPhone, COUNTRIES, isRealName, phoneKey, PROVIDERS } from '@shared/domain';
 import type { Contact, CountryCode } from '@shared/types';
 
 const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
@@ -34,7 +34,7 @@ export default function ContactsScreen() {
   };
 
   const pay = (c: Contact) =>
-    router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name } });
+    router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name, t: String(Date.now()) } });
 
   return (
     <Screen scroll>
@@ -100,6 +100,7 @@ export default function ContactsScreen() {
       {editing ? (
         <EditModal
           contact={editing === 'new' ? null : editing}
+          existing={items ?? []}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -111,7 +112,7 @@ export default function ContactsScreen() {
   );
 }
 
-function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onClose: () => void; onSaved: () => void }) {
+function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact | null; existing: Contact[]; onClose: () => void; onSaved: () => void }) {
   const t = useTheme();
   const { t: tr } = useI18n();
   const [name, setName] = useState(contact?.name ?? '');
@@ -123,9 +124,20 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const digits = localDigits(phone, country);
-  const provider = detectProvider(phone, country) ?? 'MTN';
-  const valid = name.trim().length >= 1 && digits.length >= 8;
+  // The same checks as the send screen. The old rule was "eight digits and any one
+  // character of name", and the operator defaulted to MTN when it could not be read from
+  // the number — so a contact could be saved with the wrong network and paid to it later.
+  const check = checkPhone(phone, country);
+  const digits = check.local;
+  const typed = phone.replace(/\D/g, '');
+  const phoneIssue = !check.ok && (check.reason === 'foreign_country' ? typed.length >= 6 : typed.length >= 8) ? check : null;
+  const provider = check.provider ?? 'MTN';
+  const nameOk = isRealName(name, phone);
+  // Saving the same number twice used to create two entries; the vault has no key.
+  const duplicate = check.ok
+    ? existing.find((c) => c.id !== contact?.id && phoneKey(c.phone, c.country) === phoneKey(digits, country))
+    : undefined;
+  const valid = nameOk && check.ok && !duplicate;
 
   const save = async () => {
     setBusy(true);
@@ -164,11 +176,26 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
       setBusy(false);
     }
   };
+  // Deleting was a single tap with no confirmation, on a button directly under Save.
+  const confirmDel = () => {
+    Alert.alert(tr('c_delete_title'), tr('c_delete_body', { n: contact?.name ?? '' }), [
+      { text: tr('cancel'), style: 'cancel' },
+      { text: tr('c_delete'), style: 'destructive', onPress: () => void del() },
+    ]);
+  };
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalWrap}>
-        <View style={[styles.sheet, { backgroundColor: t.background }]}>
+      {/* A Modal renders outside the Screen's ScrollView, so the keyboard insets that every
+          other form gets do not apply here: on iOS the keyboard sat over the note field and
+          the Save button, and the sheet could not be scrolled to reach them. */}
+      <KeyboardAvoidingView style={styles.modalWrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={tr('close')} />
+        <ScrollView
+          style={[styles.sheet, { backgroundColor: t.background }]}
+          contentContainerStyle={{ paddingBottom: Spacing.seven }}
+          keyboardShouldPersistTaps="handled"
+          bounces={false}>
           <View style={styles.sheetHead}>
             <Label>{contact ? tr('contacts_edit') : tr('contacts_new')}</Label>
             <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('close')} onPress={onClose}>
@@ -176,9 +203,12 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
             </Pressable>
           </View>
 
-          <Field label={tr('c_name')} placeholder={tr('c_name')} value={name} onChangeText={setName} />
+          <Field label={tr('c_name')} placeholder={tr('c_name')} value={name} onChangeText={setName} autoCapitalize="words" autoCorrect={false} />
+          {name.trim().length > 0 && !nameOk ? (
+            <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>{tr('name_needs_letters')}</Body>
+          ) : null}
 
-          <Label style={{ marginTop: Spacing.three }}>{tr('your_mm_number')}</Label>
+          <Label style={{ marginTop: Spacing.three }}>{tr('c_number')}</Label>
           <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
             <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
               <Body style={{ fontSize: 18 }}>{FLAG[country]}</Body>
@@ -190,10 +220,24 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
               placeholderTextColor={t.muted}
               keyboardType="phone-pad"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(x) => setPhone(x.replace(/[^\d+]/g, ''))}
               style={[styles.phoneInput, { color: t.text }]}
             />
           </View>
+          {phoneIssue ? (
+            <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>
+              {phoneIssue.reason === 'foreign_country' && phoneIssue.belongsTo
+                ? tr('phone_foreign', { country: COUNTRIES[phoneIssue.belongsTo].name, own: COUNTRIES[country].name })
+                : phoneIssue.reason === 'bad_length'
+                  ? tr('phone_length', { country: COUNTRIES[country].name, n: COUNTRIES[country].nsnLen.join(' / '), dial: COUNTRIES[country].dial })
+                  : tr('phone_operator')}
+            </Body>
+          ) : check.ok ? (
+            <Body muted style={{ fontSize: 12.5, marginTop: Spacing.one }}>{PROVIDERS[provider].name} · {tr('operator_from_number')}</Body>
+          ) : null}
+          {duplicate ? (
+            <Body style={{ color: t.warn, fontSize: 12.5, marginTop: Spacing.one }}>{tr('c_duplicate', { n: duplicate.name })}</Body>
+          ) : null}
           {pickCountry ? (
             <View style={styles.countryRow}>
               {(Object.keys(COUNTRIES) as CountryCode[]).map((c) => (
@@ -230,10 +274,10 @@ function EditModal({ contact, onClose, onSaved }: { contact: Contact | null; onC
           {error ? <Body style={{ color: t.bad, marginTop: Spacing.three }}>{error}</Body> : null}
           <Button title={tr('c_save')} icon="checkmark" onPress={save} loading={busy} disabled={!valid} style={{ marginTop: Spacing.four }} />
           {contact ? (
-            <Button title={tr('c_delete')} icon="trash-outline" variant="ghost" size="md" onPress={del} />
+            <Button title={tr('c_delete')} icon="trash-outline" variant="ghost" size="md" onPress={confirmDel} />
           ) : null}
-        </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -244,7 +288,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingHorizontal: Spacing.four, paddingVertical: Spacing.three },
   encrypted: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five },
   modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl, padding: Spacing.five, paddingBottom: Spacing.seven },
+  sheet: { borderTopLeftRadius: Radius.xxl, borderTopRightRadius: Radius.xxl, padding: Spacing.five, maxHeight: '88%', flexGrow: 0 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.three },
   phoneWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: Spacing.four, gap: Spacing.two, marginTop: Spacing.two },
   phoneInput: { flex: 1, fontFamily: Fonts.bodyBold, fontSize: 17, paddingVertical: Spacing.three, letterSpacing: 0.5 },

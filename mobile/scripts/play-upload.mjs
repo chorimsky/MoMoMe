@@ -16,6 +16,7 @@
 
    Usage:
      node scripts/play-upload.mjs --aab path/to/app.aab [--track internal] [--package momome.app]
+     node scripts/play-upload.mjs --version-code 4 --track production   # bundle already uploaded: only move the track
      node scripts/play-upload.mjs --auth-only          # just obtain/refresh the token
    ============================================================ */
 import { createServer } from "node:http";
@@ -36,6 +37,7 @@ const AAB = opt("--aab");
 const TRACK = opt("--track", "internal");
 const PACKAGE = opt("--package", "momome.app");
 const AUTH_ONLY = args.includes("--auth-only");
+const VERSION_CODE = opt("--version-code"); // set the track to a bundle Play already holds
 
 async function readJson(p) { return JSON.parse(await readFile(p, "utf8")); }
 
@@ -106,29 +108,34 @@ async function main() {
   const client = await loadClient();
   const token = await accessToken(client);
   if (AUTH_ONLY) { console.log("Authorised."); return; }
-  if (!AAB) throw new Error("--aab <file> is required.");
-  const size = (await stat(AAB)).size;
+  if (!AAB && !VERSION_CODE) throw new Error("--aab <file> or --version-code <n> is required.");
 
   const edit = await api(token, "edits", { method: "POST", body: "{}" });
-  console.log(`Edit ${edit.id} opened. Uploading ${AAB} (${(size / 1e6).toFixed(1)} MB)…`);
-
-  const up = await fetch(`https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PACKAGE}/edits/${edit.id}/bundles?uploadType=media`, {
-    method: "POST", duplex: "half",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "Content-Length": String(size) },
-    body: createReadStream(AAB),
-  });
-  const bundle = await up.json();
-  if (!up.ok) throw new Error(`Bundle upload failed ${up.status}: ${bundle.error?.message ?? JSON.stringify(bundle).slice(0, 300)}`);
-  console.log(`Uploaded. versionCode ${bundle.versionCode}, sha256 ${bundle.sha256}`);
+  let versionCode = VERSION_CODE;
+  if (AAB) {
+    const size = (await stat(AAB)).size;
+    console.log(`Edit ${edit.id} opened. Uploading ${AAB} (${(size / 1e6).toFixed(1)} MB)…`);
+    const up = await fetch(`https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PACKAGE}/edits/${edit.id}/bundles?uploadType=media`, {
+      method: "POST", duplex: "half",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "Content-Length": String(size) },
+      body: createReadStream(AAB),
+    });
+    const bundle = await up.json();
+    if (!up.ok) throw new Error(`Bundle upload failed ${up.status}: ${bundle.error?.message ?? JSON.stringify(bundle).slice(0, 300)}`);
+    console.log(`Uploaded. versionCode ${bundle.versionCode}, sha256 ${bundle.sha256}`);
+    versionCode = String(bundle.versionCode);
+  } else {
+    console.log(`Edit ${edit.id} opened. Using already-uploaded versionCode ${versionCode}.`);
+  }
 
   await api(token, `edits/${edit.id}/tracks/${TRACK}`, {
     method: "PUT",
-    body: JSON.stringify({ track: TRACK, releases: [{ versionCodes: [String(bundle.versionCode)], status: "completed" }] }),
+    body: JSON.stringify({ track: TRACK, releases: [{ versionCodes: [String(versionCode)], status: "completed" }] }),
   });
-  console.log(`Track "${TRACK}" set to versionCode ${bundle.versionCode} (completed).`);
+  console.log(`Track "${TRACK}" set to versionCode ${versionCode} (completed).`);
 
   const done = await api(token, `edits/${edit.id}:commit`, { method: "POST", body: "{}" });
-  console.log(`Committed edit ${done.id}. Play Console should now show ${bundle.versionCode} on ${TRACK}.`);
+  console.log(`Committed edit ${done.id}. Play Console should now show ${versionCode} on ${TRACK}.`);
 }
 
 main().catch((e) => { console.error("play-upload:", e.message); process.exit(1); });

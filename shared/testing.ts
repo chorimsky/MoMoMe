@@ -102,7 +102,7 @@ export const TEST_CASES: TestCase[] = [
 
 /** Where testers get each build. Empty = not yet available; the page then says how to get it. */
 export const TEST_LINKS = {
-  apk: "https://expo.dev/artifacts/eas/BCQW3h7lSRao5ob5LozgY0l_8mI2QpkkTQFU4aoRy9I.apk",
+  apk: "https://expo.dev/artifacts/eas/q0H1LOkGImxBsYyf8fxRXfmXlkrl2WRhy1JCSYPDJSE.apk",
   play: "https://play.google.com/apps/internaltest/4701620065637222709",
   testflight: "",
 };

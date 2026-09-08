@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, localDigits, detectProvider } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
@@ -33,12 +33,13 @@ const IN_FLIGHT: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_
 type Tab = "pay" | "history" | "contacts" | "help";
 
 /** Bottom-nav glyphs — filled bolt for Pay, clock for Activity, person for Contacts, ? for Help. */
-function TabIcon({ name, active }: { name: "pay" | "activity" | "contacts" | "help"; active: boolean }) {
+function TabIcon({ name, active }: { name: "pay" | "receive" | "activity" | "contacts" | "help"; active: boolean }) {
   const c = active ? "var(--accent)" : "var(--ink-3)";
   const p = { width: 23, height: 23, viewBox: "0 0 24 24", fill: "none", stroke: c, strokeWidth: 1.9, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   if (name === "pay") return <svg {...p}><path d="M13 2 4.5 13H10l-1 9 10.5-12H13.5z" fill={active ? c : "none"} /></svg>;
   if (name === "activity") return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>;
   if (name === "contacts") return <svg {...p}><circle cx="12" cy="8.5" r="3.6" /><path d="M5.5 20c0-3.4 2.9-5.6 6.5-5.6s6.5 2.2 6.5 5.6" /></svg>;
+  if (name === "receive") return <svg {...p}><path d="M12 4v13" /><path d="M6.5 12 12 17.5 17.5 12" /><path d="M5 20.5h14" /></svg>;
   return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.4-1 .8-1 1.6" /><circle cx="12" cy="16.6" r="0.7" fill={c} stroke="none" /></svg>;
 }
 
@@ -103,7 +104,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 5000, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
     : (() => {
         const phone = toParam ? localDigits(toParam, "CM") : "";
-        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: 50000, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
+        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
       })());
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 
@@ -410,7 +411,17 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           {/* Buttons are constrained to the 480px column so they don't stretch
               edge-to-edge on a wide desktop viewport while the bar spans full width. */}
           <div style={{ display: "flex", maxWidth: 480, margin: "0 auto" }}>
-            {([["pay", t("tab_pay"), "pay"], ["history", t("tab_activity"), "activity"], ["contacts", t("tab_contacts"), "contacts"], ["help", t("tab_help"), "help"]] as const).filter(([k]) => k !== "contacts" || features.contacts).map(([k, label, ic]) => {
+            {([["pay", t("tab_pay"), "pay"], ["receive", t("tab_receive"), "receive"], ["history", t("tab_activity"), "activity"], ["contacts", t("tab_contacts"), "contacts"], ["help", t("tab_help"), "help"]] as const).filter(([k]) => k !== "contacts" || features.contacts).map(([k, label, ic]) => {
+              if (k === "receive") {
+                // Getting paid is the other half of the product, and it had no way in from
+                // the app shell: /receive was reachable only from the marketing pages.
+                return (
+                  <Link key={k} to="/receive" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 0 9px", minHeight: 54, textDecoration: "none", color: "var(--ink-3)", fontFamily: "inherit" }}>
+                    <TabIcon name="receive" active={false} />
+                    <span style={{ fontSize: 11, fontWeight: 600 }}>{label}</span>
+                  </Link>
+                );
+              }
               const on = tab === k;
               return (
                 <button key={k} type="button" aria-current={on ? "page" : undefined} onClick={() => { setTab(k); if (k === "pay") go("details"); }}

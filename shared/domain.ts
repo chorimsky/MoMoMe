@@ -258,6 +258,9 @@ export const METHOD_ASSET: Record<Method, InboundAsset> = {
 export const FEE_PCT = 0.025;
 
 export const MIN_XAF = 500; // realistic floor — below this the crypto + MoMo cash-out fees make a transfer uneconomic
+/** Quick-pick amounts on the Send screen, shared by web and mobile so the two never
+ *  disagree. Typical person-to-person Mobile Money transfers in Cameroon sit in this band. */
+export const AMOUNT_PRESETS = [5000, 10000, 25000, 50000] as const;
 export const MAX_XAF = 5_000_000;
 
 /** Per-payout corridor caps (Mobile Money operator limits). */

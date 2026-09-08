@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, detectProvider, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -211,7 +211,7 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
             </div>
             <input ref={phoneRef} value={s.phone} readOnly={lockRecipient} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
               type="tel" inputMode="tel" autoComplete="tel" name="mm-number"
-              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: lockRecipient ? "var(--surface-2)" : "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
+              style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: lockRecipient ? "var(--surface-2)" : "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 150 }} />
             {!lockRecipient && <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
               style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", cursor: "pointer", font: "inherit", fontWeight: 650, fontSize: 13, color: "var(--ink-2)" }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.8" /><path d="M5.5 19.5c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
@@ -275,15 +275,15 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
       <div style={{ marginTop: 14 }}>
         <Label>{t("amount_q")}</Label>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
-          <input className="num" value={fmt(s.xaf)} aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
+          <input className="num" value={s.xaf ? fmt(s.xaf) : ""} placeholder="0" aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
             style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 27, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
           <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-3)" }}>XAF</span>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          {[10000, 25000, 50000, 100000].map((v) => (
+          {AMOUNT_PRESETS.map((v) => (
             <button key={v} onClick={() => set({ xaf: v })} aria-pressed={s.xaf === v}
               style={{ flex: 1, cursor: "pointer", padding: "10px 0", minHeight: 44, borderRadius: 9, fontWeight: 600, fontSize: 13, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: s.xaf === v ? "var(--ink)" : "var(--ink-2)" }}>
-              {fmt(v / 1000)}k
+              {fmt(v)}
             </button>
           ))}
         </div>

@@ -30,7 +30,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -67,7 +67,7 @@ function qrValue(pi: Payment['payInstruction']): string {
   }
   return pi.qr;
 }
-const QUICK = [1000, 2000, 5000, 10000];
+const QUICK = [...AMOUNT_PRESETS];
 // CEMAC customer due-diligence: above this single-transfer value the operator
 // must be able to identify the customer (Règlement 02/24). We surface it as an
 // up-front notice rather than a silent post-hoc flag.
@@ -727,6 +727,9 @@ export default function SendScreen() {
               <Body style={{ color: t.textSecondary }}>{recipientName || phone}</Body>
               {provider ? <Pill label={PROVIDERS[provider].short} tone={providerTone(provider)} /> : null}
             </View>
+            {/* The number itself, always: a name alone is not enough to check a payment
+                against before committing money to it. */}
+            {recipientName ? <Body muted center style={{ fontSize: 13, marginTop: 2 }}>{COUNTRIES[country].dial} {phone}</Body> : null}
             <Body muted center style={{ fontSize: 11.5, marginTop: Spacing.two, lineHeight: 16, paddingHorizontal: Spacing.four }}>{tr('cashout_note')}</Body>
           </View>
 

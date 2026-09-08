@@ -11,7 +11,7 @@ export type Lang = "en" | "fr";
 type Dict = Record<string, [string, string]>;
 
 export const STRINGS: Dict = {
-  tab_pay: ["Pay", "Payer"], tab_activity: ["Activity", "Activité"], tab_help: ["Help", "Aide"], tab_contacts: ["Contacts", "Contacts"],
+  tab_pay: ["Pay", "Payer"], tab_receive: ["Get paid", "Recevoir"], tab_activity: ["Activity", "Activité"], tab_help: ["Help", "Aide"], tab_contacts: ["Contacts", "Contacts"],
   contacts_title: ["Contacts", "Contacts"],
   contacts_sub: ["People you pay — saved privately on your device.", "Vos bénéficiaires — enregistrés en privé sur votre appareil."],
   contacts_add: ["Add contact", "Ajouter un contact"],

@@ -71,7 +71,7 @@ export default function ReceiveScreen() {
       {editing || !number ? (
         <Card padded elevated>
           <IconCircle name="arrow-down" color={t.recv} bg={t.recvWash} size={56} />
-          <Body>{savedInvalid ? tr('rcv_fix_saved') : tr('receive_intro')}</Body>
+          {savedInvalid ? <Body>{tr('rcv_fix_saved')}</Body> : null}
           <Field
             label={tr('your_mm_number')}
             placeholder="6 7X XX XX XX"

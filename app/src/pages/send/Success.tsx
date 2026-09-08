@@ -11,7 +11,7 @@ function fullPhone(p: Payment): string {
   return COUNTRIES[p.recipient.country].dial + " " + p.recipient.phone;
 }
 function when(p: Payment, lang: "en" | "fr"): string {
-  return new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function Receipt({ payment, onClose }: { payment: Payment; onClose: () => void }) {

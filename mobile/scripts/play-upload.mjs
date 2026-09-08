@@ -17,6 +17,7 @@
    Usage:
      node scripts/play-upload.mjs --aab path/to/app.aab [--track internal] [--package momome.app]
      node scripts/play-upload.mjs --version-code 4 --track production   # bundle already uploaded: only move the track
+     node scripts/play-upload.mjs --version-code 4 --track internal --notes-en "..." --notes-fr "..."   # (re)set release notes
      node scripts/play-upload.mjs --auth-only          # just obtain/refresh the token
    ============================================================ */
 import { createServer } from "node:http";
@@ -38,6 +39,8 @@ const TRACK = opt("--track", "internal");
 const PACKAGE = opt("--package", "momome.app");
 const AUTH_ONLY = args.includes("--auth-only");
 const VERSION_CODE = opt("--version-code"); // set the track to a bundle Play already holds
+const NOTES_EN = opt("--notes-en");        // release notes shown to testers / on the store listing
+const NOTES_FR = opt("--notes-fr");
 
 async function readJson(p) { return JSON.parse(await readFile(p, "utf8")); }
 
@@ -130,7 +133,13 @@ async function main() {
 
   await api(token, `edits/${edit.id}/tracks/${TRACK}`, {
     method: "PUT",
-    body: JSON.stringify({ track: TRACK, releases: [{ versionCodes: [String(versionCode)], status: "completed" }] }),
+    body: JSON.stringify({ track: TRACK, releases: [{
+      versionCodes: [String(versionCode)], status: "completed",
+      ...(NOTES_EN || NOTES_FR ? { releaseNotes: [
+        ...(NOTES_EN ? [{ language: "en-US", text: NOTES_EN }] : []),
+        ...(NOTES_FR ? [{ language: "fr-FR", text: NOTES_FR }] : []),
+      ] } : {}),
+    }] }),
   });
   console.log(`Track "${TRACK}" set to versionCode ${versionCode} (completed).`);
 

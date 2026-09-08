@@ -75,7 +75,7 @@ export const TEST_CASES: TestCase[] = [
     expect: ["A box shows who the number belongs to and offers \"Use the registered name\". Save under the made-up name anyway, for case 4.", "Un encadré indique le titulaire et propose « Utiliser le nom enregistré ». Enregistrez quand même sous le faux nom, pour le cas 4."] },
   { id: "13", section: "contacts", platforms: ["android", "ios"], title: ["From phone", "Depuis le téléphone"],
     step: ["Add contact › From phone, pick someone with a Cameroon number.", "Ajouter un contact › Depuis le téléphone, choisissez quelqu'un avec un numéro camerounais."],
-    expect: ["Their name and number fill in.", "Son nom et son numéro se remplissent."] },
+    expect: ["Their name and number fill in. Needs app version 1.0.0 (4) or newer; older builds say to update.", "Son nom et son numéro se remplissent. Nécessite la version 1.0.0 (4) ou plus récente ; les anciennes versions demandent de mettre à jour."] },
   { id: "14", section: "contacts", title: ["Edit, star, delete, duplicate", "Modifier, favori, supprimer, doublon"],
     step: ["Edit a name. Star one. Delete one. Add the same number twice.", "Modifiez un nom. Mettez-en un en favori. Supprimez-en un. Ajoutez deux fois le même numéro."],
     expect: ["Edits stick, stars go first, delete asks first, the duplicate is refused.", "Les modifications restent, les favoris passent devant, la suppression demande confirmation, le doublon est refusé."] },

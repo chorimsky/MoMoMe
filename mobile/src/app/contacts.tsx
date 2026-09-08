@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Href, router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
 import { Body, Button, Card, Field, IconCircle, Label, Screen } from '@/components/ui';
@@ -169,7 +169,23 @@ export default function ContactsScreen() {
   );
 }
 
+/** Height of the software keyboard, straight from the OS. iOS announces it before the
+ *  animation (keyboardWillShow) so the sheet moves with the keyboard; Android only says so
+ *  once it is up (keyboardDidShow). A hardware keyboard reports 0, and so does dismissal. */
+function useKeyboardHeight(): number {
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    const show = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hide = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const a = Keyboard.addListener(show, (e) => setH(e.endCoordinates.height));
+    const b = Keyboard.addListener(hide, () => setH(0));
+    return () => { a.remove(); b.remove(); };
+  }, []);
+  return h;
+}
+
 function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact | null; existing: Contact[]; onClose: () => void; onSaved: () => void }) {
+  const keyboardHeight = useKeyboardHeight();
   const t = useTheme();
   const { t: tr } = useI18n();
   const [name, setName] = useState(contact?.name ?? '');
@@ -284,12 +300,13 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      {/* A Modal renders outside the Screen's ScrollView, so the keyboard insets that every
-          other form gets do not apply here: on iOS the keyboard sat over the note field and
-          the Save button, and the sheet could not be scrolled to reach them. */}
-      {/* 'padding' on BOTH platforms: Android is edge-to-edge and does not resize the
-          window for the keyboard, so the sheet has to move itself. */}
-      <KeyboardAvoidingView style={styles.modalWrap} behavior="padding">
+      {/* A Modal is its own window, so nothing the Screen does about the keyboard reaches it,
+          and on Android (edge-to-edge since SDK 53) the modal window is not resized for the
+          keyboard either: it simply overlaps the sheet. KeyboardAvoidingView was supposed to
+          lift it and did not reliably — it waits for keyboardDidShow and derives the shift from
+          its own measured frame, which inside a dialog window is not the screen frame. So the
+          sheet pads itself by the keyboard height reported by the OS. See useKeyboardHeight. */}
+      <View style={[styles.modalWrap, { paddingBottom: keyboardHeight }]}>
         <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={tr('close')} />
         <ScrollView
           style={[styles.sheet, { backgroundColor: t.background }]}
@@ -401,7 +418,7 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
             <Button title={tr('c_delete')} icon="trash-outline" variant="ghost" size="md" onPress={confirmDel} />
           ) : null}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

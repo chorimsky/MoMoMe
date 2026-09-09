@@ -55,8 +55,8 @@ export function Merchant() {
         {phase === "loading" && <div style={{ display: "grid", placeItems: "center", minHeight: "50vh" }}><Spinner size={24} /></div>}
         {/* If the server auto-activated (no SMS yet), skip straight to the dashboard. */}
         {phase === "onboard" && <Onboard onDone={(m) => { setMerchant(m); setPhase(m.verifiedPhone ? "dashboard" : "verify"); }} initial={merchant} />}
-        {phase === "verify" && merchant && <Verify merchant={merchant} onVerified={(m) => { setMerchant(m); setPhase("dashboard"); }} onEdit={() => setPhase("onboard")} />}
-        {phase === "dashboard" && merchant && <Dashboard merchant={merchant} />}
+        {phase === "verify" && merchant && <Verify merchant={merchant} onVerified={(m) => { setMerchant(m); setPhase("dashboard"); }} onEdit={() => setPhase("onboard")} onLater={() => setPhase("dashboard")} />}
+        {phase === "dashboard" && merchant && <Dashboard merchant={merchant} onEdit={() => setPhase("onboard")} onVerify={() => setPhase("verify")} />}
       </div>
     </div>
   );
@@ -154,17 +154,25 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
 }
 
 /* ---------- verify settlement number ---------- */
-function Verify({ merchant, onVerified, onEdit }: { merchant: MerchantAccount; onVerified: (m: MerchantAccount) => void; onEdit: () => void }) {
+function Verify({ merchant, onVerified, onEdit, onLater }: { merchant: MerchantAccount; onVerified: (m: MerchantAccount) => void; onEdit: () => void; onLater: () => void }) {
   const { t } = useI18n();
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  // An SMS that never arrives used to leave the merchant with no way forward: the "send"
+  // button vanished once pressed. Resend is offered after a short cooldown.
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function request() {
     setBusy(true); setErr(null);
-    try { const r = await api.merchantVerifyRequest(); setDevCode(r.devCode ?? null); setSent(true); }
+    try { const r = await api.merchantVerifyRequest(); setDevCode(r.devCode ?? null); setSent(true); setCooldown(30); }
     catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_v_err_send")); } finally { setBusy(false); }
   }
   async function verify() {
@@ -190,17 +198,24 @@ function Verify({ merchant, onVerified, onEdit }: { merchant: MerchantAccount; o
             <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder={t("bk_code_ph")} inputMode="numeric" autoFocus
               style={{ ...inputStyle, fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 24, letterSpacing: "0.3em", textAlign: "center" }} />
             <button className="btn btn-primary btn-block" disabled={code.length !== 6 || busy} onClick={verify}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_verify")}</button>
+            <button type="button" className="btn btn-quiet btn-block" disabled={busy || cooldown > 0} onClick={request} style={{ fontSize: 13 }}>
+              {cooldown > 0 ? `${t("mrc_v_resend")} (${cooldown}s)` : t("mrc_v_resend")}
+            </button>
           </div>
         )}
         {err && <div role="alert" style={{ fontSize: 13, fontWeight: 600, color: "var(--bad)", marginTop: 10 }}>{err}</div>}
-        <button className="btn btn-quiet" style={{ marginTop: 8, fontSize: 13 }} onClick={onEdit}>{t("mrc_v_edit")}</button>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-quiet" style={{ fontSize: 13 }} onClick={onEdit}>{t("mrc_v_edit")}</button>
+          {/* The dashboard works without the SMS; only pay links wait for a proven number. */}
+          <button className="btn btn-quiet" style={{ fontSize: 13, marginLeft: "auto" }} onClick={onLater}>{t("mrc_v_later")}</button>
+        </div>
       </div>
     </div>
   );
 }
 
 /* ---------- dashboard ---------- */
-function Dashboard({ merchant }: { merchant: MerchantAccount }) {
+function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; onEdit: () => void; onVerify: () => void }) {
   const { t, lang } = useI18n();
   const [sum, setSum] = useState<MerchantSummary | null>(null);
   const [links, setLinks] = useState<MerchantLink[]>([]);
@@ -222,10 +237,23 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
             <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{catLabel(merchant.category, lang)} · {t("mrc_d_settles_to")} {COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</span>
           </div>
         </div>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--recv)", background: "var(--recv-wash)", padding: "5px 12px", borderRadius: 999 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_active")}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {merchant.verifiedPhone ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--recv)", background: "var(--recv-wash)", padding: "5px 12px", borderRadius: 999 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_verified")}
+            </span>
+          ) : (
+            <button type="button" onClick={onVerify} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--warn-ink, #7a4d00)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "5px 12px", borderRadius: 999, cursor: "pointer", font: "inherit" }}>
+              {t("mrc_d_unverified")} · {t("mrc_d_verify_cta")}
+            </button>
+          )}
+          <button type="button" className="btn btn-quiet btn-sm" onClick={onEdit}>{t("mrc_d_edit")}</button>
+        </div>
       </div>
+      {!merchant.verifiedPhone && (
+        <div role="note" style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>{t("mrc_d_unverified_hint")}</div>
+      )}
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: -8 }}>{t("mrc_d_code_hint")}</div>
 
       {/* One compact summary card: hero today's-sales, then a spread row of secondary stats. */}
       <div style={{ ...cardStyle, padding: "16px 18px" }}>
@@ -284,7 +312,7 @@ function Dashboard({ merchant }: { merchant: MerchantAccount }) {
 }
 
 /* ---------- payment tools (links + QR) ---------- */
-function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
+function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
   const { t } = useI18n();
   const features = useFeatures();
   const [kind, setKind] = useState<"link" | "invoice">("link");
@@ -362,13 +390,20 @@ function LinkTools({ merchant: _m, links, onChange }: { merchant: MerchantAccoun
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? t("amb_copied") : t("mrc_lt_copy")}</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setShowQr(showQr === l.code ? null : l.code)}>{showQr === l.code ? t("amb_hide_qr") : t("mrc_lt_qr")}</button>
+                {/* WhatsApp is how a Cameroonian merchant sends a link to a customer; the empty
+                    state promised it, the card never offered it. Native share where available. */}
+                <a className="btn btn-ghost btn-sm" target="_blank" rel="noopener noreferrer"
+                  href={`https://wa.me/?text=${encodeURIComponent(`${merchant.businessName}${l.amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(l.amountXaf)} XAF` : ""}${l.label ? ` · ${l.label}` : ""}\n${urlFor(l.code)}`)}`}
+                  onClick={(e) => { if (typeof navigator.share === "function") { e.preventDefault(); void navigator.share({ title: merchant.businessName, url: urlFor(l.code) }).catch(() => {}); } }}>
+                  {t("mrc_lt_share")}
+                </a>
                 <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)", marginLeft: "auto" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
               </div>
               {showQr === l.code && (
                 <div data-qr-dl style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>
                   <div style={{ background: "#fff", padding: 12, borderRadius: 14 }}><QR value={urlFor(l.code)} size={180} /></div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{t("mrc_lt_scan_pay")} {_m.businessName}</div>
-                  <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={(e) => downloadQrPng(e.currentTarget.closest("[data-qr-dl]"), `momome-${_m.code}-${l.code}.png`)}>{t("mrc_lt_save_qr")}</button>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>{t("mrc_lt_scan_pay")} {merchant.businessName}</div>
+                  <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={(e) => downloadQrPng(e.currentTarget.closest("[data-qr-dl]"), `momome-${merchant.code}-${l.code}.png`)}>{t("mrc_lt_save_qr")}</button>
                 </div>
               )}
             </div>

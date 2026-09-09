@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri } from "@shared/domain.js";
@@ -8,7 +8,7 @@ import { useI18n, errMessage } from "../../lib/i18n.js";
 import { useFeatures } from "../../lib/features.js";
 import { api } from "../../api/client.js";
 import { pollMs } from "../../lib/net.js";
-import { FlowCard, Label, Stepper, Row, useExpiry } from "./ui.js";
+import { FlowCard, Label, Stepper, Row, useExpiry, FixedFlow } from "./ui.js";
 import type { Draft } from "./SendApp.js";
 
 const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MANUAL_REVIEW"];
@@ -200,6 +200,10 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
         </div>
       )}
 
+      {/* A business link (/pay/:code) fixes the recipient: the panel above names the business,
+          so the number, operator and name blocks are not shown at all — a read-only number with
+          an Edit button next to it read as "you may change this", which is the opposite of true. */}
+      {!lockRecipient && (<>
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: "none" }}>
@@ -272,6 +276,8 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
             ) : null}
           </div>
 
+      </>)}
+
       <div style={{ marginTop: 14 }}>
         <Label>{t("amount_q")}</Label>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
@@ -313,6 +319,7 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
 /* ============================================================ 2 — METHOD */
 export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean; methods?: Partial<Record<Method, boolean>> }) {
   const { t, ml } = useI18n();
+  const fixed = useContext(FixedFlow);
   // Only show crypto rails the operator has enabled; if the current pick was
   // disabled, fall back to the first available one.
   const available = methods ? METHODS.filter((k) => methods[k]) : METHODS;
@@ -395,7 +402,7 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
       )}
 
       <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
-        <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>
+        {!fixed && <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>}
         <button className="btn btn-primary" onClick={next} disabled={busy || available.length === 0} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>
       </div>
     </FlowCard>

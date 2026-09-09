@@ -6,6 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { api, errMessage } from '@/api/client';
 import { Body, Button, Card, H2, IconCircle, Label, Pill, Screen } from '@/components/ui';
 import { Fonts, Spacing } from '@/constants/theme';
+import { mintIntent } from '@/lib/navIntent';
 import { useTheme } from '@/hooks/use-theme';
 import { xaf } from '@/lib/format';
 import { useI18n } from '@/lib/i18n';
@@ -42,6 +43,10 @@ export default function PayLinkScreen() {
         scanned: link.merchant.settlementPhone,
         amount: link.amountXaf ? String(link.amountXaf) : '',
         merchantCode: link.merchant.code,
+        // The business name as the recipient label, with the in-app intent token that
+        // Send requires before it honours a `name` param (see lib/navIntent).
+        name: link.merchant.businessName,
+        t: mintIntent(),
       },
     });
   };

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, createContext, useContext } from "react";
 import { useI18n } from "../../lib/i18n.js";
 
 /** Live countdown to an ISO expiry. Ticks every second. */
@@ -22,9 +22,16 @@ export function Label({ children }: { children: ReactNode }) {
   return <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)", marginBottom: 8 }}>{children}</div>;
 }
 
+/** True inside a business checkout whose amount the merchant fixed: there is no Details
+ *  step for the buyer, so the stepper omits it and the Method step has nothing to go back to. */
+export const FixedFlow = createContext(false);
+
 export function Stepper({ i }: { i: number }) {
   const { t } = useI18n();
-  const steps = [t("step_details"), t("step_method"), t("step_review"), t("step_pay")];
+  const fixed = useContext(FixedFlow);
+  const all = [t("step_details"), t("step_method"), t("step_review"), t("step_pay")];
+  const steps = fixed ? all.slice(1) : all;
+  if (fixed) i = Math.max(0, i - 1);
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
       {steps.map((s, n) => (

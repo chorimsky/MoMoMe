@@ -5,6 +5,7 @@ import { COUNTRIES, localDigits, detectProvider } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
+import { FixedFlow } from "./ui.js";
 import { DetailsStep, MethodStep, ReviewStep, PayStep, ProcessingStep } from "./steps.js";
 import { SuccessStep } from "./Success.js";
 import { Activity } from "./Activity.js";
@@ -90,7 +91,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const toParam = (params.get("to") ?? "").replace(/\D/g, "");
   const [tab, setTab] = useState<Tab>(initialTab);
   const features = useFeatures();
-  const [step, setStep] = useState<Step>("details");
+  // A business link with a fixed amount has nothing to ask on Details: straight to "how to pay".
+  const [step, setStep] = useState<Step>(merchant?.amountXaf && merchant.amountXaf > 0 ? "method" : "details");
   const [busy, setBusy] = useState(false);
   // The server's "is this who you meant?" refusal, and the token that clears it. Held here
   // rather than in the step so a re-render cannot lose an acknowledgement already given.
@@ -101,7 +103,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const [err, setErr] = useState<string | null>(null);
 
   const [s, setS] = useState<Draft>(() => merchant
-    ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 5000, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
+    ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 0, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
     : (() => {
         const phone = toParam ? localDigits(toParam, "CM") : "";
         return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
@@ -306,6 +308,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
             assistive tech had no top-level landmark to jump to. This names the document
             once; the step headings stay correctly nested beneath it. */}
         <h1 className="sr-only">{merchant ? t("mrc_paying") : t("pay_title")}</h1>
+        <FixedFlow.Provider value={!!(merchant?.amountXaf && merchant.amountXaf > 0)}>
 
         {merchant && (
           <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--brand-wash)", border: "1px solid color-mix(in oklab, var(--brand) 30%, var(--line))" }}>
@@ -411,6 +414,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
             {step === "success" && payment && <SuccessStep payment={payment} reset={reset} onViewActivity={() => { setTab("history"); }} />}
           </div>
         )}
+        </FixedFlow.Provider>
       </div>
 
       {showTabs && (

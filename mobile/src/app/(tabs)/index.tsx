@@ -123,6 +123,8 @@ export default function SendScreen() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
+  // A business link that fixed its amount: the buyer chooses how to pay, nothing else.
+  const [lockedAmount, setLockedAmount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [quoteExpired, setQuoteExpired] = useState(false);
   const [ack, setAck] = useState(false);
@@ -141,7 +143,10 @@ export default function SendScreen() {
   useEffect(() => {
     if (typeof params.scanned === 'string' && params.scanned) setPhone(params.scanned.replace(/\D/g, ''));
     if (typeof params.amount === 'string' && params.amount) setAmount(params.amount.replace(/\D/g, ''));
-    if (typeof params.merchantCode === 'string' && params.merchantCode) setMerchantCode(params.merchantCode);
+    if (typeof params.merchantCode === 'string' && params.merchantCode) {
+      setMerchantCode(params.merchantCode);
+      setLockedAmount(typeof params.amount === 'string' && params.amount.replace(/\D/g, '').length > 0);
+    }
     if (params.country === 'CM' || params.country === 'GA' || params.country === 'TD' || params.country === 'CG' || params.country === 'CF')
       setCountry(params.country);
     // A label is honoured only when this app minted the navigation (contact tap); a deep
@@ -383,6 +388,7 @@ export default function SendScreen() {
   }, [step, payment?.id]);
 
   const reset = () => {
+    setLockedAmount(false);
     setStep('details');
     setPhone('');
     setAmount('');
@@ -428,6 +434,7 @@ export default function SendScreen() {
   };
 
   const startOver = () => {
+    setLockedAmount(false);
     Alert.alert(tr('start_over'), tr('start_over_confirm'), [
       { text: tr('keep_waiting'), style: 'cancel' },
       { text: tr('start_over'), style: 'destructive', onPress: reset },
@@ -538,6 +545,7 @@ export default function SendScreen() {
               </Pressable>
               <TextInput
                 value={phone}
+                editable={!merchantCode}
                 onChangeText={(x) => setPhone(x.replace(/[^\d+]/g, ''))}
                 placeholder="6 7X XX XX XX"
                 placeholderTextColor={t.muted}
@@ -627,6 +635,7 @@ export default function SendScreen() {
             <View style={styles.amountRow}>
               <TextInput
                 value={amount ? group(amount) : ''}
+                editable={!lockedAmount}
                 onChangeText={(x) => setAmount(x.replace(/\D/g, ''))}
                 placeholder="0"
                 placeholderTextColor={t.muted}
@@ -636,7 +645,7 @@ export default function SendScreen() {
               <Text style={[styles.ccy, { color: t.muted }]}>XAF</Text>
             </View>
             <View style={styles.chips}>
-              {QUICK.map((v) => (
+              {!lockedAmount && QUICK.map((v) => (
                 <Chip
                   key={v}
                   label={group(String(v))}

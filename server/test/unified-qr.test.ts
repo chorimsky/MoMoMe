@@ -97,6 +97,10 @@ async function main() {
     ok("the on-chain address is the primary leg", pi.code === ADDR, pi.code);
     ok("a Lightning leg was minted for the SAME payment", pi.alt?.method === "LIGHTNING", String(pi.alt?.method));
     ok("both legs ask for the same BTC amount", pi.alt?.amount === pi.amount, `${pi.alt?.amount} vs ${pi.amount}`);
+    // Wallets deal in whole satoshis. A fractional-sat invoice made Wallet of Satoshi pass an
+    // explicit amount next to a fixed-amount invoice, which its Spark SDK refuses.
+    const sats = pi.amount * 1e8;
+    ok("the amount is a whole number of satoshis", Math.abs(sats - Math.round(sats)) < 1e-6, `${pi.amount} BTC = ${sats} sat`);
     ok("the QR is ONE BIP-21 code carrying both", pi.qr.startsWith(`bitcoin:${ADDR}?amount=`) && pi.qr.includes("&lightning="), pi.qr.slice(0, 64));
     ok("the invoice rides uppercased (QR alphanumeric mode)", pi.qr.includes(BOLT11.toUpperCase()));
     ok("a wallet that ignores `lightning=` still reads the address", pi.qr.split("?")[0] === `bitcoin:${ADDR}`);

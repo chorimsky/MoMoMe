@@ -17,7 +17,7 @@
 import crypto from "node:crypto";
 import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC, METHOD_ASSET, btcToMsat, msatToBtc, erc20PaymentUri } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET, btcToInvoiceMsat, msatToBtc, erc20PaymentUri } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
@@ -313,11 +313,15 @@ export const ibexAdapter: RailAdapter = {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
 
     if (req.method === "LIGHTNING") {
+      // Whole satoshis, rounded up (see shared/domain): the figure on the invoice is the
+      // figure the app shows, so the payer's wallet and our screen never disagree by a sat.
+      const invoiceMsat = btcToInvoiceMsat(req.amount);
+      const invoiceBtc = msatToBtc(invoiceMsat);
       const res = await ibex("/invoice/add", {
         method: "POST",
         body: JSON.stringify({
           accountId: config.ibex.accountId,
-          amountMsat: btcToMsat(req.amount),
+          amountMsat: invoiceMsat,
           memo: req.ref.slice(0, 50), // IBEX caps memo at 50 chars
           expiration: Math.min(QUOTE_TTL_SEC.LIGHTNING, 900), // IBEX max 15 min
           webhookUrl: req.callbackUrl,
@@ -331,7 +335,7 @@ export const ibexAdapter: RailAdapter = {
         // Satoshi, …) recognise it as a Lightning invoice. A bare/uppercased
         // bolt11 is rejected by some scanners as "not a valid address".
         method: "LIGHTNING", code: data.bolt11, qr: `lightning:${data.bolt11}`, asset: "BTC",
-        amount: req.amount, amountLabel: formatAmount(req.amount, "BTC"), expiresAt,
+        amount: invoiceBtc, amountLabel: formatAmount(invoiceBtc, "BTC"), expiresAt,
         // The settlement webhook reports the same transaction by id.
         providerRef: data.transactionId, provider: "ibex",
       };

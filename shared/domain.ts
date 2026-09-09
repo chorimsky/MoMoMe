@@ -326,3 +326,11 @@ export const MSAT_PER_BTC = 1e11;
 export const btcToMsat = (btc: number): number => Math.round(btc * MSAT_PER_BTC);
 /** Millisatoshi → BTC. */
 export const msatToBtc = (msat: number): number => msat / MSAT_PER_BTC;
+/** BTC → millisatoshi for an INVOICE we ask someone to pay: rounded UP to a whole satoshi.
+ *
+ *  An invoice for 22 784.031 sats is valid Lightning, but wallets deal in whole sats. Wallet
+ *  of Satoshi (Spark SDK) reconciles the fraction by passing an explicit amount next to the
+ *  fixed-amount invoice, and Spark refuses that pairing: "User can only specify
+ *  amountSatsToSend for 0 amount lightning invoice". So invoices are always whole sats, and
+ *  rounding goes up so the payer never covers less than the quote (at most 1 sat more). */
+export const btcToInvoiceMsat = (btc: number): number => Math.ceil(btc * 1e8 - 1e-9) * 1000;

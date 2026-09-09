@@ -35,8 +35,18 @@ export function rateFor(method: Method): RateQuote {
 }
 
 /** Asset units the sender must pay to deliver `totalXaf`. */
+/** The crypto amount a payer is asked to send, in the smallest unit that can actually be
+ *  paid: a whole satoshi for BTC, a whole cent for a stablecoin. Rounded UP, so the payer
+ *  never covers less than the quote (at most one unit more).
+ *
+ *  A raw division gave 66 772.745 sats. That is a legal Lightning amount, but wallets deal
+ *  in whole sats: Wallet of Satoshi reconciled the fraction by passing an explicit amount
+ *  next to the fixed-amount invoice, and its Spark SDK refused the pairing. Rounding here,
+ *  at the quote, keeps every leg — invoice, on-chain URI, label — on the same figure. */
 export function inboundAmount(totalXaf: number, rq: RateQuote): number {
-  return totalXaf / rq.customerXafPerUnit;
+  const raw = totalXaf / rq.customerXafPerUnit;
+  const unit = rq.asset === "BTC" ? 1e8 : 100;
+  return Math.ceil(raw * unit - 1e-9) / unit;
 }
 
 export function formatAmount(amount: number, asset: InboundAsset): string {

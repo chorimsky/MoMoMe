@@ -28,6 +28,7 @@ import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useFeatures } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
+import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
 import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS } from '@shared/domain';
@@ -143,7 +144,9 @@ export default function SendScreen() {
     if (typeof params.merchantCode === 'string' && params.merchantCode) setMerchantCode(params.merchantCode);
     if (params.country === 'CM' || params.country === 'GA' || params.country === 'TD' || params.country === 'CG' || params.country === 'CF')
       setCountry(params.country);
-    if (typeof params.name === 'string' && params.name) {
+    // A label is honoured only when this app minted the navigation (contact tap); a deep
+    // link from outside can preset the number but never the name. See lib/navIntent.
+    if (typeof params.name === 'string' && params.name && consumeIntent(params.t)) {
       setRecipientName(params.name);
       setNameSource('internal');
       setOpenedAs(params.name);

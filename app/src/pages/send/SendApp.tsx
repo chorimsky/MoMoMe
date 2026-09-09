@@ -311,12 +311,19 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--brand-wash)", border: "1px solid color-mix(in oklab, var(--brand) 30%, var(--line))" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{merchant.kind === "invoice" ? t("mrc_invoice") : t("mrc_paying")}</span>
-              {merchant.verified && (
+              {merchant.verified ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 800, color: "var(--recv)" }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>{t("mrc_verified")}
                 </span>
+              ) : (
+                /* Anyone can register a business under any name; only a verified settlement number
+                   ties the name to a real account. Say so, instead of merely omitting the badge. */
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 800, color: "var(--warn, #b45309)" }}>{t("mrc_unverified")}</span>
               )}
             </div>
+            {!merchant.verified && (
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6 }}>{t("mrc_unverified_hint")}</div>
+            )}
             <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>{merchant.businessName}</div>
             {merchant.kind === "invoice" && (merchant.clientName || merchant.dueDate || merchant.label) && (
               <div style={{ marginTop: 8, display: "grid", gap: 5 }}>

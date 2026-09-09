@@ -60,11 +60,19 @@ export const API_BASE = BASE;
 
 /* ---------- admin session token ---------- */
 const TOKEN_KEY = "mm_admin_token";
-let adminToken: string | null = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } })();
+/* sessionStorage, not localStorage: the admin session ends with the tab. A token that
+   survives in localStorage outlives the operator's attention — it stays valid for its
+   whole 12 h on a shared or left-open machine and is readable by anything that runs in
+   the origin. The old localStorage copy is removed on load so upgraded browsers do not
+   keep one around. */
+let adminToken: string | null = (() => {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+})();
 
 export function setAdminToken(token: string | null): void {
   adminToken = token;
-  try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
+  try { token ? sessionStorage.setItem(TOKEN_KEY, token) : sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
 }
 export function getAdminToken(): string | null { return adminToken; }
 

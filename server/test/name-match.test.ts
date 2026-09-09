@@ -82,6 +82,15 @@ async function main() {
     const unknown = await post("/api/payments", { quoteId: q, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Rose Etoa" } });
     const unknownBody = await unknown.json() as { recipient?: { name: string; nameSource: string } };
     ok("an unregistered number keeps the sender's stated name", unknown.status === 200 && unknownBody.recipient?.name === "Rose Etoa", JSON.stringify(unknownBody.recipient));
+
+    /* ---- bidi and zero-width characters never reach a stored name ---- */
+    // U+202E (right-to-left override) can render "ecilA" as "Alice"; U+200B is invisible.
+    // Both are format characters (\p{Cf}); the old cleaner only removed controls (\p{Cc}).
+    q = await quote();
+    const bidi = await post("/api/payments", { quoteId: q, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "\u202eaotE esoR\u200b" } });
+    const bidiBody = await bidi.json() as { recipient?: { name: string } };
+    ok("bidi override and zero-width chars are stripped from the stated name", bidi.status === 200 && !/[\u202e\u200b]/u.test(bidiBody.recipient?.name ?? ""), JSON.stringify(bidiBody.recipient?.name));
+    ok("what remains is the visible text", bidiBody.recipient?.name === "aotE esoR", JSON.stringify(bidiBody.recipient?.name));
   } finally {
     server.close();
   }

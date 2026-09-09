@@ -5,8 +5,7 @@ import type {
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import { namesMatch,
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21,
-} from "../../../shared/domain.js";
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21, cleanText } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName } from "../core/nameResolver.js";
@@ -724,7 +723,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // cap (it's forwarded to the payout aggregator's disburse({name}) and stored): strip
   // control chars, collapse whitespace, cap at 60 — matches the admin cash-out cap.
   const cleanName = typeof recipient.name === "string"
-    ? recipient.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60)
+    ? cleanText(recipient.name, 60)
     : "";
   // The payout rails want a label and some require one, so an unnamed recipient still gets
   // the number as the string sent to the rail. What must NOT happen is that string becoming
@@ -1194,7 +1193,7 @@ api.post("/me/delete-request", rateLimitDurableMiddleware("account_delete_req", 
   const country = (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode;
   const check = checkPhone(String(b.phone ?? ""), country);
   if (!check.ok) return res.status(400).json({ error: "bad_phone", message: "Enter the Mobile Money number you used with MoMo›Me, with its country." });
-  const note = typeof b.note === "string" ? b.note.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 500) : undefined;
+  const note = cleanText(b.note, 500) || undefined;
   const { record, isNew } = fileDeletionRequest({ phone: check.local, country, note });
   if (isNew) void notifyDeletionRequest(record);
   res.json({ ok: true, ref: record.ref, receivedAt: record.createdAt, alreadyOpen: !isNew });
@@ -1207,7 +1206,7 @@ api.post("/me/delete-request", rateLimitDurableMiddleware("account_delete_req", 
 api.post("/testing/report", rateLimitDurableMiddleware("test_report", 20, 60 * 60_000), async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const country = (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode;
-  const name = typeof b.name === "string" ? b.name.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  const name = cleanText(b.name, 80);
   if (name.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your name so the team knows who tested." });
   const check = checkPhone(String(b.phone ?? ""), country);
   if (!check.ok) return res.status(400).json({ error: "bad_phone", message: "Enter your own Mobile Money number, with its country." });
@@ -1294,7 +1293,7 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   const owner = await ownerOf(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const b = (req.body ?? {}) as { businessName?: string; category?: string; country?: string; settlementPhone?: string; tier?: string; location?: MerchantAccount["location"] };
-  const businessName = String(b.businessName ?? "").trim();
+  const businessName = cleanText(b.businessName, 80);
   const country = (COUNTRIES[b.country as CountryCode] ? b.country : "CM") as CountryCode;
   const settlementPhone = String(b.settlementPhone ?? "").replace(/\D/g, "");
   if (businessName.length < 2) return res.status(400).json({ error: "bad_name", message: "Enter your business name." });

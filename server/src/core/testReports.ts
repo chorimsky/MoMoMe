@@ -7,6 +7,7 @@
    differently. Nothing is deduplicated — a second run on the same platform is a second
    report, because the second run is the interesting one after a fix.
    ============================================================ */
+import { cleanText } from "../../../shared/domain.js";
 import type { CountryCode, TestCaseResult, TestReport } from "../../../shared/types.js";
 import { TEST_CASE_IDS } from "../../../shared/testing.js";
 import { id } from "./ids.js";
@@ -27,8 +28,7 @@ function shortRef(): string {
   return `TR-${s}`;
 }
 
-const clean = (v: unknown, max: number): string =>
-  typeof v === "string" ? v.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
+const clean = cleanText;
 
 /** Validate the client's results against the shared case list. Unknown ids are dropped,
  *  duplicates keep the last answer, outcomes outside the three are treated as skipped. */

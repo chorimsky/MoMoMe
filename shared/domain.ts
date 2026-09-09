@@ -33,6 +33,16 @@ export function localDigits(phone: string, country: CountryCode): string {
  *  require one. That is fine as a label and wrong as an identity: the digits then flowed
  *  into the identity graph as the person's NAME and came back out at trustLevel 2, verified
  *  — the platform telling a sender that this number belongs to "680344485". */
+/** Text a person typed and other people will read: names, notes, business names.
+ *
+ *  Strips control characters (\p{Cc}) AND format characters (\p{Cf}) — the bidi overrides
+ *  (U+202E…) and zero-width joiners that can make "Alice" render as something else or hide
+ *  a difference between two names that look identical — then collapses whitespace and caps
+ *  the length. Every server route that stores free text goes through this one function. */
+export function cleanText(v: unknown, max: number): string {
+  return typeof v === "string" ? v.replace(/[\p{Cc}\p{Cf}]/gu, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
 export function isRealName(name: string | null | undefined, phone: string): boolean {
   const n = (name ?? "").trim();
   if (n.length < 2) return false;

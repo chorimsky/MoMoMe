@@ -326,6 +326,8 @@ export const STRINGS: Dict = {
   mrc_paying: ["You're paying", "Vous payez"],
   mrc_invoice: ["Invoice", "Facture"],
   mrc_verified: ["Verified", "Vérifié"],
+  mrc_unverified: ["Not verified", "Non vérifié"],
+  mrc_unverified_hint: ["This business has not confirmed its Mobile Money number. Pay only if you know who runs it.", "Ce commerce n'a pas confirmé son numéro Mobile Money. Payez seulement si vous savez qui le gère."],
   mrc_enter_amount: ["Enter the amount to pay below.", "Entrez le montant à payer ci-dessous."],
   mrc_inv_ref: ["Ref", "Réf"],
   mrc_inv_to: ["Billed to", "Facturé à"],

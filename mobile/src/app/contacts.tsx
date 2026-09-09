@@ -8,6 +8,7 @@ import { Body, Button, Card, Field, IconCircle, Label, Screen } from '@/componen
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
+import { mintIntent } from '@/lib/navIntent';
 import { loadContacts, newContact, removeContact, saveContact } from '@/lib/vault';
 import { checkPhone, COUNTRIES, isRealName, namesMatch, phoneKey, PROVIDERS } from '@shared/domain';
 
@@ -70,7 +71,7 @@ export default function ContactsScreen() {
   };
 
   const pay = (c: Contact) =>
-    router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name, t: String(Date.now()) } });
+    router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name, t: mintIntent() } });
 
   return (
     <Screen scroll>

@@ -1,140 +1,120 @@
 /**
- * Branded launch screen. The native splash (yellow + eye) shows instantly; once
- * fonts are ready this overlay takes over on the same brand yellow and presents
- * the full MoMo›Me logo — the goggle-eye mark on a clean app-icon tile, the
- * wordmark, and the tagline — then fades away to reveal the app. So the brand is
- * the first thing the user sees, framed as a proper logo rather than a bare mark.
+ * Branded launch screen.
+ *
+ * The native splash (brand yellow, the bare goggle-eye at 120pt image width ≈ 42pt of
+ * visible mark, centred) is on screen until fonts are ready. This overlay is mounted in
+ * the same frame the native splash is hidden, and its FIRST frame draws the very same
+ * mark at the very same size and place — so there is no jump, no tile popping in, no
+ * halo: the eye is simply there, and then it moves once.
+ *
+ * One motion, ~1.1 s in total:
+ *   0–360 ms   the mark grows and lifts; the wordmark and tagline fade in beneath it
+ *   360–900 ms hold
+ *   900–1140   the overlay fades out over the app, which is already rendered under it
+ *
+ * With "Reduce motion" on, nothing moves: the wordmark fades in, then the overlay fades.
+ * No loading dots — by the time this shows, the app is ready; a spinner would be a lie.
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import { MomoMark, Wordmark } from '@/components/brand';
+import { useI18n } from '@/lib/i18n';
 
 const BRAND_YELLOW = '#FFC92E';
 const INK = '#1C1813';
 
-/** Three softly-pulsing dots — a lightweight "loading" cue under the logo. */
-function LoadingDots() {
-  const v = useRef([0, 1, 2].map(() => new Animated.Value(0.3))).current;
-  useEffect(() => {
-    const loops = v.map((val, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 160),
-          Animated.timing(val, { toValue: 1, duration: 380, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          Animated.timing(val, { toValue: 0.3, duration: 380, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        ]),
-      ),
-    );
-    loops.forEach((l) => l.start());
-    return () => loops.forEach((l) => l.stop());
-  }, [v]);
-  return (
-    <View style={styles.dots}>
-      {v.map((val, i) => (
-        <Animated.View key={i} style={[styles.dot, { opacity: val, transform: [{ scale: val }] }]} />
-      ))}
-    </View>
-  );
-}
+/* The native splash image is a 1024px canvas whose eye spans ~360px, shown at 120pt wide:
+   ≈42pt of visible eye. MomoMark's eye spans 18 of its 32 viewBox units, so a 76pt mark
+   draws a 42pt eye. Its visual centre sits at viewBox y≈15 (1/32 above the box centre),
+   hence the small downward nudge so the eye lands on the exact centre of the screen. */
+const MARK_SIZE = 76;
+const MARK_NUDGE_Y = MARK_SIZE / 32;
+const GROW = 1.45; // 76 → ~110pt
+const LIFT = -34;
 
 export function BrandSplash({ onDone }: { onDone?: () => void }) {
+  const { t } = useI18n();
   const [gone, setGone] = useState(false);
   const fade = useRef(new Animated.Value(1)).current; // whole overlay
-  const rise = useRef(new Animated.Value(0)).current; // wordmark + tagline rise-in
-  const pop = useRef(new Animated.Value(0.7)).current; // logo tile pop
-  const halo = useRef(new Animated.Value(0)).current; // halo bloom
+  const move = useRef(new Animated.Value(0)).current; // 0 = native-splash pose, 1 = lockup pose
+  const text = useRef(new Animated.Value(0)).current; // wordmark + tagline
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(pop, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
-      Animated.timing(halo, { toValue: 1, duration: 640, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(rise, { toValue: 1, duration: 480, delay: 180, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ]).start();
+    let cancelled = false;
+    let hold: ReturnType<typeof setTimeout> | undefined;
 
-    const hold = setTimeout(() => {
-      Animated.timing(fade, { toValue: 0, duration: 440, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
-        () => {
-          setGone(true);
-          onDone?.();
-        },
-      );
-    }, 1600);
-    return () => clearTimeout(hold);
-  }, [fade, rise, pop, halo, onDone]);
+    const leave = () => {
+      Animated.timing(fade, { toValue: 0, duration: 240, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => {
+        if (cancelled) return;
+        setGone(true);
+        onDone?.();
+      });
+    };
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .catch(() => false)
+      .then((reduce) => {
+        if (cancelled) return;
+        if (reduce) {
+          Animated.timing(text, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+          hold = setTimeout(leave, 700);
+          return;
+        }
+        Animated.parallel([
+          Animated.timing(move, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(text, { toValue: 1, duration: 320, delay: 140, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        ]).start();
+        hold = setTimeout(leave, 900);
+      });
+
+    return () => {
+      cancelled = true;
+      if (hold) clearTimeout(hold);
+    };
+  }, [fade, move, text, onDone]);
 
   if (gone) return null;
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, styles.wrap, { opacity: fade }]} pointerEvents="none">
-      {/* logo lockup */}
-      <Animated.View style={{ alignItems: 'center', transform: [{ scale: pop }] }}>
-        <Animated.View
-          style={[
-            styles.halo,
-            { opacity: halo.interpolate({ inputRange: [0, 1], outputRange: [0, 0.55] }), transform: [{ scale: halo.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }] },
-          ]}
-        />
-        <View style={styles.tile}>
-          <MomoMark size={96} tile={false} />
-        </View>
+    <Animated.View
+      style={[StyleSheet.absoluteFill, styles.wrap, { opacity: fade }]}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants">
+      <Animated.View
+        style={{
+          transform: [
+            { translateY: move.interpolate({ inputRange: [0, 1], outputRange: [MARK_NUDGE_Y, LIFT] }) },
+            { scale: move.interpolate({ inputRange: [0, 1], outputRange: [1, GROW] }) },
+          ],
+        }}>
+        <MomoMark size={MARK_SIZE} tile={false} />
       </Animated.View>
 
       <Animated.View
-        style={{
-          marginTop: 30,
-          opacity: rise,
-          transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
-        }}>
-        <Wordmark size={32} mono color={INK} />
-      </Animated.View>
-      <Animated.Text
         style={[
-          styles.tag,
-          { opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+          styles.lockup,
+          { opacity: text, transform: [{ translateY: text.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] },
         ]}>
-        Mobile Money, made simple
-      </Animated.Text>
-
-      <View style={styles.footer}>
-        <LoadingDots />
-      </View>
+        <Wordmark size={30} mono color={INK} />
+        <Text style={styles.tag}>{t('tagline')}</Text>
+      </Animated.View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { backgroundColor: BRAND_YELLOW, alignItems: 'center', justifyContent: 'center' },
-  halo: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: '#fff',
-    top: -46,
-  },
-  tile: {
-    width: 150,
-    height: 150,
-    borderRadius: 38,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: INK,
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 10,
-  },
+  /* Anchored to the screen centre so the mark's starting pose (centre) is unaffected by the
+     text block's height; sits just under the mark's final pose (centre + 55 − 34 ≈ +21pt). */
+  lockup: { position: 'absolute', top: '50%', marginTop: 44, alignItems: 'center' },
   tag: {
-    marginTop: 12,
+    marginTop: 8,
     fontFamily: 'Fredoka_500Medium',
-    fontSize: 15,
+    fontSize: 14,
     letterSpacing: 0.2,
-    color: 'rgba(28,24,19,0.72)',
+    color: 'rgba(28,24,19,0.7)',
   },
-  footer: { position: 'absolute', bottom: 72, alignItems: 'center' },
-  dots: { flexDirection: 'row', gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: INK },
 });

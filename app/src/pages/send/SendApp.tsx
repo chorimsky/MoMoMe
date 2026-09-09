@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, localDigits, detectProvider } from "@shared/domain.js";
+import { COUNTRIES, localDigits, detectProvider, ADDRESS_METHODS } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
@@ -128,7 +128,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         const saved = JSON.parse(raw) as { paymentId: string; draft: Draft; quote: Quote | null };
         const p = await api.getPayment(saved.paymentId);
         if (cancelled) return;
-        const payable = p.state === "AWAITING_INBOUND" && Date.parse(p.payInstruction.expiresAt) > Date.now();
+        // An address stays payable after its rate lock; only a Lightning invoice dies.
+        const payable = p.state === "AWAITING_INBOUND" && (ADDRESS_METHODS.has(p.method) || Date.parse(p.payInstruction.expiresAt) > Date.now());
         if (payable || IN_FLIGHT.includes(p.state)) {
           setS(saved.draft); setQuote(saved.quote ?? null); setPayment(p); setResumed(true); setTab("pay");
           setStep(payable ? "pay" : "processing");

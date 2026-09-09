@@ -307,10 +307,20 @@ export const QUOTE_TTL_SEC: Record<Method, number> = {
   // before the payment landed. 10 min (IBEX max is 15) gives ample time; the
   // per-rail spread covers the slightly longer rate lock.
   LIGHTNING: 600,
-  USDT: 150,
-  USDC: 150,
+  // A stablecoin payer usually withdraws from an exchange: the withdrawal queue plus
+  // Ethereum confirmations routinely take longer than the 150 s this used to be, and the
+  // screen then said "expired" to someone whose money was already on its way. The address
+  // never expires — only the rate lock does — and the on-chain path re-prices a late
+  // arrival, so a longer lock costs nothing but spread exposure the rail already covers.
+  USDT: 600,
+  USDC: 600,
   ONCHAIN: 900,
 };
+
+/** Methods whose pay instruction is an ADDRESS that stays valid after the rate lock
+ *  passes (only the price expires), as opposed to a Lightning invoice, which dies. The
+ *  Pay screens must not hide an address as "expired": money already sent to it lands. */
+export const ADDRESS_METHODS: ReadonlySet<Method> = new Set<Method>(["ONCHAIN", "USDT", "USDC"]);
 
 // User-facing funding names are mobile-money-first: lead with speed/outcome, not
 // crypto jargon. The asset is only named where the payer must know what to send

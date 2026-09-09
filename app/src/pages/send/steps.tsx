@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -486,7 +486,13 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
 export function PayStep({ payment, method, back, next, refresh, busy, demoMode }: { payment: Payment; method: Method; back: () => void; next: () => void; refresh: () => void; busy: boolean; demoMode?: boolean }) {
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
-  const { label, expired } = useExpiry(inst.expiresAt);
+  const { label, expired: lockPassed } = useExpiry(inst.expiresAt);
+  // A Lightning invoice is DEAD after expiry: hide it, offer a fresh one. An address
+  // (on-chain, USDT, USDC) is not — only the rate lock passed. Money already sent to it
+  // still lands and is credited at the rate when it arrives, so the address stays on
+  // screen, the poll keeps running, and the refresh is optional.
+  const addressBased = ADDRESS_METHODS.has(method);
+  const expired = lockPassed && !addressBased;
   // A unified BIP-21 QR carries the Lightning invoice as `lightning=…`, but the two legs do
   // not live equally long — the invoice dies well before the on-chain address does. Once it
   // has, strip it: a wallet that scans a dead invoice reports a failure, whereas the plain
@@ -519,9 +525,11 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
         } catch { /* keep polling */ }
       }
-      // Stop once the invoice has expired — no point burning metered data polling a
-      // dead invoice; the "code expired / refresh" UI takes over.
-      if (active && Date.parse(inst.expiresAt) > Date.now()) id = setTimeout(poll, gap());
+      // A Lightning invoice paid in its last seconds can still land after our expiry (the
+      // server only fails it two minutes later), so keep polling through that grace window.
+      // An address never dies: poll for as long as the screen is open.
+      const stopAt = Date.parse(inst.expiresAt) + 120_000;
+      if (active && (ADDRESS_METHODS.has(method) || stopAt > Date.now())) id = setTimeout(poll, gap());
     };
     id = setTimeout(poll, gap());
     const onVis = () => { if (!document.hidden && active) { clearTimeout(id); poll(); } };
@@ -580,6 +588,13 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
       )}
 
+      {lockPassed && addressBased && (
+        <div role="note" style={{ margin: "16px 0 0", padding: "12px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
+          <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)" }}>{t("lock_passed_title")}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.45 }}>{t("lock_passed_sub")}</div>
+          <button className="btn btn-quiet" onClick={refresh} disabled={busy} style={{ marginTop: 8, fontSize: 12.5 }}>{t("refresh_price")}</button>
+        </div>
+      )}
       {expired ? (
         <>
           <div style={{ margin: "16px 0", padding: "13px 14px", border: "1px solid var(--warn)", borderRadius: "var(--r)", background: "var(--send-wash)" }}>
@@ -591,7 +606,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       ) : (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center", margin: "16px 0", fontSize: 13, color: "var(--ink-2)" }}>
-            <Spinner size={13} color="var(--accent)" /> {METHOD_META[method].fast ? t("waiting_pay") : t("waiting_conf")} <span className="num" style={{ color: "var(--ink-3)" }}>· {label}</span>
+            <Spinner size={13} color="var(--accent)" /> {METHOD_META[method].fast ? t("waiting_pay") : t("waiting_conf")} {!lockPassed && <span className="num" style={{ color: "var(--ink-3)" }}>· {label}</span>}
           </div>
           <button className="btn btn-primary" onClick={next} disabled={busy} style={{ width: "100%", padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("ive_paid")}</button>
         </>

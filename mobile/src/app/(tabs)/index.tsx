@@ -31,7 +31,7 @@ import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -944,7 +944,9 @@ function PayStep({
   // a failure, and an address it still pays TO is one nobody is watching for this payment.
   const [expired, setExpired] = useState(false);
   useEffect(() => {
-    const chk = () => setExpired(!!pi.expiresAt && Date.parse(pi.expiresAt) <= Date.now());
+    // Only a Lightning invoice dies at expiry. An address (on-chain, USDT, USDC) outlives
+    // its rate lock: money already sent still lands, so it must stay on screen.
+    const chk = () => setExpired(!ADDRESS_METHODS.has(payment.method) && !!pi.expiresAt && Date.parse(pi.expiresAt) <= Date.now());
     chk();
     const id = setInterval(chk, 1000);
     return () => clearInterval(id);
@@ -1032,8 +1034,15 @@ function PayStep({
               <View style={[styles.pulse, { backgroundColor: tone === 'recv' ? t.recv : tone === 'bad' ? t.bad : t.accent }]} />
             </View>
             <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, flex: 1 }}>{tr(statusKey(payment.state))}</Body>
-            {pi.expiresAt ? <Countdown to={pi.expiresAt} /> : null}
+            {pi.expiresAt && !(ADDRESS_METHODS.has(payment.method) && Date.parse(pi.expiresAt) <= Date.now()) ? <Countdown to={pi.expiresAt} /> : null}
           </View>
+          {ADDRESS_METHODS.has(payment.method) && pi.expiresAt && Date.parse(pi.expiresAt) <= Date.now() ? (
+            <View style={[styles.issueBox, { borderColor: t.line, backgroundColor: t.surface, alignSelf: 'stretch', marginTop: 0 }]}>
+              <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13.5 }}>{tr('lock_passed_title')}</Text>
+              <Body muted>{tr('lock_passed_sub')}</Body>
+              <Button title={tr('refresh_price')} variant="ghost" size="md" icon="refresh" onPress={onRefresh} loading={busy} />
+            </View>
+          ) : null}
           <Body muted center>{tr('waiting_auto')}</Body>
         </>
       )}

@@ -844,6 +844,14 @@ export interface ReportsSnapshot {
   customers: number;
   daily: Array<{ date: string; volumeXaf: number; payments: number }>;
   byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number }>;
+  /** Why payments did not complete in the window, most common first. `reason` is the note
+   *  the state machine wrote on the terminal transition (e.g. "invoice expired — not paid"),
+   *  normalised so amounts and ids do not split one cause into many rows. */
+  failures: {
+    total: number;              // payments in the window that ended FAILED / REFUNDED / MANUAL_REVIEW
+    attempts: number;           // all payments in the window (denominator for the rate)
+    reasons: Array<{ reason: string; state: PaymentState; count: number; volumeXaf: number; methods: Partial<Record<Method, number>>; avgMinutesToFail: number }>;
+  };
 }
 
 /* ---------- system health ---------- */

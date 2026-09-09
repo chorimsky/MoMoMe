@@ -2186,6 +2186,27 @@ api.get("/admin/reports", async (req, res) => {
       const done = ps.filter((p) => p.displayStatus === "Completed");
       return { id, volumeXaf: done.reduce((s, p) => s + p.xaf, 0), payments: done.length, successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : 100 };
     }),
+    failures: { total: 0, attempts: 0, reasons: [] }, // filled below
+  };
+  // Why payments fail — the operator's first question after "how many". Grouped by the
+  // terminal note (numbers and ids normalised) so one cause is one row.
+  const ended = all.filter((p) => p.state === "FAILED" || p.state === "REFUNDED" || p.state === "MANUAL_REVIEW");
+  const groups = new Map<string, { reason: string; state: typeof ended[number]["state"]; count: number; volumeXaf: number; methods: Partial<Record<typeof ended[number]["method"], number>>; minutes: number[] }>();
+  for (const p of ended) {
+    const last = [...p.events].reverse().find((e) => e.state === p.state);
+    const reason = (last?.note ?? p.state).replace(/\b\d[\d\s.,]*\b/g, "#").replace(/\b(pay|q|del|MMM)[_-][A-Za-z0-9-]+/g, "#").trim();
+    const key = `${p.state}|${reason}`;
+    const g = groups.get(key) ?? { reason, state: p.state, count: 0, volumeXaf: 0, methods: {}, minutes: [] };
+    g.count += 1; g.volumeXaf += p.xaf; g.methods[p.method] = (g.methods[p.method] ?? 0) + 1;
+    if (last) g.minutes.push((Date.parse(last.at) - Date.parse(p.createdAt)) / 60_000);
+    groups.set(key, g);
+  }
+  report.failures = {
+    total: ended.length,
+    attempts: all.length,
+    reasons: [...groups.values()].sort((a, b) => b.count - a.count).map(({ minutes, ...g }) => ({
+      ...g, avgMinutesToFail: minutes.length ? Math.round(minutes.reduce((x, y) => x + y, 0) / minutes.length) : 0,
+    })),
   };
   res.json(report);
 });

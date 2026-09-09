@@ -67,6 +67,29 @@ export function ReportsView() {
             : <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No data yet</div>}
         </Card>
 
+        {/* The operator's first question after "how many": why did the rest not complete.
+            One row per cause, from the note the state machine wrote when it gave up. */}
+        <Card title="Why payments fail" pad={false}>
+          <div style={{ padding: "12px 20px 4px", fontSize: 12.5, color: "var(--ink-3)" }}>
+            {data.failures.total === 0
+              ? "Every payment in this period completed."
+              : `${fmt(data.failures.total)} of ${fmt(data.failures.attempts)} payments did not complete (${Math.round(100 * data.failures.total / Math.max(1, data.failures.attempts))}%).`}
+          </div>
+          {data.failures.reasons.map((r) => (
+            <div key={r.state + r.reason} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto auto", gap: 12, alignItems: "center", padding: "10px 20px", borderTop: "1px solid var(--line-2)", fontSize: 12.5 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis" }}>{r.reason}</div>
+                <div style={{ color: "var(--ink-3)", fontSize: 11.5, marginTop: 2 }}>
+                  {r.state}{" · "}{Object.entries(r.methods).map(([m, n]) => `${m} ×${n}`).join(", ")}{r.avgMinutesToFail ? ` · after ~${fmt(r.avgMinutesToFail)} min` : ""}
+                </div>
+              </div>
+              <span className="num" style={{ fontWeight: 700 }}>{fmt(r.count)}</span>
+              <span className="num" style={{ color: "var(--ink-2)" }}>{fmt(r.volumeXaf)} XAF</span>
+              <span className="num" style={{ color: "var(--ink-3)" }}>{Math.round(100 * r.count / Math.max(1, data.failures.total))}%</span>
+            </div>
+          ))}
+        </Card>
+
         <Card title="By provider" pad={false}>
           <div className="mm-tablewrap">
             <div className="mm-table">

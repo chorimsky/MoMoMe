@@ -483,7 +483,7 @@ export const api = {
     items: NotificationRecord[];
   }>("/admin/notifications/outbox"),
   adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
-  retryPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
+  retryPayment: (id: string) => req<{ ok: boolean; reason?: string; message?: string; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),
 
   adminPeex: () => req<PeexPanel>("/admin/peex"),

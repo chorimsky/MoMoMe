@@ -20,7 +20,7 @@ import { TEST_CASES } from "../../../shared/testing.js";
 import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
-import { settle, confirmInbound, adminRetry, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
+import { settle, confirmInbound, adminRetryWhy, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
@@ -2489,8 +2489,8 @@ api.get("/admin/audit", async (_req, res) => {
 api.post("/admin/payments/:id/retry", async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  const ok = await adminRetry(p);
-  res.json({ ok, payment: p });
+  const out = await adminRetryWhy(p);
+  res.json({ ...out, payment: p });
 });
 api.post("/admin/payments/:id/refund", async (req, res) => {
   const p = await store().getPayment(req.params.id);

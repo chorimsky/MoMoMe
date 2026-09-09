@@ -823,23 +823,34 @@ export async function reconcileFailedPayouts(maxAgeMs = 120_000): Promise<void> 
  *  ORIGINAL idempotency key (a prior payout returns "duplicate" — no second pay).
  *  Honours the same real-money safety as the settle path and only marks DELIVERED
  *  on an authoritative payout confirmation (never eagerly on "accepted"). */
+/** Why a retry was refused, in words an operator can act on. A bare `false` used to
+ *  collapse nine different situations into "no funded rail, or already completed", so the
+ *  operator could not tell "the sender never paid" from "the treasury is empty". */
+export type RetryOutcome =
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "completed" | "refunded" | "in_flight" | "nothing_arrived" | "over_cap" | "float_negative" | "no_rail" | "simulated_inbound" | "rail_rejected" | "duplicate"; message: string };
+
 export async function adminRetry(pIn: Payment): Promise<boolean> {
+  return (await adminRetryWhy(pIn)).ok;
+}
+export async function adminRetryWhy(pIn: Payment): Promise<RetryOutcome> {
   // Serialize with every other money path (mirrors adminRefund / onPayoutResult): without
   // the lock + fresh read, an operator double-click, or a retry racing reconcile / a payout
   // callback, could both observe "not in flight" and submit TWO real disbursements — the
   // adapter's per-instance in-memory idempotency map cannot be the sole double-pay guard.
   return store().lockPayment(pIn.id, () => adminRetryLocked(pIn.id));
 }
-async function adminRetryLocked(paymentId: string): Promise<boolean> {
+const refuse = (reason: Exclude<RetryOutcome, { ok: true }>["reason"], message: string): RetryOutcome => ({ ok: false, reason, message });
+async function adminRetryLocked(paymentId: string): Promise<RetryOutcome> {
   const p = await store().getPayment(paymentId); // fresh read under the lock
-  if (!p) return false;
-  if (p.displayStatus === "Completed") return false;
-  if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return false; // never re-pay a refunded inbound
+  if (!p) return refuse("not_found", "Payment not found.");
+  if (p.displayStatus === "Completed") return refuse("completed", "Already delivered — nothing to retry.");
+  if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return refuse("refunded", "This inbound was refunded; it must not be paid out again."); // never re-pay a refunded inbound
   // Never re-disburse a payout that is already in flight (PAYOUT_REQUESTED). It looks
   // "stuck/Pending" but the async confirmation (callback/poll/reconcile) is still
   // running; a second disburse would double-pay if the adapter's in-memory idempotency
   // map is cold (e.g. after a restart before the snapshot flush).
-  if (p.state === "PAYOUT_REQUESTED") return false;
+  if (p.state === "PAYOUT_REQUESTED") return refuse("in_flight", "A payout is already in flight for this payment — its confirmation is still being awaited. Retrying now could pay twice.");
 
   // Retry is an override of the LATE holds (approval threshold, transient float,
   // low-trust) — all of which happen AFTER FX-lock. It must NEVER resurrect a
@@ -847,13 +858,13 @@ async function adminRetryLocked(paymentId: string): Promise<boolean> {
   // (on-chain "unverified"/"underpaid"): those have no ledger posting and no float
   // reservation, so paying out would disburse real XAF for crypto that never (fully)
   // arrived. Such a hold must be re-verified via confirmInbound, not blind-retried.
-  if (!p.events.some((e) => e.state === "FX_LOCKED")) return false;
+  if (!p.events.some((e) => e.state === "FX_LOCKED")) return refuse("nothing_arrived", "The sender never paid — no crypto arrived, so there is nothing to pay out. The customer can simply start a new payment.");
 
   // Re-apply the money-safety guards that confirmInbound enforces (retry is a manual
   // operator OVERRIDE of the approval-threshold hold, but it must NOT be able to
   // breach the corridor cap or over-draw the treasury float — those aren't approvals).
-  if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) return false;
-  if ((await availableFloatXaf()) < 0) return false;
+  if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) return refuse("over_cap", `${p.xaf} XAF is above the ${p.recipient.provider} single-payout cap of ${PROVIDER_PAYOUT_MAX[p.recipient.provider]} XAF.`);
+  if ((await availableFloatXaf()) < 0) return refuse("float_negative", "The treasury float is negative — top up the payout rail before retrying.");
 
   // Is THIS payment's crypto inbound real money? (Same test as confirmInbound.)
   const cryptoReal = railTrusted(p.payInstruction.provider);
@@ -862,9 +873,9 @@ async function adminRetryLocked(paymentId: string): Promise<boolean> {
   const agg = p.aggregator
     ? aggregatorByName(p.aggregator)
     : await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal);
-  if (!agg) return false;
+  if (!agg) return refuse("no_rail", `No funded ${cryptoReal ? "live " : ""}payout rail can cover ${p.xaf} XAF to ${p.recipient.provider} right now — check rail balances under Rails.`);
   // SAFETY: never move REAL Mobile Money for a non-real (simulated) crypto inbound.
-  if (aggregatorLive(agg.name) && !cryptoReal) return false;
+  if (aggregatorLive(agg.name) && !cryptoReal) return refuse("simulated_inbound", "This inbound was simulated (sandbox crypto); real Mobile Money must not be sent for it.");
   p.aggregator = agg.name;
 
   // parkForReview gave the earmark back when this payment was held — take it again
@@ -877,14 +888,14 @@ async function adminRetryLocked(paymentId: string): Promise<boolean> {
     // Nothing was submitted, so give the earmark straight back. No transition: the
     // payment is already held for review and a second MANUAL_REVIEW event says nothing.
     await releaseReservation(p);
-    return false;
+    return refuse("rail_rejected", `${agg.name} rejected the disbursement request; nothing was sent. See the rail's status under Rails.`);
   }
   // The adapter already had this ref in flight — do NOT re-enter PAYOUT_REQUESTED (that
   // would blindly overwrite payoutRef and re-arm confirmation on an existing payout).
   // Mirror confirmInbound: hold for review so an operator confirms the original.
   if (res.status === "duplicate") {
     await transition(p, "MANUAL_REVIEW", "duplicate payout key on retry");
-    return false;
+    return refuse("duplicate", `${agg.name} already has a payout in flight under this reference — confirm the original instead of retrying.`);
   }
   p.payoutRef = res.providerRef;
   // Hand off to the confirmation path: onPayoutResult posts the delivery legs and
@@ -892,13 +903,13 @@ async function adminRetryLocked(paymentId: string): Promise<boolean> {
   await transition(p, "PAYOUT_REQUESTED", "retried by admin");
   // The per-payment lock is HELD here — call onPayoutResultLocked (not onPayoutResult,
   // which re-acquires the same lock → re-entrant deadlock), mirroring confirmInboundLocked.
-  if (res.simulated) { await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); return true; }
+  if (res.simulated) { await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); return { ok: true }; }
   // Real rail: confirm via status query; settle on COMPLETED/FAILED, else keep polling.
   let status: PayoutStatus = "PENDING";
   try { status = (await agg.queryStatus(p.ref)) ?? "PENDING"; } catch { /* keep PENDING */ }
   if (status === "COMPLETED" || status === "FAILED") await onPayoutResultLocked(p.ref, status, res.providerRef);
   else void pollPayout(p.ref); // fire-and-forget: acquires the lock AFTER this one releases
-  return true;
+  return { ok: true };
 }
 
 /** Admin: refund a payment that did not deliver — reverses its ledger entries so

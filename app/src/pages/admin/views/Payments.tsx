@@ -182,7 +182,9 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
     try {
       const r = kind === "retry" ? await api.retryPayment(p.id) : await api.refundPayment(p.id);
       if (!r.ok) {
-        setActErr(kind === "retry" ? "Retry didn't go through — no funded rail, or it's already completed." : "Refund couldn't be applied to this payment.");
+        // The server says exactly why (nothing arrived, in flight, no funded rail, cap, float…).
+        const why = "message" in r && typeof r.message === "string" ? r.message : null;
+        setActErr(why ?? (kind === "retry" ? "Retry didn't go through." : "Refund couldn't be applied to this payment."));
         setBusy(""); return;
       }
       await onChanged();
@@ -256,7 +258,12 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
 
           {p.displayStatus !== "Completed" && (
             <Block title="Actions">
-              {canMoveFunds ? (
+              {canMoveFunds && !p.events.some((e) => e.state === "FX_LOCKED") ? (
+                /* Nothing arrived from the sender (the invoice expired unpaid, or the inbound was
+                   never confirmed): there is no money to pay out and none to refund. Offering the
+                   buttons here only produced a refusal the operator could not interpret. */
+                <p style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.45 }}>The sender never paid — nothing arrived, so there is nothing to pay out or refund. The customer can simply start a new payment.</p>
+              ) : canMoveFunds ? (
                 <>
                   <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, lineHeight: 1.45 }}>This payment hasn't been delivered. Retry the Mobile Money payout, or refund the sender.</p>
                   <div style={{ display: "flex", gap: 8 }}>

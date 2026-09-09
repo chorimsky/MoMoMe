@@ -17,7 +17,7 @@
 import crypto from "node:crypto";
 import { fetchT } from "./http.js";
 import type { Method, PayInstruction } from "../../../shared/types.js";
-import { QUOTE_TTL_SEC, METHOD_ASSET, btcToInvoiceMsat, msatToBtc, erc20PaymentUri } from "../../../shared/domain.js";
+import { QUOTE_TTL_SEC, METHOD_ASSET, btcToInvoiceMsat, msatToBtc, lightningQr } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
 import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
@@ -322,7 +322,7 @@ export const ibexAdapter: RailAdapter = {
         body: JSON.stringify({
           accountId: config.ibex.accountId,
           amountMsat: invoiceMsat,
-          memo: req.ref.slice(0, 50), // IBEX caps memo at 50 chars
+          memo: `MoMoMe ${req.ref}`.slice(0, 50), // shown in the payer's wallet; IBEX caps at 50 chars
           expiration: Math.min(QUOTE_TTL_SEC.LIGHTNING, 900), // IBEX max 15 min
           webhookUrl: req.callbackUrl,
           ...(config.ibex.webhookSecret ? { webhookSecret: config.ibex.webhookSecret } : {}),
@@ -331,10 +331,9 @@ export const ibexAdapter: RailAdapter = {
       if (!res.ok) throw new Error(`IBEX add-invoice failed: ${res.status} ${await res.text()}`);
       const data = (await res.json()) as { transactionId: string; bolt11: string; hash: string };
       return {
-        // QR uses the `lightning:` BOLT11 URI scheme so wallets (Wallet of
-        // Satoshi, …) recognise it as a Lightning invoice. A bare/uppercased
-        // bolt11 is rejected by some scanners as "not a valid address".
-        method: "LIGHTNING", code: data.bolt11, qr: `lightning:${data.bolt11}`, asset: "BTC",
+        // QR is the uppercase `LIGHTNING:` form (see lightningQr); the copyable code stays
+        // the plain lowercase bolt11, which every paste field accepts.
+        method: "LIGHTNING", code: data.bolt11, qr: lightningQr(data.bolt11), asset: "BTC",
         amount: invoiceBtc, amountLabel: formatAmount(invoiceBtc, "BTC"), expiresAt,
         // The settlement webhook reports the same transaction by id.
         providerRef: data.transactionId, provider: "ibex",
@@ -367,7 +366,11 @@ export const ibexAdapter: RailAdapter = {
       return {
         // `code` stays the bare address (copy-paste / exchange withdrawal fields); the QR
         // carries the EIP-681 URI so a scanning wallet gets the chain AND the amount.
-        method: req.method, code: addr, qr: erc20PaymentUri(asset as "USDT" | "USDC", addr, req.amount), asset,
+        // The QR is the BARE address. An EIP-681 `ethereum:…/transfer?…` URI is understood by
+        // MetaMask and a few wallets, but the exchange apps most payers withdraw stablecoins
+        // from (Binance, OKX, Bybit…) scan for a plain 0x address and reject anything else.
+        // Amount and network are printed beside the code, where every payer reads them.
+        method: req.method, code: addr, qr: addr, asset,
         amount: req.amount, amountLabel: formatAmount(req.amount, asset), expiresAt,
         providerRef: addr, provider: "ibex",
       };

@@ -4,7 +4,7 @@
    Inbound settlement is driven by the /confirm endpoint, not webhooks.
    ============================================================ */
 import type { Method, PayInstruction, InboundAsset } from "../../../shared/types.js";
-import { METHOD_ASSET, QUOTE_TTL_SEC, erc20PaymentUri } from "../../../shared/domain.js";
+import { METHOD_ASSET, QUOTE_TTL_SEC, lightningQr } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import type { InstructionRequest, RailAdapter, RailEvent } from "./types.js";
 
@@ -37,7 +37,7 @@ export const sandboxAdapter: RailAdapter = {
 
     if (method === "LIGHTNING") {
       code = `lnbc${Math.round(amount * 1e8)}n1${rand(B32, 90)}`;
-      qr = `lightning:${code}`; // `lightning:` URI scheme so wallets recognise it
+      qr = lightningQr(code); // same shape as the live adapter
       providerRef = rand("0123456789abcdef", 64); // mock payment hash
     } else if (method === "ONCHAIN") {
       const addr = `bc1q${rand(B32, 38)}`;
@@ -51,7 +51,7 @@ export const sandboxAdapter: RailAdapter = {
       code = addr;
       // Same EIP-681 URI the real rail emits — the simulator must never teach a payer a
       // different (chain-less, amount-less) QR from the one production hands out.
-      qr = erc20PaymentUri(asset as "USDT" | "USDC", addr, amount);
+      qr = addr; // bare address, as the live adapter: exchange-app scanners reject URIs
       providerRef = addr;
     }
 

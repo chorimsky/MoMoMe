@@ -80,13 +80,14 @@ async function main() {
     }
     return await get(`/api/payments/${id}`) as { state: string; events: Array<{ note?: string }> };
   };
-  const newOnchainPayment = async (phone: string) => {
-    let r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 25000, method: "ONCHAIN", country: "CM" }) });
+  const newPayment = async (method: string, phone: string) => {
+    let r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 25000, method, country: "CM" }) });
     const q = await r.json() as { id: string };
     r = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({
       quoteId: q.id, recipient: { phone, country: "CM", provider: "MTN", name: "Unified QR" } }) });
     return await r.json() as { id: string; ref: string; payInstruction: { code: string; qr: string; amount: number; providerRef: string; alt?: { method: string; code: string; providerRef: string; expiresAt: string; amount: number } } };
   };
+  const newOnchainPayment = (phone: string) => newPayment("ONCHAIN", phone);
 
   try {
     console.log("\nUnified BIP-21 QR — one code, on-chain or Lightning");
@@ -142,6 +143,15 @@ async function main() {
     await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: onchainWebhook("ibex-onchain-tx-10", pay2.payInstruction.amount) });
     const cur2 = await settleTo(pay2.id);
     ok("an on-chain payment paid on-chain still settles", cur2.state === "DELIVERED", cur2.state);
+    // 4) Wallet compatibility of the payloads themselves (see shared/domain lightningQr).
+    // Last, because the fake IBEX mints the same canned invoice for every request: a second
+    // Lightning payment created earlier would share the providerRef and steal the webhook.
+    ok("the Lightning leg inside the unified QR is uppercase (alphanumeric-mode QR)", pi.qr.includes("&lightning=LNBC") || pi.qr.includes("&lightning=LNTB"), pi.qr.slice(0, 80));
+    const ln = await newPayment("LIGHTNING", "677000789");
+    ok("a Lightning-only QR is LIGHTNING:<UPPERCASE BOLT11>", /^LIGHTNING:LN[A-Z0-9]+$/.test(ln.payInstruction.qr), ln.payInstruction.qr.slice(0, 40));
+    ok("…while the copyable code is the plain lowercase invoice", /^ln[a-z0-9]+$/.test(ln.payInstruction.code), ln.payInstruction.code.slice(0, 40));
+    const usdt = await newPayment("USDT", "677000789");
+    ok("a stablecoin QR is the bare 0x address, not an EIP-681 URI", /^0x[0-9a-fA-F]{40}$/.test(usdt.payInstruction.qr), usdt.payInstruction.qr.slice(0, 60));
   } finally { server.close(); }
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);

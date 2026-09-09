@@ -236,6 +236,19 @@ export function erc20PaymentUri(asset: "USDT" | "USDC", address: string, amount:
   return `ethereum:${contract}@${ETH_CHAIN_ID}/transfer?address=${address}&uint256=${baseUnits}`;
 }
 
+/** What to put in a QR for a BOLT11 invoice: the `lightning:` scheme, ALL UPPERCASE.
+ *
+ *  Uppercase is not cosmetic. A QR encodes an all-uppercase alphanumeric string in
+ *  "alphanumeric mode" at ~5.5 bits per character; anything with a lowercase letter falls
+ *  back to byte mode at 8 bits, so a 300-character invoice needs a denser, larger QR that
+ *  phone cameras misread more often. Bech32 (and so BOLT11) is defined case-insensitive and
+ *  wallets lowercase before decoding; the uppercase `LIGHTNING:` form is what BTCPay Server
+ *  and most point-of-sale software emit, so it is the most widely scanned shape there is.
+ *  The COPY text stays lowercase (see the callers) because some paste fields are stricter. */
+export function lightningQr(bolt11: string): string {
+  return `LIGHTNING:${bolt11.toUpperCase()}`;
+}
+
 /** BIP-21 payment URI. With `bolt11` it is a UNIFIED QR: a Lightning-capable wallet pays
  *  the invoice, and one that isn't simply ignores the unknown `lightning=` parameter and
  *  pays the on-chain address. That graceful degradation is why both fit in one code, and

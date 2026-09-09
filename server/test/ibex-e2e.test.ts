@@ -84,7 +84,7 @@ async function main() {
     ok("payment created", r.status === 200, String(r.status));
     ok("instruction minted by IBEX", pay.payInstruction?.provider === "ibex", pay.payInstruction?.provider);
     ok("bolt11 returned to the customer", pay.payInstruction?.code === BOLT11);
-    ok("QR uses the lightning: URI scheme", pay.payInstruction?.qr === `lightning:${BOLT11}`);
+    ok("QR is the uppercase LIGHTNING: URI", pay.payInstruction?.qr === `LIGHTNING:${BOLT11.toUpperCase()}`);
     ok("providerRef is the IBEX transaction id (webhook match key)", pay.payInstruction?.providerRef === TXID);
     ok("IBEX authenticated then created the invoice", calls.some((c) => c.includes("/oauth/token")) && calls.some((c) => c.includes("/invoice/add")));
 

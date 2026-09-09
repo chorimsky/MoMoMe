@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -562,6 +562,13 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       </div>
 
       {!demoMode && <CopyField label={ml(method, "codeLabel")} value={inst.code} />}
+      {!demoMode && (method === "USDT" || method === "USDC") && (
+        /* The QR is the bare address so exchange-app scanners accept it; wallets that
+           understand EIP-681 (MetaMask, Rabby…) can take chain, token and amount from here. */
+        <a href={erc20PaymentUri(method, inst.code, inst.amount)} className="btn btn-quiet" style={{ display: "inline-flex", marginTop: 8, fontSize: 13 }}>
+          {t("open_in_wallet")}
+        </a>
+      )}
       {!demoMode && (method === "USDT" || method === "USDC") && (
         <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
       )}

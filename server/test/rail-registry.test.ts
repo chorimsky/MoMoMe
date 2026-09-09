@@ -37,7 +37,7 @@ async function main() {
   // createInstruction happy path is fully offline on the sandbox rail.
   const inst = await reg.createInstruction({ method: "LIGHTNING", ref: "MMM-TEST-1", amount: 0.00025 });
   ok("createInstruction → sandbox provider", inst.provider === "sandbox");
-  ok("createInstruction → lightning qr", inst.qr.startsWith("lightning:") && inst.method === "LIGHTNING");
+  ok("createInstruction → lightning qr", inst.qr.startsWith("LIGHTNING:LN") && inst.method === "LIGHTNING");
   ok("createInstruction → has providerRef", typeof inst.providerRef === "string" && inst.providerRef.length > 0);
 
   console.log(`\n✅ ${passed} assertions passed`);

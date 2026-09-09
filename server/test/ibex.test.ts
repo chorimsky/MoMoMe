@@ -126,7 +126,7 @@ async function main() {
   try {
     const ln = await ibexAdapter.createInstruction({ method: "LIGHTNING", ref: "MMM-REF-1", amount: 0.00025, callbackUrl: "https://x/webhooks/ibex" });
     ok("createInstruction LIGHTNING → bolt11 code", ln.code === "lnbc1pxyz" && ln.method === "LIGHTNING");
-    ok("LN qr uses lightning: URI", ln.qr === "lightning:lnbc1pxyz");
+    ok("LN qr is the uppercase LIGHTNING: URI (QR alphanumeric mode)", ln.qr === "LIGHTNING:LNBC1PXYZ");
     ok("LN providerRef = transactionId, provider=ibex", ln.providerRef === "tx_ln_new" && ln.provider === "ibex");
     ok("LN expiresAt is a future ISO", !Number.isNaN(Date.parse(ln.expiresAt)) && Date.parse(ln.expiresAt) > Date.now());
 

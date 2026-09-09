@@ -106,11 +106,13 @@ async function main() {
     ok("instruction minted by IBEX (not the simulated rail)", pi?.provider === "ibex", pi?.provider);
     ok("customer is given an ERC-20 address", /^0x[0-9a-f]{40}$/.test(pi?.code ?? ""), pi?.code);
     ok("asset is USDC", pi?.asset === "USDC", pi?.asset);
-    // The QR is an EIP-681 URI (chain + token + amount), NOT the bare address — a bare
-    // 0x could be sent on the wrong chain and carried no amount. The address itself stays
-    // in `code` for copy-paste, and remains the settlement match key.
-    ok("QR is an ethereum: payment URI carrying chain + amount",
-      pi?.qr?.startsWith("ethereum:") && pi.qr.includes("@1/transfer") && pi.qr.includes(`address=${pi.code}`), pi?.qr?.slice(0, 40));
+    // The QR is the BARE address. It used to be an EIP-681 URI (chain + token + amount),
+    // which MetaMask honours but the exchange apps most payers withdraw from (Binance, OKX,
+    // Bybit…) refuse outright — they scan for a plain 0x address. Chain and amount are
+    // printed beside the code, and the web Pay step offers the EIP-681 URI as an
+    // "Open in wallet" link for wallets that understand it. `code` stays the match key.
+    ok("QR is the bare 0x address every scanner reads",
+      /^0x[0-9a-fA-F]{40}$/.test(pi?.qr ?? "") && pi?.qr === pi?.code, pi?.qr?.slice(0, 44));
     ok("providerRef is the address — the webhook match key", pi?.providerRef === pi?.code);
     ok("minted on the USDC account, not the USDT one",
       calls.some((c) => c.includes("/accounts/usdc-account/crypto/receive-infos")) &&

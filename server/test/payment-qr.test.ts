@@ -42,7 +42,9 @@ async function main() {
     sandboxAdapter.createInstruction({ method, ref: "MMM-QR-1", amount, callbackUrl: "https://example.test/webhooks/sandbox" });
 
   const ln = await mk("LIGHTNING", 0.0001);
-  ok("Lightning QR uses the lightning: scheme", ln.qr.startsWith("lightning:"), ln.qr.slice(0, 22));
+  // Uppercase so the QR encodes in alphanumeric mode (smaller, more scannable); the form
+  // BTCPay and most POS software emit. See shared/domain lightningQr.
+  ok("Lightning QR is the uppercase LIGHTNING: URI", /^LIGHTNING:LNBC[A-Z0-9]+$/.test(ln.qr), ln.qr.slice(0, 22));
   ok("Lightning code is the bare bolt11 (copy-paste)", ln.code.startsWith("lnbc") && !ln.code.includes(":"));
 
   const btc = await mk("ONCHAIN", 0.0025);
@@ -51,9 +53,11 @@ async function main() {
 
   for (const asset of ["USDT", "USDC"] as const) {
     const st = await mk(asset, 12.5);
-    ok(`${asset} QR is an ethereum: URI, NOT a bare address`, st.qr.startsWith("ethereum:"), st.qr.slice(0, 30));
-    ok(`${asset} QR names its own contract`, st.qr.includes(ERC20[asset].contract));
-    ok(`${asset} QR carries the amount`, st.qr.includes("uint256=12500000"), st.qr.split("uint256=")[1]);
+    // The QR is the bare address: exchange-app scanners (Binance, OKX, Bybit…) reject an
+    // EIP-681 URI. The URI still exists — erc20PaymentUri, tested above — as the web Pay
+    // step's "Open in wallet" link for wallets that honour chain, token and amount.
+    ok(`${asset} QR is the bare 0x address every scanner reads`, /^0x[0-9a-f]{40}$/.test(st.qr), st.qr.slice(0, 30));
+    ok(`${asset} QR and code are the same address`, st.qr === st.code);
     ok(`${asset} code stays the bare 0x address for copy-paste`, /^0x[0-9a-f]{40}$/.test(st.code), st.code);
     ok(`${asset} settlement still matches on the ADDRESS, not the URI`, st.providerRef === st.code);
   }
@@ -61,7 +65,7 @@ async function main() {
   // The simulator must not teach a different QR shape from the real rail — a payer who
   // learns the demo flow should recognise production exactly.
   const simUsdc = await mk("USDC", 1);
-  ok("the simulator emits the same URI shape as the live rail", simUsdc.qr.startsWith(`ethereum:${ERC20.USDC.contract}@${ETH_CHAIN_ID}/transfer`));
+  ok("the simulator emits the same QR shape as the live rail (bare address)", /^0x[0-9a-f]{40}$/.test(simUsdc.qr) && simUsdc.qr === simUsdc.code, simUsdc.qr.slice(0, 30));
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);
   if (fail) process.exit(1);

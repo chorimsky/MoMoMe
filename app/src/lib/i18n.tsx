@@ -210,6 +210,7 @@ export const STRINGS: Dict = {
   net_lightning: ["Lightning Network", "Réseau Lightning"],
   net_onchain: ["Bitcoin network", "Réseau Bitcoin"],
   net_erc20: ["Ethereum · ERC-20 only", "Ethereum · ERC-20 uniquement"],
+  open_in_wallet: ["Open in wallet", "Ouvrir dans le portefeuille"],
   erc20_only: ["Ethereum (ERC-20) only — sending on any other network will lose the funds.", "Ethereum (ERC-20) uniquement — un envoi sur un autre réseau entraîne la perte des fonds."],
   cr_title: ["Is this the right number?", "Est-ce le bon numéro ?"],
   cr_meant: ["You may have meant", "Vouliez-vous dire"],

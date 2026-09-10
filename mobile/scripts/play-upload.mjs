@@ -19,6 +19,7 @@
      node scripts/play-upload.mjs --version-code 4 --track production   # bundle already uploaded: only move the track
      node scripts/play-upload.mjs --version-code 4 --track internal --notes-en "..." --notes-fr "..."   # (re)set release notes
      node scripts/play-upload.mjs --auth-only          # just obtain/refresh the token
+     node scripts/play-upload.mjs --status             # what each track currently holds
    ============================================================ */
 import { createServer } from "node:http";
 import { readFile, writeFile, stat } from "node:fs/promises";
@@ -26,6 +27,11 @@ import { createReadStream } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { setDefaultResultOrder } from "node:dns";
+
+// This Mac resolves Google hosts to IPv6 addresses that then time out ("fetch failed",
+// UND_ERR_SOCKET). curl is fine; Node needs to be told to try IPv4 first.
+setDefaultResultOrder("ipv4first");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CLIENT_FILE = resolve(here, "../google-play-oauth-client.json");
@@ -38,6 +44,7 @@ const AAB = opt("--aab");
 const TRACK = opt("--track", "internal");
 const PACKAGE = opt("--package", "momome.app");
 const AUTH_ONLY = args.includes("--auth-only");
+const STATUS = args.includes("--status");    // print every track's releases and exit
 const VERSION_CODE = opt("--version-code"); // set the track to a bundle Play already holds
 const NOTES_EN = opt("--notes-en");        // release notes shown to testers / on the store listing
 const NOTES_FR = opt("--notes-fr");
@@ -111,6 +118,13 @@ async function main() {
   const client = await loadClient();
   const token = await accessToken(client);
   if (AUTH_ONLY) { console.log("Authorised."); return; }
+  if (STATUS) {
+    const e = await api(token, "edits", { method: "POST", body: "{}" });
+    const tracks = await api(token, `edits/${e.id}/tracks`);
+    for (const tr of tracks.tracks ?? []) for (const r of tr.releases ?? []) console.log(`${tr.track}: v${(r.versionCodes ?? []).join(",")} ${r.status}${r.name ? ` (${r.name})` : ""}`);
+    await api(token, `edits/${e.id}`, { method: "DELETE" }).catch(() => {});
+    return;
+  }
   if (!AAB && !VERSION_CODE) throw new Error("--aab <file> or --version-code <n> is required.");
 
   const edit = await api(token, "edits", { method: "POST", body: "{}" });

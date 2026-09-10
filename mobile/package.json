@@ -47,7 +47,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "ota": "NODE_OPTIONS=--dns-result-order=ipv4first eas update --branch production --non-interactive"
+    "ota": "EAS_SKIP_AUTO_FINGERPRINT=1 NODE_OPTIONS=--dns-result-order=ipv4first CI=1 sh -c 'expo export -p android -p ios --dump-assetmap && eas update --skip-bundler --branch production --non-interactive \"$@\"' --"
   },
   "private": true
 }

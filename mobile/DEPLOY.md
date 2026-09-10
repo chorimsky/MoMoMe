@@ -130,10 +130,15 @@ eas submit --profile production --platform android
 JS-only changes ship without a new store review:
 
 ```bash
-eas update --branch production --message "copy tweak"
+pnpm ota --message "copy tweak"
 ```
 
-(The `channel`s in `eas.json` already map builds to update branches.)
+`pnpm ota` is the fast path (~2 min instead of ~5): it exports only the Android and iOS
+bundles (no web build, no source maps), skips the fingerprint step (the runtime version
+policy is `appVersion`, so the fingerprint is never read), and resolves IPv4 first because
+Node on this Mac times out on the IPv6 addresses of Expo/Google hosts (the cause of the
+"asset processing timed out" and 30-minute hangs). The `channel`s in `eas.json` already map
+builds to update branches.
 
 ---
 

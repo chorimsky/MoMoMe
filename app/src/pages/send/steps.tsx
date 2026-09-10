@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS, satsLabel } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, lightningAddress, lnAddressNumber, localDigits, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS, satsLabel } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -213,7 +213,13 @@ export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft;
               </select>
               <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-3)", fontSize: 11 }}>▾</span>
             </div>
-            <input ref={phoneRef} value={s.phone} readOnly={lockRecipient} onChange={(e) => set({ phone: e.target.value })} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
+            <input ref={phoneRef} value={s.phone} readOnly={lockRecipient} onChange={(e) => {
+                // A pasted Lightning Address (what the Receive screens hand out) is the same
+                // identity as the number: reduce it to the local digits and carry on.
+                const v = e.target.value;
+                const ln = v.includes("@") ? lnAddressNumber(v) : null;
+                set({ phone: ln ? localDigits(ln, s.country) : v });
+              }} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")}
               type="tel" inputMode="tel" autoComplete="tel" name="mm-number"
               style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: lockRecipient ? "var(--surface-2)" : "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 150 }} />
             {!lockRecipient && <button type="button" onClick={pickContact} aria-label={t("from_contacts")} title={t("from_contacts")}
@@ -552,7 +558,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
           <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{recName}</div>
           <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
-          {method === "LIGHTNING" && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {recDigits}@{LN_ADDRESS_DOMAIN}</div>}
+          {method === "LIGHTNING" && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {lightningAddress(payment.recipient.phone, payment.recipient.country)}</div>}
           <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("reference")} · {payment.ref}</div>
         </div>
       </div>

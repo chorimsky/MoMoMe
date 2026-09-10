@@ -8,7 +8,7 @@
    address is the Mobile Money number.
    ============================================================ */
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, MIN_XAF, MAX_XAF, detectProvider, localDigits, checkPhone } from "../../../shared/domain.js";
+import { COUNTRIES, MIN_XAF, MAX_XAF, detectProvider, localDigits, checkPhone, lightningAddress } from "../../../shared/domain.js";
 import { getSettings } from "./settings.js";
 import { rateFor } from "./fx.js";
 
@@ -86,6 +86,8 @@ export function lnurlMetadata(opts: { national: string; provider: ProviderId; na
   return JSON.stringify(meta);
 }
 
-export function lnAddress(national: string): string {
-  return `${national}@${LN_ADDRESS_DOMAIN}`;
+/** The canonical address for a resolved recipient — the same builder the Receive screens
+ *  and the identity layer use, so metadata, sender ids and what the customer shows agree. */
+export function lnAddress(r: Pick<LnRecipient, "national" | "country">): string {
+  return lightningAddress(r.national, r.country);
 }

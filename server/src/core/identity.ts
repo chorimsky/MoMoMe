@@ -16,7 +16,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey, isRealName, detectProvider } from "../../../shared/domain.js";
+import { COUNTRIES, lightningAddress, localDigits, phoneKey, isRealName, detectProvider } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
 import { reviewAccess, isReviewPhone } from "./review.js";
 
@@ -90,7 +90,7 @@ export function ensureIdentity(rec: Recipient, firstPaymentRef?: string): Identi
     country: rec.country,
     walletId: `LNW${pad(seq)}`,
     ledgerId: `LED${pad(seq)}`,
-    lightningAddress: `${cc}${phoneDigits}@${LN_ADDRESS_DOMAIN}`,
+    lightningAddress: lightningAddress(rec.phone, rec.country),
     status: "Active",
     claimed: false,
     receivedXaf: 0,

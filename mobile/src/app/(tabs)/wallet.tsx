@@ -9,14 +9,11 @@ import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { detectProvider, localDigits, LN_ADDRESS_DOMAIN, MAX_XAF, receiveLink } from '@shared/domain';
+import { detectProvider, localDigits, lightningAddress, MAX_XAF, receiveLink } from '@shared/domain';
 import { WEB_ORIGIN } from '@/lib/config';
 
-// The Lightning Address domain is a PROTOCOL fact — the host an external wallet resolves
-// /.well-known/lnurlp/<number> against, and the same constant the server builds its LNURL
-// metadata from. Deriving it from WEB_ORIGIN (a UI/deep-link setting) meant a build pointed
-// at another origin would show the user an address that disagrees with what the server serves.
-const LN_DOMAIN = LN_ADDRESS_DOMAIN;
+// The address comes from the shared builder — the same one the server serves and the
+// identity layer stores — so what this screen shows is what a wallet can pay.
 
 export default function ReceiveScreen() {
   const t = useTheme();
@@ -54,7 +51,7 @@ export default function ReceiveScreen() {
     setEditing(false);
   };
 
-  const address = number ? `${number}@${LN_DOMAIN}` : '';
+  const address = number ? lightningAddress(number, 'CM') : '';
   const [amountDraft, setAmountDraft] = useState('');
   const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, '')) || 0, MAX_XAF);
   // The link serves everyone: app, browser, or a phone camera with nothing installed.

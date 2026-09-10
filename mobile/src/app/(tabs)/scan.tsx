@@ -8,7 +8,7 @@ import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/c
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { parseReceiveLink } from '@shared/domain';
+import { lnAddressNumber, parseReceiveLink } from '@shared/domain';
 
 /** Resolve a scanned QR / typed value to an action — matching the web app's
  *  `payPathFromScan`: /pay & /m links, referral links, bare MOM-CC-###### codes,
@@ -23,6 +23,10 @@ function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknow
   const ref = s.match(/[?&]ref=([A-Za-z0-9_-]+)/);
   if (ref) return { kind: 'ref', value: ref[1] };
   if (/^MOM-[A-Za-z]{2}-\d{4,8}$/i.test(s)) return { kind: 'pay', value: s.toUpperCase() };
+  // A MoMo›Me Lightning Address QR (`lightning:<number>@momome.xyz`) — the identity the
+  // Receive tab shows. Same parser as the web scanner, so both apps read it back.
+  const ln = lnAddressNumber(s);
+  if (ln) return { kind: 'send', value: ln };
   const digits = s.replace(/[^\d]/g, '');
   if (/^\+?\d{8,15}$/.test(s) || (digits.length >= 8 && digits.length <= 12)) {
     return { kind: 'send', value: digits };

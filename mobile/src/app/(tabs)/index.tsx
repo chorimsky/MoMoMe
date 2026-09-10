@@ -31,7 +31,7 @@ import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS, satsLabel, erc20PaymentUri } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS, satsLabel, erc20PaymentUri, lightningAddress, lnAddressNumber, localDigits } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -546,7 +546,11 @@ export default function SendScreen() {
               <TextInput
                 value={phone}
                 editable={!merchantCode}
-                onChangeText={(x) => setPhone(x.replace(/[^\d+]/g, ''))}
+                onChangeText={(x) => {
+                  // A pasted Lightning Address is the same identity as the number.
+                  const ln = x.includes('@') ? lnAddressNumber(x) : null;
+                  setPhone(ln ? localDigits(ln, 'CM') : x.replace(/[^\d+]/g, ''));
+                }}
                 placeholder="6 7X XX XX XX"
                 placeholderTextColor={t.muted}
                 keyboardType="phone-pad"
@@ -1082,6 +1086,12 @@ function PayStep({
             {providerShort ? `${providerShort} · ` : ''}{payment.recipient.phone}
           </Body>
         </View>
+        {pi.method === 'LIGHTNING' ? (
+          <View style={styles.kv}>
+            <Body muted>{tr('lightning_address')}</Body>
+            <Mono style={{ fontSize: 12 }}>{lightningAddress(payment.recipient.phone, payment.recipient.country)}</Mono>
+          </View>
+        ) : null}
         <View style={styles.kv}>
           <Body muted>{tr('reference')}</Body>
           <Mono style={{ fontSize: 12 }}>{payment.ref}</Mono>

@@ -260,7 +260,7 @@ async function main() {
     const lnNoAmt = await J("/lnurl/pay/677000789");
     ok("lnurl pay requires an amount → ERROR", lnNoAmt.body.status === "ERROR");
     // The LNURL invoice creates a real AWAITING_INBOUND payment tagged source=lnurl.
-    const lnPays = await J("/api/payments", { headers: { "x-mm-sender": `lnurl:677000789@momome.xyz` } });
+    const lnPays = await J("/api/payments", { headers: { "x-mm-sender": `lnurl:237677000789@momome.xyz` } });
     ok("lnurl payment is created + tagged source=lnurl", Array.isArray(lnPays.body) && lnPays.body.some((p: { source?: string; recipient: { phone: string } }) => p.source === "lnurl" && p.recipient.phone === "677000789"));
 
     // --- Security: admin auth brute-force throttling (real HTTP, end of phase 1
@@ -566,7 +566,7 @@ async function main() {
     // The Lightning identity is the PHONE, never the merchant code (a lookup label).
     ok("learned merchant's lightning identity is the phone, not the code",
       learned.lightningAddresses.length === 1
-      && learned.lightningAddresses[0] === "699000111@momome.xyz"
+      && learned.lightningAddresses[0] === "237699000111@momome.xyz"
       && !learned.lightningAddresses.some((a) => a.startsWith("momo-bx@")));
     void before;
 

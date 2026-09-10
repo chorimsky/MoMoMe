@@ -13,16 +13,16 @@
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LN_ADDRESS_DOMAIN, MAX_XAF, checkPhone, receiveLink } from "@shared/domain.js";
+import { MAX_XAF, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
 
-/** The Lightning Address for a national Mobile Money number. Built from the SAME constant
- *  the server resolves against, so the address shown is the address that works. */
+/** The Lightning Address for a Mobile Money number — the shared builder, so the address
+ *  shown here is byte-for-byte the one the identity layer and the LNURL server use. */
 export function receiveAddress(nationalDigits: string): string {
-  return `${nationalDigits}@${LN_ADDRESS_DOMAIN}`;
+  return lightningAddress(nationalDigits, "CM");
 }
 
 export function Receive() {

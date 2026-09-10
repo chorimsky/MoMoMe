@@ -66,7 +66,7 @@ async function main() {
     ok("callback returns a bolt11 to pay", typeof cb.pr === "string" && cb.pr.startsWith("lnbc"), cb.reason ?? String(cb.pr).slice(0, 18));
 
     // Find the payment the callback opened (source=lnurl, senderId scoped to the address).
-    const SND = { ...DEV, "x-mm-sender": `lnurl:${PHONE}@momome.xyz` };
+    const SND = { ...DEV, "x-mm-sender": `lnurl:237${PHONE}@momome.xyz` };
     const all = await getJson("/api/payments", SND) as Array<{ id: string; ref: string; state: string; source?: string; recipient: { phone: string } }>;
     const pay = all.find((p) => p.source === "lnurl" && p.recipient.phone === PHONE);
     ok("a delivery to that Mobile Money number was opened", !!pay, pay?.ref ?? "none");

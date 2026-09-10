@@ -175,6 +175,17 @@ export const EUR_XAF_PEG = 655.957;
  *  truth for merchant/customer identities and the LNURL-pay server. */
 export const LN_ADDRESS_DOMAIN = "momome.xyz";
 
+/** THE Lightning Address of a Mobile Money number — the one identity every surface shows and
+ *  the server serves. User part = full international digits (dial code + national number),
+ *  which is unique across every country we cover; a bare national number is not (an 8-digit
+ *  Gabon number and a Cameroon number can collide). Receive screens, the LNURL metadata,
+ *  customer identities and merchant records all call this, so a customer sees the same
+ *  address on the Receive tab, on "Your number", and in what a payer's wallet displays. */
+export function lightningAddress(phone: string, country: CountryCode): string {
+  const dial = COUNTRIES[country].dial.replace(/\D/g, "");
+  return `${dial}${localDigits(phone, country)}@${LN_ADDRESS_DOMAIN}`;
+}
+
 /** The Mobile Money number inside a MoMo›Me Lightning Address, or null.
  *
  *  Accepts the `lightning:` URI scheme (how the Receive screens encode the QR), a bare

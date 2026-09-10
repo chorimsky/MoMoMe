@@ -42,7 +42,7 @@ lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000)
   if (!r) return res.status(200).json(lnErr("Not a valid Mobile Money number."));
 
   const name = await resolveRecipient(r.national, r.country).then((x) => x.name).catch(() => undefined);
-  const address = lnAddress(r.national);
+  const address = lnAddress(r);
   const { min, max } = sendableRangeMsat();
   res.json({
     tag: "payRequest",
@@ -120,7 +120,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
       name: name && name.trim() ? name : r.national,
       nameSource: name && name.trim() ? (resolved?.status ?? "provider") : "unknown",
     },
-    senderId: `lnurl:${lnAddress(r.national)}`,
+    senderId: `lnurl:${lnAddress(r)}`,
     xaf, feeXaf, totalXaf, usd: quote.usd, spreadBps: rq.spreadBps,
     payInstruction: instruction,
     source: "lnurl",

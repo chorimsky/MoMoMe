@@ -129,6 +129,8 @@ export const STRINGS = {
   lock_passed_title: ['Price lock passed — this address still works', 'Le taux bloqué a expiré — cette adresse reste valable'],
   lock_passed_sub: ["If you already sent, it will be credited at the rate when it arrives. If you haven't, refresh for a current price.", "Si vous avez déjà envoyé, ce sera crédité au taux du moment de l'arrivée. Sinon, actualisez pour un prix à jour."],
   refresh_price: ['Refresh price', 'Actualiser le prix'],
+  cashapp_title: ['Paying from the USA with Cash App?', 'Vous payez depuis les États-Unis avec Cash App ?'],
+  cashapp_steps: ['Tap $ › the QR scanner › scan this code or Paste Address › choose Cash or Bitcoin › Confirm and pay. Cash App converts your dollars for you.', "Touchez $ › le scanner QR › scannez ce code ou Coller l'adresse › choisissez Cash ou Bitcoin › Confirmer et payer. Cash App convertit vos dollars pour vous."],
   open_in_wallet: ['Open in wallet', 'Ouvrir dans le portefeuille'],
   no_wallet_title: ['No wallet found', 'Aucun portefeuille trouvé'],
   no_wallet_sub: ['The code was copied instead. Open your wallet, choose Send or Pay, and paste it.', "Le code a été copié à la place. Ouvrez votre portefeuille, choisissez Envoyer ou Payer, et collez-le."],

@@ -589,6 +589,14 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
           {t("open_in_wallet")}
         </a>
       )}
+      {!demoMode && method === "LIGHTNING" && !expired && (
+        /* The most common sender abroad is on Cash App, which pays Lightning invoices from a
+           dollar balance. Six words of guidance here saved a real first-time sender a search. */
+        <details style={{ marginTop: 10, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 650, color: "var(--ink)" }}>{t("cashapp_title")}</summary>
+          <p style={{ margin: "6px 0 0" }}>{t("cashapp_steps")}</p>
+        </details>
+      )}
       {!demoMode && (method === "USDT" || method === "USDC") && (
         /* The QR is the bare address so exchange-app scanners accept it; wallets that
            understand EIP-681 (MetaMask, Rabby…) can take chain, token and amount from here. */

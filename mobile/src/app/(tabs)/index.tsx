@@ -1021,6 +1021,11 @@ function PayStep({
               Alert.alert(tr('no_wallet_title'), tr('no_wallet_sub'));
             }}
           />
+          {pi.method === 'LIGHTNING' ? (
+            <Body muted style={{ fontSize: 12.5 }}>
+              <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('cashapp_title')} </Text>{tr('cashapp_steps')}
+            </Body>
+          ) : null}
           <View style={{ height: Spacing.one }} />
           <Label>{ml(pi.method, 'codeLabel')}</Label>
           <Pressable

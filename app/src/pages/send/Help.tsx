@@ -9,6 +9,9 @@ const FAQS = [
   { q: "faq2_q", a: "faq2_a" },
   { q: "faq3_q", a: "faq3_a" },
   { q: "faq4_q", a: "faq4_a" },
+  // From a real 10 Sept 2026 payment: US sender, Cash App, 1 000 XAF delivered in seconds.
+  { q: "faq5_q", a: "faq5_a" },
+  { q: "faq6_q", a: "faq6_a" },
 ];
 
 export function Help({ support }: { support?: { email: string; phone: string } }) {

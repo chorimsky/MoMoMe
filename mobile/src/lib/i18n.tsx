@@ -80,9 +80,9 @@ export const STRINGS = {
 
   // method blurbs
   blurb_lightning: ['Arrives in seconds · lowest fee', 'Arrive en quelques secondes · frais réduits'],
-  blurb_usdt: ['Stable value · a few minutes', 'Valeur stable · arrive en quelques secondes'],
+  blurb_usdt: ['Stable value · a few minutes', 'Valeur stable · quelques minutes'],
   blurb_onchain: ['Best for large amounts · 10–60 min', 'Idéal pour les gros montants · 10–60 min'],
-  blurb_usdc: ['Stable value · a few minutes', 'Valeur stable · arrive en quelques secondes'],
+  blurb_usdc: ['Stable value · a few minutes', 'Valeur stable · quelques minutes'],
   // The network is the mistake that cannot be undone with a stablecoin: both are 0x
   // addresses, and sending on TRON or BSC instead of Ethereum loses the money. It belongs
   // on the row where the choice is made, not only on the pay screen after it.

@@ -14,6 +14,7 @@ import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest, notifyTestReport } from "../core/notifications.js";
+import { isReviewPhone } from "../core/review.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
 import { fileTestReport, listTestReports, normaliseResults } from "../core/testReports.js";
 import { TEST_CASES } from "../../../shared/testing.js";
@@ -663,6 +664,7 @@ api.post("/admin/merchants/merge", async (req, res) => {
 /* ---------- consumer account claim (Phase 2) ---------- */
 api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6, 60_000), async (req, res) => {
   const r = requestClaim(String((req.body ?? {}).phone ?? ""));
+  if (r.review) return res.json({ sent: true }); // store reviewer: fixed code, no SMS
   if (!r.found) {
     return res.status(404).json({ error: "no_account", message: "No account for this number yet. You'll have one the moment you receive a Mobile Money payment." });
   }
@@ -692,6 +694,10 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // Validate the recipient before touching the quote (prevents unhandled crashes
   // and arbitrary payout targets).
   const country = recipient && COUNTRIES[recipient.country as keyof typeof COUNTRIES];
+  // The store-review number can be "owned" and verified by a reviewer; it must never be paid.
+  if (recipient && typeof recipient === "object" && typeof recipient.phone === "string" && isReviewPhone(recipient.phone)) {
+    return res.status(400).json({ error: "reserved_number", message: "This number is reserved for app review and cannot receive payments." });
+  }
   if (
     !recipient || typeof recipient !== "object" ||
     typeof recipient.phone !== "string" || recipient.phone.replace(/\D/g, "").length < 8 ||
@@ -1239,9 +1245,18 @@ function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number;
 
 api.post("/me/anchor/request", rateLimitDurableMiddleware("anchor_req", 6, 60_000), async (req, res) => {
   if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
-  const r = requestAnchor(String((req.body ?? {}).phone ?? ""));
+  const phoneIn = String((req.body ?? {}).phone ?? "");
+  const r = requestAnchor(phoneIn);
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Enter a valid Mobile Money number." });
-  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
+  if (r.review) return res.json({ sent: true }); // store reviewer: fixed code, no SMS
+  // This answered `sent: true` without sending anything — the same defect the merchant
+  // route had: requestAnchor only GENERATES the code. In production the dev code is
+  // withheld, so "own your number" waited for an SMS that never existed.
+  const sent = await sendOtpSms(`${COUNTRIES.CM.dial}${phoneIn.replace(/\D/g, "").slice(-9)}`, r.code!, "confirm your number");
+  if (!sent && liveMoney()) {
+    return res.status(503).json({ error: "sms_unavailable", message: "We can't send confirmation codes right now. Please try again later." });
+  }
+  res.json({ sent, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
 });
 
 api.post("/me/anchor/verify", rateLimitDurableMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
@@ -1356,6 +1371,7 @@ api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6,
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
   const r = requestAnchor(m.settlementPhone);
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
+  if (r.review) return res.json({ sent: true }); // store reviewer: fixed code, no SMS
   // This used to answer `sent: true` having sent nothing — requestAnchor only GENERATES a
   // code. In production the dev code is withheld, so a merchant waited for an SMS that did
   // not exist, never reached verifiedPhone, and could never create a pay link. Send it, and

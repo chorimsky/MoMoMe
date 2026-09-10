@@ -13,6 +13,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import { register, touch } from "./persist.js";
+import { reviewAccess, isReviewPhone } from "./review.js";
 
 /** VMK wrapped by a recovery-code-derived key. Opaque to the server. */
 export interface RecoveryBlob {
@@ -43,9 +44,17 @@ const hashCode = (code: string) => crypto.createHash("sha256").update(code).dige
 export const accountIdForPhone = (phone: string) => `acct:${digitsOf(phone)}`;
 
 /** A phone is anchorable if it looks like a real number (≥ 8 national digits). */
-export function requestAnchor(phone: string): { ok: boolean; code?: string } {
+export function requestAnchor(phone: string): { ok: boolean; code?: string; review?: boolean } {
   const d = digitsOf(phone);
   if (d.length < 8) return { ok: false };
+  // Store reviewers cannot receive a Cameroon SMS: the designated review number gets its
+  // fixed code (see core/review.ts). The caller must not send an SMS for it.
+  const review = reviewAccess();
+  if (review && isReviewPhone(d)) {
+    otps.set(d, { hash: hashCode(review.code), expiresAt: Date.now() + 24 * 3600_000, attempts: 0 });
+    touch("account");
+    return { ok: true, code: review.code, review: true };
+  }
   const code = String(crypto.randomInt(100000, 1000000)); // 6-digit
   otps.set(d, { hash: hashCode(code), expiresAt: Date.now() + 5 * 60_000, attempts: 0 });
   touch("account");

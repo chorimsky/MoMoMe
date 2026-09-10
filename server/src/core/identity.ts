@@ -16,8 +16,9 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type { Identity, IdentityStats, Recipient } from "../../../shared/types.js";
-import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey, isRealName } from "../../../shared/domain.js";
+import { COUNTRIES, LN_ADDRESS_DOMAIN, localDigits, phoneKey, isRealName, detectProvider } from "../../../shared/domain.js";
 import { register, touch } from "./persist.js";
+import { reviewAccess, isReviewPhone } from "./review.js";
 
 interface Otp { hash: string; expiresAt: number; attempts: number }
 
@@ -177,7 +178,17 @@ export function identityStats(): IdentityStats {
    A number can only be claimed once it has received a payment (it has an
    identity). The OTP would be sent by SMS in production; in sandbox the
    code is returned so the demo can complete. (otps map declared up top.) */
-export function requestClaim(phone: string, country: Recipient["country"] = "CM"): { found: boolean; alreadyClaimed?: boolean; code?: string } {
+export function requestClaim(phone: string, country: Recipient["country"] = "CM"): { found: boolean; alreadyClaimed?: boolean; code?: string; review?: boolean } {
+  // The store-review number (core/review.ts): it has never been paid, so it has no
+  // identity to claim — give it one, and its fixed code. Claiming may be repeated.
+  const review = reviewAccess();
+  if (review && isReviewPhone(phone)) {
+    const id = ensureIdentity({ phone: review.phone, country, provider: detectProvider(review.phone, country) ?? "MTN", name: "Store review", nameSource: "manual" });
+    id.claimed = false;
+    otps.set(id.phone, { hash: hashCode(review.code), expiresAt: Date.now() + 24 * 3600_000, attempts: 0 });
+    touch("identity");
+    return { found: true, code: review.code, review: true };
+  }
   const id = getIdentityByDigits(phone, country);
   if (!id) return { found: false };
   if (id.claimed) return { found: true, alreadyClaimed: true };

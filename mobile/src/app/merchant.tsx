@@ -273,22 +273,24 @@ function Dashboard({
 
   return (
     <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
-      <Card padded style={{ gap: Spacing.two }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.three }}>
-          <IconCircle name="storefront" color={t.accent} bg={t.accentWash} />
-          <View style={{ flex: 1 }}>
-            <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 17 }}>{merchant.businessName}</Body>
-            <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
+      {/* Name, one status line, one action. The settlement number lives under "Edit details"
+          and the code is repeated on the poster, so neither needs its own row here. */}
+      <View style={{ gap: 6 }}>
+        <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 22 }}>{merchant.businessName}</Body>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two, flexWrap: 'wrap' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: merchant.verifiedPhone ? t.recv : t.warn }} />
+            <Body style={{ fontSize: 12.5, fontFamily: Fonts.bodyBold, color: merchant.verifiedPhone ? t.recv : t.warn }}>
+              {merchant.verifiedPhone ? tr('m_verified') : tr('m_unverified')}
+            </Body>
           </View>
-          {merchant.verifiedPhone ? <Pill label={tr('m_verified')} tone="recv" icon="shield-checkmark" /> : <Pill label={tr('m_unverified')} tone="bad" />}
-          <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('m_edit_details')}>
-            <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('m_edit_details')}</Body>
+          <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
+          <Body muted style={{ fontSize: 12.5 }}>{merchant.category}</Body>
+          <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('m_edit_details')} style={{ marginLeft: 'auto' }}>
+            <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 12.5 }}>{tr('m_edit_details')}</Body>
           </Pressable>
         </View>
-        <Body muted style={{ fontSize: 13 }}>
-          {merchant.category} · {tr('settles_to')} {PROVIDERS[merchant.provider]?.short} {merchant.settlementPhone}
-        </Body>
-      </Card>
+      </View>
 
       {!merchant.verifiedPhone ? (
         <Card padded style={{ borderColor: t.warn }}>

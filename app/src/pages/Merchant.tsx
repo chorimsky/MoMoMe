@@ -229,31 +229,28 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ fontSize: "clamp(22px,4vw,28px)", letterSpacing: "-0.02em" }}>{merchant.businessName}</h1>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-            <span className="num" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)", background: "var(--surface-2)", border: "1px solid var(--line)", padding: "3px 9px", borderRadius: 999 }}>{merchant.code}</span>
-            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>{catLabel(merchant.category, lang)} · {t("mrc_d_settles_to")} {COUNTRIES[merchant.country].dial} {merchant.settlementPhone}</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {/* Name, one line of status, one action. The settlement number and the "type this
+          code" hint moved into the places they are used (Edit details, the poster). */}
+      <div>
+        <h1 style={{ fontSize: "clamp(22px,4vw,28px)", letterSpacing: "-0.02em", margin: 0 }}>{merchant.businessName}</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap", fontSize: 12.5 }}>
           {merchant.verifiedPhone ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--recv)", background: "var(--recv-wash)", padding: "5px 12px", borderRadius: 999 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_verified")}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700, color: "var(--recv)" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_verified_short")}
             </span>
           ) : (
-            <button type="button" onClick={onVerify} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: "var(--warn-ink, #7a4d00)", background: "var(--send-wash)", border: "1px solid var(--warn)", padding: "5px 12px", borderRadius: 999, cursor: "pointer", font: "inherit" }}>
+            <button type="button" onClick={onVerify} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700, color: "var(--warn-ink, #7a4d00)", background: "transparent", border: "none", padding: 0, cursor: "pointer", font: "inherit", fontSize: 12.5 }}>
               {t("mrc_d_unverified")} · {t("mrc_d_verify_cta")}
             </button>
           )}
-          <button type="button" className="btn btn-quiet btn-sm" onClick={onEdit}>{t("mrc_d_edit")}</button>
+          <span className="num" style={{ color: "var(--ink-3)" }}>{merchant.code}</span>
+          <span style={{ color: "var(--ink-3)" }}>{catLabel(merchant.category, lang)}</span>
+          <button type="button" onClick={onEdit} style={{ marginLeft: "auto", background: "transparent", border: "none", padding: 0, cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "var(--accent)" }}>{t("mrc_d_edit")}</button>
         </div>
       </div>
       {!merchant.verifiedPhone && (
         <div role="note" style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>{t("mrc_d_unverified_hint")}</div>
       )}
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: -8 }}>{t("mrc_d_code_hint")}</div>
 
       {/* One compact summary card: hero today's-sales, then a spread row of secondary stats. */}
       <div style={{ ...cardStyle, padding: "16px 18px" }}>
@@ -344,7 +341,7 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
   const invoice = kind === "invoice";
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{t("mrc_lt_title")}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("mrc_lt_title_short")}</div>
       {features.invoices && (
         <div className="seg" style={{ marginBottom: 12 }}>
           {(["link", "invoice"] as const).map((k) => (
@@ -361,13 +358,13 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
               <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} type="date" style={inputStyle} /></div>
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: "1 1 130px" }}><label style={labelStyle}>{invoice ? t("mrc_lt_amount") : t("mrc_lt_amount_opt")}</label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+          <div><label style={labelStyle}>{invoice ? t("mrc_lt_amount") : t("mrc_lt_amount_short")}</label>
             <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={invoice ? "250 000" : t("mrc_lt_open")} inputMode="numeric" style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} /></div>
-          <div style={{ flex: "1 1 160px" }}><label style={labelStyle}>{invoice ? t("mrc_lt_ref_opt") : t("mrc_lt_label_opt")}</label>
+          <div><label style={labelStyle}>{invoice ? t("mrc_lt_ref_opt") : t("mrc_lt_label_short")}</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={invoice ? "INV-20260045" : "Table 4"} maxLength={60} style={inputStyle} /></div>
-          <button className="btn btn-primary" disabled={busy} onClick={create} style={{ flex: "0 0 auto" }}>{busy ? "…" : invoice ? t("mrc_lt_create_inv") : t("mrc_lt_create_link")}</button>
         </div>
+        <button className="btn btn-primary btn-block" disabled={busy} onClick={create}>{busy ? "…" : invoice ? t("mrc_lt_create_inv") : t("mrc_lt_create_link")}</button>
       </div>
 
       {active.length > 0 && (
@@ -377,6 +374,8 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
               {/* Details stack — full width so nothing gets crushed; the URL truncates. */}
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 650, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <button type="button" aria-label={t("mrc_lt_disable")} title={t("mrc_lt_disable")} onClick={async () => { if (!window.confirm(t("mrc_lt_disable_confirm"))) return; await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}
+                    style={{ order: 9, marginLeft: "auto", width: 26, height: 26, borderRadius: "50%", border: "none", background: "transparent", color: "var(--ink-3)", cursor: "pointer", font: "inherit", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
                   {l.kind === "invoice" && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--accent)", background: "var(--accent-wash)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_inv_badge")}</span>}
                   {l.paid && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", color: "var(--recv)", background: "color-mix(in oklab, var(--recv) 16%, transparent)", padding: "1px 6px", borderRadius: 5 }}>{t("mrc_lt_paid")}{l.paid.count > 1 ? ` ×${l.paid.count}` : ""}</span>}
                   <span>{l.amountXaf ? `${fmt(l.amountXaf)} XAF` : t("mrc_lt_open")}{l.label ? ` · ${l.label}` : ""}</span>
@@ -387,17 +386,16 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
                 <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 3 }}>{urlFor(l.code)}</div>
               </div>
               {/* Actions row — wraps under the details; Disable is separated to the right. */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => copy(l.code)}>{copied === l.code ? t("amb_copied") : t("mrc_lt_copy")}</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setShowQr(showQr === l.code ? null : l.code)}>{showQr === l.code ? t("amb_hide_qr") : t("mrc_lt_qr")}</button>
                 {/* WhatsApp is how a Cameroonian merchant sends a link to a customer; the empty
                     state promised it, the card never offered it. Native share where available. */}
-                <a className="btn btn-ghost btn-sm" target="_blank" rel="noopener noreferrer"
+                <a className="btn btn-ghost btn-sm" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}
                   href={`https://wa.me/?text=${encodeURIComponent(`${merchant.businessName}${l.amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(l.amountXaf)} XAF` : ""}${l.label ? ` · ${l.label}` : ""}\n${urlFor(l.code)}`)}`}
                   onClick={(e) => { if (typeof navigator.share === "function") { e.preventDefault(); void navigator.share({ title: merchant.businessName, url: urlFor(l.code) }).catch(() => {}); } }}>
                   {t("mrc_lt_share")}
                 </a>
-                <button className="btn btn-quiet btn-sm" style={{ color: "var(--bad)", marginLeft: "auto" }} onClick={async () => { await api.disableMerchantLink(l.code).catch(() => {}); onChange(); }}>{t("mrc_lt_disable")}</button>
               </div>
               {showQr === l.code && (
                 <div data-qr-dl style={{ display: "grid", placeItems: "center", padding: "14px 0 4px" }}>
@@ -411,10 +409,6 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
         </div>
       )}
       {active.length === 0 && <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 12 }}>{t("mrc_lt_empty")}</p>}
-      <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <span>{t("mrc_lt_platform")} <Link to="/developers" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_lt_use_api")}</Link></span>
-        <span>{t("mrc_lt_bring")} <Link to="/ambassador" style={{ color: "var(--accent)", fontWeight: 600 }}>{t("mrc_lt_become_amb")}</Link></span>
-      </div>
     </div>
   );
 }

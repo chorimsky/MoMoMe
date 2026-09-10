@@ -7,6 +7,7 @@
 
    Every string is an [en, fr] pair, the same convention as the app's own copy.
    ============================================================ */
+import { APP_LINKS } from "./apps.js";
 
 export type TestPlatform = "web" | "android" | "ios";
 export type TestOutcome = "pass" | "fail" | "skip";
@@ -102,9 +103,9 @@ export const TEST_CASES: TestCase[] = [
 
 /** Where testers get each build. Empty = not yet available; the page then says how to get it. */
 export const TEST_LINKS = {
-  apk: "https://expo.dev/artifacts/eas/q0H1LOkGImxBsYyf8fxRXfmXlkrl2WRhy1JCSYPDJSE.apk",
+  apk: APP_LINKS.apk,
   play: "https://play.google.com/apps/internaltest/4701620065637222709",
-  testflight: "",
+  testflight: APP_LINKS.testflight,
 };
 
 export const TEST_CASE_IDS = new Set(TEST_CASES.map((c) => c.id));

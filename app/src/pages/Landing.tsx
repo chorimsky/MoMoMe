@@ -4,6 +4,7 @@ import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import { useNarrow } from "../lib/useNarrow.js";
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
+import { AppBanner, StoreBadges } from "../components/StoreBadges.js";
 import "./Landing.css";
 
 /* Simple line glyphs (rounded, friendly) for benefit + step tiles. */
@@ -119,7 +120,7 @@ export function Landing() {
               {lang === "en" ? "FR" : "EN"}
             </button>
             <ThemeToggle size={38} />
-            <Link className="btn btn-primary cta-sm" to="/send">{t("lp_cta_pay")}<span className="cta-rest"> Mobile Money</span></Link>
+            <a className="btn btn-primary cta-sm" href="#get-app">{t("lp_cta_app")}</a>
           </div>
         </header>
 
@@ -128,10 +129,12 @@ export function Landing() {
             <div className="eyebrow">{t("lp_eyebrow")}</div>
             <h1>{t("lp_h1")}</h1>
             <p className="lede">{t("lp_lede")}</p>
-            <div className="cta-row">
-              <Link className="btn btn-primary btn-lg" to="/send">{t("lp_cta_send")}</Link>
+            <StoreBadges />
+            <div className="cta-row" style={{ marginTop: 14, alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("lp_or_web")}</span>
+              <Link className="btn btn-ghost" to="/send" style={{ textDecoration: "none" }}>{t("lp_cta_send")}</Link>
               {features.scanToPay && (
-                <Link className="btn btn-ghost btn-lg" to="/scan" style={{ gap: 8 }}>
+                <Link className="btn btn-ghost" to="/scan" style={{ gap: 8, textDecoration: "none" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>
                   {t("scan_cta")}
                 </Link>
@@ -206,6 +209,13 @@ export function Landing() {
           </div>
         </section>
 
+        <section id="get-app" className="get-app">
+          <Momo size={sm ? 84 : 104} />
+          <h2>{t("lp_app_title")}</h2>
+          <p className="how-sub" style={{ margin: "0 auto" }}>{t("lp_app_sub")}</p>
+          <StoreBadges align="center" />
+        </section>
+
         <nav className="lp-foot-links" aria-label="Convert to Mobile Money" style={{ marginBottom: 14, flexWrap: "wrap", justifyContent: "center" }}>
           <a href="/bitcoin-to-mobile-money/">Bitcoin to Mobile Money</a>
           <a href="/lightning-to-mobile-money/">Lightning to Mobile Money</a>
@@ -231,6 +241,7 @@ export function Landing() {
           </nav>
         </footer>
       </div>
+      <AppBanner />
     </div>
   );
 }

@@ -80,9 +80,9 @@ export const STRINGS = {
 
   // method blurbs
   blurb_lightning: ['Arrives in seconds · lowest fee', 'Arrive en quelques secondes · frais réduits'],
-  blurb_usdt: ['Stable value · arrives in seconds', 'Valeur stable · arrive en quelques secondes'],
+  blurb_usdt: ['Stable value · a few minutes', 'Valeur stable · arrive en quelques secondes'],
   blurb_onchain: ['Best for large amounts · 10–60 min', 'Idéal pour les gros montants · 10–60 min'],
-  blurb_usdc: ['Stable value · arrives in seconds', 'Valeur stable · arrive en quelques secondes'],
+  blurb_usdc: ['Stable value · a few minutes', 'Valeur stable · arrive en quelques secondes'],
   // The network is the mistake that cannot be undone with a stablecoin: both are 0x
   // addresses, and sending on TRON or BSC instead of Ethereum loses the money. It belongs
   // on the row where the choice is made, not only on the pay screen after it.
@@ -126,6 +126,10 @@ export const STRINGS = {
   lock_passed_title: ['Price lock passed — this address still works', 'Le taux bloqué a expiré — cette adresse reste valable'],
   lock_passed_sub: ["If you already sent, it will be credited at the rate when it arrives. If you haven't, refresh for a current price.", "Si vous avez déjà envoyé, ce sera crédité au taux du moment de l'arrivée. Sinon, actualisez pour un prix à jour."],
   refresh_price: ['Refresh price', 'Actualiser le prix'],
+  open_in_wallet: ['Open in wallet', 'Ouvrir dans le portefeuille'],
+  no_wallet_title: ['No wallet found', 'Aucun portefeuille trouvé'],
+  no_wallet_sub: ['The code was copied instead. Open your wallet, choose Send or Pay, and paste it.', "Le code a été copié à la place. Ouvrez votre portefeuille, choisissez Envoyer ou Payer, et collez-le."],
+  exact_amount_hint: ['Make sure this exact amount arrives — if your wallet offers it, pay the network fee on top, not out of the amount.', "Veillez à ce que ce montant exact arrive — si votre portefeuille le propose, payez les frais réseau en plus, pas déduits du montant."],
   code_expired_title: ['This code has expired', 'Ce code a expiré'],
   code_expired_sub: ['Nothing was taken. Get a new code at today’s rate — or, if you already paid, wait: it will be delivered on its own.', 'Rien n’a été prélevé. Obtenez un nouveau code au taux du jour — ou, si vous avez déjà payé, patientez : il sera livré automatiquement.'],
   refresh_code: ['Get a new code', 'Obtenir un nouveau code'],

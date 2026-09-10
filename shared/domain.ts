@@ -236,6 +236,14 @@ export function erc20PaymentUri(asset: "USDT" | "USDC", address: string, amount:
   return `ethereum:${contract}@${ETH_CHAIN_ID}/transfer?address=${address}&uint256=${baseUnits}`;
 }
 
+/** The amount a Lightning wallet will actually display: whole satoshis, grouped. Eight-decimal
+ *  BTC ("0.00011823 BTC") is what the rail speaks; no wallet shows it, so a payer comparing
+ *  our screen with theirs saw two different numbers for the same money. */
+export function satsLabel(btc: number): string {
+  const sats = Math.round(btc * 1e8);
+  return `${sats.toLocaleString("fr-FR").replace(/\u202f/g, " ")} sats`;
+}
+
 /** What to put in a QR for a BOLT11 invoice: the `lightning:` scheme, ALL UPPERCASE.
  *
  *  Uppercase is not cosmetic. A QR encodes an all-uppercase alphanumeric string in
@@ -335,8 +343,10 @@ export const METHOD_META: Record<
   // with USDC live they sat side by side in the method picker as two identical rows, one
   // of which you could only tell apart by its glyph. The pay screen has always said
   // "Send US Dollars (USDT)", so this just matches it.
-  USDT: { name: "US Dollars (USDT)", arrival: "Within seconds", fast: true },
-  USDC: { name: "US Dollars (USDC)", arrival: "Within seconds", fast: true },
+  // Honest: an ERC-20 transfer from an exchange needs a few minutes. The method picker
+  // already said "2–5 minutes"; Review then promised "within seconds" — one screen was wrong.
+  USDT: { name: "US Dollars (USDT)", arrival: "Usually 2–5 minutes", fast: false },
+  USDC: { name: "US Dollars (USDC)", arrival: "Usually 2–5 minutes", fast: false },
 };
 
 /* ---------- Bitcoin unit conversion ----------

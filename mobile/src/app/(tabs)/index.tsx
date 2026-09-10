@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { api, ApiError, errMessage } from '@/api/client';
@@ -31,7 +31,7 @@ import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS, satsLabel, erc20PaymentUri } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -972,6 +972,8 @@ function PayStep({
         <Label>{tr('total_to_pay')}</Label>
         <Text style={[styles.payAmount, { color: t.text }]}>{xaf(payment.totalXaf)}</Text>
         <Body muted center>{tr('send_exactly')} {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
+          {pi.method === 'LIGHTNING' ? <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }} center>{satsLabel(pi.amount)}</Body> : null}
+          {ADDRESS_METHODS.has(pi.method) ? <Body muted center style={{ fontSize: 12.5 }}>{tr('exact_amount_hint')}</Body> : null}
       </View>
 
       {/* DEMO MODE: the instruction is simulated, so its address/invoice is fabricated.
@@ -1004,6 +1006,22 @@ function PayStep({
           offers the address to copy and send to. */}
       {!demoMode && !expired ? (
         <View style={{ alignSelf: 'stretch', gap: Spacing.one }}>
+          {/* The QR is on the same phone as the wallet, so it cannot be scanned. A deep link
+              hands the invoice/address to whichever wallet is installed; if none claims the
+              scheme, fall back to copying it. */}
+          <Button
+            title={tr('open_in_wallet')}
+            icon="open-outline"
+            onPress={async () => {
+              const uri = pi.method === 'LIGHTNING' ? `lightning:${pi.code}` : pi.method === 'ONCHAIN' ? pi.qr : erc20PaymentUri(pi.method, pi.code, pi.amount);
+              try {
+                if (await Linking.canOpenURL(uri)) { await Linking.openURL(uri); return; }
+              } catch { /* fall through */ }
+              await copy();
+              Alert.alert(tr('no_wallet_title'), tr('no_wallet_sub'));
+            }}
+          />
+          <View style={{ height: Spacing.one }} />
           <Label>{ml(pi.method, 'codeLabel')}</Label>
           <Pressable
             onPress={copy}

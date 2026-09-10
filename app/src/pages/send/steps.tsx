@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS } from "@shared/domain.js";
+import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, LN_ADDRESS_DOMAIN, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS, satsLabel } from "@shared/domain.js";
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
@@ -332,15 +332,15 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
   // configured per method, so the same XAF buys a different amount of crypto — and the
   // settlement times differ by orders of magnitude. Without this the sender picks blind.
   // Stateless: no quote is minted here, so comparing options costs nothing.
-  const [preview, setPreview] = useState<Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }>>({});
+  const [preview, setPreview] = useState<Record<string, { amount: number; amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }>>({});
   useEffect(() => {
     let alive = true;
     if (!s.xaf) return;
     api.previewMethods(s.xaf)
       .then((r) => {
         if (!alive) return;
-        const by: Record<string, { amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> = {};
-        for (const m of r.methods) by[m.method] = { amountLabel: m.amountLabel, etaSeconds: m.etaSeconds, senderPaysNetworkFee: m.senderPaysNetworkFee };
+        const by: Record<string, { amount: number; amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> = {};
+        for (const m of r.methods) by[m.method] = { amount: m.amount, amountLabel: m.amountLabel, etaSeconds: m.etaSeconds, senderPaysNetworkFee: m.senderPaysNetworkFee };
         setPreview(by);
       })
       .catch(() => { /* the choice still works without the figures */ });
@@ -381,7 +381,7 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
                 <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{ml(k, "sub")}</span>
                 {preview[k] && (
                   <span style={{ display: "block", marginTop: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
-                    <span className="num" style={{ fontWeight: 700 }}>{t("m_you_send")} {preview[k].amountLabel}</span>
+                    <span className="num" style={{ fontWeight: 700 }}>{t("m_you_send")} {k === "LIGHTNING" ? satsLabel(preview[k].amount) : preview[k].amountLabel}</span>
                     <span style={{ color: "var(--ink-3)" }}> · {eta(preview[k].etaSeconds)}</span>
                     {preview[k].senderPaysNetworkFee && (
                       <span style={{ display: "block", color: "var(--ink-3)", marginTop: 2 }}>{t("m_network_fee")}</span>
@@ -452,7 +452,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         <Row k={t("pay_with")} v={METHOD_META[s.method].name} />
         {/* What leaves the sender's wallet, and on which network — the two facts a stablecoin
             payer must get right, shown before they commit rather than beside the address after. */}
-        <Row k={t("you_send")} v={quote.inboundAmountLabel} sub={t(NET_KEY[s.method])} />
+        <Row k={t("you_send")} v={s.method === "LIGHTNING" ? satsLabel(quote.inboundAmount) : quote.inboundAmountLabel} sub={s.method === "LIGHTNING" ? `${quote.inboundAmountLabel} · ${t(NET_KEY[s.method])}` : t(NET_KEY[s.method])} />
         <Row k={t("arrival")} v={ml(s.method, "arrival")} tone={METHOD_META[s.method].fast ? "recv" : undefined} />
       </div>
       {(s.method === "USDT" || s.method === "USDC") && (
@@ -572,11 +572,23 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("total_to_pay")}</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 750, letterSpacing: "-0.02em", whiteSpace: "nowrap", marginTop: 2 }}>{fmt(payment.totalXaf)} <span style={{ fontSize: 17, color: "var(--ink-3)" }}>XAF</span></div>
-          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{t("send_exactly")} {inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
+          <div className="num" style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{t("send_exactly")} {method === "LIGHTNING" ? <><b style={{ color: "var(--ink)" }}>{satsLabel(inst.amount)}</b> ({inst.amountLabel})</> : inst.amountLabel} · ≈ ${fmt(payment.usd, 2)}</div>
+          {ADDRESS_METHODS.has(method) && (
+            /* The most common on-chain failure is an amount that arrives short because the
+               wallet took its network fee out of it — which lands the payment in manual review. */
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.45 }}>{t("exact_amount_hint")}</div>
+          )}
         </div>
       </div>
 
       {!demoMode && <CopyField label={ml(method, "codeLabel")} value={inst.code} />}
+      {!demoMode && (method === "LIGHTNING" || method === "ONCHAIN") && !expired && (
+        /* On a phone the QR is on the same screen as the wallet, so scanning is impossible:
+           a `lightning:` / `bitcoin:` link hands the invoice straight to the installed wallet. */
+        <a href={method === "LIGHTNING" ? `lightning:${inst.code}` : inst.qr} className="btn btn-primary" style={{ display: "flex", justifyContent: "center", marginTop: 8, padding: "14px" }}>
+          {t("open_in_wallet")}
+        </a>
+      )}
       {!demoMode && (method === "USDT" || method === "USDC") && (
         /* The QR is the bare address so exchange-app scanners accept it; wallets that
            understand EIP-681 (MetaMask, Rabby…) can take chain, token and amount from here. */

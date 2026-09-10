@@ -213,6 +213,7 @@ export const STRINGS: Dict = {
   net_lightning: ["Lightning Network", "Réseau Lightning"],
   net_onchain: ["Bitcoin network", "Réseau Bitcoin"],
   net_erc20: ["Ethereum · ERC-20 only", "Ethereum · ERC-20 uniquement"],
+  exact_amount_hint: ["Make sure this exact amount arrives — if your wallet offers it, choose to pay the network fee on top, not out of the amount.", "Veillez à ce que ce montant exact arrive — si votre portefeuille le propose, payez les frais réseau en plus, pas déduits du montant."],
   open_in_wallet: ["Open in wallet", "Ouvrir dans le portefeuille"],
   erc20_only: ["Ethereum (ERC-20) only — sending on any other network will lose the funds.", "Ethereum (ERC-20) uniquement — un envoi sur un autre réseau entraîne la perte des fonds."],
   cr_title: ["Is this the right number?", "Est-ce le bon numéro ?"],
@@ -490,14 +491,14 @@ export const STRINGS: Dict = {
 const METHOD_FR: Record<Method, { sub: string; arrival: string; payTitle: string; payDesc: string; codeLabel: string }> = {
   LIGHTNING: { sub: "Le plus rapide · en quelques secondes", arrival: "En quelques secondes", payTitle: "Payer instantanément", payDesc: "Scannez le code pour payer instantanément. Nous livrons le Mobile Money dès réception.", codeLabel: "Code de paiement instantané" },
   ONCHAIN: { sub: "Idéal pour les gros montants", arrival: "10–60 minutes", payTitle: "Envoyer du Bitcoin", payDesc: "Envoyez le montant exact à cette adresse Bitcoin. Nous livrons dès que votre paiement est confirmé.", codeLabel: "Adresse Bitcoin" },
-  USDT: { sub: "Valeur stable · en quelques secondes", arrival: "En quelques secondes", payTitle: "Envoyer des dollars (USDT)", payDesc: "Envoyez le montant exact en dollars (USDT) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDT (Ethereum · ERC-20)" },
-  USDC: { sub: "Valeur stable · en quelques secondes", arrival: "En quelques secondes", payTitle: "Envoyer des dollars (USDC)", payDesc: "Envoyez le montant exact en dollars (USDC) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDC (Ethereum · ERC-20)" },
+  USDT: { sub: "Valeur stable · quelques minutes", arrival: "Généralement 2–5 minutes", payTitle: "Envoyer des dollars (USDT)", payDesc: "Envoyez le montant exact en dollars (USDT) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDT (Ethereum · ERC-20)" },
+  USDC: { sub: "Valeur stable · quelques minutes", arrival: "Généralement 2–5 minutes", payTitle: "Envoyer des dollars (USDC)", payDesc: "Envoyez le montant exact en dollars (USDC) sur le réseau Ethereum (ERC-20) à cette adresse. N'envoyez pas sur un autre réseau. Nous livrons le Mobile Money dès réception.", codeLabel: "Adresse USDC (Ethereum · ERC-20)" },
 };
 const METHOD_EN: Record<Method, { sub: string; payTitle: string; payDesc: string; codeLabel: string }> = {
   LIGHTNING: { sub: "Fastest · arrives in seconds", payTitle: "Pay instantly", payDesc: "Scan the code to pay instantly. We deliver the Mobile Money the moment it arrives.", codeLabel: "Instant payment code" },
   ONCHAIN: { sub: "Best for large amounts", payTitle: "Send Bitcoin", payDesc: "Send the exact amount to this Bitcoin address. We deliver as soon as your payment is confirmed.", codeLabel: "Bitcoin address" },
-  USDT: { sub: "Stable value · arrives in seconds", payTitle: "Send US Dollars (USDT)", payDesc: "Send the exact amount of US Dollars (USDT) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDT address (Ethereum · ERC-20)" },
-  USDC: { sub: "Stable value · arrives in seconds", payTitle: "Send US Dollars (USDC)", payDesc: "Send the exact amount of US Dollars (USDC) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDC address (Ethereum · ERC-20)" },
+  USDT: { sub: "Stable value · a few minutes", payTitle: "Send US Dollars (USDT)", payDesc: "Send the exact amount of US Dollars (USDT) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDT address (Ethereum · ERC-20)" },
+  USDC: { sub: "Stable value · a few minutes", payTitle: "Send US Dollars (USDC)", payDesc: "Send the exact amount of US Dollars (USDC) on the Ethereum network (ERC-20) to this address. Do not send on any other network. We deliver the Mobile Money the moment it arrives.", codeLabel: "USDC address (Ethereum · ERC-20)" },
 };
 
 interface I18nCtx {
@@ -560,8 +561,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 const METHOD_EN_ARRIVAL: Record<Method, string> = {
   LIGHTNING: "Within seconds",
   ONCHAIN: "10–60 minutes",
-  USDT: "Within seconds",
-  USDC: "Within seconds",
+  USDT: "Usually 2–5 minutes",
+  USDC: "Usually 2–5 minutes",
 };
 
 export function useI18n(): I18nCtx {

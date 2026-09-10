@@ -13,7 +13,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LN_ADDRESS_DOMAIN, checkPhone } from "@shared/domain.js";
+import { LN_ADDRESS_DOMAIN, MAX_XAF, checkPhone, receiveLink } from "@shared/domain.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
@@ -30,6 +30,19 @@ export function Receive() {
   const features = useFeatures();
   const [draft, setDraft] = useState("");
   const [number, setNumber] = useState<string | null>(null);
+  // Optional: the amount being asked for. Carried in the link so the payer sees it filled in.
+  const [amountDraft, setAmountDraft] = useState("");
+  const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, "")) || 0, MAX_XAF);
+  const [showLn, setShowLn] = useState(false);
+  const [shared, setShared] = useState(false);
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://momome.xyz";
+  const link = number ? receiveLink(origin, number, amountXaf) : "";
+  const shareText = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}\n${link}` : "";
+  const share = async () => {
+    if (typeof navigator.share === "function") { try { await navigator.share({ title: "MoMo›Me", text: shareText, url: link }); return; } catch { /* dismissed → fall through to WhatsApp */ } }
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank", "noopener");
+    setShared(true); setTimeout(() => setShared(false), 1500);
+  };
 
   // The SAME rule the send flow and the LNURL server use. This screen used to carry its own
   // copy — "at least 8 digits and a known prefix" — which accepted 677000789000 and would
@@ -95,23 +108,46 @@ export function Receive() {
                 {t("rcv_on_network").replace("{op}", check.provider === "ORANGE" ? "Orange" : "MTN")}
               </p>
             )}
+            <label style={{ display: "block", fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)", margin: "16px 0 6px" }}>
+              {t("rcv_amount_opt")}
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input className="num" inputMode="numeric" placeholder="0" value={amountDraft ? new Intl.NumberFormat("fr-FR").format(amountXaf) : ""} aria-label={t("rcv_amount_opt")}
+                onChange={(e) => setAmountDraft(e.target.value.replace(/\D/g, ""))}
+                style={{ flex: 1, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--paper)", color: "var(--ink)", fontSize: 16 }} />
+              <span style={{ color: "var(--ink-3)", fontWeight: 700 }}>XAF</span>
+            </div>
+            <p style={{ color: "var(--ink-3)", fontSize: 12, marginTop: 6 }}>{t("rcv_amount_hint")}</p>
             <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => setNumber(check.local)}>
               {t("rcv_create")}
             </button>
           </div>
         ) : (
           <div style={{ padding: 18, border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_your_code")}</div>
-            {/* `lightning:` so a wallet camera recognises it as a Lightning Address rather
-                than plain text — the same scheme the mobile Receive screen encodes. */}
-            <div role="img" aria-label={`${t("rcv_your_code")}: ${address}`}
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_your_link")}</div>
+            {amountXaf > 0 && <div className="num" style={{ fontSize: 22, fontWeight: 750, color: "var(--ink)" }}>{new Intl.NumberFormat("fr-FR").format(amountXaf)} <span style={{ fontSize: 13, color: "var(--ink-3)" }}>XAF</span></div>}
+            {/* The QR is the web link: a phone camera opens it with no app installed, the
+                MoMo›Me app's scanner routes it to Send, and it carries the amount. */}
+            <div role="img" aria-label={`${t("rcv_your_link")}: ${link}`}
                  style={{ padding: 12, background: "#fff", borderRadius: 14, boxShadow: "var(--shadow)", border: "1px solid var(--line)" }}>
-              <QR value={`lightning:${address}`} size={196} />
+              <QR value={link} size={196} />
             </div>
-            {/* One address, not two. This used to print the string as a heading and then
-                again inside the copy field immediately below it. */}
-            <div style={{ alignSelf: "stretch" }}><CopyField label={t("rcv_copy_addr")} value={address} /></div>
+            <div style={{ alignSelf: "stretch" }}><CopyField label={t("rcv_link_label")} value={link} /></div>
+            <button className="btn btn-primary btn-block" onClick={share}>{shared ? t("amb_copied") : t("rcv_share_btn")}</button>
             <p style={{ color: "var(--ink-2)", fontSize: 13, lineHeight: 1.5, textAlign: "center", margin: 0 }}>{t("rcv_share")}</p>
+
+            {/* Secondary: the Lightning Address, for someone paying from a Bitcoin wallet. */}
+            <div style={{ alignSelf: "stretch", borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_ln_section")}</div>
+              <p style={{ color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45, margin: "4px 0 8px" }}>{t("rcv_ln_hint")}</p>
+              <CopyField label={t("rcv_copy_addr")} value={address} />
+              <button className="btn btn-quiet" style={{ marginTop: 8, fontSize: 12.5 }} onClick={() => setShowLn((v) => !v)}>{showLn ? t("amb_hide_qr") : t("rcv_show_ln_qr")}</button>
+              {showLn && (
+                <div role="img" aria-label={`${t("rcv_ln_section")}: ${address}`} style={{ display: "grid", placeItems: "center", padding: 12 }}>
+                  <div style={{ padding: 10, background: "#fff", borderRadius: 12, border: "1px solid var(--line)" }}><QR value={`lightning:${address}`} size={150} /></div>
+                </div>
+              )}
+            </div>
             <button className="btn btn-ghost" onClick={() => { setNumber(null); setDraft(""); }}>{t("rcv_change")}</button>
           </div>
         )}

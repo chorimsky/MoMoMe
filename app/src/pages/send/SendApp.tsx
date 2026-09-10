@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, localDigits, detectProvider, ADDRESS_METHODS } from "@shared/domain.js";
+import { COUNTRIES, localDigits, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
@@ -89,6 +89,9 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   // (see payPathFromScan) or a receive link is opened, so "show me your code" leads
   // straight into paying that person instead of re-typing their number.
   const toParam = (params.get("to") ?? "").replace(/\D/g, "");
+  // /send?to=…&amount=… — a receive link that asked for a specific amount. Prefilled, not
+  // locked: the payer is paying a person, not a business, and may change it.
+  const amountParam = Math.min(Number((params.get("amount") ?? "").replace(/\D/g, "")) || 0, MAX_XAF);
   const [tab, setTab] = useState<Tab>(initialTab);
   const features = useFeatures();
   // A business link with a fixed amount has nothing to ask on Details: straight to "how to pay".
@@ -106,7 +109,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 0, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
     : (() => {
         const phone = toParam ? localDigits(toParam, "CM") : "";
-        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
+        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: phone ? amountParam : 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
       })());
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 

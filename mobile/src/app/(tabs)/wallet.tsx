@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { getMyNumber, setMyNumber } from '@/api/client';
@@ -9,7 +9,8 @@ import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { detectProvider, localDigits, LN_ADDRESS_DOMAIN } from '@shared/domain';
+import { detectProvider, localDigits, LN_ADDRESS_DOMAIN, MAX_XAF, receiveLink } from '@shared/domain';
+import { WEB_ORIGIN } from '@/lib/config';
 
 // The Lightning Address domain is a PROTOCOL fact — the host an external wallet resolves
 // /.well-known/lnurlp/<number> against, and the same constant the server builds its LNURL
@@ -23,7 +24,6 @@ export default function ReceiveScreen() {
   const [number, setNumber] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // A number is only usable if a Mobile Money provider actually claims it — the same rule
   // the LNURL server applies (parseLnUser refuses anything detectProvider can't place). The
@@ -55,10 +55,19 @@ export default function ReceiveScreen() {
   };
 
   const address = number ? `${number}@${LN_DOMAIN}` : '';
-  const copy = async () => {
-    await Clipboard.setStringAsync(address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+  const [amountDraft, setAmountDraft] = useState('');
+  const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, '')) || 0, MAX_XAF);
+  // The link serves everyone: app, browser, or a phone camera with nothing installed.
+  const link = number ? receiveLink(WEB_ORIGIN, number, amountXaf) : '';
+  const [copiedWhat, setCopiedWhat] = useState<'link' | 'address' | null>(null);
+  const copy = async (what: 'link' | 'address') => {
+    await Clipboard.setStringAsync(what === 'link' ? link : address);
+    setCopiedWhat(what);
+    setTimeout(() => setCopiedWhat(null), 1600);
+  };
+  const share = async () => {
+    const text = `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}\n${link}`;
+    try { await Share.share({ message: text, url: link }); } catch { /* dismissed */ }
   };
 
   return (
@@ -83,6 +92,15 @@ export default function ReceiveScreen() {
           {draft.trim().length > 0 && !valid ? (
             <Body style={{ color: t.bad, fontSize: 13 }}>{tr('rcv_bad_number')}</Body>
           ) : null}
+          <Field
+            label={tr('rcv_amount_opt')}
+            placeholder="0"
+            keyboardType="number-pad"
+            value={amountDraft}
+            onChangeText={(x) => setAmountDraft(x.replace(/\D/g, ''))}
+            right={<Text style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>XAF</Text>}
+          />
+          <Body muted style={{ fontSize: 12.5 }}>{tr('rcv_amount_hint')}</Body>
           <Button
             title={tr('create_pay_link')}
             icon="link"
@@ -97,23 +115,42 @@ export default function ReceiveScreen() {
       ) : (
         <Card padded elevated style={{ alignItems: 'center', gap: Spacing.four }}>
           <Label>{tr('your_pay_link')}</Label>
-          <View style={styles.addrRow}>
-            <Ionicons name="link" size={16} color={t.brandInk} style={{ backgroundColor: t.brand, borderRadius: 6, padding: 3 }} />
-            <Text style={[styles.addr, { color: t.text }]}>{address}</Text>
-          </View>
+          {amountXaf > 0 ? <Text style={[styles.addr, { color: t.text }]}>{amountXaf.toLocaleString('fr-FR')} XAF</Text> : null}
+          {/* The QR is the web link: a phone camera opens it with no app installed, the app's
+              scanner routes it to Send, and it carries the amount. */}
           <View style={[styles.qrCard, Shadow.md]}>
-            <QRCode value={`lightning:${address}`} size={210} backgroundColor="#fff" color="#111" />
+            <QRCode value={link} size={210} backgroundColor="#fff" color="#111" />
           </View>
           <Pressable
-            onPress={copy}
+            onPress={() => copy('link')}
+            accessibilityRole="button"
+            accessibilityLabel={tr('rcv_link_label')}
             style={({ pressed }) => [
               styles.copyRow,
               { backgroundColor: t.surface2, borderColor: t.line, opacity: pressed ? 0.85 : 1 },
             ]}>
-            <Mono style={{ flex: 1 }} numberOfLines={1}>{address}</Mono>
-            <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={copied ? t.recv : t.accent} />
+            <Mono style={{ flex: 1 }} numberOfLines={1}>{link.replace(/^https?:\/\//, '')}</Mono>
+            <Ionicons name={copiedWhat === 'link' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'link' ? t.recv : t.accent} />
           </Pressable>
+          <Button title={tr('rcv_share_btn')} icon="share-outline" onPress={share} style={{ alignSelf: 'stretch' }} />
           <Body muted center style={{ fontSize: 13 }}>{tr('share_get_paid')}</Body>
+
+          {/* Secondary: the Lightning Address, for someone paying from a Bitcoin wallet. */}
+          <View style={{ alignSelf: 'stretch', borderTopWidth: 1, borderTopColor: t.line, paddingTop: Spacing.three, gap: Spacing.two }}>
+            <Label>{tr('rcv_ln_section')}</Label>
+            <Body muted style={{ fontSize: 12.5 }}>{tr('rcv_ln_hint')}</Body>
+            <Pressable
+              onPress={() => copy('address')}
+              accessibilityRole="button"
+              accessibilityLabel={tr('rcv_ln_section')}
+              style={({ pressed }) => [
+                styles.copyRow,
+                { backgroundColor: t.surface2, borderColor: t.line, opacity: pressed ? 0.85 : 1 },
+              ]}>
+              <Mono style={{ flex: 1 }} numberOfLines={1}>{address}</Mono>
+              <Ionicons name={copiedWhat === 'address' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'address' ? t.recv : t.accent} />
+            </Pressable>
+          </View>
           <Button
             title={tr('change_number')}
             variant="ghost"

@@ -390,6 +390,13 @@ export const STRINGS = {
     'Saisissez votre numéro MTN ou Orange Money. Nous créons un lien de paiement que tout le monde peut utiliser — l’argent est converti et envoyé directement sur ce numéro.',
   ],
   your_mm_number: ['Your Mobile Money number', 'Votre numéro Mobile Money'],
+  rcv_amount_opt: ['Amount (optional)', 'Montant (facultatif)'],
+  rcv_amount_hint: ['Leave empty to let them choose.', 'Laissez vide pour les laisser choisir.'],
+  rcv_link_label: ['Payment link', 'Lien de paiement'],
+  rcv_share_btn: ['Share link', 'Partager le lien'],
+  rcv_share_text: ['Pay me with MoMo›Me', 'Payez-moi avec MoMo›Me'],
+  rcv_ln_section: ['From a Bitcoin wallet', 'Depuis un portefeuille Bitcoin'],
+  rcv_ln_hint: ['Anyone with a Lightning wallet can pay this address directly. It lands on your Mobile Money too.', "Toute personne avec un portefeuille Lightning peut payer cette adresse directement. Ça arrive aussi sur votre Mobile Money."],
   create_pay_link: ['Create my payment link', 'Créer mon lien de paiement'],
   your_pay_link: ['Your payment link', 'Votre lien de paiement'],
   share_get_paid: [

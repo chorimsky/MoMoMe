@@ -244,6 +244,29 @@ export function satsLabel(btc: number): string {
   return `${sats.toLocaleString("fr-FR").replace(/\u202f/g, " ")} sats`;
 }
 
+/** The link someone shares to GET PAID by anyone — a person with the app, a browser, or a
+ *  Bitcoin wallet. It opens the send flow with the number (and, if asked for, the amount)
+ *  filled in. The Lightning Address (`<number>@momome.xyz`) still exists for wallets, but
+ *  it is useless to a friend with no wallet, which is most friends; the link serves everyone
+ *  and a phone camera opens it without any app installed. */
+export function receiveLink(origin: string, nationalDigits: string, amountXaf?: number): string {
+  const base = `${origin.replace(/\/$/, "")}/send?to=${nationalDigits}`;
+  return amountXaf && amountXaf > 0 ? `${base}&amount=${Math.round(amountXaf)}` : base;
+}
+
+/** Read a receive link back (any host — the app's own scanners see links from every
+ *  environment). Returns the number and optional amount, or null if this is not one. */
+export function parseReceiveLink(raw: string): { to: string; amountXaf?: number } | null {
+  try {
+    const u = new URL(raw.trim());
+    if (!/\/send\/?$/.test(u.pathname)) return null;
+    const to = (u.searchParams.get("to") ?? "").replace(/\D/g, "");
+    if (to.length < 8 || to.length > 12) return null;
+    const a = Number((u.searchParams.get("amount") ?? "").replace(/\D/g, ""));
+    return { to, ...(a > 0 ? { amountXaf: a } : {}) };
+  } catch { return null; }
+}
+
 /** What to put in a QR for a BOLT11 invoice: the `lightning:` scheme, ALL UPPERCASE.
  *
  *  Uppercase is not cosmetic. A QR encodes an all-uppercase alphanumeric string in

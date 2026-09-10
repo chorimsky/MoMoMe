@@ -8,12 +8,16 @@ import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/c
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
+import { parseReceiveLink } from '@shared/domain';
 
 /** Resolve a scanned QR / typed value to an action — matching the web app's
  *  `payPathFromScan`: /pay & /m links, referral links, bare MOM-CC-###### codes,
  *  and phone numbers. */
-function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknown'; value: string } {
+function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknown'; value: string; amount?: number } {
   const s = data.trim();
+  // A receive link (/send?to=…&amount=…) — what the Receive tab's QR encodes now.
+  const rl = parseReceiveLink(s);
+  if (rl) return { kind: 'send', value: rl.to, ...(rl.amountXaf ? { amount: rl.amountXaf } : {}) };
   const link = s.match(/\/(?:pay|m)\/([A-Za-z0-9_-]+)/);
   if (link) return { kind: 'pay', value: link[1] };
   const ref = s.match(/[?&]ref=([A-Za-z0-9_-]+)/);
@@ -34,7 +38,7 @@ function ManualEntry() {
   const go = () => {
     const r = routeForPayload(code);
     if (r.kind === 'send') {
-      router.push({ pathname: '/', params: { scanned: r.value } });
+      router.push({ pathname: '/', params: { scanned: r.value, ...(r.amount ? { amount: String(r.amount) } : {}) } });
     } else if (r.kind === 'ref') {
       api.claimReferral(r.value).catch(() => {});
       router.push('/');
@@ -72,7 +76,7 @@ export default function ScanScreen() {
     locked.current = true;
     const r = routeForPayload(data);
     if (r.kind === 'pay') router.push({ pathname: '/pay/[code]', params: { code: r.value } });
-    else if (r.kind === 'send') router.push({ pathname: '/', params: { scanned: r.value } });
+    else if (r.kind === 'send') router.push({ pathname: '/', params: { scanned: r.value, ...(r.amount ? { amount: String(r.amount) } : {}) } });
     else setPayload(data);
     setTimeout(() => (locked.current = false), 1500);
   };

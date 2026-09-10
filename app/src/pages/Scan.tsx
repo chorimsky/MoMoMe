@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
-import { lnAddressNumber } from "@shared/domain.js";
+import { lnAddressNumber, parseReceiveLink } from "@shared/domain.js";
 
 /** Extract a MoMo›Me app path from a scanned/typed value, or null. Handles the
  *  pay/merchant checkout codes AND a referral link (?ref=…) so scanning any
@@ -24,6 +24,9 @@ export function payPathFromScan(raw: string): string | null {
     const u = new URL(s);
     const hit = rel(u.pathname);
     if (hit) return hit;
+    // A receive link (/send?to=…&amount=…) — the code the Receive screen shows now.
+    const rl = parseReceiveLink(s);
+    if (rl) return `/send?to=${rl.to}${rl.amountXaf ? `&amount=${rl.amountXaf}` : ""}`;
     // Referral link — join with the ambassador's code (browser/app onboarding).
     const ref = u.searchParams.get("ref");
     if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) return `/?ref=${ref.toUpperCase()}`;

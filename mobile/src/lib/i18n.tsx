@@ -31,6 +31,9 @@ export const STRINGS = {
   // common
   continue: ['Continue', 'Continuer'],
   cancel: ['Cancel', 'Annuler'],
+  save: ['Save', 'Enregistrer'],
+  m_edit_details: ['Edit details', 'Modifier les infos'],
+
   done: ['Done', 'Terminé'],
   back: ['Back', 'Retour'],
   copy: ['Copy', 'Copier'],

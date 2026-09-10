@@ -13,7 +13,7 @@ import { WEB_ORIGIN } from '@/lib/config';
 import { CATEGORIES, categoryLabel } from '@/lib/categories';
 import { METHOD_LABEL, statusLabel } from '@/lib/format';
 import { statusKey, useI18n } from '@/lib/i18n';
-import { detectProvider, localDigits, PROVIDERS } from '@shared/domain';
+import { detectProvider, localDigits, PROVIDERS, checkPhone, COUNTRIES } from '@shared/domain';
 import type { MerchantAccount, MerchantLink, MerchantSummary } from '@shared/types';
 
 const group = (n: number) => Math.round(n).toLocaleString('fr-FR').replace(/[\s,]/g, ' ');
@@ -23,6 +23,9 @@ export default function MerchantScreen() {
   const { t: tr } = useI18n();
   const [loading, setLoading] = useState(true);
   const [merchant, setMerchant] = useState<MerchantAccount | null>(null);
+  // "Edit details" reuses the onboarding form, prefilled; there was no way to change a
+  // name, category or settlement number after signing up.
+  const [editing, setEditing] = useState(false);
   const [summary, setSummary] = useState<MerchantSummary | null>(null);
   const [links, setLinks] = useState<MerchantLink[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +63,7 @@ export default function MerchantScreen() {
       <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
       {error ? (
         <ErrorBar message={error} style={{ marginTop: Spacing.four }} />
-      ) : merchant ? (
+      ) : merchant && !editing ? (
         <Dashboard
           merchant={merchant}
           summary={summary}
@@ -69,9 +72,17 @@ export default function MerchantScreen() {
           setBusy={setBusy}
           onChange={refreshMerchant}
           setError={setError}
+          onEdit={() => setEditing(true)}
         />
       ) : (
-        <Onboard busy={busy} setBusy={setBusy} onDone={refreshMerchant} setError={setError} />
+        <Onboard
+          busy={busy}
+          setBusy={setBusy}
+          onDone={() => { setEditing(false); refreshMerchant(); }}
+          setError={setError}
+          initial={merchant}
+          onCancel={merchant ? () => setEditing(false) : undefined}
+        />
       )}
     </Screen>
   );
@@ -83,20 +94,37 @@ function Onboard({
   setBusy,
   onDone,
   setError,
+  initial,
+  onCancel,
 }: {
   busy: boolean;
   setBusy: (b: boolean) => void;
   onDone: () => void;
   setError: (s: string | null) => void;
+  /** Editing an existing account: fields start filled. Changing the settlement number
+   *  revokes verification server-side (the new number is unproven). */
+  initial?: MerchantAccount | null;
+  onCancel?: () => void;
 }) {
   const t = useTheme();
   const { t: tr, lang } = useI18n();
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
-  const [tier, setTier] = useState<'individual' | 'business'>('individual');
-  const [phone, setPhone] = useState('');
+  const [name, setName] = useState(initial?.businessName ?? '');
+  const [category, setCategory] = useState<string>(initial?.category ?? CATEGORIES[0]);
+  const [tier, setTier] = useState<'individual' | 'business'>(initial?.tier ?? 'individual');
+  const [phone, setPhone] = useState(initial?.settlementPhone ?? '');
   const provider = useMemo(() => detectProvider(phone, 'CM'), [phone]);
-  const valid = name.trim().length >= 2 && localDigits(phone, 'CM').length >= 8;
+  // The same check the Send screen and the server apply — "8 digits or more" let a
+  // merchant register a number that could never be paid out, and only the server said no.
+  const check = checkPhone(phone, 'CM');
+  const c = COUNTRIES.CM;
+  const phoneIssue = phone.replace(/\D/g, '').length >= 8 && !check.ok
+    ? check.reason === 'foreign_country' && check.belongsTo
+      ? tr('phone_foreign', { country: COUNTRIES[check.belongsTo].name, own: c.name })
+      : check.reason === 'bad_length'
+        ? tr('phone_length', { country: c.name, n: c.nsnLen.join(' / '), dial: c.dial })
+        : tr('phone_operator')
+    : null;
+  const valid = name.trim().length >= 2 && check.ok;
 
   const create = async () => {
     setBusy(true);
@@ -157,7 +185,9 @@ function Onboard({
           onChangeText={setPhone}
           right={provider ? <Pill label={PROVIDERS[provider].short} tone={provider === 'MTN' ? 'brand' : 'accent'} /> : undefined}
         />
-        <Button title={tr('create_merchant')} icon="checkmark" onPress={create} loading={busy} disabled={!valid} />
+        {phoneIssue ? <Body style={{ color: t.bad, fontSize: 13 }}>{phoneIssue}</Body> : null}
+        <Button title={initial ? tr('save') : tr('create_merchant')} icon="checkmark" onPress={create} loading={busy} disabled={!valid} />
+        {onCancel ? <Button title={tr('cancel')} variant="ghost" size="md" onPress={onCancel} /> : null}
       </Card>
     </View>
   );
@@ -172,6 +202,7 @@ function Dashboard({
   setBusy,
   onChange,
   setError,
+  onEdit,
 }: {
   merchant: MerchantAccount;
   summary: MerchantSummary | null;
@@ -180,6 +211,7 @@ function Dashboard({
   setBusy: (b: boolean) => void;
   onChange: () => void;
   setError: (s: string | null) => void;
+  onEdit: () => void;
 }) {
   const t = useTheme();
   const { t: tr } = useI18n();
@@ -249,6 +281,9 @@ function Dashboard({
             <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
           </View>
           {merchant.verifiedPhone ? <Pill label={tr('m_verified')} tone="recv" icon="shield-checkmark" /> : <Pill label={tr('m_unverified')} tone="bad" />}
+          <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('m_edit_details')}>
+            <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('m_edit_details')}</Body>
+          </Pressable>
         </View>
         <Body muted style={{ fontSize: 13 }}>
           {merchant.category} · {tr('settles_to')} {PROVIDERS[merchant.provider]?.short} {merchant.settlementPhone}

@@ -7,6 +7,7 @@
 import { store } from "./db/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
+import { reconcileStablecoinDeposits } from "./core/stablecoinReconcile.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
 import { rate as ibexRate } from "./adapters/ibex.js";
@@ -21,6 +22,7 @@ export async function reconcileTick(): Promise<void> {
   // Inbound reconcile applies to any crypto rail with authoritative re-query (IBEX);
   // refund reconcile is IBEX-specific (refunds pay out via IBEX).
   if (ibexConfigured()) await reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
+  if (ibexConfigured()) await reconcileStablecoinDeposits().catch((e) => console.error("reconcile stablecoins", e));
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

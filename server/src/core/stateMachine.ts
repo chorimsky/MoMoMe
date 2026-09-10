@@ -33,7 +33,7 @@ const FLOAT_CACHE_MS = Number(process.env.FLOAT_CACHE_MS ?? 8_000);
 // quoted deal (a fat-finger over-send, or an AML-relevant unexpected deposit) — hold
 // for review instead of auto-delivering a windfall. 15% over covers wallet rounding
 // / dust while catching 2×+ mistakes. Underpayment uses the mirror band (0.999).
-const OVERPAY_TOLERANCE = Number(process.env.OVERPAY_TOLERANCE ?? 1.15);
+export const OVERPAY_TOLERANCE = Number(process.env.OVERPAY_TOLERANCE ?? 1.15);
 /** SINGLE-FLIGHT refresh. The cache alone does NOT bound upstream load: on a miss,
  *  every concurrent caller used to launch its OWN aggregatorFloatXaf(), and each of those
  *  hits EVERY configured rail's balance API (Peexit alone = /disbursement/me +
@@ -183,13 +183,16 @@ export async function recordUnattributedInbound(input: {
   providerRef: string;
   eventId?: string;
   amount: number;
+  /** Known asset (the stablecoin reconcile knows it from the rail's currency); when absent
+   *  it is inferred from the reference's shape, which cannot tell USDT from USDC. */
+  asset?: "USDT" | "USDC";
 }): Promise<{ id: string; asset: string; booked: boolean }> {
   const ref = input.providerRef.trim();
-  const erc20 = /^0x[0-9a-fA-F]{40}$/.test(ref);
+  const erc20 = !!input.asset || /^0x[0-9a-fA-F]{40}$/.test(ref);
   const onchainBtc = /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,}$/.test(ref);
-  const method: Method = erc20 ? "USDT" : onchainBtc ? "ONCHAIN" : "LIGHTNING";
+  const method: Method = input.asset ?? (erc20 ? "USDT" : onchainBtc ? "ONCHAIN" : "LIGHTNING");
   // BTC either way for the two Bitcoin methods; a stablecoin address cannot be told apart.
-  const asset = erc20 ? "UNKNOWN_STABLECOIN" : "BTC";
+  const asset = input.asset ?? (erc20 ? "UNKNOWN_STABLECOIN" : "BTC");
 
   const { record, isNew } = captureUnattributed({
     rail: input.rail, providerRef: ref, eventId: input.eventId,
@@ -197,10 +200,10 @@ export async function recordUnattributedInbound(input: {
   });
 
   let booked = false;
-  if (isNew && asset === "BTC") {
+  if (isNew && (asset === "BTC" || asset === "USDT" || asset === "USDC")) {
     await store().recordTxn(record.id, [
-      { account: "inbound_clearing", direction: "debit", amount: input.amount, currency: "BTC" },
-      { account: "refund_payable", direction: "credit", amount: input.amount, currency: "BTC" },
+      { account: "inbound_clearing", direction: "debit", amount: input.amount, currency: asset },
+      { account: "refund_payable", direction: "credit", amount: input.amount, currency: asset },
     ]);
     booked = true;
   }

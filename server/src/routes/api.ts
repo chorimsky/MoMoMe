@@ -21,6 +21,7 @@ import { TEST_CASES } from "../../../shared/testing.js";
 import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
+import { reconcileStablecoinDeposits } from "../core/stablecoinReconcile.js";
 import { settle, confirmInbound, adminRetryWhy, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
@@ -993,7 +994,11 @@ api.post("/payments/:id/confirm", async (req, res) => {
   if (p.state === "AWAITING_INBOUND") {
     const inst = p.payInstruction;
     const adapter = adapterByName(inst.provider ?? "");
-    if (adapter?.confirmSettlement && inst.providerRef) {
+    if ((inst.method === "USDT" || inst.method === "USDC") && adapter?.listStablecoinDeposits) {
+      // "I've paid" on a stablecoin: look at the rail's deposit list right now rather than
+      // waiting for the next tick — the deposit is matched to THIS address via the chain.
+      await reconcileStablecoinDeposits().catch(() => {});
+    } else if (adapter?.confirmSettlement && inst.providerRef) {
       // REAL rail (IBEX): settle ONLY if the rail confirms the crypto
       // actually arrived. Tapping "I've paid" without paying does nothing; a genuine
       // payment also auto-settles via the webhook + reconcile without any tap.

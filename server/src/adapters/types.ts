@@ -21,9 +21,25 @@ export interface InstructionRequest {
 }
 
 /** Normalised inbound event parsed from a provider webhook. */
+export interface StablecoinDeposit {
+  /** The rail's own transaction id — the dedupe key (Payment.inboundEventIds). */
+  id: string;
+  asset: "USDT" | "USDC";
+  /** Whole-token units (1.81 = 1.81 USDC). */
+  amount: number;
+  /** Ethereum tx hash; null when the rail did not report one. */
+  txHash: string | null;
+  settledAt: string;
+}
+
 export interface RailEvent {
   /** Matches PayInstruction.providerRef (LN payment hash / address). */
   providerRef: string;
+  /** Set for an ERC-20 stablecoin deposit. IBEX reports those WITHOUT the receive address
+   *  (only the account and the tx hash), so providerRef cannot match a payment; the webhook
+   *  handler hands such events to the stablecoin reconcile, which resolves the address from
+   *  the chain. */
+  stablecoin?: "USDT" | "USDC";
   kind: "detected" | "confirmed";
   /** Actual amount received, in asset units (for under/overpayment checks). */
   amount?: number;
@@ -85,6 +101,10 @@ export interface RailAdapter {
    *  and (b) reconcile lost webhooks. Return null when it can't be determined (e.g. an
    *  on-chain address). A rail with no pollable status (the sandbox) omits this. */
   confirmSettlement?(providerRef: string): Promise<SettlementStatus | null>;
+  /** OPTIONAL: completed ERC-20 stablecoin deposits on the rail's stablecoin accounts,
+   *  newest first, each with the on-chain tx hash. The stablecoin reconcile settles from
+   *  this list, so a deposit lands even when its webhook never arrives. */
+  listStablecoinDeposits?(): Promise<StablecoinDeposit[]>;
 
   /** OPTIONAL crypto-OUTBOUND (refund a sender / treasury sweep). Pays a BOLT11 invoice
    *  from the rail's wallet; `amountMsat` is required for an amount-less invoice. A rail

@@ -611,7 +611,16 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         </a>
       )}
       {!demoMode && (method === "USDT" || method === "USDC") && (
-        <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
+        <>
+          <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, color: "var(--ink)", lineHeight: 1.45 }}>⚠ {t("erc20_only")}</div>
+          {/* Exchanges batch withdrawals (a Coinbase one took 29 min before it even left). The
+              address outlives the price lock and settlement reads the chain, so the honest
+              message is "it will land, keep or close this page" — not "hurry". */}
+          <details style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 650, color: "var(--ink)" }}>{t("exchange_delay_title")}</summary>
+            <div style={{ marginTop: 6 }}>{t("exchange_delay_sub")}</div>
+          </details>
+        </>
       )}
 
       {lockPassed && addressBased && (

@@ -1002,6 +1002,12 @@ function PayStep({
               <Body style={{ flex: 1, color: t.text }}>{tr('erc20_only')}</Body>
             </View>
           ) : null}
+          {pi.method === 'USDT' || pi.method === 'USDC' ? (
+            <View style={{ gap: 4, marginTop: Spacing.two }}>
+              <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('exchange_delay_title')}</Body>
+              <Body muted style={{ fontSize: 12.5 }}>{tr('exchange_delay_sub')}</Body>
+            </View>
+          ) : null}
         </>
       )}
 

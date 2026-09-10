@@ -86,11 +86,13 @@ async function main() {
     const ev = ibexAdapter.parseEvent({ transaction: { id: "tx_oc_2", transactionTypeId: 7, address: "bc1qpendingaddr", status: "mempool" } });
     ok("on-chain mempool → detected by address", ev?.kind === "detected" && ev.providerRef === "bc1qpendingaddr");
   }
-  // Stablecoin (USDT currencyId 29) confirmed → providerRef = 0x address, amount = base units / 1e6.
+  // Stablecoin (USDT currencyId 29) confirmed → providerRef = 0x address, amount in WHOLE tokens
+  // (verified against a live IBEX deposit: 1.81 USDC is reported as 1.81, not 1810000).
   {
-    const ev = ibexAdapter.parseEvent({ transaction: { id: "tx_usdt_1", currencyId: 29, address: "0xAbC123", amount: 5_000_000, settledAt: "2026-01-01T00:00:00Z" } });
+    const ev = ibexAdapter.parseEvent({ transaction: { id: "tx_usdt_1", currencyId: 29, address: "0xAbC123", amount: 5, settledAt: "2026-01-01T00:00:00Z" } });
     ok("USDT deposit → providerRef=0x addr, confirmed", ev?.providerRef === "0xAbC123" && ev.kind === "confirmed");
-    ok("USDT amount base-units→USDT (÷1e6)", ev?.amount === 5, String(ev?.amount));
+    ok("USDT amount is taken as whole tokens (5 = 5 USDT)", ev?.amount === 5, String(ev?.amount));
+    ok("the event is flagged as a stablecoin deposit", ev?.stablecoin === "USDT", String(ev?.stablecoin));
   }
   ok("no transaction → null", ibexAdapter.parseEvent({}) === null);
   ok("no providerRef (no id/addr) → null", ibexAdapter.parseEvent({ transaction: { invoice: { receiveMsat: 1000 } } }) === null);

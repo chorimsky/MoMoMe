@@ -58,6 +58,10 @@ export const config = {
     // both on Ethereum/ERC-20.
     usdtAccountId: secret("IBEX_USDT_ACCOUNT_ID"),
     usdcAccountId: secret("IBEX_USDC_ACCOUNT_ID"),
+    /** Ethereum JSON-RPC used to read the receipt of a stablecoin deposit and find WHICH of
+     *  our receive addresses it paid — IBEX reports a deposit by tx hash only (see
+     *  core/stablecoinReconcile.ts). Any mainnet RPC that serves eth_getTransactionReceipt. */
+    ethRpcUrl: env("ETH_RPC_URL", "https://ethereum-rpc.publicnode.com"),
     webhookSecret: secret("IBEX_WEBHOOK_SECRET"),
     apiUrl: env("IBEX_API_URL", sandbox ? "https://ibexhub-api.sandbox.poweredbyibex.io" : "https://ibexhub-api.poweredbyibex.io"),
     authUrl: env("IBEX_AUTH_URL", sandbox ? "https://auth.hub.sandbox.poweredbyibex.io/oauth/token" : "https://auth.hub.poweredbyibex.io/oauth/token"),

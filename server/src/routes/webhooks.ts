@@ -11,6 +11,7 @@ import { markDetected, confirmInbound, recordUnattributedInbound } from "../core
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
+import { reconcileStablecoinDeposits } from "../core/stablecoinReconcile.js";
 
 export const webhooks = Router();
 
@@ -77,8 +78,16 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
 
   const event = adapter.parseEvent(parsed);
   if (!event) return res.json({ ok: true, ignored: true });
-
   const payment = await store().findByProviderRef(event.providerRef);
+  // An ERC-20 stablecoin deposit arrives WITHOUT the receive address (IBEX reports account +
+  // tx hash — verified live), so it cannot match a payment by providerRef. Ack, then let the
+  // stablecoin reconcile settle it from the rail's deposit list and the chain receipt. (If a
+  // rail ever does include the address, the match above wins and the normal path runs.)
+  if (!payment && event.stablecoin && adapter.listStablecoinDeposits) {
+    res.json({ ok: true, deferred: "stablecoin" });
+    background(reconcileStablecoinDeposits());
+    return;
+  }
   if (!payment) {
     // Money landed on something we issued and there is no payment to attach it to. This
     // used to be a bare 200 — no ledger entry, no log, nothing an operator could see, while

@@ -46,7 +46,7 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
 /** One USDC deposit, as IBEX reports it. `txId` identifies THIS deposit. */
 const deposit = (txId: string, usdc: number) => JSON.stringify({
   secret: "test-webhook-secret",
-  transaction: { id: txId, currencyId: 30, address: ADDR, amount: Math.round(usdc * 1e6), status: "settled", settledAt: new Date().toISOString() },
+  transaction: { id: txId, currencyId: 30, address: ADDR, amount: usdc, status: "settled", settledAt: new Date().toISOString() },
 });
 
 async function main() {

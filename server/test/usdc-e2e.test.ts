@@ -36,6 +36,13 @@ let minted = 0;
 const addrFor = (n: number) => `0x${n.toString(16).padStart(40, "a")}`;
 const calls: string[] = [];
 
+const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const pad = (addr: string) => "0x" + addr.slice(2).toLowerCase().padStart(64, "0");
+/** Deposits IBEX "has seen": pushed by the test before a webhook (or a tick) is fired. */
+const deposits: Array<{ id: string; usdc: number; txHash: string; to: string }> = [];
+let txn = 0;
+const seeDeposit = (to: string, usdc: number) => { const id = `ibex-usdc-tx-${++txn}`; deposits.push({ id, usdc, txHash: "0x" + txn.toString(16).padStart(64, "b"), to: to.toLowerCase() }); return id; };
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: unknown, init?: unknown) => {
   const url = String((input as { url?: string })?.url ?? input);
@@ -46,7 +53,21 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
     if (url.includes("/crypto/receive-infos")) {
       return J({ id: `recv-${++minted}`, type: "ethereum", data: { address: addrFor(minted) } });
     }
+    // The deposit list + details, exactly as IBEX serves them: the list carries the
+    // account and the amount in whole tokens, never the address; /details adds the tx hash.
+    if (url.includes("/transactions?")) return J({ transactions: deposits.map((d) => ({ id: d.id, currencyId: 30, transactionTypeId: 9, status: "completed", amount: d.usdc, settledAt: new Date().toISOString(), accountId: "usdc-account" })) });
+    const det = url.match(/\/v2\/transaction\/([^/]+)\/details/);
+    if (det) { const d = deposits.find((x) => x.id === det[1]); return d ? J({ networkId: d.txHash, link: "" }) : J({}, 404); }
     return J({}, 404);
+  }
+  // The Ethereum RPC: the receipt of a batched exchange withdrawal — many USDC transfers to
+  // strangers, ours among them.
+  if (url.includes("ethereum-rpc.publicnode.com")) {
+    const body = JSON.parse(String((init as { body?: string })?.body ?? "{}")) as { params?: string[] };
+    const d = deposits.find((x) => x.txHash === body.params?.[0]);
+    if (!d) return J({ jsonrpc: "2.0", id: 1, result: null });
+    const usdcLog = (to: string, usdc: number) => ({ address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", topics: [TRANSFER, pad("0x7830c87c02e56aff27fa8ab1241711331fa86f43"), pad(to)], data: "0x" + BigInt(Math.round(usdc * 1e6)).toString(16).padStart(64, "0") });
+    return J({ jsonrpc: "2.0", id: 1, result: { status: "0x1", logs: [usdcLog("0x" + "1".repeat(40), 370), usdcLog("0x" + "2".repeat(40), 37310.799673), usdcLog(d.to, d.usdc), usdcLog("0x" + "3".repeat(40), 4999.848016)] } });
   }
   // FX venues — fixed prices so the assertions are about our code, not live markets.
   if (url.includes("coinbase.com") && url.includes("BTC-USD")) return J({ data: { amount: "65000.00" } });
@@ -55,12 +76,14 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
   return realFetch(input as RequestInfo, init as RequestInit);
 }) as typeof fetch;
 
-/** A USDC deposit exactly as IBEX reports it: currencyId 30, ERC-20 base units (6 dp). */
+/** A USDC deposit webhook exactly as IBEX sends it (verified live 2026-09-10): currencyId
+ *  30, amount in WHOLE tokens, and NO receive address — only the account. The deposit is
+ *  also visible on the rail's transaction list, which is where settlement reads it from. */
 const depositBody = (address: string, usdc: number) => JSON.stringify({
   secret: "test-webhook-secret",
   transaction: {
-    id: `ibex-usdc-tx-${address.slice(-4)}`, currencyId: 30, address,
-    amount: Math.round(usdc * 1e6), status: "settled", settledAt: new Date().toISOString(),
+    id: seeDeposit(address, usdc), currencyId: 30, transactionTypeId: 9, accountId: "usdc-account",
+    amount: usdc, status: "completed", settledAt: new Date().toISOString(),
   },
 });
 
@@ -139,8 +162,11 @@ async function main() {
     // A deposit's providerRef is an ADDRESS, not a transaction id. Re-querying
     // /v2/transaction/{address} cannot answer, and a rail that replies {settled:false}
     // rather than 404 would silently drop the settlement — so we must not ask at all.
-    ok("no /v2/transaction re-query for a deposit (address is not a txn id)",
-      !calls.slice(before).some((c) => c.includes("/transaction/")), calls.slice(before).join(" "));
+    // (The deposit's OWN id is asked for its /details — that is where the tx hash lives.)
+    ok("no /v2/transaction re-query by address (address is not a txn id)",
+      !calls.slice(before).some((c) => c.includes(`/transaction/${pi.code}`)), calls.slice(before).join(" "));
+    ok("the deposit was matched to THIS address through the chain receipt",
+      calls.slice(before).some((c) => c.includes("/details")), calls.slice(before).join(" "));
 
     // 6. The money invariant.
     const led = await get(`/api/ledger/${pay.id}`) as Array<{ account: string; direction: string; amount: number; currency: string }>;
@@ -154,13 +180,14 @@ async function main() {
 
     // 7. Providers retry. A replayed deposit must not pay out twice.
     const legs = led.length;
-    await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: depositBody(pi.code, pi.amount) });
+    const replay = JSON.stringify({ secret: "test-webhook-secret", transaction: { id: deposits[0].id, currencyId: 30, transactionTypeId: 9, accountId: "usdc-account", amount: pi.amount, status: "completed", settledAt: new Date().toISOString() } });
+    await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: replay });
     await new Promise((res) => setTimeout(res, 800));
     const led2 = await get(`/api/ledger/${pay.id}`) as unknown[];
     ok("duplicate deposit webhook does not re-post the ledger", led2.length === legs, `${legs} → ${led2.length}`);
 
     // 8. Underpayment guard — a deposit smaller than the locked amount must never pay the
-    //    full fiat out. (Base units ÷ 1e6 is how the amount is read off the event.)
+    //    full fiat out. (The chain receipt is the amount of record, in whole tokens.)
     r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 30000, method: "USDC", country: "CM" }) });
     const q2 = await r.json() as { id: string };
     r = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({

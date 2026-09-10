@@ -94,7 +94,7 @@ export const STRINGS = {
   net_erc20: ['Ethereum · ERC-20 only', 'Ethereum · ERC-20 uniquement'],
   m_you_send: ['You send', 'Vous envoyez'],
   m_eta_secs: ['Seconds', 'Quelques secondes'],
-  m_eta_mins: ['2–5 minutes', '2–5 minutes'],
+  m_eta_mins: ['2–5 min · up to 60 min from an exchange', '2–5 min · jusqu\'à 60 min depuis une plateforme'],
   m_eta_slow: ['10–60 minutes', '10–60 minutes'],
   m_net_fee: ['+ network fee from your wallet', '+ frais de réseau depuis votre portefeuille'],
   m_indicative: ['Amounts are indicative — your rate is locked next.', 'Montants indicatifs — votre taux est fixé à l\'étape suivante.'],
@@ -106,6 +106,8 @@ export const STRINGS = {
   // Shown for USDT/USDC only. Both are minted as ERC-20 receive addresses, and a deposit
   // sent on Tron/BSC/Polygon to an Ethereum address is unrecoverable — the web pay screen
   // has always said this, the app did not.
+  exchange_delay_title: ['Sending from an exchange (Coinbase, Binance…)?', 'Vous envoyez depuis une plateforme (Coinbase, Binance…) ?'],
+  exchange_delay_sub: ['Exchanges batch withdrawals, so yours can take 30–60 minutes to leave. This address stays yours, we watch it, and the Mobile Money is delivered the moment the transfer lands — even if you close the app.', 'Les plateformes regroupent les retraits : le vôtre peut mettre 30 à 60 minutes à partir. Cette adresse reste la vôtre, nous la surveillons, et le Mobile Money est livré dès que le transfert arrive — même si vous fermez l\'app.'],
   erc20_only: ['Ethereum (ERC-20) only — sending on any other network will lose the funds.', 'Ethereum (ERC-20) uniquement — un envoi sur un autre réseau entraîne la perte des fonds.'],
   waiting_auto: ['Waiting for your payment — this updates automatically.', 'En attente de votre paiement — mise à jour automatique.'],
 

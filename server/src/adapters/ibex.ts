@@ -20,7 +20,7 @@ import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC, METHOD_ASSET, btcToInvoiceMsat, msatToBtc, lightningQr } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
-import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus } from "./types.js";
+import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus, StablecoinDeposit } from "./types.js";
 
 
 /* ---------- OAuth2 client-credentials token manager (in-flight deduped) ---------- */
@@ -132,6 +132,40 @@ export async function transactionStatus(transactionId: string): Promise<{ settle
   const state = (inv.state?.name ?? "").toUpperCase();
   const failed = !settled && ["CANCEL", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"].includes(state);
   return { settled, failed };
+}
+
+/* ---------- stablecoin deposits (USDT/USDC on Ethereum) ----------
+   What IBEX gives us for an ERC-20 deposit, verified live: `GET /transactions` lists it as
+   {currencyId 29|30, transactionTypeId 9 "Crypto Receive", status "completed", amount in
+   whole tokens} with NO receive address and NO receive-info id; `GET /v2/transaction/{id}/
+   details` adds `networkId` = the Ethereum tx hash. So the only way to learn WHICH of our
+   addresses was paid is the chain itself — core/stablecoinReconcile.ts reads the receipt.
+   The list endpoint ignores its accountId filter and caps limit at 25, so filter here. */
+const txHashCache = new Map<string, string | null>();
+
+async function depositTxHash(txId: string): Promise<string | null> {
+  if (txHashCache.has(txId)) return txHashCache.get(txId)!;
+  const res = await ibex(`/v2/transaction/${txId}/details`, { method: "GET" });
+  if (!res.ok) return null; // not cached: try again next tick
+  const d = (await res.json()) as { networkId?: string | null };
+  const hash = typeof d.networkId === "string" && /^0x[0-9a-fA-F]{64}$/.test(d.networkId) ? d.networkId.toLowerCase() : null;
+  txHashCache.set(txId, hash);
+  return hash;
+}
+
+export async function listStablecoinDeposits(): Promise<StablecoinDeposit[]> {
+  if (!config.ibex.usdtAccountId && !config.ibex.usdcAccountId) return [];
+  const res = await ibex(`/transactions?limit=25`, { method: "GET" });
+  if (!res.ok) throw new Error(`IBEX transactions list failed: ${res.status}`);
+  const d = (await res.json()) as { transactions?: Array<{ id: string; currencyId?: number; transactionTypeId?: number; status?: string; amount?: number; settledAt?: string | null; createdAt?: string; accountId?: string }> };
+  const out: StablecoinDeposit[] = [];
+  for (const t of d.transactions ?? []) {
+    const asset = t.currencyId === 29 ? "USDT" : t.currencyId === 30 ? "USDC" : null;
+    if (!asset || t.transactionTypeId !== 9 || (t.status ?? "").toLowerCase() !== "completed") continue;
+    if (typeof t.amount !== "number" || t.amount <= 0) continue;
+    out.push({ id: t.id, asset, amount: t.amount, txHash: await depositTxHash(t.id), settledAt: t.settledAt ?? t.createdAt ?? new Date().toISOString() });
+  }
+  return out;
 }
 
 export interface PayResult { transactionId: string; settled: boolean; feesMsat?: number; }
@@ -438,14 +472,20 @@ export const ibexAdapter: RailAdapter = {
     // until verified against a real deposit; assuming base-units (÷1e6) fails SAFE —
     // if IBEX reports a larger unit the guard under-counts → MANUAL_REVIEW, never overpay.
     let amount: number | undefined;
-    if (isStable) amount = typeof t.amount === "number" ? t.amount / 1e6 : undefined;
+    // VERIFIED against a live deposit (2026-09-10, USDC tx 24eac4e5…): IBEX reports a
+    // stablecoin `amount` in WHOLE TOKENS (1.81 = 1.81 USDC), not ERC-20 base units. The
+    // old ÷1e6 turned every real deposit into dust and would have held it as underpaid.
+    if (isStable) amount = typeof t.amount === "number" ? t.amount : undefined;
     else amount = receivedMsat !== undefined ? msatToBtc(receivedMsat) : typeof t.amount === "number" ? msatToBtc(t.amount) : undefined;
     // The transaction id identifies THIS deposit. For Lightning it equals providerRef; for
     // a deposit method providerRef is the address, so this is the only thing that tells a
     // webhook replay apart from a second payment to the same address.
     const eventId = t.id ?? t.infoId;
-    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount, ...(eventId ? { eventId } : {}) };
+    const stablecoin = t.currencyId === 29 ? "USDT" as const : t.currencyId === 30 ? "USDC" as const : undefined;
+    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount, ...(eventId ? { eventId } : {}), ...(stablecoin ? { stablecoin } : {}) };
   },
+
+  listStablecoinDeposits: () => listStablecoinDeposits(),
 
   // Authoritative re-query used by the webhook handler + reconcile backstop so a
   // forged/replayed "settled" webhook can never drive a real payout, and a lost

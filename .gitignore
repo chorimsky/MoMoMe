@@ -32,3 +32,7 @@ vercel-env/
 mobile/.*.sh
 mobile/.*.log
 mobile/.cfgerr.txt
+
+# FCM service-account key + Firebase app config (push credentials)
+mobile/.secrets/
+mobile/google-services.json

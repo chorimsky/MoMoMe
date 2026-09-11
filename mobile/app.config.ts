@@ -69,6 +69,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Must match the package registered for this app in Google Play Console
     // (the Play listing expects "momome.app"). iOS keeps com.momome.app.
     package: 'momome.app',
+    // Firebase app config for push (FCM). On EAS it arrives as the GOOGLE_SERVICES_JSON file
+    // secret; locally the gitignored ./google-services.json. Absent → build without push.
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? (require('node:fs').existsSync('./google-services.json') ? './google-services.json' : undefined),
     adaptiveIcon: {
       backgroundColor: '#FFC92E',
       foregroundImage: './assets/images/android-icon-foreground.png',

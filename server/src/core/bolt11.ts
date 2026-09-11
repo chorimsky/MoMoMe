@@ -23,7 +23,9 @@ export function bolt11AmountMsat(bolt11: string): number | null {
 }
 
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-// The 5-bit value of the `p` (payment_hash) tagged field — charset index of 'p' = 1.
+// The 5-bit value of the `p` (payment_hash) tagged field — charset index of 'p' = 1;
+// `h` (description_hash) is charset index 23.
+const TAG_DESCRIPTION_HASH = 23;
 const TAG_PAYMENT_HASH = CHARSET.indexOf("p");
 
 /** Regroup a stream of `from`-bit values into `to`-bit values (bech32 convertbits).
@@ -48,7 +50,17 @@ function convertBits(data: number[], from: number, to: number, pad: boolean): nu
  *  tagged fields [tag:1][len:2 big-endian][data:len]; returns the `p` field's 256 bits.
  *  No signature/checksum verification — this is only used as a status-poll key, and
  *  outbound settlement is re-queried authoritatively by the rail. */
+/** The `h` (description_hash) tagged field, hex — what a LUD-06 wallet compares against
+ *  sha256(metadata) before paying. null when the invoice carries none (or can't decode). */
+export function bolt11DescriptionHash(bolt11: string): string | null {
+  return taggedHash(bolt11, TAG_DESCRIPTION_HASH);
+}
+
 export function bolt11PaymentHash(bolt11: string): string | null {
+  return taggedHash(bolt11, TAG_PAYMENT_HASH);
+}
+
+function taggedHash(bolt11: string, wantTag: number): string | null {
   const s = bolt11.trim().toLowerCase();
   const sep = s.lastIndexOf("1");
   if (sep <= 0 || !s.startsWith("ln")) return null;
@@ -68,7 +80,7 @@ export function bolt11PaymentHash(bolt11: string): string | null {
     const len = payload[i + 1] * 32 + payload[i + 2]; // 2-word big-endian length
     const start = i + 3;
     if (start + len > payload.length) break;
-    if (tag === TAG_PAYMENT_HASH && len === 52) { // 52 * 5 = 260 bits → 32 bytes
+    if (tag === wantTag && len === 52) { // 52 * 5 = 260 bits → 32 bytes
       const bytes = convertBits(payload.slice(start, start + len), 5, 8, false);
       if (!bytes || bytes.length < 32) return null;
       return bytes.slice(0, 32).map((b) => b.toString(16).padStart(2, "0")).join("");

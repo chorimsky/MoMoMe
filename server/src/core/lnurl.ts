@@ -77,10 +77,20 @@ export function sendableRangeMsat(): { min: number; max: number } {
 /** LUD-06 metadata array (JSON-encoded). The text/plain line is what the payer's
  *  wallet shows — it names the linked Mobile Money recipient + number. */
 export function lnurlMetadata(opts: { national: string; provider: ProviderId; name?: string | null; address: string }): string {
-  const who = opts.name && opts.name.trim() ? `${opts.name.trim()} · ` : "";
-  const desc = `Pay ${who}${opts.provider} Mobile Money ${opts.national} via MoMo›Me`;
+  // The text/plain line is the ONLY thing an external wallet shows before "Pay": it is the
+  // payer's chance to see that the number belongs to the person they mean. So the registered
+  // account-holder name leads — and when there is none on file, the line says so instead of
+  // looking reassuring. Mobile Money cannot be reversed.
+  const name = opts.name?.trim();
+  const desc = name
+    ? `${name} · ${opts.provider} ${opts.national} · MoMo›Me — check the name is who you mean to pay`
+    : `${opts.provider} ${opts.national} · MoMo›Me — no name on file for this number: check it carefully`;
+  const long = name
+    ? `You are paying ${name}, the registered holder of ${opts.provider} Mobile Money ${opts.national}. Your sats are converted and delivered to that number in seconds. Mobile Money cannot be reversed, so pay only if the name matches the person you intend.`
+    : `You are paying ${opts.provider} Mobile Money ${opts.national}. The operator has not confirmed a name for this number yet, so double-check every digit with the person you intend to pay. Mobile Money cannot be reversed.`;
   const meta: Array<[string, string]> = [
     ["text/plain", desc],
+    ["text/long-desc", long],
     ["text/identifier", opts.address],
   ];
   return JSON.stringify(meta);

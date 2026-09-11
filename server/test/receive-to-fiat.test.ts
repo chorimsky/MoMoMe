@@ -57,8 +57,16 @@ async function main() {
     // The identity layer advertises the address WITH the dial code (237677000789@…) while
     // the LNURL metadata uses the national form. Both must resolve, or the address shown to
     // a customer in the console is one an external wallet cannot pay.
-    const withCc = await getJson(`/.well-known/lnurlp/237${PHONE}`) as { tag?: string };
+    const withCc = await getJson(`/.well-known/lnurlp/237${PHONE}`) as { tag?: string; metadata?: string };
     ok("the dial-code form of the address resolves too", withCc.tag === "payRequest", String(withCc.tag));
+    // What the payer's wallet shows before "Pay" is the confirmation step for a payment
+    // coming from any Lightning wallet in the world: the registered name leads, or the line
+    // says plainly that no name is on file.
+    const meta = JSON.parse(withCc.metadata ?? "[]") as Array<[string, string]>;
+    const plain = meta.find((m) => m[0] === "text/plain")?.[1] ?? "";
+    ok("metadata names the recipient or warns that no name is on file", /check the name is who you mean to pay|no name on file/.test(plain), plain);
+    ok("metadata carries a long description for wallets that show one", meta.some((m) => m[0] === "text/long-desc"));
+    ok("metadata identifier is the canonical Lightning Address", meta.find((m) => m[0] === "text/identifier")?.[1] === `237${PHONE}@momome.xyz`);
 
     // 2. LUD-06: paying it mints a real invoice AND opens a delivery.
     const msat = 2_000_000; // 2000 sat

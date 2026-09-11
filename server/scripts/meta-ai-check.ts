@@ -1,0 +1,21 @@
+/* Live check of the Meta Model API with the service's own env (railway run). Prints results only. */
+import { readFile } from "node:fs/promises";
+import { metaAiConfigured, structured, transcribe } from "../src/adapters/metaAi.js";
+import { oggOpusToWav } from "../src/core/audio.js";
+import { readIntent } from "../src/core/whatsappBot.js";
+console.log("configured:", metaAiConfigured());
+const t0 = Date.now();
+const i1 = await readIntent("Give Nana 5k for the rent, her number is 6 77 00 07 89");
+console.log("intent EN:", JSON.stringify(i1), `${Date.now() - t0} ms`);
+const t1 = Date.now();
+const i2 = await readIntent("envoie cinq mille à six sept sept zéro zéro zéro sept huit neuf");
+console.log("intent FR (dictated digits):", JSON.stringify(i2), `${Date.now() - t1} ms`);
+const i3 = await readIntent("statut MMM-2026-418893 svp");
+console.log("intent status:", JSON.stringify(i3));
+const ogg = await readFile("test/fixtures/voice.ogg");
+const { wav, seconds } = await oggOpusToWav(ogg);
+const t2 = Date.now();
+const tr = await transcribe(wav, { keywords: ["MoMo›Me", "MTN", "Orange"] });
+console.log(`transcribe (${seconds.toFixed(1)}s sine tone, expect empty/no words):`, JSON.stringify(tr), `${Date.now() - t2} ms`);
+const s = await structured<{ ok: boolean }>("Answer with ok=true.", "ping", "ping", { type: "object", additionalProperties: false, properties: { ok: { type: "boolean" } }, required: ["ok"] });
+console.log("structured ping:", JSON.stringify(s));

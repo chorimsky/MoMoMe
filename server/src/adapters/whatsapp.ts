@@ -36,6 +36,20 @@ export function sendTemplate(to: string, name: string, lang: string, params: str
   return post({ to: waDigits(to), type: "template", template: { name, language: { code: lang },
     components: params.length ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }] : [] } });
 }
+/** Download an inbound media object (a voice note): GET /{id} → { url, mime_type }, then the
+ *  bytes from that URL with the same bearer. null when anything is off. */
+export async function downloadMedia(mediaId: string): Promise<{ bytes: Buffer; mime: string } | null> {
+  try {
+    const meta = await fetchT(`${config.whatsapp.apiUrl}/${mediaId}`, { headers: { authorization: `Bearer ${config.whatsapp.accessToken}` } }, 10_000);
+    if (!meta.ok) return null;
+    const j = (await meta.json()) as { url?: string; mime_type?: string; file_size?: number };
+    if (!j.url || (j.file_size ?? 0) > 5_000_000) return null; // a voice note is ~1 KB/s; 5 MB is not one
+    const bin = await fetchT(j.url, { headers: { authorization: `Bearer ${config.whatsapp.accessToken}` } }, 15_000);
+    if (!bin.ok) return null;
+    return { bytes: Buffer.from(await bin.arrayBuffer()), mime: j.mime_type ?? "" };
+  } catch { return null; }
+}
+
 /** Mark an inbound message as read (the two blue ticks) — a courtesy, best-effort. */
 export function markRead(messageId: string): Promise<SendResult> {
   return post({ status: "read", message_id: messageId });

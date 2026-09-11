@@ -1,0 +1,10 @@
+import { readFile } from "node:fs/promises";
+import { transcribe } from "../src/adapters/metaAi.js";
+import { oggOpusToWav } from "../src/core/audio.js";
+import { replyTo } from "../src/core/whatsappBot.js";
+const ogg = await readFile(process.argv[2]);
+const { wav, seconds } = await oggOpusToWav(ogg);
+const t0 = Date.now();
+const tr = await transcribe(wav, { keywords: ["envoie", "envoyer", "recevoir", "francs", "zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "cent", "mille"] });
+console.log(`audio ${seconds.toFixed(1)}s → transcript in ${Date.now() - t0} ms:`, JSON.stringify(tr?.text));
+if (tr) console.log("bot reply:\n" + (await replyTo({ from: "237699000111", kind: "text", text: tr.text })));

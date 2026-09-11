@@ -97,6 +97,14 @@ export const config = {
     templateLang: env("WHATSAPP_TEMPLATE_LANG", "en"),
     apiUrl: env("WHATSAPP_API_URL", "https://graph.facebook.com/v21.0"),
   },
+  /** Meta Model API (Muse) — voice-note transcription and intent parsing for the WhatsApp
+   *  bot. Optional; unset means regex only and "type it" for voice notes. */
+  metaAi: {
+    apiKey: secret("META_AI_API_KEY"),
+    apiUrl: env("META_AI_API_URL", "https://api.meta.ai/v1"),
+    model: env("META_AI_MODEL", "muse-spark-1.3"),
+    asrModel: env("META_AI_ASR_MODEL", "muse-voice-transcribe-1.0"),
+  },
   /** Public Bitcoin explorer (Esplera/mempool API) for reading an on-chain deposit's outputs. */
   btcExplorerUrl: env("BTC_EXPLORER_URL", "https://mempool.space/api").replace(/\/$/, ""),
   /** phoenixd — OUR OWN Lightning node (ACINQ's self-custodial daemon, keys on our volume).

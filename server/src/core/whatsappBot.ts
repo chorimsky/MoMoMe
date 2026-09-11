@@ -22,9 +22,42 @@ import { config } from "../config.js";
 import { store } from "../db/store.js";
 import { resolveRecipient } from "./nameResolver.js";
 import { waDigits } from "./whatsapp.js";
+import { metaAiConfigured, structured, transcribe } from "../adapters/metaAi.js";
+import { downloadMedia } from "../adapters/whatsapp.js";
+import { oggOpusToWav } from "./audio.js";
 
 export type Lang = "en" | "fr";
-export interface Inbound { from: string; text?: string; kind: "text" | "audio" | "image" | "button" | "other"; }
+const VOICE_KEYWORDS = [
+  "MoMo›Me", "MTN", "Orange", "Mobile Money", "XAF", "francs",
+  "envoie", "envoyer", "recevoir", "reçois", "statut", "aide", "send", "receive", "status", "help",
+  "zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "vingt", "cent", "mille",
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "hundred", "thousand",
+];
+export interface Inbound { from: string; text?: string; kind: "text" | "audio" | "image" | "button" | "other"; mediaId?: string; }
+
+/* ---- the model reads the intent; the code decides whether it is payable ----
+   Muse returns constrained JSON — never free text — so a hallucinated field cannot reach a
+   number check it does not pass. Timeout or no key → null → the regex below. */
+interface Intent { intent: "send" | "receive" | "status" | "help" | "other"; amount_xaf: number | null; number: string | null; ref: string | null; language: "en" | "fr" }
+const INTENT_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: {
+    intent: { type: "string", enum: ["send", "receive", "status", "help", "other"] },
+    amount_xaf: { type: ["integer", "null"], description: "Amount in XAF (CFA francs). '5k' = 5000, 'cinq mille' = 5000. null if none." },
+    number: { type: ["string", "null"], description: "The Mobile Money phone number to pay, digits only, as written (with or without country code). null if none." },
+    ref: { type: ["string", "null"], description: "A MoMo›Me payment reference like MMM-2026-000123, or null." },
+    language: { type: "string", enum: ["en", "fr"] },
+  },
+  required: ["intent", "amount_xaf", "number", "ref", "language"],
+};
+const INTENT_SYSTEM = `You read short WhatsApp messages sent to MoMo›Me, a service that pays Mobile Money numbers in Cameroon (MTN / Orange, 9-digit numbers starting with 6, e.g. 677000789 or 237677000789) from crypto. Extract the intent only. "send"/"pay"/"envoyer"/"donner"/"paie" money to a number = send. Asking for their own link or to be paid / "recevoir" / "mon lien" = receive. A reference MMM-YYYY-NNNNNN = status. Greetings/questions = help. Never invent a number or amount that is not in the message. Numbers dictated in words ("six sept sept zéro zéro zéro sept huit neuf") become digits. Amounts in words ("cinq mille", "dix mille", "five thousand") become integers. French message → language fr.`;
+
+export async function readIntent(text: string): Promise<Intent | null> {
+  if (!metaAiConfigured() || !text.trim()) return null;
+  const r = await structured<Intent>(INTENT_SYSTEM, text.slice(0, 500), "momome_intent", INTENT_SCHEMA);
+  if (!r || typeof r !== "object" || !r.intent) return null;
+  return r;
+}
 
 const FR = /\b(envoy|envoi|recev|reçoi|recoi|mon lien|statut|aide|bonjour|salut|payer|paie)/i;
 export function detectLang(text: string): Lang { return FR.test(text) ? "fr" : "en"; }
@@ -81,12 +114,79 @@ const STATE_LABEL: Record<string, { en: string; fr: string }> = {
 
 /** One inbound → one reply. Exported for tests; the webhook calls it. */
 export async function replyTo(m: Inbound): Promise<string> {
-  if (m.kind === "audio") return T[detectLang("")].audio + "\n\n" + T.fr.audio;
+  if (m.kind === "audio") return replyToVoice(m);
   if (m.kind !== "text" && m.kind !== "button") return T.en.other;
-  const text = (m.text ?? "").trim();
-  const lang = detectLang(text);
+  return replyToText((m.text ?? "").trim(), m.from);
+}
+
+/** A voice note: download → WAV → transcribe → read back what we heard, then answer it.
+ *  Reading it back matters: "sept" and "cent" are one bad microphone apart. */
+async function replyToVoice(m: Inbound): Promise<string> {
+  const typed = T.en.audio + "\n\n" + T.fr.audio;
+  if (!metaAiConfigured() || !m.mediaId) return typed;
+  const media = await downloadMedia(m.mediaId);
+  if (!media) return typed;
+  let wav: Buffer;
+  try { wav = (await oggOpusToWav(media.bytes)).wav; } catch { return typed; }
+  // Vocabulary biasing is what makes dictated numbers survive: measured live, the same
+  // clip went from "and wasink mill Franks six" to "cinq mille francs, six sept sept zéro
+  // zéro zéro sept huit neuf" once the number words were in the list.
+  const heard = await transcribe(wav, { keywords: VOICE_KEYWORDS });
+  if (!heard) return typed;
+  const lang = detectLang(heard.text);
+  const echo = lang === "fr" ? `J'ai entendu : « ${heard.text} »` : `I heard: "${heard.text}"`;
+  const fix = lang === "fr" ? "Si ce n'est pas ça, écrivez-le." : "If that is wrong, type it.";
+  return `${echo}\n\n${await replyToText(heard.text, m.from)}\n\n${fix}`;
+}
+
+async function replyToText(text: string, from: string): Promise<string> {
+  const origin = config.webOrigin;
+  // 1. The model, when configured: understands "give Nana 5k for the rent, 677…" and words
+  //    for numbers. Its output is only a proposal — every field goes through the same checks.
+  const ai = await readIntent(text);
+  if (ai) {
+    const lang = ai.language;
+    const t = T[lang];
+    if (ai.intent === "status" && ai.ref) {
+      const ref = ai.ref.toUpperCase();
+      const p = await store().findPaymentByRef(ref);
+      return p ? t.status(ref, STATE_LABEL[p.state]?.[lang] ?? p.state.toLowerCase(), p.xaf) : t.statusNone(ref);
+    }
+    if (ai.intent === "send") {
+      if (!ai.number) return t.help;
+      const digits = waDigits(ai.number);
+      const country = countryOf(digits);
+      const chk = checkPhone(digits, country);
+      if (!chk.ok) return t.badNumber(ai.number);
+      const amt = ai.amount_xaf ?? 0;
+      if (!amt || amt < MIN_XAF || amt > MAX_XAF) return t.badAmount;
+      const link = receiveLink(origin, `${COUNTRIES[country].dial.replace(/\D/g, "")}${chk.local}`, amt);
+      const who = await resolveRecipient(chk.local, country).then((r) => r.name).catch(() => undefined);
+      return who ? t.pay(amt, `${who} · ${chk.provider} ${chk.local}`, link) : t.payNoName(amt, `${chk.provider} ${chk.local}`, link);
+    }
+    if (ai.intent === "receive") {
+      const me = waDigits(from);
+      const country = countryOf(me);
+      const chk = checkPhone(me, country);
+      if (!chk.ok) return t.receiveBad;
+      const amt = ai.amount_xaf && ai.amount_xaf >= MIN_XAF && ai.amount_xaf <= MAX_XAF ? ai.amount_xaf : undefined;
+      return t.receive(receiveLink(origin, `${COUNTRIES[country].dial.replace(/\D/g, "")}${chk.local}`, amt), amt);
+    }
+    // help / other: let the rules have a look first (a command the model did not
+    // recognise is still a command); the menu is the rules' own fallback, in the
+    // language the model heard.
+    return replyByRules(text, from, ai.intent === "help" ? ai.language : undefined);
+  }
+  // 2. The regex bot — always there.
+  return replyByRules(text, from);
+}
+
+function replyByRules(text: string, from: string, langHint?: Lang): Promise<string> {
+  return (async () => {
+  const lang = langHint ?? detectLang(text);
   const t = T[lang];
   const origin = config.webOrigin;
+  const m = { from };
 
   // status MMM-2026-000123
   const ref = text.match(/MMM-\d{4}-\d{4,}/i)?.[0]?.toUpperCase();
@@ -121,6 +221,7 @@ export async function replyTo(m: Inbound): Promise<string> {
   }
 
   return t.help;
+  })();
 }
 
 /** Meta's webhook payload → the messages inside it (there can be several, or none). */
@@ -132,7 +233,7 @@ export function inboundMessages(body: unknown): Array<Inbound & { id?: string }>
     if (!from) continue;
     const type = String(msg.type ?? "");
     if (type === "text") out.push({ id: String(msg.id ?? ""), from, kind: "text", text: String((msg.text as { body?: string })?.body ?? "") });
-    else if (type === "audio" || type === "voice") out.push({ id: String(msg.id ?? ""), from, kind: "audio" });
+    else if (type === "audio" || type === "voice") out.push({ id: String(msg.id ?? ""), from, kind: "audio", mediaId: String(((msg.audio ?? msg.voice) as { id?: string } | undefined)?.id ?? "") || undefined });
     else if (type === "interactive" || type === "button") {
       const i = msg.interactive as { button_reply?: { title?: string }; list_reply?: { title?: string } } | undefined;
       const b = msg.button as { text?: string } | undefined;

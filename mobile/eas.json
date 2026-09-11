@@ -54,7 +54,7 @@
   "submit": {
     "production": {
       "android": {
-        "serviceAccountKeyPath": "./google-play-key.json",
+        "serviceAccountKeyPath": "./.secrets/fcm-service-account.json",
         "track": "internal"
       },
       "ios": {

@@ -130,6 +130,7 @@ export const STRINGS = {
   cr_proceed: ['No, this is correct — send it', 'Non, c’est correct — envoyer'],
   lock_passed_title: ['Price lock passed — this address still works', 'Le taux bloqué a expiré — cette adresse reste valable'],
   lock_passed_sub: ["If you already sent, it will be credited at the rate when it arrives. If you haven't, refresh for a current price.", "Si vous avez déjà envoyé, ce sera crédité au taux du moment de l'arrivée. Sinon, actualisez pour un prix à jour."],
+  lock_passed_stable_sub: ["If you already sent the exact amount, the recipient still gets the quoted Mobile Money — dollars do not move against XAF the way Bitcoin does. If you haven't sent yet, refresh for a current price.", "Si vous avez déjà envoyé le montant exact, le destinataire reçoit toujours le Mobile Money annoncé — le dollar ne bouge pas face au XAF comme le Bitcoin. Sinon, actualisez pour un prix à jour."],
   refresh_price: ['Refresh price', 'Actualiser le prix'],
   cashapp_title: ['Paying from the USA with Cash App?', 'Vous payez depuis les États-Unis avec Cash App ?'],
   cashapp_steps: ['Tap $ › the QR scanner › scan this code or Paste Address › choose Cash or Bitcoin › Confirm and pay. Cash App converts your dollars for you.', "Touchez $ › le scanner QR › scannez ce code ou Coller l'adresse › choisissez Cash ou Bitcoin › Confirmer et payer. Cash App convertit vos dollars pour vous."],

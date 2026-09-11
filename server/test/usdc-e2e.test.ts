@@ -79,10 +79,12 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
 /** A USDC deposit webhook exactly as IBEX sends it (verified live 2026-09-10): currencyId
  *  30, amount in WHOLE tokens, and NO receive address — only the account. The deposit is
  *  also visible on the rail's transaction list, which is where settlement reads it from. */
-const depositBody = (address: string, usdc: number) => JSON.stringify({
-  secret: "test-webhook-secret",
+const depositBody = (address: string, usdc: number, opts: { seen?: boolean; secret?: string } = {}) => JSON.stringify({
+  secret: opts.secret ?? "test-webhook-secret",
   transaction: {
-    id: seeDeposit(address, usdc), currencyId: 30, transactionTypeId: 9, accountId: "usdc-account",
+    // A forged/rejected webhook describes a deposit the rail never saw — only a genuine one
+    // is also on the rail's transaction list (seen: true, the default).
+    id: opts.seen === false ? `forged-${address.slice(-4)}` : seeDeposit(address, usdc), currencyId: 30, transactionTypeId: 9, accountId: "usdc-account",
     amount: usdc, status: "completed", settledAt: new Date().toISOString(),
   },
 });
@@ -145,10 +147,10 @@ async function main() {
     //    real Mobile-Money payout.
     r = await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: JSON.stringify({ secret: "wrong", transaction: { id: "x", currencyId: 30, address: pi.code, amount: 1 } }) });
     ok("wrong shared secret → 401", r.status === 401, String(r.status));
-    r = await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.1" }, body: depositBody(pi.code, pi.amount) });
+    r = await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.1" }, body: depositBody(pi.code, pi.amount, { seen: false }) });
     ok("sender IP not on IBEX's allowlist → 401", r.status === 401, String(r.status));
     r = await fetch(`${base}/webhooks/ibex`, { method: "POST",
-      headers: { "content-type": "application/json", "x-forwarded-for": "35.243.242.121, 203.0.113.9" }, body: depositBody(pi.code, pi.amount) });
+      headers: { "content-type": "application/json", "x-forwarded-for": "35.243.242.121, 203.0.113.9" }, body: depositBody(pi.code, pi.amount, { seen: false }) });
     ok("allowlisted IP PREPENDED to the XFF chain → 401 (not spoofable)", r.status === 401, String(r.status));
 
     // 5. The deposit lands.

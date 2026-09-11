@@ -19,7 +19,7 @@
    right units, and the RPC being down simply means "next tick".
    ============================================================ */
 import type { Payment } from "../../../shared/types.js";
-import { OVERPAY_TOLERANCE, confirmInbound, markDetected, recordUnattributedInbound } from "./stateMachine.js";
+import { OVERPAY_TOLERANCE, confirmInbound, markDetected, parkForReview, recordUnattributedInbound } from "./stateMachine.js";
 import { activeRails } from "../adapters/index.js";
 import { store } from "../db/store.js";
 import { listUnattributed } from "./unattributed.js";
@@ -30,9 +30,9 @@ import { erc20TransfersInTx } from "./erc20.js";
 const done = new Set<string>();
 let inflight: Promise<void> | null = null;
 
+const isStablecoin = (p: Payment): boolean => p.payInstruction.method === "USDT" || p.payInstruction.method === "USDC";
 const openForDeposit = (p: Payment): boolean =>
-  (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED") &&
-  (p.payInstruction.method === "USDT" || p.payInstruction.method === "USDC");
+  (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED") && isStablecoin(p);
 
 /** One pass over every rail that can list stablecoin deposits. Concurrent callers share a
  *  pass (the webhook handler, the 30 s tick and "I've paid" all call this). */
@@ -54,18 +54,36 @@ async function runPass(): Promise<void> {
     for (const u of listUnattributed()) if (u.eventId) seenIds.add(u.eventId);
     for (const d of deposits) {
       if (done.has(d.id) || seenIds.has(d.id)) { done.add(d.id); continue; }
-      const open = payments.filter(openForDeposit).filter((p) => p.payInstruction.method === d.asset && p.payInstruction.provider === rail.name);
+      const mine = payments.filter(isStablecoin).filter((p) => p.payInstruction.provider === rail.name);
+      const open = mine.filter(openForDeposit).filter((p) => p.payInstruction.method === d.asset);
       // 1. The chain says which address was paid. Exact, and immune to batched withdrawals.
       const transfers = d.txHash ? await erc20TransfersInTx(d.txHash) : [];
       if (transfers === null) { console.warn(`[stablecoin] ${d.asset} ${d.amount} tx ${d.txHash} — receipt not readable yet, retrying next tick`); continue; }
-      const byAddress = open.find((p) => transfers.some((t) => t.asset === d.asset && t.to === p.payInstruction.code.toLowerCase()));
-      if (byAddress) {
-        const t = transfers.find((x) => x.asset === d.asset && x.to === byAddress.payInstruction.code.toLowerCase())!;
-        console.log(`[stablecoin] ${byAddress.ref} ← ${t.amount} ${d.asset} (${rail.name} ${d.id}, tx ${d.txHash}) — settling`);
-        await markDetected(byAddress);
-        await confirmInbound(byAddress, t.amount, d.id, byAddress.payInstruction.providerRef);
-        done.add(d.id);
-        continue;
+      // ANY of our stablecoin payments, not only the open ones: a second deposit to an
+      // address that already settled belongs to that payment (confirmInbound books it as a
+      // refund owed and says so on the payment), and a USDC transfer to a USDT address is
+      // that payment's money too — held, not lost.
+      const hit = mine.map((p) => ({ p, t: transfers.find((x) => x.to === p.payInstruction.code.toLowerCase()) })).find((h) => h.t);
+      if (hit) {
+        const { p, t } = hit as { p: Payment; t: NonNullable<typeof hit.t> };
+        if (t.asset !== p.payInstruction.method) {
+          // Same address, other token. IBEX keeps one account per currency, so the credit
+          // may not even have landed where we can spend it. An operator settles this one.
+          if (openForDeposit(p)) {
+            console.warn(`[stablecoin] ${p.ref} ← ${t.amount} ${t.asset} sent to its ${p.payInstruction.method} address (tx ${d.txHash}) — holding for review`);
+            p.inboundEventIds = [...(p.inboundEventIds ?? []), d.id];
+            await store().putPayment(p);
+            await parkForReview(p, `${t.amount} ${t.asset} was sent to this payment's ${p.payInstruction.method} address (tx ${d.txHash}) — wrong token; confirm the credit with the rail, then settle or refund`);
+            done.add(d.id);
+            continue;
+          }
+        } else {
+          console.log(`[stablecoin] ${p.ref} ← ${t.amount} ${d.asset} (${rail.name} ${d.id}, tx ${d.txHash}) — ${openForDeposit(p) ? "settling" : "already settled: booking as a duplicate"}`);
+          if (openForDeposit(p)) await markDetected(p);
+          await confirmInbound(p, t.amount, d.id, p.payInstruction.providerRef);
+          done.add(d.id);
+          continue;
+        }
       }
       // 2. No receipt to read (rail gave no hash) → the amount alone, ONLY when it names exactly
       //    one open payment on this asset. Two candidates is an operator's call, not a guess.

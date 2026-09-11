@@ -237,7 +237,7 @@ async function releaseReservation(p: Payment): Promise<void> {
   ]);
 }
 
-async function parkForReview(p: Payment, reason: string): Promise<void> {
+export async function parkForReview(p: Payment, reason: string): Promise<void> {
   await releaseReservation(p);
   await transition(p, "MANUAL_REVIEW", reason);
   void notifyHeldForReview(p, reason);

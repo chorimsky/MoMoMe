@@ -626,7 +626,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       {lockPassed && addressBased && (
         <div role="note" style={{ margin: "16px 0 0", padding: "12px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
           <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)" }}>{t("lock_passed_title")}</div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.45 }}>{t("lock_passed_sub")}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.45 }}>{method === "ONCHAIN" ? t("lock_passed_sub") : t("lock_passed_stable_sub")}</div>
           <button className="btn btn-quiet" onClick={refresh} disabled={busy} style={{ marginTop: 8, fontSize: 12.5 }}>{t("refresh_price")}</button>
         </div>
       )}

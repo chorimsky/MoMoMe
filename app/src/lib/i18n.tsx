@@ -145,6 +145,7 @@ export const STRINGS: Dict = {
   expires_in: ["expires in", "expire dans"],
   lock_passed_title: ["Price lock passed — this address still works", "Le taux bloqué a expiré — cette adresse reste valable"],
   lock_passed_sub: ["If you already sent, it will be credited at the rate when it arrives. If you haven't, refresh for a current price.", "Si vous avez déjà envoyé, ce sera crédité au taux du moment de l'arrivée. Sinon, actualisez pour un prix à jour."],
+  lock_passed_stable_sub: ["If you already sent the exact amount, the recipient still gets the quoted Mobile Money — dollars do not move against XAF the way Bitcoin does. If you haven't sent yet, refresh for a current price.", "Si vous avez déjà envoyé le montant exact, le destinataire reçoit toujours le Mobile Money annoncé — le dollar ne bouge pas face au XAF comme le Bitcoin. Sinon, actualisez pour un prix à jour."],
   refresh_price: ["Refresh price", "Actualiser le prix"],
   code_expired_title: ["Payment code expired", "Code de paiement expiré"],
   code_expired_sub: ["This code is no longer valid. Refresh to get a new one.", "Ce code n'est plus valide. Actualisez pour en obtenir un nouveau."],

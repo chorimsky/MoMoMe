@@ -1072,7 +1072,7 @@ function PayStep({
           {ADDRESS_METHODS.has(payment.method) && pi.expiresAt && Date.parse(pi.expiresAt) <= Date.now() ? (
             <View style={[styles.issueBox, { borderColor: t.line, backgroundColor: t.surface, alignSelf: 'stretch', marginTop: 0 }]}>
               <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13.5 }}>{tr('lock_passed_title')}</Text>
-              <Body muted>{tr('lock_passed_sub')}</Body>
+              <Body muted>{tr(payment.method === 'ONCHAIN' ? 'lock_passed_sub' : 'lock_passed_stable_sub')}</Body>
               <Button title={tr('refresh_price')} variant="ghost" size="md" icon="refresh" onPress={onRefresh} loading={busy} />
             </View>
           ) : null}

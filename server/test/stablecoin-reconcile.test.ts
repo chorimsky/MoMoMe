@@ -41,7 +41,13 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
   if (url.includes("poweredbyibex.io")) {
     if (url.includes("/oauth/token")) return J({ access_token: "tok", expires_in: 3600 });
     if (url.includes("/crypto/receive-infos")) return J({ id: `recv-${++minted}`, data: { address: addrFor(minted) } });
-    if (url.includes("/transactions?")) return J({ transactions: deposits.map((d) => ({ id: d.id, currencyId: 30, transactionTypeId: 9, status: "completed", amount: d.amount, settledAt: "2026-09-10T20:09:16Z" })) });
+    if (url.includes("/transactions?")) {
+      const page = Number(url.match(/page=(\d+)/)?.[1] ?? 1);
+      // Page 1 is padded with 25 Lightning rows so the walk MUST turn the page to find the deposits.
+      const ln = Array.from({ length: 25 }, (_, i) => ({ id: `ln-${i}`, currencyId: 0, transactionTypeId: 1, status: "completed", amount: 1000, createdAt: new Date().toISOString() }));
+      const dep = deposits.map((d) => ({ id: d.id, currencyId: 30, transactionTypeId: 9, status: "completed", amount: d.amount, settledAt: "2026-09-10T20:09:16Z", createdAt: new Date().toISOString() }));
+      return J({ transactions: page === 1 ? ln : page === 2 ? dep : [] });
+    }
     const det = url.match(/\/v2\/transaction\/([^/]+)\/details/);
     if (det) { const d = deposits.find((x) => x.id === det[1]); return d ? J({ networkId: d.hash }) : J({}, 404); }
     return J({}, 404);
@@ -140,6 +146,30 @@ async function main() {
     deposits.push({ id: "dep-5", amount: e.payInstruction.amount, hash: null });
     await reconcileStablecoinDeposits();
     ok("a sole amount match settles", (await settled(e.id)) === "DELIVERED");
+
+    // 5. A SECOND deposit to an address that already settled → attached to that payment as
+    //    a refund owed (not delivered twice, not lost as unattributed).
+    const hash6 = "0x" + "6".repeat(64);
+    receipts.set(hash6, { status: "0x1", logs: [log(b.payInstruction.code, 3)] });
+    deposits.push({ id: "dep-6", amount: 3, hash: hash6 });
+    const legsB = (await get(`/api/ledger/${b.id}`) as unknown[]).length;
+    await reconcileStablecoinDeposits();
+    const pb2 = await store().getPayment(b.id);
+    ok("second deposit to a settled address stays on that payment", (pb2?.inboundEventIds ?? []).includes("dep-6") && pb2?.state === "DELIVERED", `${pb2?.state} ${JSON.stringify(pb2?.inboundEventIds)}`);
+    ok("…noted as a refund owed", (pb2?.events ?? []).some((ev) => /refund owed/.test(ev.note ?? "")));
+    ok("…booked as a liability, not delivered again", (await get(`/api/ledger/${b.id}`) as unknown[]).length === legsB + 2);
+    ok("…and NOT as unattributed", !listUnattributed().some((x) => x.eventId === "dep-6"));
+
+    // 6. USDT sent to a USDC address (same 0x, wrong token) → held with a clear reason.
+    const f = await newPayment(1000, "693777888");
+    const hash7 = "0x" + "7".repeat(64);
+    const usdtLog = { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", topics: [TRANSFER, pad("0x" + "1".repeat(40)), pad(f.payInstruction.code)], data: "0x" + BigInt(Math.round(f.payInstruction.amount * 1e6)).toString(16).padStart(64, "0") };
+    receipts.set(hash7, { status: "0x1", logs: [usdtLog] });
+    deposits.push({ id: "dep-7", amount: f.payInstruction.amount, hash: hash7 });
+    await reconcileStablecoinDeposits();
+    const pf = await get(`/api/payments/${f.id}`) as { state: string; events: Array<{ note?: string }> };
+    ok("wrong token to the right address → MANUAL_REVIEW, never auto-paid", pf.state === "MANUAL_REVIEW", pf.state);
+    ok("…and the note says which token went where", pf.events.some((ev) => /USDT was sent to this payment's USDC address/.test(ev.note ?? "")), pf.events.map((ev) => ev.note).join(" | "));
   } finally { server.close(); }
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);

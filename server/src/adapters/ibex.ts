@@ -153,17 +153,35 @@ async function depositTxHash(txId: string): Promise<string | null> {
   return hash;
 }
 
+/** How far back the deposit list is walked. An exchange withdrawal can sit in the
+ *  exchange's queue for an hour; a payer can also send a day later. Three days covers
+ *  every realistic "I paid, where is it" and keeps the walk to a handful of pages. */
+const DEPOSIT_LOOKBACK_MS = 3 * 24 * 3600_000;
+const DEPOSIT_MAX_PAGES = 8;
+
 export async function listStablecoinDeposits(): Promise<StablecoinDeposit[]> {
   if (!config.ibex.usdtAccountId && !config.ibex.usdcAccountId) return [];
-  const res = await ibex(`/transactions?limit=25`, { method: "GET" });
-  if (!res.ok) throw new Error(`IBEX transactions list failed: ${res.status}`);
-  const d = (await res.json()) as { transactions?: Array<{ id: string; currencyId?: number; transactionTypeId?: number; status?: string; amount?: number; settledAt?: string | null; createdAt?: string; accountId?: string }> };
   const out: StablecoinDeposit[] = [];
-  for (const t of d.transactions ?? []) {
-    const asset = t.currencyId === 29 ? "USDT" : t.currencyId === 30 ? "USDC" : null;
-    if (!asset || t.transactionTypeId !== 9 || (t.status ?? "").toLowerCase() !== "completed") continue;
-    if (typeof t.amount !== "number" || t.amount <= 0) continue;
-    out.push({ id: t.id, asset, amount: t.amount, txHash: await depositTxHash(t.id), settledAt: t.settledAt ?? t.createdAt ?? new Date().toISOString() });
+  const cutoff = Date.now() - DEPOSIT_LOOKBACK_MS;
+  // The list is newest-first across ALL accounts (its currency/type/account filters are
+  // ignored — probed live) and capped at 25 per page, but `page=N` works. A burst of
+  // Lightning traffic must not push a stablecoin deposit out of the window, so walk pages
+  // until the entries are older than the lookback.
+  for (let page = 1; page <= DEPOSIT_MAX_PAGES; page++) {
+    const res = await ibex(`/transactions?limit=25&page=${page}`, { method: "GET" });
+    if (!res.ok) throw new Error(`IBEX transactions list failed: ${res.status}`);
+    const d = (await res.json()) as { transactions?: Array<{ id: string; currencyId?: number; transactionTypeId?: number; status?: string; amount?: number; settledAt?: string | null; createdAt?: string; accountId?: string }> };
+    const rows = d.transactions ?? [];
+    let oldest = Date.now();
+    for (const t of rows) {
+      const at = Date.parse(t.createdAt ?? "") || Date.now();
+      oldest = Math.min(oldest, at);
+      const asset = t.currencyId === 29 ? "USDT" : t.currencyId === 30 ? "USDC" : null;
+      if (!asset || t.transactionTypeId !== 9 || (t.status ?? "").toLowerCase() !== "completed") continue;
+      if (typeof t.amount !== "number" || t.amount <= 0 || at < cutoff) continue;
+      out.push({ id: t.id, asset, amount: t.amount, txHash: await depositTxHash(t.id), settledAt: t.settledAt ?? t.createdAt ?? new Date().toISOString() });
+    }
+    if (rows.length < 25 || oldest < cutoff) break;
   }
   return out;
 }

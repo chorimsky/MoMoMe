@@ -11,7 +11,7 @@
 export const APP_LINKS = {
   play: "https://play.google.com/store/apps/details?id=momome.app",
   appStore: "https://apps.apple.com/app/id6806540524",
-  apk: "https://expo.dev/artifacts/eas/q0H1LOkGImxBsYyf8fxRXfmXlkrl2WRhy1JCSYPDJSE.apk",
+  apk: "https://expo.dev/artifacts/eas/PP83lQXP6dZTtqorlEa7Q-D71ucBuoVFdYkaAHae8yw.apk",
   testflight: "",
 } as const;
 

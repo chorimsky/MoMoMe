@@ -317,7 +317,11 @@ export type LedgerAccount =
    *  that had already settled. It cannot be delivered again (the order was filled once),
    *  and it must not be quietly kept, so it is booked here as an explicit liability for an
    *  operator to refund. A non-zero balance is money that is not ours. */
-  | "refund_payable";
+  | "refund_payable"
+  /** What a rail KEPT out of an inbound — our own node's liquidity purchase, a routing
+   *  fee on a sweep. Booked so fx_position equals what the node actually holds; the
+   *  customer is never charged (Lightning credits the locked amount in full). */
+  | "rail_fees";
 
 /** Crypto that arrived with no payment to attach it to.
  *

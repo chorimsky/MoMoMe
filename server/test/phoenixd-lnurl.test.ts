@@ -27,7 +27,7 @@ import { createHash, createHmac } from "node:crypto";
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}${d ? `  (${d})` : ""}`); pass++; } else { console.log(`  ✗ ${n}${d ? `  (${d})` : ""}`); fail++; } };
 
-const invoices = new Map<string, { descriptionHash?: string; description?: string; amountSat: number; paid: boolean }>();
+const invoices = new Map<string, { descriptionHash?: string; description?: string; amountSat: number; paid: boolean; feeSat?: number }>();
 let ibexInvoiceCalls = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: unknown, init?: unknown) => {
@@ -43,8 +43,8 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
       return J({ amountSat: Number(f.get("amountSat")), paymentHash: hash, serialized: `lnbc1fake${hash.slice(0, 20)}` });
     }
     const m = url.match(/\/payments\/incoming\/([0-9a-f]+)$/);
-    if (m) { const inv = invoices.get(m[1]); return inv ? J({ paymentHash: m[1], isPaid: inv.paid, receivedSat: inv.paid ? inv.amountSat : 0 }) : J({}, 404); }
-    if (url.endsWith("/getbalance")) return J({ balanceSat: 250_000, feeCreditSat: 0 });
+    if (m) { const inv = invoices.get(m[1]); return inv ? J({ paymentHash: m[1], isPaid: inv.paid, receivedSat: inv.paid ? inv.amountSat - (inv.feeSat ?? 0) : 0, fees: inv.paid ? inv.feeSat ?? 0 : 0 }) : J({}, 404); }
+    if (url.endsWith("/getbalance")) return J({ balanceSat: 250_000, feeCreditSat: 1_500 });
     return J({}, 404);
   }
   if (url.includes("poweredbyibex.io")) {
@@ -104,11 +104,22 @@ async function main() {
     let cur = await get(`/api/payments/${pay.id}`, LN) as { state: string };
     ok("…but an UNPAID invoice does not settle on the webhook body", cur.state === "AWAITING_INBOUND", cur.state);
 
-    // Now the node says it was paid → the same webhook settles it, all the way.
+    // Now the node says it was paid → the same webhook settles it, all the way. This is the
+    // node's FIRST receive: it kept 300 sat as its liquidity purchase. No on-chain reserve
+    // was needed to get here — the channel is bought out of the payment itself.
     invoices.get(hash)!.paid = true;
+    invoices.get(hash)!.feeSat = 300;
     r = await fetch(`${base}/webhooks/phoenixd`, { method: "POST", headers: { "content-type": "application/json", "x-phoenix-signature": sig }, body });
     for (let i = 0; i < 50; i++) { await new Promise((res) => setTimeout(res, 100)); cur = await get(`/api/payments/${pay.id}`, LN) as { state: string }; if (["DELIVERED", "FAILED", "MANUAL_REVIEW"].includes(cur.state)) break; }
     ok("paid on our node → delivered as Mobile Money", cur.state === "DELIVERED", cur.state);
+    const full = await get(`/api/payments/${pay.id}`, LN) as { xaf: number; repricedFromXaf?: number; events: Array<{ note?: string }> };
+    ok("the customer is credited the FULL locked amount (no Quoted → Delivered)", full.repricedFromXaf === undefined, String(full.repricedFromXaf));
+    const led = await get(`/api/ledger/${pay.id}`, LN) as Array<{ account: string; direction: string; amount: number; currency: string }>;
+    const feeLeg = led.find((e) => e.account === "rail_fees");
+    ok("the liquidity fee is booked as rail_fees, in BTC", !!feeLeg && Math.abs(feeLeg.amount - 300 / 1e8) < 1e-12 && feeLeg.currency === "BTC", JSON.stringify(feeLeg));
+    const fx = led.filter((e) => e.account === "fx_position" && e.currency === "BTC").reduce((a, e) => a + (e.direction === "credit" ? e.amount : -e.amount), 0);
+    ok("fx_position holds what the node really holds (amount − fee)", Math.abs(fx - (2000 - 300) / 1e8) < 1e-12, String(fx));
+    ok("…and the payment says the fee was absorbed by MoMo›Me", full.events.some((e) => /absorbed by MoMo›Me/.test(e.note ?? "")));
 
     // In-app Lightning (no hash needed) still goes to IBEX first — phoenixd is the failover.
     r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 5000, method: "LIGHTNING", country: "CM" }) });

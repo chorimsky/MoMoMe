@@ -155,9 +155,10 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
     const paidLeg = payment.payInstruction.alt?.providerRef === event.providerRef
       ? payment.payInstruction.alt
       : payment.payInstruction;
+    let railFee: number | undefined;
     if (adapter.confirmSettlement && paidLeg.method === "LIGHTNING") {
       const s = await adapter.confirmSettlement(event.providerRef).catch(() => null);
-      if (s) { if (!s.settled) return; } // explicit verdict: not paid → ignore
+      if (s) { if (!s.settled) return; railFee = s.feeBtc; } // explicit verdict: not paid → ignore
       // Indeterminate (null: network failure, or the rail has no re-query). For REAL money
       // do NOT fall back to the webhook body — hold, and let the poll/reconcile backstop
       // settle the moment the rail can confirm. This stops a transient re-query failure from
@@ -165,6 +166,6 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
       // body". A non-real inbound moves no real money either way, so it proceeds.
       else if (adapter.trusted()) return;
     }
-    await confirmInbound(payment, event.amount, event.eventId, event.providerRef);
+    await confirmInbound(payment, event.amount, event.eventId, event.providerRef, railFee);
   })());
 });

@@ -37,18 +37,38 @@ node minted an invoice.
    - `PHOENIXD_CHAIN` = `mainnet`
    Redeploy momome-api. Admin → Rails shows `phoenixd` configured, with its balance.
 
-## Liquidity and cost
+## Starting with NO reserve — how the first payments behave
 
-phoenixd has no channel until the first payment arrives. On that first receive it buys
-inbound liquidity from the LSP automatically (`--auto-liquidity 2m` = a 2 M sat channel):
-the mining fee plus ~1% of the purchased amount is deducted from what is received. Later
-payments inside that capacity cost nothing to receive. Keep the treasury sweep in mind:
-sats received on this node sit ON this node; Admin → Treasury sweeps them out
-(`/payinvoice` / on-chain) when the balance is worth moving.
+Nothing has to be deposited to make the node active. phoenixd buys its inbound channel out
+of the first Lightning payment it receives, with no on-chain funds of ours involved:
 
-A first-time deposit to open the channel therefore looks "short" by the liquidity fee.
-Settlement uses the amount the node actually received, so that difference is visible on
-the payment as Quoted → Delivered, never silently lost.
+| First receive is… | What phoenixd does | What MoMo›Me does |
+|---|---|---|
+| Large enough to cover the liquidity fee (≳ 30 000 sat, about 20 USD) | Opens a 2 M sat channel and keeps the fee (mining + ~1%) from that payment | Delivers the FULL quoted Mobile Money; books the fee as `rail_fees` (visible on the payment: "absorbed by MoMo›Me, not the customer") |
+| Smaller than that | Accepts it as **fee credit**: the sats count toward the future channel and are not yet spendable | Delivers the full quoted Mobile Money; the credit shows in Admin → Rails (`feeCreditSat`) |
+
+Fee credit is not lost money: it is spent on the channel the moment enough has accumulated
+(or a larger payment arrives). Until then it is a small float MoMo›Me has paid out in XAF
+against sats it cannot yet move — at the sizes involved (tens of dollars), that is a
+bookkeeping fact, not a risk.
+
+After the channel exists, receives within capacity cost nothing. Sweeping sats OUT (Admin →
+Treasury) frees inbound capacity, so one channel serves indefinitely if the balance is
+swept regularly. Only an unswept node that receives more than 2 M sats buys a second
+channel, at the same fee.
+
+Steady-state cost, swept weekly: effectively zero per payment. Worst case, never swept:
+about 1% of volume.
+
+## Efficiency notes
+
+- Invoices are minted in one local HTTP call to the node; no OAuth, no provider queue.
+- Settlement is confirmed by one local status read; the webhook only triggers it.
+- Lightning Address payers see the registered name before "Pay" (LUD-06 metadata), and the
+  invoice carries the matching description hash, so every wallet — strict or lenient — pays.
+- IBEX remains the primary rail for in-app Lightning, on-chain BTC and stablecoins; this
+  node is the first choice only where the description hash is required, and a failover
+  otherwise. An outage on either side degrades to the other, never to a dead end.
 
 ## Verify
 

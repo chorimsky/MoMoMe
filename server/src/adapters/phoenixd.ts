@@ -47,16 +47,24 @@ export async function incomingStatus(paymentHash: string): Promise<SettlementSta
   const res = await call(`/payments/incoming/${paymentHash}`);
   if (res.status === 404) return { settled: false, failed: false };
   if (!res.ok) return null;
-  const d = (await res.json()) as { isPaid?: boolean; receivedSat?: number };
-  return { settled: !!d.isPaid || (typeof d.receivedSat === "number" && d.receivedSat > 0), failed: false };
+  const d = (await res.json()) as { isPaid?: boolean; receivedSat?: number; fees?: number };
+  const settled = !!d.isPaid || (typeof d.receivedSat === "number" && d.receivedSat > 0);
+  // `fees` (sat) is what the node kept — the liquidity purchase on a first receive, else 0.
+  // With no channel yet a SMALL payment is absorbed as "fee credit" (the whole amount goes
+  // toward the future channel; receivedSat is 0, fees == amount). Either way the customer's
+  // Mobile Money is delivered in full; the ledger books the fee (see confirmInbound).
+  const feeSat = typeof d.fees === "number" && d.fees > 0 ? d.fees : 0;
+  return { settled, failed: false, ...(settled && feeSat > 0 ? { feeBtc: feeSat / SATS } : {}) };
 }
 
-export async function nodeBalanceSat(): Promise<number | null> {
+export interface NodeBalance { balanceSat: number; feeCreditSat: number }
+export async function nodeBalance(): Promise<NodeBalance | null> {
   const res = await call("/getbalance");
   if (!res.ok) return null;
-  const d = (await res.json()) as { balanceSat?: number };
-  return typeof d.balanceSat === "number" ? d.balanceSat : null;
+  const d = (await res.json()) as { balanceSat?: number; feeCreditSat?: number };
+  return typeof d.balanceSat === "number" ? { balanceSat: d.balanceSat, feeCreditSat: d.feeCreditSat ?? 0 } : null;
 }
+export async function nodeBalanceSat(): Promise<number | null> { return (await nodeBalance())?.balanceSat ?? null; }
 
 export const phoenixdAdapter: RailAdapter = {
   name: "phoenixd",

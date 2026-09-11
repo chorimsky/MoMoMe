@@ -424,15 +424,15 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
-export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string): Promise<void> {
+export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number): Promise<void> {
   // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
   // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
   // webhooks) re-reads inside the lock, sees the booking below, and aborts — closing the
   // double-settle → double real-payout hole (memory's shared-object serialization the tests
   // rely on does NOT hold on Postgres, where each call gets an independent copy).
-  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef));
+  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef, railFee));
 }
-async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string): Promise<void> {
+async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number): Promise<void> {
   await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p) return;
@@ -596,6 +596,17 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     { account: "customer_wallet", direction: "debit", amount: received, currency: asset },
     { account: "fx_position", direction: "credit", amount: received, currency: asset },
   ]);
+  // What the rail kept (our own node buying inbound liquidity on a first receive). The
+  // customer was credited in full above; this moves the fee out of fx_position so the
+  // ledger says what the node really holds, and the cost is visible instead of silent.
+  if (railFee && railFee > 0 && railFee <= received) {
+    await store().recordTxn(p.id, [
+      { account: "fx_position", direction: "debit", amount: railFee, currency: asset },
+      { account: "rail_fees", direction: "credit", amount: railFee, currency: asset },
+    ]);
+    p.events.push({ at: new Date().toISOString(), state: p.state, note: `rail kept ${railFee} ${asset} (liquidity/routing fee) — absorbed by MoMo›Me, not the customer` });
+    await store().putPayment(p);
+  }
   await store().recordTxn(p.id, [
     { account: "fx_position", direction: "debit", amount: p.totalXaf, currency: "XAF" },
     { account: "payout_float_XAF", direction: "credit", amount: p.xaf, currency: "XAF" },
@@ -777,7 +788,7 @@ export async function reconcileOneInbound(p: Payment): Promise<void> {
   if (p.state === "FAILED" && Date.now() - Date.parse(p.createdAt) > 72 * 3600_000) return; // don't re-check ancient failures
   try {
     const s = await confirmSettlement(p.payInstruction.provider, p.payInstruction.providerRef);
-    if (s?.settled) { await confirmInbound(p, p.payInstruction.amount); return; } // settle / recover (LN = full lock)
+    if (s?.settled) { await confirmInbound(p, p.payInstruction.amount, undefined, undefined, s.feeBtc); return; } // settle / recover (LN = full lock)
     // Genuinely unpaid + past expiry → expire so it doesn't sit on "Waiting…"
     // forever. Only when NOT paid (settled check above ran first). No funds moved.
     const expiredAt = Date.parse(p.payInstruction.expiresAt);

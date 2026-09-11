@@ -10,7 +10,7 @@ import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
-import { nodeBalanceSat } from "../adapters/phoenixd.js";
+import { nodeBalance } from "../adapters/phoenixd.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
@@ -1004,7 +1004,7 @@ api.post("/payments/:id/confirm", async (req, res) => {
       // actually arrived. Tapping "I've paid" without paying does nothing; a genuine
       // payment also auto-settles via the webhook + reconcile without any tap.
       const s = await adapter.confirmSettlement(inst.providerRef).catch(() => null);
-      if (s?.settled) await confirmInbound(p, inst.amount);
+      if (s?.settled) await confirmInbound(p, inst.amount, undefined, undefined, s.feeBtc);
     } else if (!adapter?.trusted()) {
       // Simulated / untrusted rail (sandbox demo) — no real on-chain payment exists,
       // so drive the simulated settlement. Never do this for a trusted rail.
@@ -2289,7 +2289,7 @@ api.get("/admin/rails", async (_req, res) => {
         name: "phoenixd (own node)", base: false, env: config.phoenixd.chain, configured: phoenixdConfigured(), live: phoenixdTrusted(),
         apiUrl: config.phoenixd.url || "(PHOENIXD_URL unset — see infra/phoenixd/README.md)", methods: phoenixdConfigured() ? ["LIGHTNING"] : [],
         webhookSecret: config.phoenixd.webhookSecret ? "set" : "unset",
-        balanceSat: phoenixdConfigured() ? await nodeBalanceSat().catch(() => null) : null,
+        balance: phoenixdConfigured() ? await nodeBalance().catch(() => null) : null,
         descriptionHash: true,
       },
     ],

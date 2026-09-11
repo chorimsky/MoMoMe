@@ -62,6 +62,10 @@ export interface RailEvent {
 export interface SettlementStatus {
   settled: boolean;
   failed: boolean;
+  /** What the RAIL kept out of a settled inbound, in asset units (BTC) — e.g. our own
+   *  node's liquidity purchase on a first receive. Booked as rail_fees so the ledger's
+   *  fx_position equals what the node actually holds. Undefined = none / not reported. */
+  feeBtc?: number;
 }
 
 /** Result of an OUTBOUND crypto payment (a refund to a sender / a treasury sweep).

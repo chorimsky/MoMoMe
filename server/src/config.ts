@@ -79,6 +79,8 @@ export const config = {
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
    *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
    *  derives from PAWAPAY_ENV (sandbox|production). */
+  /** Public Bitcoin explorer (Esplera/mempool API) for reading an on-chain deposit's outputs. */
+  btcExplorerUrl: env("BTC_EXPLORER_URL", "https://mempool.space/api").replace(/\/$/, ""),
   /** phoenixd — OUR OWN Lightning node (ACINQ's self-custodial daemon, keys on our volume).
    *  Exists so the platform does not depend on a provider for what the Lightning spec
    *  requires: a LUD-06 invoice must carry description_hash, which IBEX cannot set. Used

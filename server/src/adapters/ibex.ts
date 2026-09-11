@@ -20,7 +20,7 @@ import type { Method, PayInstruction } from "../../../shared/types.js";
 import { QUOTE_TTL_SEC, METHOD_ASSET, btcToInvoiceMsat, msatToBtc, lightningQr } from "../../../shared/domain.js";
 import { formatAmount } from "../core/fx.js";
 import { config, ibexConfigured, ibexInboundTrusted } from "../config.js";
-import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus, StablecoinDeposit } from "./types.js";
+import type { InstructionRequest, RailAdapter, RailEvent, SettlementStatus, RailDeposit } from "./types.js";
 
 
 /* ---------- OAuth2 client-credentials token manager (in-flight deduped) ---------- */
@@ -60,9 +60,37 @@ async function ibex(path: string, init: RequestInit): Promise<Response> {
       ...init,
       headers: { "content-type": "application/json", authorization: token, ...(init.headers ?? {}) },
     });
-  let res = await call(await getAccessToken());
-  if (res.status === 401) res = await call(await getAccessToken(true));
-  return res;
+  // Resilience against the API, not just its happy path:
+  //  • one transparent re-auth on 401 (token expired / rotated);
+  //  • GETs are idempotent → retried on 429 / 5xx / network failure with backoff, honouring
+  //    Retry-After. Lists, statuses and rates are what the reconcile loops live on, and a
+  //    single blip must not turn into "payment never settled" for 30 s or forever;
+  //  • POSTs are retried ONLY when no response came back at all (connection reset before
+  //    the request was sent is indistinguishable from after — an extra unpaid invoice or
+  //    address is harmless, a missed one is a dead-ended customer). A 4xx/5xx response to
+  //    a POST is returned as-is: the caller decides.
+  const method = (init.method ?? "GET").toUpperCase();
+  const idempotent = method === "GET";
+  let attempt = 0;
+  let lastErr: unknown;
+  while (attempt < 3) {
+    attempt++;
+    try {
+      let res = await call(await getAccessToken());
+      if (res.status === 401) res = await call(await getAccessToken(true));
+      if (idempotent && (res.status === 429 || res.status >= 500) && attempt < 3) {
+        const ra = Number(res.headers.get("retry-after"));
+        await new Promise((r) => setTimeout(r, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 10) * 1000 : 400 * attempt));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= (idempotent ? 3 : 2)) break;
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`IBEX ${method} ${path} failed`);
 }
 
 /** Current IBEX FX rate: units of `toCurrencyId` per 1 `fromCurrencyId`
@@ -148,7 +176,8 @@ async function depositTxHash(txId: string): Promise<string | null> {
   const res = await ibex(`/v2/transaction/${txId}/details`, { method: "GET" });
   if (!res.ok) return null; // not cached: try again next tick
   const d = (await res.json()) as { networkId?: string | null };
-  const hash = typeof d.networkId === "string" && /^0x[0-9a-fA-F]{64}$/.test(d.networkId) ? d.networkId.toLowerCase() : null;
+  // ERC-20: 0x-prefixed 32-byte hash. Bitcoin: a bare 64-hex txid.
+  const hash = typeof d.networkId === "string" && /^(0x)?[0-9a-fA-F]{64}$/.test(d.networkId) ? d.networkId.toLowerCase() : null;
   txHashCache.set(txId, hash);
   return hash;
 }
@@ -159,14 +188,13 @@ async function depositTxHash(txId: string): Promise<string | null> {
 const DEPOSIT_LOOKBACK_MS = 3 * 24 * 3600_000;
 const DEPOSIT_MAX_PAGES = 8;
 
-export async function listStablecoinDeposits(): Promise<StablecoinDeposit[]> {
-  if (!config.ibex.usdtAccountId && !config.ibex.usdcAccountId) return [];
-  const out: StablecoinDeposit[] = [];
+export async function listDeposits(): Promise<RailDeposit[]> {
+  const out: RailDeposit[] = [];
   const cutoff = Date.now() - DEPOSIT_LOOKBACK_MS;
   // The list is newest-first across ALL accounts (its currency/type/account filters are
   // ignored — probed live) and capped at 25 per page, but `page=N` works. A burst of
-  // Lightning traffic must not push a stablecoin deposit out of the window, so walk pages
-  // until the entries are older than the lookback.
+  // Lightning traffic must not push a deposit out of the window, so walk pages until the
+  // entries are older than the lookback.
   for (let page = 1; page <= DEPOSIT_MAX_PAGES; page++) {
     const res = await ibex(`/transactions?limit=25&page=${page}`, { method: "GET" });
     if (!res.ok) throw new Error(`IBEX transactions list failed: ${res.status}`);
@@ -176,15 +204,23 @@ export async function listStablecoinDeposits(): Promise<StablecoinDeposit[]> {
     for (const t of rows) {
       const at = Date.parse(t.createdAt ?? "") || Date.now();
       oldest = Math.min(oldest, at);
-      const asset = t.currencyId === 29 ? "USDT" : t.currencyId === 30 ? "USDC" : null;
-      if (!asset || t.transactionTypeId !== 9 || (t.status ?? "").toLowerCase() !== "completed") continue;
-      if (typeof t.amount !== "number" || t.amount <= 0 || at < cutoff) continue;
-      out.push({ id: t.id, asset, amount: t.amount, txHash: await depositTxHash(t.id), settledAt: t.settledAt ?? t.createdAt ?? new Date().toISOString() });
+      if ((t.status ?? "").toLowerCase() !== "completed" || typeof t.amount !== "number" || t.amount <= 0 || at < cutoff) continue;
+      // typeId 9 "Crypto Receive" = ERC-20 stablecoin (currencyId 29/30, whole tokens — verified
+      // live). typeId 7 "Deposit" on the BTC account = on-chain BTC, amount in MSAT like every
+      // BTC figure IBEX reports (provisional until a first real on-chain deposit is seen).
+      let asset: RailDeposit["asset"] | null = null;
+      let amount = t.amount;
+      if (t.transactionTypeId === 9 && (t.currencyId === 29 || t.currencyId === 30)) asset = t.currencyId === 29 ? "USDT" : "USDC";
+      else if (t.transactionTypeId === 7 && t.currencyId === 0) { asset = "BTC"; amount = msatToBtc(t.amount); }
+      if (!asset) continue;
+      out.push({ id: t.id, asset, amount, txHash: await depositTxHash(t.id), settledAt: t.settledAt ?? t.createdAt ?? new Date().toISOString() });
     }
     if (rows.length < 25 || oldest < cutoff) break;
   }
   return out;
 }
+/** @deprecated use listDeposits */
+export const listStablecoinDeposits = listDeposits;
 
 export interface PayResult { transactionId: string; settled: boolean; feesMsat?: number; }
 
@@ -499,11 +535,11 @@ export const ibexAdapter: RailAdapter = {
     // a deposit method providerRef is the address, so this is the only thing that tells a
     // webhook replay apart from a second payment to the same address.
     const eventId = t.id ?? t.infoId;
-    const stablecoin = t.currencyId === 29 ? "USDT" as const : t.currencyId === 30 ? "USDC" as const : undefined;
-    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount, ...(eventId ? { eventId } : {}), ...(stablecoin ? { stablecoin } : {}) };
+    const deposit = t.currencyId === 29 ? "USDT" as const : t.currencyId === 30 ? "USDC" as const : t.transactionTypeId === 7 ? "BTC" as const : undefined;
+    return { providerRef, kind: confirmed ? "confirmed" : "detected", amount, ...(eventId ? { eventId } : {}), ...(deposit ? { deposit } : {}) };
   },
 
-  listStablecoinDeposits: () => listStablecoinDeposits(),
+  listDeposits: () => listDeposits(),
 
   // Authoritative re-query used by the webhook handler + reconcile backstop so a
   // forged/replayed "settled" webhook can never drive a real payout, and a lost

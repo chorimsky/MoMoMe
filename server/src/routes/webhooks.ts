@@ -11,9 +11,16 @@ import { markDetected, confirmInbound, recordUnattributedInbound } from "../core
 import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
-import { reconcileStablecoinDeposits } from "../core/stablecoinReconcile.js";
+import { reconcileDeposits } from "../core/depositReconcile.js";
 
 export const webhooks = Router();
+
+/** When each crypto rail last delivered a VERIFIED webhook. Admin → Rails shows it: a rail
+ *  with open payments and no webhook for hours is either idle or has lost its registration
+ *  (IBEX's account webhook has to be re-registered after some account operations), and
+ *  the deposit/Lightning reconcile loops are then the only thing settling. */
+const lastWebhookAt = new Map<string, string>();
+export function lastWebhookTimes(): Record<string, string> { return Object.fromEntries(lastWebhookAt); }
 
 /* ---------- payout (fiat) callbacks — dispatched through the PayoutAdapter ----------
    Every aggregator callback runs the SAME flow (verify → parse → authoritative re-query
@@ -75,6 +82,7 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   } catch {
     return res.status(400).json({ error: "bad_json" });
   }
+  lastWebhookAt.set(req.params.provider, new Date().toISOString());
 
   const event = adapter.parseEvent(parsed);
   if (!event) return res.json({ ok: true, ignored: true });
@@ -83,9 +91,9 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   // tx hash — verified live), so it cannot match a payment by providerRef. Ack, then let the
   // stablecoin reconcile settle it from the rail's deposit list and the chain receipt. (If a
   // rail ever does include the address, the match above wins and the normal path runs.)
-  if (!payment && event.stablecoin && adapter.listStablecoinDeposits) {
-    res.json({ ok: true, deferred: "stablecoin" });
-    background(reconcileStablecoinDeposits());
+  if (!payment && event.deposit && adapter.listDeposits) {
+    res.json({ ok: true, deferred: "deposit" });
+    background(reconcileDeposits());
     return;
   }
   if (!payment) {

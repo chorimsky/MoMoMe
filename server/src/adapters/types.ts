@@ -25,25 +25,30 @@ export interface InstructionRequest {
 }
 
 /** Normalised inbound event parsed from a provider webhook. */
-export interface StablecoinDeposit {
+export type DepositAsset = "USDT" | "USDC" | "BTC";
+/** A completed DEPOSIT on the rail — an ERC-20 stablecoin or on-chain BTC. Deposits are
+ *  what a webhook cannot match on its own (IBEX reports them without the receive address),
+ *  so the deposit reconcile settles them from this list plus the chain. */
+export interface RailDeposit {
   /** The rail's own transaction id — the dedupe key (Payment.inboundEventIds). */
   id: string;
-  asset: "USDT" | "USDC";
-  /** Whole-token units (1.81 = 1.81 USDC). */
+  asset: DepositAsset;
+  /** Asset units: whole tokens for USDT/USDC (1.81), BTC for on-chain (0.0005). */
   amount: number;
-  /** Ethereum tx hash; null when the rail did not report one. */
+  /** Chain tx hash/txid; null when the rail did not report one. */
   txHash: string | null;
   settledAt: string;
 }
+/** @deprecated name kept for readers of older commits */
+export type StablecoinDeposit = RailDeposit;
 
 export interface RailEvent {
   /** Matches PayInstruction.providerRef (LN payment hash / address). */
   providerRef: string;
-  /** Set for an ERC-20 stablecoin deposit. IBEX reports those WITHOUT the receive address
-   *  (only the account and the tx hash), so providerRef cannot match a payment; the webhook
-   *  handler hands such events to the stablecoin reconcile, which resolves the address from
-   *  the chain. */
-  stablecoin?: "USDT" | "USDC";
+  /** Set for a DEPOSIT (ERC-20 stablecoin or on-chain BTC). IBEX reports those without the
+   *  receive address, so providerRef may not match a payment; the webhook handler hands such
+   *  events to the deposit reconcile, which resolves the address from the chain. */
+  deposit?: DepositAsset;
   kind: "detected" | "confirmed";
   /** Actual amount received, in asset units (for under/overpayment checks). */
   amount?: number;
@@ -112,10 +117,10 @@ export interface RailAdapter {
    *  and (b) reconcile lost webhooks. Return null when it can't be determined (e.g. an
    *  on-chain address). A rail with no pollable status (the sandbox) omits this. */
   confirmSettlement?(providerRef: string): Promise<SettlementStatus | null>;
-  /** OPTIONAL: completed ERC-20 stablecoin deposits on the rail's stablecoin accounts,
-   *  newest first, each with the on-chain tx hash. The stablecoin reconcile settles from
-   *  this list, so a deposit lands even when its webhook never arrives. */
-  listStablecoinDeposits?(): Promise<StablecoinDeposit[]>;
+  /** OPTIONAL: completed deposits (ERC-20 stablecoins, on-chain BTC) on the rail, newest
+   *  first, each with the chain tx hash. The deposit reconcile settles from this list, so a
+   *  deposit lands even when its webhook never arrives. */
+  listDeposits?(): Promise<RailDeposit[]>;
 
   /** OPTIONAL crypto-OUTBOUND (refund a sender / treasury sweep). Pays a BOLT11 invoice
    *  from the rail's wallet; `amountMsat` is required for an amount-less invoice. A rail

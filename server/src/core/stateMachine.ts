@@ -191,6 +191,9 @@ export async function recordUnattributedInbound(input: {
   const erc20 = !!input.asset || /^0x[0-9a-fA-F]{40}$/.test(ref);
   const onchainBtc = /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,}$/.test(ref);
   const method: Method = input.asset ?? (erc20 ? "USDT" : onchainBtc ? "ONCHAIN" : "LIGHTNING");
+  // (a BTC deposit reaches here with no `asset`: a 64-hex txid is not an address, so the
+  //  onchainBtc shape test fails and the method falls to LIGHTNING/BTC — the asset is BTC
+  //  either way and gets booked; the method label is cosmetic for the operator)
   // BTC either way for the two Bitcoin methods; a stablecoin address cannot be told apart.
   const asset = input.asset ?? (erc20 ? "UNKNOWN_STABLECOIN" : "BTC");
 

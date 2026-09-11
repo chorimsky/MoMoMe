@@ -11,6 +11,7 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
+import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
@@ -22,7 +23,7 @@ import { TEST_CASES } from "../../../shared/testing.js";
 import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipientRisk.js";
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
-import { reconcileStablecoinDeposits } from "../core/stablecoinReconcile.js";
+import { reconcileDeposits } from "../core/depositReconcile.js";
 import { settle, confirmInbound, adminRetryWhy, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
@@ -995,10 +996,10 @@ api.post("/payments/:id/confirm", async (req, res) => {
   if (p.state === "AWAITING_INBOUND") {
     const inst = p.payInstruction;
     const adapter = adapterByName(inst.provider ?? "");
-    if ((inst.method === "USDT" || inst.method === "USDC") && adapter?.listStablecoinDeposits) {
-      // "I've paid" on a stablecoin: look at the rail's deposit list right now rather than
-      // waiting for the next tick — the deposit is matched to THIS address via the chain.
-      await reconcileStablecoinDeposits().catch(() => {});
+    if ((inst.method === "USDT" || inst.method === "USDC" || inst.method === "ONCHAIN") && adapter?.listDeposits) {
+      // "I've paid" on a deposit method: look at the rail's deposit list right now rather
+      // than waiting for the next tick — the deposit is matched to THIS address via the chain.
+      await reconcileDeposits().catch(() => {});
     } else if (adapter?.confirmSettlement && inst.providerRef) {
       // REAL rail (IBEX): settle ONLY if the rail confirms the crypto
       // actually arrived. Tapping "I've paid" without paying does nothing; a genuine
@@ -2282,6 +2283,16 @@ api.get("/admin/rails", async (_req, res) => {
         // Sandbox LN takes real sats → a settled sandbox inbound can authorize a real
         // payout when this opt-in is on (off by default).
         sandboxPayout: config.ibex.allowSandboxPayout,
+        lastWebhookAt: lastWebhookTimes().ibex ?? null,
+        // What this integration can and cannot do — probed, not assumed. The reconcile loops
+        // exist because of the "cannot" column.
+        capabilities: {
+          lightningDescriptionHash: false,   // /invoice/add ignores every description-hash parameter (probed 2026-09-11)
+          depositWebhookCarriesAddress: false, // ERC-20/on-chain deposits report account + tx hash only
+          depositListPaginated: true,        // /transactions?page=N; filters ignored, limit ≤ 25
+          stablecoinAmountUnits: "whole tokens",
+          btcAmountUnits: "msat",
+        },
       },
       {
         // Our own node. Chosen first for Lightning-Address invoices (it can set the LUD-06

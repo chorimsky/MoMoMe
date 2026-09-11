@@ -7,22 +7,34 @@
 import { store } from "./db/store.js";
 import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
-import { reconcileStablecoinDeposits } from "./core/stablecoinReconcile.js";
+import { reconcileDeposits } from "./core/depositReconcile.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
-import { rate as ibexRate } from "./adapters/ibex.js";
+import { rate as ibexRate, registerAccountWebhook } from "./adapters/ibex.js";
 import { setRates, setDualBtc, CCY, ratesFresh, setRatesRefresher } from "./core/rates.js";
 import { fetchEurUsd, fetchDualBtcUsd } from "./core/publicRates.js";
 
 /** Reconcile backstops (payouts / cashins / inbounds / refunds / failed-payouts) +
  *  the AML compliance scan + quote pruning. One idempotent tick. */
+/** IBEX's account webhook is registered at boot, but a registration can disappear (account
+ *  operations on their side, a re-provisioned account). Re-assert it every 6 h — the call is
+ *  idempotent (409 = already there) — so a lost registration costs at most 6 h of reconcile-
+ *  only settlement rather than forever. */
+let lastWebhookRegisterAt = Date.now(); // boot already registered it
+async function keepWebhookRegistered(): Promise<void> {
+  if (!ibexConfigured() || Date.now() - lastWebhookRegisterAt < 6 * 3600_000) return;
+  lastWebhookRegisterAt = Date.now();
+  await registerAccountWebhook().catch((e) => console.error("[ibex] webhook re-register failed", e instanceof Error ? e.message : e));
+}
+
 export async function reconcileTick(): Promise<void> {
   await reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
   await reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
   // Inbound reconcile applies to any crypto rail with authoritative re-query (IBEX);
   // refund reconcile is IBEX-specific (refunds pay out via IBEX).
   if (ibexConfigured()) await reconcileStuckInbounds().catch((e) => console.error("reconcile inbounds", e));
-  if (ibexConfigured()) await reconcileStablecoinDeposits().catch((e) => console.error("reconcile stablecoins", e));
+  if (ibexConfigured()) await reconcileDeposits().catch((e) => console.error("reconcile deposits", e));
+  await keepWebhookRegistered();
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

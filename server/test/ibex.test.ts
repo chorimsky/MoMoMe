@@ -92,7 +92,7 @@ async function main() {
     const ev = ibexAdapter.parseEvent({ transaction: { id: "tx_usdt_1", currencyId: 29, address: "0xAbC123", amount: 5, settledAt: "2026-01-01T00:00:00Z" } });
     ok("USDT deposit → providerRef=0x addr, confirmed", ev?.providerRef === "0xAbC123" && ev.kind === "confirmed");
     ok("USDT amount is taken as whole tokens (5 = 5 USDT)", ev?.amount === 5, String(ev?.amount));
-    ok("the event is flagged as a stablecoin deposit", ev?.stablecoin === "USDT", String(ev?.stablecoin));
+    ok("the event is flagged as a deposit (USDT)", ev?.deposit === "USDT", String(ev?.deposit));
   }
   ok("no transaction → null", ibexAdapter.parseEvent({}) === null);
   ok("no providerRef (no id/addr) → null", ibexAdapter.parseEvent({ transaction: { invoice: { receiveMsat: 1000 } } }) === null);
@@ -146,6 +146,27 @@ async function main() {
   } finally {
     globalThis.fetch = origFetch;
   }
+
+/* ---- HTTP resilience: the client, not just the happy path ---- */
+{
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  const seq: Array<() => Response> = [
+    () => new Response("busy", { status: 429, headers: { "retry-after": "0" } }),
+    () => new Response("upstream", { status: 502 }),
+    () => new Response(JSON.stringify({ rate: 65000 }), { status: 200, headers: { "content-type": "application/json" } }),
+  ];
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String((input as { url?: string })?.url ?? input);
+    if (url.includes("/oauth/token")) return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 });
+    if (url.includes("/rates")) { calls++; return (seq[calls - 1] ?? seq[seq.length - 1])(); }
+    return realFetch(input as RequestInfo);
+  }) as typeof fetch;
+  const { rate } = await import("../src/adapters/ibex.js");
+  const r = await rate(0, 3);
+  ok("a GET survives 429 → 502 → 200 (retried with backoff)", r === 65000 && calls === 3, `rate=${r} calls=${calls}`);
+  globalThis.fetch = realFetch;
+}
 
   console.log(`\n✅ ${passed} assertions passed`);
 }

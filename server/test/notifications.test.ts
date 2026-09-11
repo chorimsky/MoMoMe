@@ -120,5 +120,65 @@ ok("it reports SMS as enabled but unconfigured — the exact state the console m
 ok("and which audience each channel can actually reach", sms?.reaches.includes("recipient") === true,
    sms?.reaches.join(","));
 
+/* ---- PUSH: the only channel that reaches a SENDER ---- */
+{
+  const { setPushToken, clearPushToken, pushTokenFor } = await import("../src/core/pushTokens.js");
+  const sent: Array<{ to: string; title: string; body: string }> = [];
+  let ticket: { status: string; details?: { error?: string } } = { status: "ok" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: unknown) => {
+    const url = String((input as { url?: string })?.url ?? input);
+    if (url.startsWith("https://exp.host/--/api/v2/push/send")) {
+      const msgs = JSON.parse(String((init as { body?: string })?.body ?? "[]")) as Array<{ to: string; title: string; body: string }>;
+      sent.push(...msgs);
+      return new Response(JSON.stringify({ data: msgs.map(() => ticket) }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return realFetch(input as RequestInfo, init as RequestInit);
+  }) as typeof fetch;
+
+  // No token yet → the sender is unreachable, and the outbox says so.
+  await notifyDelivered(pay({ ref: "MMM-2026-418850", senderId: "dev_abc" }));
+  const noTok = listNotifications().find((r) => r.paymentRef === "MMM-2026-418850" && r.channel === "push");
+  ok("a delivery ALSO addresses the sender over push", !!noTok, noTok?.audience);
+  ok("…and without a token records WHY nothing was sent (skipped, not a gateway fault)", noTok?.status === "skipped" && /not turned on payment alerts/.test(noTok.detail ?? ""), noTok?.detail);
+
+  // Token registered (French) → a real push goes out, in French, with the essentials.
+  setPushToken("dev_abc", "ExponentPushToken[abcdefgh12345678]", "android", "fr");
+  await notifyDelivered(pay({ ref: "MMM-2026-418851", senderId: "dev_abc", recipient: { phone: "680344485", country: "CM", provider: "MTN", name: "NANA JEAN PAUL", nameSource: "provider" } }));
+  const m = sent[sent.length - 1];
+  ok("push sent to the registered token", m?.to === "ExponentPushToken[abcdefgh12345678]", m?.to);
+  ok("…in the device's language, naming amount, person and ref", m?.title === "Livré ✓" && /500 XAF/.test(m.body) && /NANA JEAN PAUL/.test(m.body) && /MMM-2026-418851/.test(m.body), `${m?.title} | ${m?.body}`);
+  const okRec = listNotifications().find((r) => r.paymentRef === "MMM-2026-418851" && r.channel === "push");
+  ok("outbox records it as sent", okRec?.status === "sent", okRec?.status);
+
+  // A refund-to-claim is pushed too — that is the message a sender most needs.
+  const { notifyPayoutFailed } = await import("../src/core/notifications.js");
+  await notifyPayoutFailed(pay({ ref: "MMM-2026-418852", senderId: "dev_abc" }), "rail rejected");
+  const rf = sent[sent.length - 1];
+  ok("a failed payout pushes 'claim your refund' to the sender", /remboursement/i.test(rf?.body ?? "") && /MMM-2026-418852/.test(rf?.body ?? ""), rf?.body);
+
+  // Lightning-Address payments have no app sender: nothing is pushed, nothing is faked.
+  const before = sent.length;
+  await notifyDelivered(pay({ ref: "MMM-2026-418853", senderId: "lnurl:237680344485@momome.xyz" }));
+  ok("an LNURL payment (no app) pushes nothing", sent.length === before);
+
+  // The push service says the device is gone → the token is dropped, not retried forever.
+  ticket = { status: "error", details: { error: "DeviceNotRegistered" } };
+  await notifyDelivered(pay({ ref: "MMM-2026-418854", senderId: "dev_abc" }));
+  ok("DeviceNotRegistered drops the token", pushTokenFor("dev_abc") === undefined);
+
+  // Turned off in Settings → skipped with that reason.
+  setPushToken("dev_abc", "ExponentPushToken[abcdefgh12345678]", "ios", "en");
+  updateSettings({ channels: { ...getSettings().channels, Push: false } });
+  await notifyDelivered(pay({ ref: "MMM-2026-418855", senderId: "dev_abc" }));
+  const off = listNotifications().find((r) => r.paymentRef === "MMM-2026-418855" && r.channel === "push");
+  ok("Push switched off in Settings → skipped, with that reason", off?.status === "skipped" && /Turned off/.test(off.detail ?? ""), off?.detail);
+  updateSettings({ channels: { ...getSettings().channels, Push: true } });
+  clearPushToken("dev_abc");
+  const hp = notificationHealth().channels.find((c) => c.name === "push");
+  ok("health lists push as reaching the sender, with a device count", hp?.reaches.join(",") === "sender" && hp?.devices === 0, JSON.stringify(hp));
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

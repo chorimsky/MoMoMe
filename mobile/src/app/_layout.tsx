@@ -21,6 +21,9 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ensureSenderId } from '@/api/client';
+import { configurePushHandling } from '@/lib/push';
+import * as Notifications from 'expo-notifications';
+import { router } from 'expo-router';
 import { BrandSplash } from '@/components/brand-splash';
 import { Colors } from '@/constants/theme';
 import { useResolvedScheme } from '@/hooks/use-theme';
@@ -61,6 +64,13 @@ export default function RootLayout() {
   const ready = fontsLoaded || !!fontError;
 
   // Mint/restore the device id up front so the first API call has it.
+  useEffect(() => {
+    configurePushHandling();
+    // A tapped payment alert opens Activity, where the payment and any refund claim live.
+    const sub = Notifications.addNotificationResponseReceivedListener(() => { router.push('/activity'); });
+    Notifications.getLastNotificationResponseAsync().then((r) => { if (r) router.push('/activity'); }).catch(() => {});
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     void ensureSenderId();
   }, []);

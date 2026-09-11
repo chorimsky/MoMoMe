@@ -620,7 +620,7 @@ export interface RoutingSnapshot {
 export interface AdminSettings {
   /** logo is a data URL (data:image/…;base64,…) or null when unset. */
   company: { brand: string; email: string; phone: string; logo: string | null };
-  channels: { Email: boolean; SMS: boolean; WhatsApp: boolean };
+  channels: { Email: boolean; SMS: boolean; WhatsApp: boolean; Push: boolean };
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: {
     feePct: number;

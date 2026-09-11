@@ -13,6 +13,7 @@
    ============================================================ */
 import type { NotificationAudience } from "../../../shared/types.js";
 import { fetchT } from "./http.js";
+import { pushTokenFor, dropDeadToken } from "../core/pushTokens.js";
 
 export interface OutboundMessage {
   audience: NotificationAudience;
@@ -28,6 +29,10 @@ export interface NotifyChannel {
   configured(): boolean;
   /** Which audiences it can physically reach. */
   supports(audience: NotificationAudience): boolean;
+  /** OPTIONAL: a reason this particular `to` cannot be reached right now (no token, no
+   *  number). Recorded as SKIPPED — "nothing could carry it" — rather than as a failed
+   *  send, which would read as a gateway fault. */
+  unreachable?(msg: OutboundMessage): string | undefined;
   /** Deliver. Never throws — a channel failure must not take down a payment. */
   send(msg: OutboundMessage): Promise<{ ok: boolean; detail?: string }>;
 }
@@ -81,7 +86,40 @@ export const smsChannel: NotifyChannel = {
 };
 
 /** Every known channel. */
-export const CHANNELS: NotifyChannel[] = [logChannel, smsChannel];
+/* ---------- push, through the Expo push service ----------
+   The only channel that can reach a SENDER (the account is a device). `to` is the sender
+   id; the token registered by that device is looked up here. The Expo push service needs
+   no credential from us (an optional EXPO_ACCESS_TOKEN raises the rate limit); APNs and
+   FCM credentials live on the EAS project, not in this server. */
+export const pushChannel: NotifyChannel = {
+  name: "push",
+  configured: () => true,
+  supports: (a) => a === "sender",
+  unreachable: (msg) => (pushTokenFor(msg.to) ? undefined : "We hold no contact details for the sender beyond a device id, and this device has not turned on payment alerts (no push token registered)."),
+  send: async (msg) => {
+    const rec = pushTokenFor(msg.to);
+    if (!rec) return { ok: false, detail: "no push token" };
+    const [title, ...rest] = msg.body.split("\n");
+    const body = rest.join("\n") || title;
+    try {
+      const res = await fetchT("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", ...(process.env.EXPO_ACCESS_TOKEN ? { authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}) },
+        body: JSON.stringify([{ to: rec.token, title: rest.length ? title : "MoMo›Me", body, sound: "default", priority: "high", channelId: "payments", data: { kind: "payment" } }]),
+      }, 10_000);
+      const j = (await res.json().catch(() => ({}))) as { data?: Array<{ status?: string; message?: string; details?: { error?: string } }> };
+      const ticket = j.data?.[0];
+      if (!res.ok || !ticket) return { ok: false, detail: `Expo push HTTP ${res.status}` };
+      if (ticket.status === "ok") return { ok: true };
+      if (ticket.details?.error === "DeviceNotRegistered") { dropDeadToken(rec.token); return { ok: false, detail: "Token no longer valid (app uninstalled or alerts revoked) — dropped." }; }
+      return { ok: false, detail: `${ticket.details?.error ?? "error"}: ${ticket.message ?? ""}`.trim() };
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : "push send failed" };
+    }
+  },
+};
+
+export const CHANNELS: NotifyChannel[] = [logChannel, smsChannel, pushChannel];
 
 export function channelByName(name: string): NotifyChannel | undefined {
   return CHANNELS.find((c) => c.name === name);

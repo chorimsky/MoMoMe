@@ -54,7 +54,7 @@ export function SettingsView() {
 
   // What is actually behind each toggle. Fetched rather than assumed, so this card cannot
   // drift back into claiming delivery that isn't happening.
-  const [notifyChannels, setNotifyChannels] = useState<Array<{ name: string; configured: boolean; enabled: boolean }>>([]);
+  const [notifyChannels, setNotifyChannels] = useState<Array<{ name: string; configured: boolean; enabled: boolean; devices?: number }>>([]);
   useEffect(() => {
     let alive = true;
     api.adminNotificationOutbox()
@@ -273,12 +273,19 @@ export function SettingsView() {
             const ch = notifyChannels.find((c) => c.name === k.toLowerCase());
             const state = !ch ? "No channel for this yet — turning it on sends nothing."
               : !ch.configured ? "No provider configured — set SMS_WEBHOOK_URL to start sending."
-              : channels[k] ? "Delivering." : "Off.";
+              : !channels[k] ? "Off."
+              : k === "Push" ? `Delivering to senders' phones — ${ch.devices ?? 0} device${ch.devices === 1 ? "" : "s"} have turned alerts on.`
+              : "Delivering.";
+            const sub = k === "Push" ? "Delivered / refund-to-claim / being-checked alerts to the SENDER's app. The only channel that reaches a sender."
+              : k === "SMS" ? "Delivery confirmation to the RECIPIENT's Mobile Money number."
+              : k === "Email" ? "Nobody has an email on file — the account is a device."
+              : "Reserved for a future WhatsApp Business integration.";
             return (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{k}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{state}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{sub}</div>
                 </div>
                 <Toggle on={channels[k]} onChange={(v) => toggle(k, v)} />
               </div>

@@ -14,7 +14,7 @@ export const DEFAULT_METHODS = { LIGHTNING: true, ONCHAIN: true, USDT: true, USD
 
 const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
-  channels: { Email: true, SMS: true, WhatsApp: false },
+  channels: { Email: true, SMS: true, WhatsApp: false, Push: true },
   rails: { defaultRail: "Lightning", autoSwitch: true, threshold: 200000 },
   // Cost assumptions for net-margin intelligence (override with real rail rates):
   // payout ≈ Mobile Money disbursement cost (PawaPay/Peexit/MTN/Orange) as a

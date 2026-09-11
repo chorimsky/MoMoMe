@@ -33,7 +33,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'momome',
   owner: 'rimskycho',
   scheme: 'momome',
-  version: '1.0.0',
+  // 1.1.0: expo-notifications is a NATIVE module. runtimeVersion follows this, so OTA updates
+  // built from this tree reach only 1.1.0 binaries — a 1.0.0 install would crash on a JS
+  // bundle that imports a native module it does not have.
+  version: '1.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   userInterfaceStyle: 'automatic',
@@ -92,6 +95,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
+    [
+      'expo-notifications',
+      {
+        icon: './assets/images/android-icon-monochrome.png',
+        color: '#FFC92E',
+        defaultChannel: 'payments',
+      },
+    ],
     'expo-secure-store',
     'expo-web-browser',
     [

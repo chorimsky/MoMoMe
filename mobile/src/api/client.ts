@@ -156,6 +156,11 @@ export interface AppConfig {
 export const api = {
   getConfig: () => req<AppConfig>('/config'),
 
+  /** Payment alerts: register this device's Expo push token (one per device id). */
+  registerPushToken: (token: string, platform: 'ios' | 'android' | 'unknown', lang: 'en' | 'fr' = 'en') =>
+    req<{ ok: true }>('/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform, lang }) }),
+  unregisterPushToken: () => req<{ ok: true }>('/me/push-token', { method: 'DELETE' }),
+
   resolveRecipient: (phone: string, country: CountryCode = 'CM') =>
     req<ResolveResult>(
       `/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`,

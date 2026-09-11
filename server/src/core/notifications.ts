@@ -22,6 +22,7 @@ import type {
 } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { channelsFor, smsChannel } from "../adapters/notify.js";
+import { pushTokenFor, pushTokenCount } from "./pushTokens.js";
 import { getSettings } from "./settings.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
@@ -43,6 +44,7 @@ function enabledInSettings(channel: string): boolean {
   if (channel === "sms") return ch.SMS;
   if (channel === "email") return ch.Email;
   if (channel === "whatsapp") return ch.WhatsApp;
+  if (channel === "push") return ch.Push !== false;
   return true;
 }
 
@@ -95,6 +97,14 @@ export async function notify(input: {
       }));
       continue;
     }
+    const why = ch.unreachable?.({ audience: input.audience, to: input.to ?? "", body: input.body });
+    if (why) {
+      out.push(record({
+        kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
+        paymentRef: input.paymentRef, status: "skipped", detail: why,
+      }));
+      continue;
+    }
     if (!ch.configured()) {
       out.push(record({
         kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
@@ -139,7 +149,11 @@ function recipientMsisdn(p: Payment): string {
   return `${dial}${digits}`.replace(/\s+/g, "");
 }
 
-/** The money landed. The one message that most needs to exist. */
+/** Sender-facing copy in the language the device registered with. First line = title. */
+function senderLang(p: Payment): "en" | "fr" { return (p.senderId && pushTokenFor(p.senderId)?.lang) || "en"; }
+const who = (p: Payment): string => (p.recipient.name && p.recipient.name.replace(/\D/g, "") !== p.recipient.phone.replace(/\D/g, "") ? p.recipient.name : `${p.recipient.provider} ${p.recipient.phone}`);
+
+/** The money landed. The one message that most needs to exist — for BOTH sides. */
 export async function notifyDelivered(p: Payment): Promise<void> {
   await notify({
     kind: "payment_delivered",
@@ -148,6 +162,13 @@ export async function notifyDelivered(p: Payment): Promise<void> {
     paymentRef: p.ref,
     body: `You have received ${xaf(p.xaf)} on your ${p.recipient.provider} Mobile Money. Ref ${p.ref}. Sent via MoMo>Me.`,
   }).catch(() => { /* best-effort */ });
+  if (p.senderId && !p.senderId.startsWith("lnurl:")) {
+    const fr = senderLang(p) === "fr";
+    await notify({
+      kind: "payment_delivered", audience: "sender", to: p.senderId, paymentRef: p.ref,
+      body: fr ? `Livré ✓\n${xaf(p.xaf)} envoyés à ${who(p)} · Réf ${p.ref}` : `Delivered ✓\n${xaf(p.xaf)} sent to ${who(p)} · Ref ${p.ref}`,
+    }).catch(() => {});
+  }
 }
 
 /** It did not land. There is no sender contact — the account is a device — so this is an
@@ -159,6 +180,14 @@ export async function notifyPayoutFailed(p: Payment, reason: string): Promise<vo
     paymentRef: p.ref,
     body: `${p.ref}: payout of ${xaf(p.xaf)} to ${p.recipient.provider} ${p.recipient.phone} FAILED — ${reason}. A refund is owed.`,
   }).catch(() => {});
+  // The sender has money to claim back — that is worth a push even more than a delivery.
+  if (p.senderId && !p.senderId.startsWith("lnurl:")) {
+    const fr = senderLang(p) === "fr";
+    await notify({
+      kind: "refund_needed", audience: "sender", to: p.senderId, paymentRef: p.ref,
+      body: fr ? `Paiement non livré\n${xaf(p.xaf)} pour ${who(p)} n'a pas pu être livré. Ouvrez l'app pour récupérer votre remboursement · Réf ${p.ref}` : `Payment not delivered\n${xaf(p.xaf)} for ${who(p)} could not be delivered. Open the app to claim your refund · Ref ${p.ref}`,
+    }).catch(() => {});
+  }
 }
 
 export async function notifyHeldForReview(p: Payment, reason: string): Promise<void> {
@@ -168,6 +197,13 @@ export async function notifyHeldForReview(p: Payment, reason: string): Promise<v
     paymentRef: p.ref,
     body: `${p.ref}: ${xaf(p.xaf)} held for review — ${reason}.`,
   }).catch(() => {});
+  if (p.senderId && !p.senderId.startsWith("lnurl:")) {
+    const fr = senderLang(p) === "fr";
+    await notify({
+      kind: "manual_review", audience: "sender", to: p.senderId, paymentRef: p.ref,
+      body: fr ? `Paiement en vérification\n${xaf(p.xaf)} pour ${who(p)} est vérifié par notre équipe. Vous serez prévenu dès que c'est réglé · Réf ${p.ref}` : `Payment being checked\n${xaf(p.xaf)} for ${who(p)} is being checked by our team. You will be told as soon as it is settled · Ref ${p.ref}`,
+    }).catch(() => {});
+  }
 }
 
 /** Money arrived that nobody can account for. */
@@ -233,7 +269,7 @@ export function listNotifications(limit = 100): NotificationRecord[] {
 /** What an operator needs to see at a glance: is anything silently going nowhere? */
 export function notificationHealth(): {
   total: number; sent: number; failed: number; skipped: number;
-  channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: NotificationAudience[] }>;
+  channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: NotificationAudience[]; devices?: number }>;
 } {
   const all: NotificationAudience[] = ["recipient", "sender", "operator"];
   return {
@@ -246,6 +282,8 @@ export function notificationHealth(): {
       configured: c.configured(),
       enabled: enabledInSettings(c.name),
       reaches: all.filter((a) => c.supports(a)),
+      // Push is "configured" by construction; what matters is how many devices opted in.
+      ...(c.name === "push" ? { devices: pushTokenCount() } : {}),
     })),
   };
 }

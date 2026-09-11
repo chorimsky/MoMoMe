@@ -11,6 +11,7 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
+import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
@@ -1156,6 +1157,26 @@ api.post("/me/devices", rateLimitDurableMiddleware("device_enroll", 20, 60_000),
   res.json({ ok: true, deviceId: id });
 });
 
+/* ---------- push token: the one way to reach a sender ----------
+   The app registers its Expo push token after the person turns on "Payment alerts". One
+   token per device id; re-registering replaces it. DELETE turns alerts off server-side
+   immediately, whatever the OS permission still says. */
+api.post("/me/push-token", rateLimitDurableMiddleware("push_token", 20, 60_000), async (req, res) => {
+  const id = senderOf(req);
+  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  const body = (req.body ?? {}) as { token?: unknown; platform?: unknown; lang?: unknown };
+  if (!validPushToken(body.token)) return res.status(400).json({ error: "bad_token", message: "Not an Expo push token." });
+  const platform = body.platform === "ios" || body.platform === "android" || body.platform === "web" ? body.platform : "unknown";
+  const lang = body.lang === "fr" ? "fr" : "en";
+  setPushToken(id, body.token, platform, lang);
+  res.json({ ok: true });
+});
+api.delete("/me/push-token", async (req, res) => {
+  const id = senderOf(req);
+  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  res.json({ ok: true, removed: clearPushToken(id) });
+});
+
 /* ---------- account + data deletion ----------
    Google Play requires an app that lets people create an account to offer deletion of the
    account AND its data — in the app, and at a public URL for people who have uninstalled
@@ -1182,6 +1203,7 @@ api.post("/me/delete", rateLimitDurableMiddleware("account_delete", 5, 60_000), 
   const vaultRecords = purgeVault(owner);
   const device = forgetDevice(owner);
   const referrals = forgetReferrals(owner);
+  clearPushToken(owner); // the push token describes the person's device — it goes too
 
   // Count what is being kept, so the person is told plainly rather than left to assume.
   const retainedPayments = (await store().listPayments()).filter((p) => p.senderId === owner).length;

@@ -28,6 +28,7 @@ import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useFeatures } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
+import { enablePush, usePushState } from '@/lib/push';
 import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
@@ -856,7 +857,8 @@ export default function SendScreen() {
  *  staggered copy. Self-contained so it animates once each time it mounts. */
 function SuccessView({ payment, recipientLabel, onReset }: { payment: Payment; recipientLabel: string; onReset: () => void }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
+  const pushState = usePushState();
   const [receiptOpen, setReceiptOpen] = useState(false);
   const pop = useRef(new Animated.Value(0.5)).current;
   const bloom = useRef(new Animated.Value(0)).current;
@@ -897,6 +899,11 @@ function SuccessView({ payment, recipientLabel, onReset }: { payment: Payment; r
           <Mono>{tr('ref_short')} {payment.ref}</Mono>
         </View>
         <Button title={tr('view_receipt')} icon="receipt-outline" variant="outline" onPress={() => setReceiptOpen(true)} style={{ alignSelf: 'stretch' }} />
+        {/* The moment someone has just watched money land is the moment "tell me next
+            time" makes sense — one tap, no settings hunt. Hidden once alerts are on. */}
+        {pushState === 'off' ? (
+          <Button title={tr('push_success_cta')} icon="notifications-outline" variant="outline" onPress={() => void enablePush(lang)} style={{ alignSelf: 'stretch' }} />
+        ) : null}
         <Button title={tr('send_another')} icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />
       </Animated.View>
       <ReceiptModal visible={receiptOpen} payment={payment} onClose={() => setReceiptOpen(false)} />
@@ -1169,7 +1176,8 @@ function ProcessingView({ payment }: { payment: Payment }) {
  *  refund awaiting a destination (claim). Mirrors the web ProcessingStep tail. */
 function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => void }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
+  const pushState = usePushState();
   const s = payment.state;
   const needsClaim = !!payment.refundNeedsDestination;
 
@@ -1218,6 +1226,9 @@ function OutcomeView({ payment, onReset }: { payment: Payment; onReset: () => vo
       </View>
       {needsClaim ? (
         <Button title={tr('claim_refund')} icon="cash" onPress={() => router.push('/claim')} style={{ alignSelf: 'stretch' }} />
+      ) : null}
+      {pushState === 'off' ? (
+        <Button title={tr('push_success_cta')} variant="outline" icon="notifications-outline" onPress={() => void enablePush(lang)} style={{ alignSelf: 'stretch' }} />
       ) : null}
       <Button title={tr('view_activity')} variant="outline" icon="time" onPress={() => router.push('/activity')} style={{ alignSelf: 'stretch' }} />
       <Button title={tr('send_another')} icon="add" onPress={onReset} style={{ alignSelf: 'stretch' }} />

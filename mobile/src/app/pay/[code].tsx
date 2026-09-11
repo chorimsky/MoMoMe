@@ -20,7 +20,9 @@ export default function PayLinkScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!code) return;
+    // A deep link is untrusted input: a merchant/link code is a short token, nothing else
+    // reaches the API from here.
+    if (!code || !/^[A-Za-z0-9_-]{4,40}$/.test(code)) return;
     let alive = true;
     (async () => {
       try {

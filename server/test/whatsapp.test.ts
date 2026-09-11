@@ -9,6 +9,7 @@ process.env.WHATSAPP_VERIFY_TOKEN = "verify-me";
 process.env.WHATSAPP_APP_SECRET = "app-secret";
 process.env.WHATSAPP_TEMPLATE_DELIVERED = "momome_delivered";
 process.env.WEB_ORIGIN = "https://momome.xyz";
+process.env.META_AI_API_KEY = "test-meta-key";
 delete process.env.SMS_WEBHOOK_URL;
 
 import type { AddressInfo } from "node:net";
@@ -23,6 +24,24 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: unknown, init?: unknown) => {
   const url = String((input as { url?: string })?.url ?? input);
   const J = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
+  if (url.startsWith("https://api.meta.ai/v1/chat/completions")) {
+    aiCalls++;
+    if (aiDown) return new Response("upstream", { status: 503 });
+    const b = JSON.parse(String((init as { body?: string })?.body ?? "{}")) as { messages: Array<{ role: string; content: string }> };
+    const user = b.messages.find((m) => m.role === "user")?.content.toLowerCase() ?? "";
+    const hit = INTENTS[user];
+    return hit ? J({ choices: [{ message: { content: JSON.stringify(hit) } }] }) : J({ choices: [{ message: { content: JSON.stringify({ intent: "other", amount_xaf: null, number: null, ref: null, language: "en" }) } }] });
+  }
+  if (url.startsWith("https://api.meta.ai/v1/asr/transcribe")) {
+    asrCalls++;
+    const form = (init as { body?: FormData })?.body;
+    const audio = form?.get("audio") as Blob | null;
+    const head = Buffer.from(await (audio?.slice(0, 4).arrayBuffer() ?? new ArrayBuffer(0))).toString("ascii");
+    if (head !== "RIFF") return new Response(JSON.stringify({ error: "not wav" }), { status: 400 });
+    return J({ transcript: "envoie cinq mille à six sept sept zéro zéro zéro sept huit neuf", audioDurationMs: 3200 });
+  }
+  if (url === "https://graph.facebook.com/v21.0/media-voice-1") return J({ url: "https://lookaside.example/voice.ogg", mime_type: "audio/ogg", file_size: 12000 });
+  if (url === "https://lookaside.example/voice.ogg") { mediaDownloads++; return new Response(new Uint8Array(await import("node:fs").then((fs) => fs.promises.readFile("test/fixtures/voice.ogg")))); }
   if (url.includes("graph.facebook.com")) {
     const b = JSON.parse(String((init as { body?: string })?.body ?? "{}")) as { to: string; type: string; text?: { body: string }; template?: { name: string; components?: Array<{ parameters: Array<{ text: string }> }> }; status?: string };
     if (b.status === "read") return J({ success: true });
@@ -35,6 +54,16 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
   return realFetch(input as RequestInfo, init as RequestInit);
 }) as typeof fetch;
 
+/* Fake Meta Model API: intent JSON for known phrases (null → regex fallback), ASR transcript
+   for the voice note. Set `aiDown` to simulate an outage. */
+let aiDown = false;
+let aiCalls = 0, asrCalls = 0;
+let mediaDownloads = 0;
+const INTENTS: Record<string, unknown> = {
+  "give nana 5k for the rent, her number is 6 77 00 07 89": { intent: "send", amount_xaf: 5000, number: "677000789", ref: null, language: "en" },
+  "envoie cinq mille à six sept sept zéro zéro zéro sept huit neuf": { intent: "send", amount_xaf: 5000, number: "677000789", ref: null, language: "fr" },
+  "c'est quoi momome ?": { intent: "help", amount_xaf: null, number: null, ref: null, language: "fr" },
+};
 const meta = (from: string, msg: Record<string, unknown>) => JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { messages: [{ from, id: "wamid.in", ...msg }] } }] }] });
 const sign = (raw: string) => "sha256=" + createHmac("sha256", "app-secret").update(raw).digest("hex");
 
@@ -107,6 +136,35 @@ async function main() {
     await notifyDelivered(pay({ ref: "MMM-2026-418901", recipient: { phone: "677000598", country: "CM", provider: "MTN", name: "", nameSource: "manual" } }));
     const tpl = sent.find((m) => m.to === "237677000598");
     ok("recipient OUTSIDE the window gets the approved template with amount + ref", tpl?.type === "template" && tpl.template === "momome_delivered" && tpl.params?.[0] === "1 000 XAF" && tpl.params?.[1] === "MMM-2026-418901", JSON.stringify(tpl));
+
+    // ---- Meta Model API: understanding, then the same checks ----
+    console.log("\nMeta Model API — the model proposes, the code disposes\n");
+    r = await replyTo({ from: "237699000111", kind: "text", text: "Give Nana 5k for the rent, her number is 6 77 00 07 89" });
+    ok("free text the regex cannot read → the model's intent → a pay link", r.includes("to=237677000789&amount=5000"), r.split("\n")[1]);
+    r = await replyTo({ from: "237699000111", kind: "text", text: "envoie cinq mille à six sept sept zéro zéro zéro sept huit neuf" });
+    ok("numbers and amounts dictated in words → digits → French reply", r.startsWith("Payer") && r.includes("to=237677000789&amount=5000"), r.split("\n")[0]);
+    r = await replyTo({ from: "237699000111", kind: "text", text: "C'est quoi MoMoMe ?" });
+    ok("a question → the menu in French", r.startsWith("MoMo›Me sur WhatsApp"));
+    const before = aiCalls;
+    aiDown = true;
+    r = await replyTo({ from: "237699000111", kind: "text", text: "send 3000 to 677000789" });
+    ok("model outage → the regex bot still answers", r.includes("to=237677000789&amount=3000") && aiCalls === before + 1, r.split("\n")[1]);
+    aiDown = false;
+
+    // A voice note: downloaded, converted to WAV, transcribed, read back, answered.
+    const fs = await import("node:fs");
+    if (fs.existsSync("test/fixtures/voice.ogg")) {
+      r = await replyTo({ from: "237699000111", kind: "audio", mediaId: "media-voice-1" });
+      ok("voice note → downloaded → WAV → transcribed", mediaDownloads === 1 && asrCalls === 1, `downloads=${mediaDownloads} asr=${asrCalls}`);
+      ok("…what we heard is read back before the link", /J'ai entendu : « envoie cinq mille/.test(r), r.split("\n")[0]);
+      ok("…and the link is for the dictated number and amount", r.includes("to=237677000789&amount=5000"));
+      ok("…with an out if we misheard", /Si ce n'est pas ça, écrivez-le/.test(r));
+    } else {
+      console.log("  (no test/fixtures/voice.ogg — voice path not exercised)");
+    }
+    const { wav16 } = await import("../src/core/audio.js");
+    const w = wav16(new Int16Array([0, 1000, -1000, 0]), 16000);
+    ok("WAV encoder: RIFF header, mono 16-bit 16 kHz, correct sizes", w.toString("ascii", 0, 4) === "RIFF" && w.readUInt16LE(22) === 1 && w.readUInt32LE(24) === 16000 && w.readUInt16LE(34) === 16 && w.readUInt32LE(40) === 8);
   } finally { server.close(); }
 
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);

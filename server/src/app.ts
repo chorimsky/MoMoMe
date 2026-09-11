@@ -75,6 +75,7 @@ export function createApp() {
   // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
   // client IP (rate limiting, webhook IP allowlist), not a spoofable XFF.
   app.set("trust proxy", 1);
+  app.disable("x-powered-by"); // no framework banner for scanners
   // maxAge caches the CORS preflight (OPTIONS) for a day, so the send-flow's rapid
   // polling of /payments/:id doesn't re-preflight every few seconds on some browsers.
   app.use(cors({ origin: corsOrigin, maxAge: 86400 }));

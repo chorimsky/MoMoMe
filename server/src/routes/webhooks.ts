@@ -69,6 +69,15 @@ webhooks.post("/peex", express.raw({ type: "*/*" }), (req, res) => {
   res.status(ok ? 200 : 401).json({ ok });
 });
 
+const waInbound = new Map<string, number[]>();
+function inboundBudget(from: string, now = Date.now()): boolean {
+  const hist = (waInbound.get(from) ?? []).filter((t) => now - t < 60_000);
+  if (hist.length >= 20) return false;
+  hist.push(now); waInbound.set(from, hist);
+  if (waInbound.size > 10_000) waInbound.clear();
+  return true;
+}
+
 /* ---------- WhatsApp (Meta Cloud API) ----------
    GET = Meta's one-time verification handshake. POST = inbound messages + status updates,
    HMAC-SHA256 signed with the app secret (X-Hub-Signature-256). Every message is answered
@@ -92,6 +101,9 @@ webhooks.post("/whatsapp", express.raw({ type: "*/*" }), (req, res) => {
   res.json({ ok: true }); // Meta retries on anything but a fast 200
   for (const m of inboundMessages(body)) {
     noteInbound(m.from);
+    // A number flooding the bot burns transcription/model spend: 20 messages a minute is
+    // more than any person types; beyond it the message is acked and dropped.
+    if (!inboundBudget(m.from)) continue;
     background((async () => {
       if (m.id) void markRead(m.id);
       const reply = await replyTo(m).catch(() => null);

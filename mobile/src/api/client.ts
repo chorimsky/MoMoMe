@@ -9,6 +9,7 @@
  */
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
+import { devicePublicKeys, enrolledFor, forgetDeviceKeys, markEnrolled, signRequest } from '@/lib/deviceSign';
 
 import type {
   AmbassadorSummary,
@@ -71,11 +72,47 @@ export function ensureSenderId(): Promise<string> {
 export function getSenderId(): string | null {
   return senderId;
 }
+
+/* ---------- device enrolment + request signing ----------
+   Trust on first use: the first time this id talks to the server it enrols its public keys
+   (POST /me/devices); from then on every request is signed and the id alone is worthless.
+   A 409 means the id is already enrolled under different keys (a restored backup on
+   another device, or a wiped keychain): mint a fresh id rather than fight over it. */
+let signingActive = false;
+let enrolling: Promise<void> | null = null;
+async function ensureEnrolled(sid: string): Promise<void> {
+  if (signingActive) return;
+  if (!enrolling) {
+    enrolling = (async () => {
+      try {
+        if ((await enrolledFor()) === sid) { signingActive = true; return; }
+        const { authPub, wrapPub } = await devicePublicKeys();
+        const res = await fetch(`${API_BASE}/me/devices`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MM-Sender': sid },
+          body: JSON.stringify({ authPub, wrapPub }),
+        });
+        if (res.ok) { await markEnrolled(sid); signingActive = true; return; }
+        if (res.status === 409) {
+          // Enrolled elsewhere under other keys: this device becomes a new account id.
+          await forgetDeviceKeys();
+          await forgetSenderId();
+          const fresh = await ensureSenderId();
+          const k = await devicePublicKeys();
+          const again = await fetch(`${API_BASE}/me/devices`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MM-Sender': fresh }, body: JSON.stringify({ authPub: k.authPub, wrapPub: k.wrapPub }) });
+          if (again.ok) { await markEnrolled(fresh); signingActive = true; }
+        }
+      } catch { /* offline: unsigned this time, retried on the next request */ }
+      finally { enrolling = null; }
+    })();
+  }
+  return enrolling;
+}
 /** After the account has been deleted server-side, the id that WAS the account must go
  *  too — otherwise the next request quietly re-enrols the same identity. */
 export async function forgetSenderId(): Promise<void> {
   senderId = null;
   senderReady = null;
+  signingActive = false;
   try {
     await SecureStore.deleteItemAsync(SENDER_KEY);
   } catch {
@@ -102,6 +139,14 @@ export class ApiError extends Error {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const sid = await ensureSenderId();
+  if (!path.startsWith('/me/devices')) await ensureEnrolled(sid);
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const bodyStr = typeof init?.body === 'string' ? init.body : '';
+  let sigHeaders: Record<string, string> = {};
+  if (signingActive) {
+    try { const { ts, sig } = await signRequest(method, path, bodyStr); sigHeaders = { 'X-MM-Ts': ts, 'X-MM-Sig': sig }; }
+    catch { /* signing failed → unsigned; the server decides */ }
+  }
   const ctrl = new AbortController();
   // 20s ceiling — a stalled half-open socket (common on 2G/metered data) fails
   // cleanly instead of hanging the spinner forever.
@@ -114,6 +159,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       headers: {
         'Content-Type': 'application/json',
         'X-MM-Sender': sid,
+        ...sigHeaders,
         ...(init?.headers ?? {}),
       },
     });

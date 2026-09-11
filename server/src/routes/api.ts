@@ -12,6 +12,7 @@ import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
+import { otpSendAllowed } from "../core/otpThrottle.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
@@ -667,7 +668,12 @@ api.post("/admin/merchants/merge", async (req, res) => {
 
 /* ---------- consumer account claim (Phase 2) ---------- */
 api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6, 60_000), async (req, res) => {
-  const r = requestClaim(String((req.body ?? {}).phone ?? ""));
+  const phoneRaw = String((req.body ?? {}).phone ?? "");
+  // Per-PHONE budget on top of the per-IP one: the person being texted is the one an SMS
+  // bomb hurts, and every code costs us money.
+  const budget = otpSendAllowed(phoneRaw);
+  if (!budget.ok) { res.setHeader("Retry-After", String(budget.retryAfterSec)); return res.status(429).json({ error: "otp_limit", message: "Too many codes requested for this number. Try again later." }); }
+  const r = requestClaim(phoneRaw);
   if (r.review) return res.json({ sent: true }); // store reviewer: fixed code, no SMS
   if (!r.found) {
     return res.status(404).json({ error: "no_account", message: "No account for this number yet. You'll have one the moment you receive a Mobile Money payment." });
@@ -675,7 +681,10 @@ api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6,
   if (r.alreadyClaimed) {
     return res.status(409).json({ error: "already_claimed", message: "This account is already claimed." });
   }
-  // devCode is sandbox-only; in production the code is sent by SMS.
+  // devCode is sandbox-only; in production the code is sent by SMS — it USED to be
+  // generated and never sent, which made the claim flow impossible to complete live.
+  const sentSms = liveMoney() ? await sendOtpSms(`${COUNTRIES.CM.dial}${phoneRaw.replace(/\D/g, "").slice(-9)}`, r.code!, "claim your account") : false;
+  if (liveMoney() && !sentSms) return res.status(503).json({ error: "sms_unavailable", message: "We could not send the code right now. Please try again shortly." });
   res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
 });
 
@@ -694,6 +703,11 @@ api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 
 /* ---------- payments ---------- */
 api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async (req, res) => {
   await refreshSettingsIfStale(); // kill-switch / approval threshold must reflect a cross-instance change
+  // WHO is paying. The header alone is not identity: an enrolled device must sign, or a
+  // stolen id could open payments (and read them back) as someone else. An un-enrolled id
+  // is still accepted as a bearer during the migration window (ownerOf).
+  const owner = await ownerOf(req);
+  if (senderOf(req) && !owner) return res.status(401).json({ error: "device_unverified", message: "This device could not be verified. Reopen the app and try again." });
   const { quoteId, recipient } = (req.body ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes
   // and arbitrary payout targets).
@@ -765,14 +779,14 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     if (!toMerchant && isRealName(cleanName, recipient.phone) && !namesMatch(cleanName, registered.name)) {
       const ack = (req.body ?? {}).riskToken;
       const acknowledged = typeof ack === "string"
-        && verifyRiskToken(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch", ack);
+        && verifyRiskToken(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch", ack);
       if (!acknowledged) {
         return res.status(409).json({
           error: "confirm_recipient",
           code: "name_mismatch",
           message: `This number is registered to ${registered.name}, not to ${cleanName}. Check the number before you pay — Mobile Money payments cannot be reversed.`,
           operatorName: registered.name,
-          riskToken: riskTokenFor(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch"),
+          riskToken: riskTokenFor(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch"),
         });
       }
     }
@@ -781,13 +795,13 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   }
 
   const risk = await assessRecipient({
-    senderId: senderOf(req) ?? undefined,
+    senderId: owner,
     phone: recipient.phone, country: recipient.country, xaf: quotePeek?.xaf ?? 0,
   });
   if (risk.level === "stop") {
     const ack = (req.body ?? {}).riskToken;
     const acknowledged = typeof ack === "string" && risk.code
-      && verifyRiskToken(senderOf(req) ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, risk.code, ack);
+      && verifyRiskToken(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, risk.code, ack);
     if (!acknowledged) {
       // 409, not 400: nothing is wrong with the request — we are asking a question, and the
       // same request with the token proceeds.
@@ -842,11 +856,9 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     console.warn(`[payout-gate] BLOCKED rail: ${recipient.provider}/${recipient.country} ${quote.xaf} XAF reason=${ready.reason} willBeReal=${willBeReal}`);
     return block(503, "payouts_unavailable", "Payouts to this number aren't available right now. Please try again shortly.");
   }
-  // Attribute the payment to the authenticated device. Refuse if auth failed (an
-  // enrolled id sending no/invalid signature → ownerOf undefined): creating a
-  // senderId-less payment would make it world-readable via mayViewPayment's
-  // ownerless bypass. Legit clients (new or signed) always resolve to a real id.
-  const owner = await ownerOf(req);
+  // Attribute the payment to the authenticated device (resolved at the top of the route,
+  // before the risk tokens, so those bind to the verified owner too). A senderId-less
+  // payment would be world-readable via mayViewPayment's ownerless bypass — refuse.
   if (owner === undefined) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
 
   // ── all payout preconditions met → safe to mint the inbound address below ─────────
@@ -1162,8 +1174,10 @@ api.post("/me/devices", rateLimitDurableMiddleware("device_enroll", 20, 60_000),
    token per device id; re-registering replaces it. DELETE turns alerts off server-side
    immediately, whatever the OS permission still says. */
 api.post("/me/push-token", rateLimitDurableMiddleware("push_token", 20, 60_000), async (req, res) => {
-  const id = senderOf(req);
-  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  // Owner-VERIFIED: a spoofed device id must not be able to point another person's
+  // "delivered 10 000 XAF to NAME" alerts at an attacker's phone.
+  const id = await ownerOf(req);
+  if (!id) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const body = (req.body ?? {}) as { token?: unknown; platform?: unknown; lang?: unknown };
   if (!validPushToken(body.token)) return res.status(400).json({ error: "bad_token", message: "Not an Expo push token." });
   const platform = body.platform === "ios" || body.platform === "android" || body.platform === "web" ? body.platform : "unknown";
@@ -1172,8 +1186,8 @@ api.post("/me/push-token", rateLimitDurableMiddleware("push_token", 20, 60_000),
   res.json({ ok: true });
 });
 api.delete("/me/push-token", async (req, res) => {
-  const id = senderOf(req);
-  if (!id) return res.status(400).json({ error: "no_device", message: "No device id." });
+  const id = await ownerOf(req);
+  if (!id) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   res.json({ ok: true, removed: clearPushToken(id) });
 });
 
@@ -1273,6 +1287,10 @@ function validRecoveryBlob(b: unknown): b is { salt: string; iterations: number;
 }
 
 api.post("/me/anchor/request", rateLimitDurableMiddleware("anchor_req", 6, 60_000), async (req, res) => {
+  {
+    const b = otpSendAllowed(String((req.body ?? {}).phone ?? ""));
+    if (!b.ok) { res.setHeader("Retry-After", String(b.retryAfterSec)); return res.status(429).json({ error: "otp_limit", message: "Too many codes requested for this number. Try again later." }); }
+  }
   if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const phoneIn = String((req.body ?? {}).phone ?? "");
   const r = requestAnchor(phoneIn);
@@ -1398,6 +1416,10 @@ api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6,
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Create your merchant profile first." });
+  {
+    const b = otpSendAllowed(m.settlementPhone);
+    if (!b.ok) { res.setHeader("Retry-After", String(b.retryAfterSec)); return res.status(429).json({ error: "otp_limit", message: "Too many codes requested for this number. Try again later." }); }
+  }
   const r = requestAnchor(m.settlementPhone);
   if (!r.ok) return res.status(400).json({ error: "bad_phone", message: "Invalid settlement number." });
   if (r.review) return res.json({ sent: true }); // store reviewer: fixed code, no SMS

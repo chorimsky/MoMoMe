@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { api, errMessage, forgetSenderId } from '@/api/client';
+import { forgetDeviceKeys } from '@/lib/deviceSign';
 import { Body, Button, Card, H2, IconCircle, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -32,6 +33,7 @@ export default function DeleteAccountScreen() {
       const r = await api.deleteAccount();
       // The id that was the account goes with it, or the next request re-enrols it.
       await forgetSenderId();
+      await forgetDeviceKeys(); // the keys were this account's proof of possession
       setResult(r);
     } catch (e) {
       setError(tr('del_error', { m: errMessage(e) }));

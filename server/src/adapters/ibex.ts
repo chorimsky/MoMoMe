@@ -273,6 +273,12 @@ export async function sendOnchain(address: string, amountMsat: number): Promise<
 export async function payLightningAddress(lnAddress: string, amountMsat: number): Promise<PayResult> {
   const [name, domain] = lnAddress.split("@");
   if (!name || !domain) throw new Error("invalid lightning address");
+  // The domain becomes an outbound HTTPS request from inside our network. Only a public
+  // DNS name is a Lightning Address host — never an IP literal, localhost, or a private /
+  // platform-internal name (SSRF into Railway's private network or a metadata endpoint).
+  if (!/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain) || /(^|\.)(localhost|internal|local|home|lan|railway\.internal)$/i.test(domain) || /^\d+\.\d+\.\d+\.\d+$/.test(domain)) {
+    throw new Error("lightning address host must be a public domain name");
+  }
   // Timeout-wrapped (fetchT): this LNURL resolve gates a real-money outbound sweep;
   // a hung .well-known host must not block it indefinitely (see http.ts).
   const lnurl = await fetchT(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`, { method: "GET" });

@@ -56,8 +56,24 @@ anything else is recorded as skipped with the reason instead of silently lost.
 Cost: Meta charges per conversation (utility ≈ a few cents in Cameroon; a reply inside a
 user-initiated window is free). The SMS skip offsets most of it.
 
-## Voice
+## Voice and free text — Meta Model API (Muse)
 
-Voice notes are acknowledged, not transcribed. Transcription is a follow-up: the webhook
-already classifies `audio` messages, so a speech-to-text hook slots in at
-`server/src/core/whatsappBot.ts` (`replyTo`, kind `audio`) without touching the rest.
+With `META_AI_API_KEY` set on momome-api, two more things work:
+
+- **Voice notes are transcribed.** The note is downloaded from Meta, converted to 16 kHz WAV
+  in-process (no ffmpeg), sent to Muse Voice Transcribe with French + English bias and our
+  vocabulary as keywords, and the bot **reads back what it heard** before answering
+  ("J'ai entendu : « envoie cinq mille à … »"), then gives the link, then "if that is
+  wrong, type it". Numbers and amounts dictated in words become digits.
+- **Free text is understood.** "Give Nana 5k for the rent, her number is 6 77 00 07 89"
+  becomes `{intent: send, amount: 5000, number: 677000789}` through constrained JSON output
+  (Muse Spark). The model only proposes: every field then goes through the same phone,
+  limit and name checks as a typed command, and the link opens the confirm screen.
+
+Rules that hold: the model never touches a payout, quote or refund; no OTPs or tokens in
+prompts; an 8 s timeout, and any failure or outage falls back to the regex bot, so
+WhatsApp never goes quiet. Without the key, voice notes get "type it" and text is regex only.
+
+Variables: `META_AI_API_KEY` (required), `META_AI_MODEL` (default `muse-spark-1.3`),
+`META_AI_ASR_MODEL` (default `muse-voice-transcribe-1.0`). Cost: a message is a few hundred
+tokens; a voice note is billed by audio seconds. Pay as you go at dev.meta.ai.

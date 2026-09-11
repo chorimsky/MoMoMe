@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { getMyNumber, setMyNumber } from '@/api/client';
@@ -62,9 +62,16 @@ export default function ReceiveScreen() {
     setCopiedWhat(what);
     setTimeout(() => setCopiedWhat(null), 1600);
   };
+  const shareText = () => `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}\n${link}`;
   const share = async () => {
-    const text = `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}\n${link}`;
-    try { await Share.share({ message: text, url: link }); } catch { /* dismissed */ }
+    try { await Share.share({ message: shareText(), url: link }); } catch { /* dismissed */ }
+  };
+  // WhatsApp is where the "you owe me" conversation already is: one tap drops the link
+  // into it. Falls back to the system sheet when WhatsApp is not installed.
+  const shareWhatsApp = async () => {
+    const url = `whatsapp://send?text=${encodeURIComponent(shareText())}`;
+    try { if (await Linking.canOpenURL(url)) { await Linking.openURL(url); return; } } catch { /* fall through */ }
+    await share();
   };
 
   return (
@@ -129,7 +136,8 @@ export default function ReceiveScreen() {
             <Mono style={{ flex: 1 }} numberOfLines={1}>{link.replace(/^https?:\/\//, '')}</Mono>
             <Ionicons name={copiedWhat === 'link' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'link' ? t.recv : t.accent} />
           </Pressable>
-          <Button title={tr('rcv_share_btn')} icon="share-outline" onPress={share} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('rcv_share_whatsapp')} icon="logo-whatsapp" onPress={shareWhatsApp} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('rcv_share_btn')} icon="share-outline" variant="outline" onPress={share} style={{ alignSelf: 'stretch' }} />
           <Body muted center style={{ fontSize: 13 }}>{tr('share_get_paid')}</Body>
 
           {/* Secondary: the Lightning Address, for someone paying from a Bitcoin wallet. */}

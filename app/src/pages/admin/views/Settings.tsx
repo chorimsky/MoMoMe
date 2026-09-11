@@ -272,14 +272,14 @@ export function SettingsView() {
           {(Object.keys(channels) as Array<keyof AdminSettings["channels"]>).map((k) => {
             const ch = notifyChannels.find((c) => c.name === k.toLowerCase());
             const state = !ch ? "No channel for this yet — turning it on sends nothing."
-              : !ch.configured ? "No provider configured — set SMS_WEBHOOK_URL to start sending."
+              : !ch.configured ? (k === "WhatsApp" ? "Not connected — set WHATSAPP_ACCESS_TOKEN + WHATSAPP_PHONE_NUMBER_ID (see docs/whatsapp.md)." : "No provider configured — set SMS_WEBHOOK_URL to start sending.")
               : !channels[k] ? "Off."
               : k === "Push" ? `Delivering to senders' phones — ${ch.devices ?? 0} device${ch.devices === 1 ? "" : "s"} have turned alerts on.`
               : "Delivering.";
             const sub = k === "Push" ? "Delivered / refund-to-claim / being-checked alerts to the SENDER's app. The only channel that reaches a sender."
               : k === "SMS" ? "Delivery confirmation to the RECIPIENT's Mobile Money number."
               : k === "Email" ? "Nobody has an email on file — the account is a device."
-              : "Reserved for a future WhatsApp Business integration.";
+              : "Delivery notices to the recipient (and to a sender who linked their number); the bot on our number answers send / receive / status. When this lands, the SMS is skipped.";
             return (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
                 <div>

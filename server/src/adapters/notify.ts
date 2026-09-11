@@ -14,6 +14,7 @@
 import type { NotificationAudience } from "../../../shared/types.js";
 import { fetchT } from "./http.js";
 import { pushTokenFor, dropDeadToken } from "../core/pushTokens.js";
+import { whatsappChannel } from "./whatsapp.js";
 
 export interface OutboundMessage {
   audience: NotificationAudience;
@@ -119,7 +120,7 @@ export const pushChannel: NotifyChannel = {
   },
 };
 
-export const CHANNELS: NotifyChannel[] = [logChannel, smsChannel, pushChannel];
+export const CHANNELS: NotifyChannel[] = [logChannel, whatsappChannel, smsChannel, pushChannel];
 
 export function channelByName(name: string): NotifyChannel | undefined {
   return CHANNELS.find((c) => c.name === name);

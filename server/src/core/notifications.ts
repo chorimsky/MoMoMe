@@ -89,7 +89,14 @@ export async function notify(input: {
     return out;
   }
 
+  let deliveredOverWhatsApp = false;
   for (const ch of candidates) {
+    // Same person, same news: a delivery notice that already landed on WhatsApp does not
+    // also need to cost an SMS. Recorded as skipped so the outbox still tells the story.
+    if (ch.name === "sms" && deliveredOverWhatsApp) {
+      out.push(record({ kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged, paymentRef: input.paymentRef, status: "skipped", detail: "Already delivered over WhatsApp — SMS not needed." }));
+      continue;
+    }
     if (!enabledInSettings(ch.name)) {
       out.push(record({
         kind: input.kind, audience: input.audience, channel: ch.name, to: input.to ?? "", body: logged,
@@ -122,6 +129,7 @@ export async function notify(input: {
       rec.attempts += 1;
       rec.status = r.ok ? "sent" : "failed";
       if (r.ok) rec.sentAt = new Date().toISOString();
+      if (r.ok && ch.name === "whatsapp") deliveredOverWhatsApp = true;
       if (r.detail) rec.detail = r.detail;
     } catch (e) {
       // A channel that throws is a channel failure, never a payment failure.

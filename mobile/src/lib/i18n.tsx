@@ -220,6 +220,7 @@ export const STRINGS = {
   activity_sub: ['Your payment history', 'Votre historique de paiements'],
   claim_refund_label: ['Claim a refund', 'Réclamer un remboursement'],
   claim_refund_sub: ['A payout that could not land', 'Un versement qui n’a pas pu aboutir'],
+  rcv_share_whatsapp: ['Send on WhatsApp', 'Envoyer sur WhatsApp'],
   push_title: ['Payment alerts', 'Alertes de paiement'],
   push_sub: ['Get told the moment your money is delivered, or if a refund is waiting — even with the app closed.', 'Soyez prévenu dès que votre argent est livré, ou si un remboursement vous attend — même l\'app fermée.'],
   push_on: ['On', 'Activées'],

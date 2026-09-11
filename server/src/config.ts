@@ -79,6 +79,24 @@ export const config = {
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
    *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
    *  derives from PAWAPAY_ENV (sandbox|production). */
+  /** Where the customer-facing web app lives — links the WhatsApp bot and notifications
+   *  hand out (send / receive / status) open here, and in the app via app links. */
+  webOrigin: env("WEB_ORIGIN", "https://momome.xyz").replace(/\/$/, ""),
+  /** WhatsApp Business (Cloud API). Text + voice-note handling on our number, and a
+   *  notification channel. Unset → the channel reports unconfigured and the webhook 404s. */
+  whatsapp: {
+    accessToken: secret("WHATSAPP_ACCESS_TOKEN"),
+    phoneNumberId: env("WHATSAPP_PHONE_NUMBER_ID"),
+    /** What we answer Meta's webhook verification with (you choose it in the Meta app). */
+    verifyToken: secret("WHATSAPP_VERIFY_TOKEN"),
+    /** Meta app secret — webhook payloads are HMAC-SHA256 signed with it (X-Hub-Signature-256). */
+    appSecret: secret("WHATSAPP_APP_SECRET"),
+    /** Approved message template for business-initiated delivery notices (outside the 24 h
+     *  reply window Meta only delivers templates). Body params: {{1}} amount, {{2}} ref. */
+    templateDelivered: env("WHATSAPP_TEMPLATE_DELIVERED"),
+    templateLang: env("WHATSAPP_TEMPLATE_LANG", "en"),
+    apiUrl: env("WHATSAPP_API_URL", "https://graph.facebook.com/v21.0"),
+  },
   /** Public Bitcoin explorer (Esplera/mempool API) for reading an on-chain deposit's outputs. */
   btcExplorerUrl: env("BTC_EXPLORER_URL", "https://mempool.space/api").replace(/\/$/, ""),
   /** phoenixd — OUR OWN Lightning node (ACINQ's self-custodial daemon, keys on our volume).
@@ -247,6 +265,7 @@ export function aggregatorLive(name: string): boolean {
 }
 /** Any rail that moves REAL funds is active → simulation must be off. A production
  *  IBEX inbound counts too — a real inbound settling would drive a real payout. */
+export function whatsappConfigured(): boolean { return !!(config.whatsapp.accessToken && config.whatsapp.phoneNumberId); }
 export function phoenixdConfigured(): boolean { return !!(config.phoenixd.url && config.phoenixd.password); }
 /** phoenixd only ever holds real keys; a mainnet node's settled invoice is real sats. */
 export function phoenixdTrusted(): boolean { return phoenixdConfigured() && config.phoenixd.chain === "mainnet"; }

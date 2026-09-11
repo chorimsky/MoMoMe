@@ -12,6 +12,11 @@ import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { reconcileDeposits } from "../core/depositReconcile.js";
+import crypto from "node:crypto";
+import { config, whatsappConfigured } from "../config.js";
+import { inboundMessages, replyTo } from "../core/whatsappBot.js";
+import { noteInbound } from "../core/whatsapp.js";
+import { sendText, markRead } from "../adapters/whatsapp.js";
 
 export const webhooks = Router();
 
@@ -62,6 +67,37 @@ webhooks.post("/peex", express.raw({ type: "*/*" }), (req, res) => {
   const sig = req.headers["x-peex-signature"];
   const ok = peex.handleWebhook(raw, Array.isArray(sig) ? sig[0] : sig);
   res.status(ok ? 200 : 401).json({ ok });
+});
+
+/* ---------- WhatsApp (Meta Cloud API) ----------
+   GET = Meta's one-time verification handshake. POST = inbound messages + status updates,
+   HMAC-SHA256 signed with the app secret (X-Hub-Signature-256). Every message is answered
+   by the bot; the reply is a link into the app, never a money movement. */
+webhooks.get("/whatsapp", (req, res) => {
+  if (!whatsappConfigured() || !config.whatsapp.verifyToken) return res.status(404).end();
+  const mode = req.query["hub.mode"], token = req.query["hub.verify_token"], challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && typeof token === "string" && token === config.whatsapp.verifyToken) return res.status(200).send(String(challenge ?? ""));
+  return res.status(403).end();
+});
+webhooks.post("/whatsapp", express.raw({ type: "*/*" }), (req, res) => {
+  if (!whatsappConfigured()) return res.status(404).json({ error: "not_configured" });
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  const sig = String(req.headers["x-hub-signature-256"] ?? "");
+  if (config.whatsapp.appSecret) {
+    const want = "sha256=" + crypto.createHmac("sha256", config.whatsapp.appSecret).update(raw).digest("hex");
+    if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ error: "bad_signature" });
+  }
+  let body: unknown;
+  try { body = JSON.parse(raw); } catch { return res.status(400).json({ error: "bad_json" }); }
+  res.json({ ok: true }); // Meta retries on anything but a fast 200
+  for (const m of inboundMessages(body)) {
+    noteInbound(m.from);
+    background((async () => {
+      if (m.id) void markRead(m.id);
+      const reply = await replyTo(m).catch(() => null);
+      if (reply) await sendText(m.from, reply);
+    })());
+  }
 });
 
 // Raw body so the signature is computed over the exact bytes the provider signed.

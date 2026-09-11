@@ -87,7 +87,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         autoVerify: true,
         // Both hosts, same reason as associatedDomains above. `/pay` is the right prefix:
         // every merchant QR encodes `${origin}/pay/${code}` (see the web Merchant page).
-        data: WEB_HOSTS.map((host) => ({ scheme: 'https', host, pathPrefix: '/pay' })),
+        // `/send` too: a receive link shared on WhatsApp (momome.xyz/send?to=…&amount=…)
+        // must land in the app, not a browser tab, or the chat → pay loop breaks.
+        data: WEB_HOSTS.flatMap((host) => [{ scheme: 'https', host, pathPrefix: '/pay' }, { scheme: 'https', host, pathPrefix: '/send' }]),
         category: ['BROWSABLE', 'DEFAULT'],
       },
     ],

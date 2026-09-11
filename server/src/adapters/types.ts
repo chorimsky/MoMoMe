@@ -18,6 +18,10 @@ export interface InstructionRequest {
   usd?: number;
   /** Provider webhook callback URL for this rail. */
   callbackUrl: string;
+  /** LUD-06: sha256 of the LNURL-pay metadata, hex. A Lightning-Address payer's wallet
+   *  verifies the invoice's `h` tag against it and a strict wallet refuses without it. A
+   *  rail that cannot set description_hash ignores this (and is chosen last for it). */
+  descriptionHash?: string;
 }
 
 /** Normalised inbound event parsed from a provider webhook. */
@@ -86,6 +90,9 @@ export interface RailAdapter {
   trusted(): boolean;
   /** True if this adapter handles the given method. */
   supports(method: Method): boolean;
+  /** Can this rail mint a Lightning invoice whose `h` tag is a caller-supplied
+   *  description_hash (LUD-06)? Undefined = no. */
+  readonly descriptionHash?: boolean;
   /** Create the inbound pay instruction (invoice / address). Idempotent on ref. */
   createInstruction(req: InstructionRequest): Promise<PayInstruction>;
   /** Verify a raw webhook payload's authenticity. */

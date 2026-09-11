@@ -8,6 +8,7 @@
    Mobile Money account through the same engine as the in-app send flow.
    ============================================================ */
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import type { Payment, Quote } from "../../../shared/types.js";
 import { config } from "../config.js";
 import { getSettings } from "../core/settings.js";
@@ -36,6 +37,21 @@ function baseUrl(req: { protocol: string; get(h: string): string | undefined }):
   return (fromEnv ?? `${req.protocol}://${req.get("host") ?? "localhost"}`).replace(/\/$/, "");
 }
 
+/* The metadata a wallet was SHOWN must hash to the invoice's `h`, byte for byte. Name
+   resolution can differ between the payRequest and the callback (a provider lookup that
+   answered once and times out the next time), so the served string is pinned per user for
+   the life of a wallet flow and the callback reuses it. */
+const SERVED_TTL_MS = 60 * 60_000;
+const servedMetadata = new Map<string, { metadata: string; at: number }>();
+function pinMetadata(national: string, metadata: string): void {
+  if (servedMetadata.size > 5_000) servedMetadata.clear();
+  servedMetadata.set(national, { metadata, at: Date.now() });
+}
+export function pinnedMetadata(national: string): string | undefined {
+  const hit = servedMetadata.get(national);
+  return hit && Date.now() - hit.at < SERVED_TTL_MS ? hit.metadata : undefined;
+}
+
 /* ---- LUD-16: GET /.well-known/lnurlp/:user → payRequest ---- */
 lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000), async (req, res) => {
   const r = parseLnUser(req.params.user);
@@ -44,12 +60,14 @@ lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000)
   const name = await resolveRecipient(r.national, r.country).then((x) => x.name).catch(() => undefined);
   const address = lnAddress(r);
   const { min, max } = sendableRangeMsat();
+  const metadata = lnurlMetadata({ national: r.national, provider: r.provider, name, address });
+  pinMetadata(r.national, metadata);
   res.json({
     tag: "payRequest",
     callback: `${baseUrl(req)}/lnurl/pay/${r.national}`,
     minSendable: min,
     maxSendable: max,
-    metadata: lnurlMetadata({ national: r.national, provider: r.provider, name, address }),
+    metadata,
     commentAllowed: 0,
     payerData: undefined,
   });
@@ -89,6 +107,12 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   const now = new Date().toISOString();
   const ref = await nextRef();
 
+  // LUD-06: the invoice must carry h = sha256(metadata) — the SAME metadata string the
+  // payRequest served, byte for byte, or a strict wallet refuses to pay. Rebuilt here from
+  // the same inputs (the builder is deterministic for a given name).
+  const metadata = pinnedMetadata(r.national) ?? lnurlMetadata({ national: r.national, provider: r.provider, name, address: lnAddress(r) });
+  const descriptionHash = createHash("sha256").update(metadata, "utf8").digest("hex");
+
   // Mint the bolt11 the wallet will pay. The amount is exactly the payer's msat.
   let instruction;
   try {
@@ -97,6 +121,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
       ref,
       amount: btc,
       usd: totalXaf / rq.usdXaf, // for USD-wallet (Stablesats) hedging rails
+      descriptionHash,
     });
   } catch (e) {
     return res.json(lnErr(e instanceof Error ? e.message : "Could not create the invoice."));

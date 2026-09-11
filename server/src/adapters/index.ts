@@ -23,10 +23,11 @@ import { HealthTracker } from "../core/railHealth.js";
 import type { InstructionRequest, RailAdapter, SettlementStatus } from "./types.js";
 import { sandboxAdapter } from "./sandbox.js";
 import { ibexAdapter, mintBlockedReason } from "./ibex.js";
+import { phoenixdAdapter } from "./phoenixd.js";
 
 /** Every known crypto inbound rail. Order here is irrelevant — selection is by
  *  `priority` among the CONFIGURED rails. Sandbox is always configured (catch-all). */
-const RAILS: RailAdapter[] = [ibexAdapter, sandboxAdapter];
+const RAILS: RailAdapter[] = [ibexAdapter, phoenixdAdapter, sandboxAdapter];
 
 /** Availability / auto-failover across real rails (shared with the payout router).
  *  A real rail that fails createInstruction repeatedly is skipped in favour of the
@@ -105,6 +106,9 @@ export interface CreateInboundRequest {
   amount: number;
   /** Quote value in USD (optional) — for rails that receive into a USD wallet. */
   usd?: number;
+  /** LUD-06 description_hash (hex). Rails that can set it are tried FIRST; a rail that
+   *  cannot still mints (lenient wallets pay it) so a Lightning Address never dead-ends. */
+  descriptionHash?: string;
 }
 
 /** Create the inbound pay instruction, routing to the primary rail for the method
@@ -114,7 +118,10 @@ export interface CreateInboundRequest {
  *  rail — a real inbound must not be silently simulated; if every real rail fails we
  *  rethrow (the API surfaces `method_unavailable`). */
 export async function createInstruction(req: CreateInboundRequest): Promise<PayInstruction> {
-  const supporting = activeRails().filter((r) => r.supports(req.method));
+  let supporting = activeRails().filter((r) => r.supports(req.method));
+  // A caller that needs the invoice to carry description_hash gets the rails that can set
+  // it first, in their own priority order; the rest stay as failover.
+  if (req.descriptionHash) supporting = [...supporting.filter((r) => r.descriptionHash), ...supporting.filter((r) => !r.descriptionHash)];
   const primary = supporting[0];
   if (!primary) throw new Error(`No rail adapter for method ${req.method}`);
 
@@ -207,7 +214,7 @@ async function callSandbox(req: CreateInboundRequest): Promise<PayInstruction> {
 
 function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInstruction> {
   const callbackUrl = `${config.publicUrl}/webhooks/${rail.name}`;
-  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl };
+  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl, ...(req.descriptionHash ? { descriptionHash: req.descriptionHash } : {}) };
   return rail.createInstruction(full);
 }
 

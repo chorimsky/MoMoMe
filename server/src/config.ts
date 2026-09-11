@@ -79,6 +79,20 @@ export const config = {
   /** PawaPay — Mobile Money payout aggregator. Activates the REAL payout rail
    *  when PAWAPAY_API_KEY is set (independent of RAILS_MODE), like IBEX. URL
    *  derives from PAWAPAY_ENV (sandbox|production). */
+  /** phoenixd — OUR OWN Lightning node (ACINQ's self-custodial daemon, keys on our volume).
+   *  Exists so the platform does not depend on a provider for what the Lightning spec
+   *  requires: a LUD-06 invoice must carry description_hash, which IBEX cannot set. Used
+   *  first for Lightning-Address (LNURL-pay) invoices; also a failover for in-app Lightning
+   *  and an outbound (refund) rail. See infra/phoenixd/README.md. */
+  phoenixd: {
+    url: env("PHOENIXD_URL").replace(/\/$/, ""),
+    password: secret("PHOENIXD_PASSWORD"),
+    /** HMAC key phoenixd signs webhooks with (--webhook-secret). Optional: Lightning is
+     *  settled only after an authoritative re-query, so an unsigned webhook can at most
+     *  trigger a lookup. */
+    webhookSecret: secret("PHOENIXD_WEBHOOK_SECRET"),
+    chain: env("PHOENIXD_CHAIN", "mainnet"),
+  },
   pawapay: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
     apiUrl: env("PAWAPAY_API_URL", sandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io"),
@@ -231,7 +245,10 @@ export function aggregatorLive(name: string): boolean {
 }
 /** Any rail that moves REAL funds is active → simulation must be off. A production
  *  IBEX inbound counts too — a real inbound settling would drive a real payout. */
-export function liveMoney(): boolean { return ibexLive() || pawapayLive() || peexitLive(); }
+export function phoenixdConfigured(): boolean { return !!(config.phoenixd.url && config.phoenixd.password); }
+/** phoenixd only ever holds real keys; a mainnet node's settled invoice is real sats. */
+export function phoenixdTrusted(): boolean { return phoenixdConfigured() && config.phoenixd.chain === "mainnet"; }
+export function liveMoney(): boolean { return ibexLive() || phoenixdTrusted() || pawapayLive() || peexitLive(); }
 
 /** IBEX is all-or-nothing: reject a partial credential set at boot. In
  *  production, also require a webhook secret and a reachable https PUBLIC_URL,

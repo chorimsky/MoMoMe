@@ -10,6 +10,7 @@ import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
+import { nodeBalanceSat } from "../adapters/phoenixd.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
@@ -28,7 +29,7 @@ import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
 import { id, nextRef } from "../core/ids.js";
 import {
-  config, isLive, liveMoney, ibexConfigured, ibexLive, deployEnv, databaseHost,
+  config, isLive, liveMoney, ibexConfigured, ibexLive, phoenixdConfigured, phoenixdTrusted, deployEnv, databaseHost,
   pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
 } from "../config.js";
 import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/settings.js";
@@ -2281,6 +2282,15 @@ api.get("/admin/rails", async (_req, res) => {
         // Sandbox LN takes real sats → a settled sandbox inbound can authorize a real
         // payout when this opt-in is on (off by default).
         sandboxPayout: config.ibex.allowSandboxPayout,
+      },
+      {
+        // Our own node. Chosen first for Lightning-Address invoices (it can set the LUD-06
+        // description_hash IBEX cannot), failover for in-app Lightning, outbound for refunds.
+        name: "phoenixd (own node)", base: false, env: config.phoenixd.chain, configured: phoenixdConfigured(), live: phoenixdTrusted(),
+        apiUrl: config.phoenixd.url || "(PHOENIXD_URL unset — see infra/phoenixd/README.md)", methods: phoenixdConfigured() ? ["LIGHTNING"] : [],
+        webhookSecret: config.phoenixd.webhookSecret ? "set" : "unset",
+        balanceSat: phoenixdConfigured() ? await nodeBalanceSat().catch(() => null) : null,
+        descriptionHash: true,
       },
     ],
     payout: [

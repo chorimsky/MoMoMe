@@ -198,7 +198,27 @@ async function main() {
     ok("second payment gets a DIFFERENT address", pay2.payInstruction.code !== pi.code, pay2.payInstruction.code);
     await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: depositBody(pay2.payInstruction.code, pay2.payInstruction.amount / 2) });
     const cur2 = await settle(pay2.id);
-    ok("half-amount deposit does NOT deliver the full payout", cur2.state !== "DELIVERED", cur2.state);
+    // Half the quote arrived. The sender must not lose it and the recipient must not wait on
+    // an operator: deliver what the deposit buys at the LOCKED rate, and say so.
+    const half = pay2.payInstruction.amount / 2;
+    const note2 = cur2.events.map((e) => e.note).filter(Boolean).join(" | ");
+    ok("half-amount deposit is delivered pro-rata, not held", cur2.state === "DELIVERED", `${cur2.state} ${note2}`);
+    const p2 = await get(`/api/payments/${pay2.id}`) as { xaf: number; repricedFromXaf?: number };
+    ok("…for about half the quoted Mobile Money", p2.repricedFromXaf === 30000 && Math.abs(p2.xaf - 15000) <= 2, `${p2.repricedFromXaf} → ${p2.xaf}`);
+    ok("…and the note says under-paid + locked rate", /underpaid: got .* locked rate/.test(note2), note2);
+    const led3 = await get(`/api/ledger/${pay2.id}`) as Array<{ account: string; direction: string; amount: number; currency: string }>;
+    const inb = led3.find((e) => e.account === "inbound_clearing");
+    ok("the ledger books exactly what arrived", !!inb && Math.abs(inb.amount - half) < 1e-9, String(inb?.amount));
+
+    // Over the quote (within tolerance): the excess is DELIVERED, never kept as FX gain.
+    r = await fetch(`${base}/api/quotes`, { method: "POST", headers: DEV, body: JSON.stringify({ xaf: 30000, method: "USDC", country: "CM" }) });
+    const q3 = await r.json() as { id: string };
+    r = await fetch(`${base}/api/payments`, { method: "POST", headers: DEV, body: JSON.stringify({ quoteId: q3.id, recipient: { phone: "699000123", country: "CM", provider: "MTN" } }) });
+    const pay3 = await r.json() as { id: string; payInstruction: { code: string; amount: number } };
+    await fetch(`${base}/webhooks/ibex`, { method: "POST", headers: IBEX_IP, body: depositBody(pay3.payInstruction.code, pay3.payInstruction.amount * 1.1) });
+    const cur3 = await settle(pay3.id);
+    const p3 = await get(`/api/payments/${pay3.id}`) as { xaf: number; repricedFromXaf?: number };
+    ok("10% over-payment is delivered, with the extra going to the recipient", cur3.state === "DELIVERED" && p3.repricedFromXaf === 30000 && Math.abs(p3.xaf - 33000) <= 2, `${cur3.state} ${p3.repricedFromXaf} → ${p3.xaf}`);
   } finally { server.close(); }
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);

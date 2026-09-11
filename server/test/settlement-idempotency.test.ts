@@ -106,9 +106,17 @@ async function main() {
   }
   const noteOf = (p: Payment) => p.events[p.events.length - 1]?.note ?? "";
 
+  // Underpaid person-to-person: the recipient gets what the crypto buys (re-price), never
+  // a hold. In this rail-less test the re-price stops at the stale-FX gate — a DIFFERENT
+  // reason from "underpaid", which proves the short deposit was booked and taken forward.
   const under = await makeOnchain("under");
   await confirmInbound(under, under.payInstruction.amount * 0.5); // 50% short
-  ok("underpaid on-chain → MANUAL_REVIEW (underpaid)", under.state === "MANUAL_REVIEW" && /underpaid/.test(noteOf(under)), noteOf(under));
+  ok("underpaid on-chain P2P is NOT held as underpaid — it goes to re-price", !/underpaid/.test(noteOf(under)) && under.events.some((e) => e.state === "INBOUND_CONFIRMED"), noteOf(under));
+  // …but a merchant invoice is a bill: short is short, and the merchant decides.
+  const underInv = await makeOnchain("underinv");
+  underInv.merchantLinkCode = "LINK1"; await store().putPayment(underInv);
+  await confirmInbound(underInv, underInv.payInstruction.amount * 0.5);
+  ok("underpaid MERCHANT invoice → MANUAL_REVIEW (underpaid)", underInv.state === "MANUAL_REVIEW" && /underpaid/.test(noteOf(underInv)), noteOf(underInv));
 
   const over = await makeOnchain("over");
   await confirmInbound(over, over.payInstruction.amount * 2); // 2× fat-finger

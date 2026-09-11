@@ -12,7 +12,7 @@ import type { Payment, PaymentState, DisplayStatus, Method } from "../../../shar
 import { store } from "../db/store.js";
 import { captureUnattributed } from "./unattributed.js";
 import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed } from "./notifications.js";
-import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, btcToMsat } from "../../../shared/domain.js";
+import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, balanceReasons, recordExecution, markRailHardDown } from "./routing.js";
@@ -516,17 +516,19 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
       return;
     }
     received = actualAmount;
-    // Underpayment guard: never auto-pay a short inbound (BACKEND_DESIGN §1).
-    if (received < expected * 0.999) {
-      await transition(p, "MANUAL_REVIEW", `underpaid: got ${received}, expected ${expected}`);
-      return;
-    }
-    // Overpayment guard (symmetry): a materially larger inbound than invoiced isn't
-    // the quoted deal — it's backed by received crypto so it's not a platform loss,
-    // but auto-delivering a windfall (or an unexpected large deposit) must be reviewed,
-    // not settled silently. Holds a 2× fat-finger; passes normal wallet rounding.
+    // Overpayment beyond tolerance: a 2× fat-finger or an unexpected large deposit is not
+    // the quoted deal and must be looked at, not settled silently. (Within tolerance the
+    // excess is DELIVERED — see the re-price below — never kept.)
     if (received > expected * OVERPAY_TOLERANCE) {
       await transition(p, "MANUAL_REVIEW", `overpaid: got ${received}, expected ${expected}`);
+      return;
+    }
+    // Underpayment. A merchant invoice/link with a fixed amount is a bill: short is short,
+    // and the merchant decides (review). A person-to-person send is money for that person:
+    // deliver what the crypto actually buys (re-priced below) rather than hold it — the
+    // sender never loses what they sent, and nobody waits on an operator.
+    if (received < expected * 0.999 && p.merchantLinkCode) {
+      await transition(p, "MANUAL_REVIEW", `underpaid merchant invoice: got ${received}, expected ${expected}`);
       return;
     }
   }
@@ -537,38 +539,51 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     { account: "customer_wallet", direction: "credit", amount: received, currency: asset },
   ]);
 
-  // RE-PRICE (on-chain only). The quote was issued `estimateOnly` precisely because a
-  // 10–60 minute confirmation window can't honour a locked rate — BACKEND_DESIGN §3's
-  // re-quote model. Convert what ACTUALLY arrived at the CURRENT rate, and keep the
-  // fee as the same proportion of the total the customer agreed to. Fast rails
-  // (Lightning / USDT) keep their lock: their exposure is seconds, which is what the
-  // tighter 150bp spread already pays for.
-  if (paidMethod === "ONCHAIN") {
-    // PULL a rate before judging the feed stale. Settlement happens 10-60 minutes after the
-    // quote, and on serverless nothing refreshes FX in between (no poller; Hobby cron is
-    // daily) — so this check used to be false essentially always, holding every on-chain
-    // payment for review AFTER the customer's crypto had been booked.
-    await ensureRatesFresh();
-    // No fresh rate = no honest price. Holding is the only safe move: booking the
-    // stale lock is the bug we're fixing, and guessing is worse. (ratesFresh() is also
-    // false on a divergent two-source feed — see F4 — so a manipulated feed holds too.)
-    if (!ratesFresh()) {
-      await transition(p, "MANUAL_REVIEW", "on-chain re-price blocked — FX feed not fresh");
-      return;
+  // RE-PRICE. The recipient gets what ACTUALLY arrived, so the sender can never lose money
+  // on a difference between the quote and the deposit:
+  //  • On-chain BTC: the quote was `estimateOnly` (a 10–60 min confirmation cannot honour
+  //    a locked rate — BACKEND_DESIGN §3), so convert the received amount at the CURRENT
+  //    rate. This covers under- AND over-payment.
+  //  • Stablecoins: the lock is honoured (dollars do not move against XAF the way BTC
+  //    does, and the address outlives the lock by design). When the deposit differs from
+  //    the quoted amount, deliver pro-rata AT THE LOCKED RATE — a 2.00 USDC deposit on a
+  //    1.81 quote delivers more, a 1.75 deposit delivers less; the excess is never kept and
+  //    the shortfall is never held. Lightning always equals the lock (full-or-nothing).
+  // The fee stays the same proportion of the total the customer agreed to.
+  const feeRatio = p.totalXaf > 0 ? p.feeXaf / p.totalXaf : 0;
+  const differs = Math.abs(received - expected) > expected * 0.001;
+  if (paidMethod === "ONCHAIN" || differs) {
+    let grossXaf: number;
+    let why: string;
+    if (paidMethod === "ONCHAIN") {
+      // PULL a rate before judging the feed stale. Settlement happens 10-60 minutes after
+      // the quote, and on serverless nothing refreshes FX in between (no poller; Hobby cron
+      // is daily) — so this check used to be false essentially always, holding every
+      // on-chain payment for review AFTER the customer's crypto had been booked.
+      await ensureRatesFresh();
+      // No fresh rate = no honest price. Holding is the only safe move: booking the stale
+      // lock is the bug we're fixing, and guessing is worse. (ratesFresh() is also false on
+      // a divergent two-source feed — see F4 — so a manipulated feed holds too.)
+      if (!ratesFresh()) {
+        await transition(p, "MANUAL_REVIEW", "on-chain re-price blocked — FX feed not fresh");
+        return;
+      }
+      const rq = rateFor(p.method);
+      grossXaf = Math.round(received * rq.customerXafPerUnit);
+      why = `re-priced on confirmation: ${p.xaf} → {xaf} XAF (rate ${Math.round(rq.customerXafPerUnit)})`;
+    } else {
+      const lockedXafPerUnit = expected > 0 ? p.totalXaf / expected : 0;
+      grossXaf = Math.round(received * lockedXafPerUnit);
+      why = `${received < expected ? "under" : "over"}paid: got ${received}, quoted ${expected} ${asset} — delivering what arrived at the locked rate: ${p.xaf} → {xaf} XAF`;
     }
-    const rq = rateFor(p.method);
-    const grossXaf = Math.round(received * rq.customerXafPerUnit);
-    // Preserve the agreed fee RATIO rather than re-deriving from settings — the
-    // customer accepted this proportion at quote time, and settings may have moved.
-    const feeRatio = p.totalXaf > 0 ? p.feeXaf / p.totalXaf : 0;
     const feeXaf = Math.round(grossXaf * feeRatio);
     const xaf = grossXaf - feeXaf;
-    if (xaf <= 0) {
-      await transition(p, "MANUAL_REVIEW", `re-price left nothing deliverable (gross ${grossXaf} XAF)`);
+    if (xaf < MIN_XAF) {
+      await transition(p, "MANUAL_REVIEW", `re-price left too little to deliver (${xaf} XAF from ${received} ${asset}; minimum ${MIN_XAF})`);
       return;
     }
     if (xaf !== p.xaf) {
-      await transition(p, "FX_LOCKED", `re-priced on confirmation: ${p.xaf} → ${xaf} XAF (rate ${Math.round(rq.customerXafPerUnit)})`);
+      await transition(p, "FX_LOCKED", why.replace("{xaf}", String(xaf)));
       p.repricedFromXaf = p.xaf; // the originally-quoted amount, for a "Quoted → Delivered" receipt line
       p.xaf = xaf; p.feeXaf = feeXaf; p.totalXaf = grossXaf;
       await store().putPayment(p);

@@ -70,15 +70,19 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
   if (!supporting.length) return null;
   const real = supporting.filter((p) => p.configured() && (!requireLive || p.live()));
   if (real.length) {
-    const funded: Array<{ p: PayoutAdapter; bal: number }> = [];
+    const funded: Array<{ p: PayoutAdapter; bal: number; fee: number | null }> = [];
     const seen: Array<{ a: string; bal: number | null }> = [];
     for (const p of real) {
       const bal = await p.balance(country, provider);
       seen.push({ a: p.name, bal });
-      if (bal != null && bal >= amountXaf) funded.push({ p, bal });
+      if (bal != null && bal >= amountXaf) funded.push({ p, bal, fee: p.payoutFeePct ? await p.payoutFeePct(provider, country).catch(() => null) : null });
     }
     if (funded.length) {
-      funded.sort((x, y) => y.bal - x.bal || successRate(y.p.name) - successRate(x.p.name));
+      // COST FIRST among the rails that can pay: the difference between two rails' fees on
+      // the same payout is pure margin. A rail whose fee is unknown ranks after one whose
+      // fee is known; ties go to the deeper balance, then the better recent success rate.
+      funded.sort((x, y) => (x.fee ?? 1) - (y.fee ?? 1) || y.bal - x.bal || successRate(y.p.name) - successRate(x.p.name));
+      if (funded.length > 1) console.log(`[route] ${provider}/${country} amt=${amountXaf}: ${funded.map((f) => `${f.p.name} fee=${f.fee == null ? "?" : (f.fee * 100).toFixed(2) + "%"} bal=${Math.round(f.bal)}`).join(" | ")} → ${funded[0].p.name}`);
       return funded[0].p;
     }
     // No live rail has balance ≥ amount — the usual reason a real payout holds.

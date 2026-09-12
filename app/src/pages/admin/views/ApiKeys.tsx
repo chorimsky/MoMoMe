@@ -3,7 +3,7 @@
    The plaintext secret is shown exactly ONCE at creation; only a hash is stored.
    ============================================================ */
 import { useEffect, useState } from "react";
-import type { ApiKey } from "@shared/types.js";
+import type { ApiKey, ApiKeyUsage } from "@shared/types.js";
 import { api } from "../../../api/client.js";
 import { Card, SectionTitle } from "../AdminUI.js";
 import { Failed, Loading } from "./Overview.js";
@@ -35,6 +35,8 @@ export function ApiKeysView() {
     } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't create the key."); }
     finally { setBusy(false); }
   }
+  const [usage, setUsage] = useState<ApiKeyUsage[]>([]);
+  useEffect(() => { api.adminApiKeyUsage().then((u) => setUsage(u.usage)).catch(() => {}); }, [keys?.length]);
   async function revoke(id: string) {
     if (!window.confirm("Revoke this key? Any integration using it stops working immediately.")) return;
     try { await api.adminRevokeApiKey(id); await load(); } catch { setErr("Couldn't revoke the key."); }
@@ -77,12 +79,12 @@ export function ApiKeysView() {
       <Card pad={false}>
         <div className="mm-tablewrap">
           <div className="mm-table" data-cols="5" style={{ minWidth: 640 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1.2fr 1.2fr 0.7fr", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", padding: "14px 20px 10px", borderBottom: "1px solid var(--line)" }}>
-              <span>Label</span><span>Key</span><span>Created</span><span>Last used</span><span></span>
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.9fr 1fr 1fr 1fr 1.3fr 0.7fr", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", padding: "14px 20px 10px", borderBottom: "1px solid var(--line)" }}>
+              <span>Label</span><span>Key</span><span>Created</span><span>Last used</span><span>Partner fee</span><span>This month</span><span></span>
             </div>
             {keys.length === 0 && <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>No API keys yet. Create one above to let a partner integrate.</div>}
             {keys.map((k) => (
-              <div key={k.id} style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1.2fr 1.2fr 0.7fr", alignItems: "center", gap: 8, padding: "12px 20px", borderBottom: "1px solid var(--line-2)", opacity: k.revokedAt ? 0.55 : 1 }}>
+              <div key={k.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.9fr 1fr 1fr 1fr 1.3fr 0.7fr", alignItems: "center", gap: 8, padding: "12px 20px", borderBottom: "1px solid var(--line-2)", opacity: k.revokedAt ? 0.55 : 1 }}>
                 <span style={{ fontSize: 13, fontWeight: 650, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {k.label}
                   {k.revokedAt && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: "var(--bad)" }}>REVOKED</span>}
@@ -90,6 +92,9 @@ export function ApiKeysView() {
                 <span className="num" style={{ fontSize: 12, color: "var(--ink-2)" }}>{k.prefix}…</span>
                 <span className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{fmtDate(k.createdAt)}</span>
                 <span className="num" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{fmtDate(k.lastUsedAt)}</span>
+                {/* Partner pricing: this key's rate instead of the public fee; blank = public. */}
+                <FeeInput value={k.feePct} onSave={async (v) => { await api.adminSetApiKeyFee(k.id, v); await load(); }} />
+                <span className="num" style={{ fontSize: 11.5, color: "var(--ink-2)" }}>{(() => { const u = usage.find((x) => x.keyId === k.id); return u ? `${u.delivered}/${u.payments} · ${new Intl.NumberFormat("fr-FR").format(u.volumeXaf)} XAF · fees ${new Intl.NumberFormat("fr-FR").format(u.feeXaf)}` : "—"; })()}</span>
                 <span style={{ textAlign: "right" }}>
                   {!k.revokedAt && <button type="button" className="btn btn-quiet" style={{ padding: "5px 10px", fontSize: 12, color: "var(--bad)" }} onClick={() => revoke(k.id)}>Revoke</button>}
                 </span>
@@ -99,5 +104,18 @@ export function ApiKeysView() {
         </div>
       </Card>
     </div>
+  );
+}
+
+/** A percentage box that saves on blur/Enter. Empty = the public fee. */
+function FeeInput({ value, onSave }: { value?: number; onSave: (v: number | null) => Promise<void> }) {
+  const [v, setV] = useState(value == null ? "" : String(+(value * 100).toFixed(2)));
+  useEffect(() => { setV(value == null ? "" : String(+(value * 100).toFixed(2))); }, [value]);
+  const commit = () => { const n = v.trim() === "" ? null : Number(v) / 100; if (n === null || (Number.isFinite(n) && n >= 0 && n <= 0.2)) void onSave(n); };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input className="input num" value={v} placeholder="public" onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit(); }} style={{ width: 64, padding: "4px 6px", fontSize: 12 }} />
+      <span style={{ fontSize: 11, color: "var(--ink-3)" }}>%</span>
+    </span>
   );
 }

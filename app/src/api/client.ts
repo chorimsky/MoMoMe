@@ -13,7 +13,7 @@ export interface Observability {
   providers: Array<{ id: string; rail: string; health: string; successRate: number; avgLatencyMs: number }>;
   webhooks: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number };
 }
-import type { MomoTransfer,
+import type { ApiKeyUsage, MomoTransfer,
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
@@ -432,6 +432,9 @@ export const api = {
   claimIdentity: (id: string) => req<Identity>(`/admin/identities/${id}/claim`, { method: "POST" }),
 
   adminLiquidity: () => req<LiquiditySnapshot>("/admin/liquidity"),
+  adminMarkSold: (id: string, realizedXaf: number) => req<TreasuryWithdrawal>(`/admin/treasury/withdrawals/${id}/sold`, { method: "POST", body: JSON.stringify({ realizedXaf }) }),
+  adminSetApiKeyFee: (id: string, feePct: number | null) => req<{ ok: true }>(`/admin/apikeys/${id}`, { method: "PATCH", body: JSON.stringify({ feePct }) }),
+  adminApiKeyUsage: (month?: string) => req<{ month: string; usage: ApiKeyUsage[] }>(`/admin/apikeys/usage${month ? `?month=${month}` : ""}`),
   adminTreasury: () => req<{ pools: TreasuryPool[]; destinations: AdminSettings["treasury"]; history: TreasuryWithdrawal[] }>("/admin/treasury"),
   saveTreasuryDestinations: (d: Partial<AdminSettings["treasury"]>) =>
     req<{ destinations: AdminSettings["treasury"] }>("/admin/treasury/destinations", { method: "PUT", body: JSON.stringify(d) }),

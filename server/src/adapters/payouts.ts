@@ -46,6 +46,10 @@ export interface PayoutAdapter {
   balance(country: CountryCode, provider?: ProviderId): Promise<number | null>;
   /** Was this ref issued by THIS rail? (webhook routing + reconcile ownership). */
   statusByKey(idempotencyKey: string): DisburseResult | null;
+  /** OPTIONAL: what this rail charges us to pay this operator, as a fraction of the amount
+   *  (0.015 = 1.5%), from the rail's own account data. null when unknown or not a percentage.
+   *  Routing prefers the cheaper funded rail; the difference is margin. */
+  payoutFeePct?(provider: ProviderId, country: CountryCode): Promise<number | null>;
   /** OPTIONAL statement: every payout the provider holds for us in its listing window,
    *  by OUR ref. Lets reconciliation see a payout we have no record of, not only
    *  re-check the ones we know. Absent → reconciliation re-queries per payment. */
@@ -70,6 +74,7 @@ export const peexitAdapter: PayoutAdapter = {
   balance: peexit.availableBalanceXaf,
   statusByKey: peexit.statusByKey,
   listPayouts: peexit.listPayouts,
+  payoutFeePct: peexit.payoutFeePct,
   // Peexit authenticates its callback with HTTP Basic Auth (creds we handed it).
   verifyCallback: (_raw, headers) => {
     const a = headers["authorization"];

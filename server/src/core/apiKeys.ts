@@ -68,3 +68,17 @@ export function verifyApiKey(secret: string | undefined): string | null {
   }
   return null;
 }
+
+/** Partner pricing on a key; null clears it. */
+export function setApiKeyFee(id: string, feePct: number | null): boolean {
+  const k = keys.get(id);
+  if (!k) return false;
+  if (feePct == null) delete k.feePct; else k.feePct = feePct;
+  touch("apikeys");
+  return true;
+}
+/** The fee a given owner pays: a partner key's own rate, or nothing special. */
+export function feePctForOwner(owner: string | null | undefined): number | undefined {
+  if (!owner || !owner.startsWith("key:")) return undefined;
+  return keys.get(owner.slice(4))?.feePct;
+}

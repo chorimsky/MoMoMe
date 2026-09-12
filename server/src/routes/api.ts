@@ -1,5 +1,5 @@
 import { Router, type Request as ExpressRequest } from "express";
-import type {
+import type { ApiKeyUsage,
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
@@ -48,9 +48,10 @@ import { resolveLocation } from "../core/geoip.js";
 import { egressStatus, invalidateEgressCache } from "../core/egress.js";
 import { persistDurable } from "../core/persist.js";
 import { usingPostgres } from "../db/store.js";
-import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
+import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
+import { platformFee } from "../core/pricing.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
@@ -502,7 +503,7 @@ export type Reply<T = unknown> = { status: number; body: T };
 
 /** Quote the pay-in for `xaf` XAF over `method`. The /quotes route AND the v1 intent/route
  *  layer call this — one set of gates (paused, amount, method on offer, country, rates). */
-export async function buildQuote(input: QuoteRequest): Promise<Reply<Quote | { error: string; message: string }>> {
+export async function buildQuote(input: QuoteRequest & { feePct?: number }): Promise<Reply<Quote | { error: string; message: string }>> {
   await refreshSettingsIfStale(); // pick up a cross-instance kill-switch / settings change
   // Operator kill-switch — refuse new business when payments are paused.
   if (!getSettings().ops.acceptingPayments) {
@@ -542,7 +543,7 @@ export async function buildQuote(input: QuoteRequest): Promise<Reply<Quote | { e
   if (liveMoney() && !ratesFresh()) {
     return { status: 503, body: { error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." } };
   }
-  const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
+  const feeXaf = platformFee(xaf, input.feePct);
   const totalXaf = xaf + feeXaf;
   const rq = rateFor(method);
   const inAmt = inboundAmount(totalXaf, rq);
@@ -566,7 +567,8 @@ export async function buildQuote(input: QuoteRequest): Promise<Reply<Quote | { e
 }
 
 api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req, res) => {
-  const r = await buildQuote((req.body ?? {}) as QuoteRequest);
+  // A partner key may carry its own rate; everyone else pays the public one.
+  const r = await buildQuote({ ...((req.body ?? {}) as QuoteRequest), feePct: feePctForOwner(await ownerOf(req)) });
   res.status(r.status).json(r.body);
 });
 
@@ -613,7 +615,7 @@ api.get("/preview", rateLimitMiddleware("preview", 120, 60_000), async (req, res
   await ensureFreshRates().catch(() => {});
   const fresh = ratesFresh();
   const enabled = offeredMethods();
-  const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
+  const feeXaf = platformFee(xaf, feePctForOwner(await ownerOf(req)));
   const totalXaf = xaf + feeXaf;
 
   const methods = ALL_METHODS.filter((m) => enabled[m] !== false).map((method) => {
@@ -1892,6 +1894,9 @@ api.put("/admin/settings", async (req, res) => {
     if (pr.feePct !== undefined && !inRange(pr.feePct, 0, 0.2)) {
       return res.status(400).json({ error: "bad_pricing", message: "Fee must be between 0% and 20%." });
     }
+    if (pr.minFeeXaf !== undefined && !inRange(pr.minFeeXaf, 0, 5000)) {
+      return res.status(400).json({ error: "bad_pricing", message: "Minimum fee must be 0–5000 XAF." });
+    }
     for (const v of Object.values(pr.spreadBps ?? {})) {
       if (!inRange(v, 0, 2000)) return res.status(400).json({ error: "bad_pricing", message: "Spread must be 0–2000 bps." });
     }
@@ -2050,6 +2055,13 @@ api.put("/admin/treasury/destinations", async (req, res) => {
   res.json({ destinations: s.treasury });
 });
 
+/** The operator records what a sweep became in XAF once sold — the realized spread. */
+api.post("/admin/treasury/withdrawals/:id/sold", async (req, res) => {
+  const r = await treasury.markSold(req.params.id, Number((req.body ?? {}).realizedXaf), (req as unknown as AdminReq).session?.uid ?? "admin");
+  if (!r.ok) return res.status(r.error === "not_found" ? 404 : 400).json({ error: r.error, message: r.error === "already_marked" ? "This sweep is already marked sold." : r.error === "bad_amount" ? "Enter the XAF actually received." : "Cannot mark this sweep." });
+  res.json(r.entry);
+});
+
 api.post("/admin/treasury/withdraw", async (req, res) => {
   const { rail, amount } = (req.body ?? {}) as { rail?: TreasuryRail; amount?: number };
   if (!rail || !["lightning", "onchain", "usdt", "usdc"].includes(rail)) {
@@ -2084,6 +2096,28 @@ api.post("/admin/momo/transfers/:id/release", async (req, res) => {
   if (!t) return res.status(404).json({ error: "not_found", message: "Not found." });
   if (!(await momoTransfer.releaseTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_releasable", message: "Only a transfer held for review can be released." });
   res.json(t);
+});
+
+/** Partner pricing on a key, and what it did in a month (the basis of its invoice). */
+api.patch("/admin/apikeys/:id", (req, res) => {
+  const b = (req.body ?? {}) as { feePct?: unknown };
+  const fee = b.feePct === null ? null : Number(b.feePct);
+  if (fee !== null && (!Number.isFinite(fee) || fee < 0 || fee > 0.2)) return res.status(400).json({ error: "bad_fee", message: "feePct must be between 0 and 0.2 (20%)." });
+  if (!setApiKeyFee(req.params.id, fee)) return res.status(404).json({ error: "not_found", message: "No such key." });
+  res.json({ ok: true });
+});
+api.get("/admin/apikeys/usage", async (req, res) => {
+  const month = typeof req.query.month === "string" && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
+  const ps = (await store().listPayments()).filter((p) => p.senderId?.startsWith("key:") && p.createdAt.startsWith(month));
+  const byKey = new Map<string, ApiKeyUsage>();
+  for (const p of ps) {
+    const keyId = p.senderId!.slice(4);
+    const u = byKey.get(keyId) ?? { keyId, month, payments: 0, delivered: 0, volumeXaf: 0, feeXaf: 0 };
+    u.payments++;
+    if (p.state === "DELIVERED") { u.delivered++; u.volumeXaf += p.xaf; u.feeXaf += p.feeXaf; }
+    byKey.set(keyId, u);
+  }
+  res.json({ month, usage: [...byKey.values()] });
 });
 
 api.get("/admin/momo", async (_req, res) => {
@@ -2148,6 +2182,7 @@ api.get("/admin/pricing", async (_req, res) => {
   const s = getSettings().pricing;
   res.json({
     feePct: s.feePct,
+    minFeeXaf: s.minFeeXaf,
     eurXafPeg: EUR_XAF_PEG,
     spreadBps: s.spreadBps,
     costs: s.costs,
@@ -2231,6 +2266,7 @@ api.get("/admin/revenue", async (req, res) => {
   }
 
   res.json({
+    realized: treasury.realizedFx(cutoff),
     period, volumeXaf, payments: completed.length,
     feeRevenueXaf, spreadRevenueXaf, grossRevenueXaf, costsXaf, netRevenueXaf,
     effectiveTakePct, netMarginPct, avgRevenuePerTxXaf: completed.length ? Math.round(grossRevenueXaf / completed.length) : 0,

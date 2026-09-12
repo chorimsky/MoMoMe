@@ -158,9 +158,15 @@ function TreasurySweep() {
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 750, color: "var(--ink-3)", marginBottom: 8 }}>Recent withdrawals</div>
           <div className="card" style={{ padding: 0 }}>
             {history.map((h) => (
-              <div key={h.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
-                <span style={{ color: "var(--ink-2)" }}>{fmt(h.amount, cryptoDp(h.asset))} {h.asset} · {RAIL_LABEL[h.rail]}</span>
-                <span style={{ color: h.status === "failed" ? "var(--bad)" : "var(--recv)", fontWeight: 650 }}>{h.status}{h.error ? ` · ${h.error}` : ""}</span>
+              <div key={h.id} style={{ padding: "10px 16px", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <span style={{ color: "var(--ink-2)" }}>{fmt(h.amount, cryptoDp(h.asset))} {h.asset} · {RAIL_LABEL[h.rail]}{h.customerXaf ? <span style={{ color: "var(--ink-3)" }}> · customers charged {fmt(h.customerXaf)} XAF</span> : null}</span>
+                  <span style={{ color: h.status === "failed" ? "var(--bad)" : "var(--recv)", fontWeight: 650 }}>{h.status}{h.error ? ` · ${h.error}` : ""}</span>
+                </div>
+                {/* What it BECAME once sold and re-deposited: the realized spread, not the booked one. */}
+                {h.status !== "failed" && (h.realizedXaf != null
+                  ? <div style={{ marginTop: 4, color: (h.realizedXaf - (h.customerXaf ?? 0)) >= 0 ? "var(--recv)" : "var(--bad)" }}>sold for {fmt(h.realizedXaf)} XAF · realized {h.realizedXaf - (h.customerXaf ?? 0) >= 0 ? "+" : ""}{fmt(h.realizedXaf - (h.customerXaf ?? 0))} XAF vs what customers paid</div>
+                  : <MarkSold id={h.id} onDone={load} />)}
               </div>
             ))}
           </div>
@@ -260,6 +266,26 @@ function SweepControls({ pools, dest, onChanged, onHistory }: { pools: TreasuryP
       </div>
 
       {msg && <div style={{ fontSize: 12.5, fontWeight: 600, color: `var(--${msg.tone})`, marginTop: 12 }}>{msg.text}</div>}
+    </div>
+  );
+}
+
+/** Enter the XAF a sweep actually became. Books the realized FX result. */
+function MarkSold({ id, onDone }: { id: string; onDone: () => Promise<void> }) {
+  const [v, setV] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const go = async () => {
+    const n = Number(v.replace(/\D/g, ""));
+    if (!n) return;
+    setBusy(true); setErr(null);
+    try { await api.adminMarkSold(id, n); await onDone(); } catch { setErr("Could not record it."); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+      <input className="input num" placeholder="XAF received after selling" value={v} onChange={(e) => setV(e.target.value)} style={{ maxWidth: 220, padding: "5px 8px", fontSize: 12 }} />
+      <button className="btn btn-ghost" disabled={busy || !v} onClick={() => void go()} style={{ padding: "5px 10px", fontSize: 12 }}>Mark sold</button>
+      {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
     </div>
   );
 }

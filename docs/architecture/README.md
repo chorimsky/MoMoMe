@@ -90,3 +90,20 @@ Admin, Operations Manager, Finance Manager, Read Only) into sessions and people 
 platform and country, session length, most visited pages with time on page and
 entrances/exits, the send funnel step by step, actions with their most common value,
 hour of day and day series, languages, screens, versions and referrers.
+
+## Unit economics (the levers in code)
+
+- **Fee floor** — `pricing.minFeeXaf` (default 100): the platform fee is `max(xaf × feePct,
+  minFeeXaf)`, computed in one place (`core/pricing.ts`). At the 500 XAF minimum a flat 2.5 %
+  was 12 XAF against an aggregator fee of 8.5 XAF on a real movement.
+- **Partner pricing** — an API key may carry `feePct`; its quotes, previews and v1 routes use
+  it. `GET /api/admin/apikeys/usage?month=` sums delivered payments, volume and fees per key:
+  the invoice basis. Changing a key's rate is a step-up operation.
+- **Cost-aware payout routing** — among funded, eligible rails the lower `payoutFeePct`
+  (Peexit reports its MTN/Orange schedule) wins; unknown fee ranks last; ties by balance,
+  then recent success.
+- **Realized FX** — a treasury sweep records what customers were charged for that crypto
+  (`customerXaf`) and the mid value; the operator later marks what it became in XAF
+  (`POST /api/admin/treasury/withdrawals/:id/sold`). The ledger moves the crypto out of
+  `fx_position` and the XAF into the float through `fx_pnl`; Rates & Pricing shows realized
+  versus booked spread. Tests: `server/test/profitability.test.ts`.

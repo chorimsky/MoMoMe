@@ -13,6 +13,7 @@ import { store } from "../db/store.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 import { accountBalances, sendOnchain, payLightningAddress } from "../adapters/ibex.js";
+import { rateFor } from "./fx.js";
 
 type Asset = "BTC" | "USDT" | "USDC";
 
@@ -31,6 +32,8 @@ const accountFor: Record<Asset, () => string> = {
 const withdrawals: TreasuryWithdrawal[] = [];
 register("treasury", () => withdrawals.slice(0, 200), (d: TreasuryWithdrawal[]) => { withdrawals.push(...d); });
 export function withdrawalHistory(): TreasuryWithdrawal[] { return withdrawals.slice(0, 50); }
+/** Test seam: a sweep entry as withdraw() would have recorded it (no rail in sandbox). */
+export function seedWithdrawal(e: TreasuryWithdrawal): void { if (process.env.RAILS_MODE === "sandbox") withdrawals.unshift(e); }
 function record(e: TreasuryWithdrawal): void {
   withdrawals.unshift(e);
   if (withdrawals.length > 200) withdrawals.pop();
@@ -121,7 +124,12 @@ export async function withdraw(rail: TreasuryRail, amount: number, by: string): 
   if (!pool || !pool.balanceKnown) return { ok: false, error: "balance_unavailable" };
   if (amount > pool.withdrawable + 1e-12) return { ok: false, error: "exceeds_withdrawable" };
 
-  const entry: TreasuryWithdrawal = { id: id("tw"), at: new Date().toISOString(), rail, asset, amount, destination: dest, by, status: "sent" };
+  // What this crypto is worth as it leaves: at the mid rate, and at the rate customers were
+  // being charged (mid minus the spread we book as revenue). When the operator later marks
+  // what it actually became in XAF, the gap between that and customerXaf is the realized
+  // spread — the number the booked spread must be judged against.
+  const rq = asset === "BTC" ? rateFor("LIGHTNING") : rateFor(asset);
+  const entry: TreasuryWithdrawal = { id: id("tw"), at: new Date().toISOString(), rail, asset, amount, destination: dest, by, status: "sent", referenceXaf: Math.round(amount * rq.midXafPerUnit), customerXaf: Math.round(amount * rq.customerXafPerUnit) };
   try {
     if (rail === "lightning") {
       const r = await payLightningAddress(dest, btcToMsat(amount));
@@ -143,4 +151,37 @@ export async function withdraw(rail: TreasuryRail, amount: number, by: string): 
   console.log(`[treasury] withdraw ${amount} ${asset} via ${rail} → ${dest} by ${by} (${entry.status}, tx=${entry.txId ?? "-"})`);
   return { ok: true, entry };
   });
+}
+
+/** The operator says what a sweep became in XAF once sold and re-deposited. Books the
+ *  realized result: the crypto leaves fx_position through fx_pnl, the XAF arrives in the
+ *  payout float through fx_pnl. fx_pnl's XAF against its crypto is the realized FX P&L. */
+export async function markSold(withdrawalId: string, realizedXaf: number, by: string): Promise<{ ok: boolean; error?: string; entry?: TreasuryWithdrawal }> {
+  const e = withdrawals.find((w) => w.id === withdrawalId);
+  if (!e) return { ok: false, error: "not_found" };
+  if (e.status === "failed") return { ok: false, error: "failed_withdrawal" };
+  if (e.realizedXaf != null) return { ok: false, error: "already_marked", entry: e };
+  if (!Number.isFinite(realizedXaf) || realizedXaf <= 0) return { ok: false, error: "bad_amount" };
+  e.realizedXaf = Math.round(realizedXaf); e.realizedAt = new Date().toISOString(); e.realizedBy = by;
+  await store().recordTxn(e.id, [
+    { account: "fx_position", direction: "credit", amount: e.amount, currency: e.asset },
+    { account: "fx_pnl", direction: "debit", amount: e.amount, currency: e.asset },
+  ]);
+  await store().recordTxn(e.id, [
+    { account: "fx_pnl", direction: "credit", amount: e.realizedXaf, currency: "XAF" },
+    { account: "payout_float_XAF", direction: "debit", amount: e.realizedXaf, currency: "XAF" },
+  ]);
+  touch("treasury");
+  console.log(`[treasury] sweep ${e.id} marked sold: ${e.amount} ${e.asset} → ${e.realizedXaf} XAF (customers were charged ${e.customerXaf ?? "?"}, mid ${e.referenceXaf ?? "?"}) by ${by}`);
+  return { ok: true, entry: e };
+}
+
+/** Realized FX result over the sweeps marked sold in a window. */
+export function realizedFx(sinceMs: number): { sweeps: number; pendingSweeps: number; btcSold: number; customerXaf: number; referenceXaf: number; realizedXaf: number; pnlXaf: number; pnlPct: number | null } {
+  const inWin = withdrawals.filter((w) => w.status !== "failed" && Date.parse(w.at) >= sinceMs);
+  const sold = inWin.filter((w) => w.realizedXaf != null);
+  const customerXaf = sold.reduce((a, w) => a + (w.customerXaf ?? 0), 0);
+  const realizedXaf = sold.reduce((a, w) => a + (w.realizedXaf ?? 0), 0);
+  const pnlXaf = realizedXaf - customerXaf;
+  return { sweeps: sold.length, pendingSweeps: inWin.length - sold.length, btcSold: sold.filter((w) => w.asset === "BTC").reduce((a, w) => a + w.amount, 0), customerXaf, referenceXaf: sold.reduce((a, w) => a + (w.referenceXaf ?? 0), 0), realizedXaf, pnlXaf, pnlPct: customerXaf > 0 ? pnlXaf / customerXaf : null };
 }

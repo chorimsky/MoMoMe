@@ -128,7 +128,11 @@ export interface ApiKey {
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  /** Partner pricing: this key's platform fee instead of the global one (0.02 = 2%). */
+  feePct?: number;
 }
+/** What a partner key did in a month — the basis of its invoice. */
+export interface ApiKeyUsage { keyId: string; month: string; payments: number; delivered: number; volumeXaf: number; feeXaf: number }
 
 /** What the server stores/returns for the vault — opaque ciphertext only. */
 export interface VaultRecord {
@@ -331,7 +335,11 @@ export type LedgerAccount =
   | "rail_fees"
   /** XAF collected from a Mobile Money payer, sitting in the aggregator's COLLECTION
    *  wallet (an asset of ours) until the aggregator settles it to the payout wallet. */
-  | "momo_collect_clearing";
+  | "momo_collect_clearing"
+  /** Realized foreign-exchange result of turning swept crypto back into XAF float: the
+   *  crypto leaves fx_position here, the XAF that came back arrives in the float from
+   *  here. Its XAF balance against its crypto balance IS the realized spread. */
+  | "fx_pnl";
 
 /** Crypto that arrived with no payment to attach it to.
  *
@@ -642,6 +650,9 @@ export interface AdminSettings {
   rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
   pricing: {
     feePct: number;
+    /** The fee never goes below this (XAF): at small tickets the rails' own fees would
+     *  otherwise eat the whole percentage. 0 = no floor. */
+    minFeeXaf: number;
     spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
     /** Cost assumptions for net-margin intelligence (set from your real rail
      *  contracts): payout = Mobile Money disbursement cost as a fraction of the
@@ -748,6 +759,12 @@ export interface TreasuryWithdrawal {
   status: "sent" | "settled" | "failed";
   txId?: string;
   error?: string;
+  /** What the swept crypto was worth when it left: at the mid rate, and at what customers
+   *  were being charged for it (mid minus the spread we book). Set at withdrawal time. */
+  referenceXaf?: number; customerXaf?: number;
+  /** What it actually became in XAF once sold and re-deposited — entered by the operator.
+   *  Realized FX P&L = realizedXaf − customerXaf: the spread that survived the cycle. */
+  realizedXaf?: number; realizedAt?: string; realizedBy?: string;
 }
 
 /* ---------- admin Mobile Money ops (manual cash-in / cash-out) ---------- */
@@ -805,6 +822,7 @@ export interface LiquiditySnapshot {
 /* ---------- pricing / FX ---------- */
 export interface PricingInfo {
   feePct: number;
+  minFeeXaf: number;
   eurXafPeg: number;
   spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
@@ -844,6 +862,9 @@ export interface RevenueReport {
   benchmarks: { corridorPct: number; cryptoCompPct: number; ssaAvgPct: number };
   insights: Array<{ tone: "good" | "warn" | "bad" | "info"; text: string }>;
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
+  /** The spread that actually survived turning swept crypto back into XAF — measured from
+   *  treasury sweeps the operator has marked as sold, never assumed. */
+  realized: { sweeps: number; pendingSweeps: number; btcSold: number; customerXaf: number; referenceXaf: number; realizedXaf: number; pnlXaf: number; pnlPct: number | null };
 }
 
 /* ---------- delivery ---------- */

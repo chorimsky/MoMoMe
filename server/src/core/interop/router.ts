@@ -25,6 +25,7 @@ import { railOfMethod } from "./rails.js";
 import { id } from "../ids.js";
 import { saveRoute } from "./intents.js";
 import { engine as complianceEngine } from "./compliance.js";
+import { feePctForOwner } from "../apiKeys.js";
 
 const ETA: Record<Method, number> = { LIGHTNING: 5, ONCHAIN: 1800, USDT: 180, USDC: 180 };
 
@@ -38,7 +39,7 @@ export function toPaymentQuote(q: Quote, destinationCurrency: string): PaymentQu
   };
 }
 
-export type QuoteFn = (input: QuoteRequest) => Promise<{ status: number; body: Quote | { error: string; message: string } }>;
+export type QuoteFn = (input: QuoteRequest & { feePct?: number }) => Promise<{ status: number; body: Quote | { error: string; message: string } }>;
 
 /** Enumerate and check every candidate route for the intent. All routes are saved (viable
  *  or not) so the decision is auditable; the intent keeps the viable ids. */
@@ -87,7 +88,7 @@ export async function discoverRoutes(intent: PaymentIntent, dest: PaymentAddress
     let quote: PaymentQuote | null = null;
     let quoteDetail: string | undefined;
     if (checks.every((c) => c.ok)) {
-      const r = await buildQuote({ xaf: intent.amount, method, country });
+      const r = await buildQuote({ xaf: intent.amount, method, country, feePct: feePctForOwner(intent.owner) });
       if (r.status === 200) quote = toPaymentQuote(r.body as Quote, dest.currency ?? "XAF");
       else quoteDetail = (r.body as { message?: string }).message ?? "quote refused";
     }

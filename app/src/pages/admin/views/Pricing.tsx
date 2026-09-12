@@ -48,6 +48,7 @@ export function PricingView() {
   const [period, setPeriod] = useState("30d");
   // editable working copy of the controls
   const [feePctInput, setFeePctInput] = useState(0);
+  const [minFee, setMinFee] = useState(0);
   const [spreadBps, setSpreadBps] = useState<Spreads | null>(null);
   const [costs, setCosts] = useState<Costs | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -60,6 +61,7 @@ export function PricingView() {
     api.adminPricing().then((p) => {
       setPricing(p);
       setFeePctInput(p.feePct * 100);
+      setMinFee(p.minFeeXaf ?? 0);
       setSpreadBps({ ...p.spreadBps });
       setCosts({ ...p.costs });
       setDirty(false);
@@ -97,7 +99,7 @@ export function PricingView() {
   const save = async () => {
     setSaving(true); setErr(null);
     try {
-      await api.saveSettings({ pricing: { feePct: feePctInput / 100, spreadBps, costs } });
+      await api.saveSettings({ pricing: { feePct: feePctInput / 100, minFeeXaf: minFee, spreadBps, costs } });
       await loadConfig();
       api.adminRevenue(period).then(setReport).catch(() => {});
       setSaved(true);
@@ -156,6 +158,14 @@ export function PricingView() {
               <KV k="Gross revenue" v={<strong>{money(r.grossRevenueXaf)} XAF</strong>} />
               <KV k="− Estimated costs" v={<span style={{ color: "var(--bad)" }}>−{money(r.costsXaf)} XAF</span>} />
               <KV k="= Net profit" v={<strong style={{ color: toneColor(marginTone(r.netMarginPct)) }}>{money(r.netRevenueXaf)} XAF</strong>} />
+              {r.realized && (
+                /* The spread above is BOOKED at quote time. This is what survived selling the
+                   swept crypto and re-depositing XAF — from sweeps the operator marked sold. */
+                <div style={{ borderTop: "1px solid var(--line-2)", marginTop: 8, paddingTop: 8 }}>
+                  <KV k="Realized FX (sweeps marked sold)" v={r.realized.sweeps ? <span style={{ fontWeight: 700, color: r.realized.pnlXaf >= 0 ? "var(--recv)" : "var(--bad)" }}>{r.realized.pnlXaf >= 0 ? "+" : ""}{money(r.realized.pnlXaf)} XAF{r.realized.pnlPct != null ? ` (${(r.realized.pnlPct * 100).toFixed(2)}%)` : ""}</span> : <span style={{ color: "var(--ink-3)" }}>no sweep marked sold yet{r.realized.pendingSweeps ? ` · ${r.realized.pendingSweeps} pending` : ""}</span>} />
+                  {r.realized.sweeps > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{r.realized.btcSold.toFixed(6)} BTC sold · customers charged {money(r.realized.customerXaf)} · received {money(r.realized.realizedXaf)} · mid {money(r.realized.referenceXaf)}{r.realized.pendingSweeps ? ` · ${r.realized.pendingSweeps} sweep(s) not yet marked` : ""}</div>}
+                </div>
+              )}
               <div style={{ borderTop: "1px solid var(--line-2)", marginTop: 8, paddingTop: 8 }}>
                 <KV k="Volume settled" v={`${money(r.volumeXaf)} XAF · ${fmt(r.payments)} payments`} />
                 <KV k="Avg revenue / payment" v={`${fmt(r.avgRevenuePerTxXaf)} XAF`} />
@@ -221,6 +231,7 @@ export function PricingView() {
         <Card title="Pricing & cost controls" sub="Edit to model revenue — projection updates live, then Save.">
           <Grid cols={2} gap={12} style={{ marginTop: 4 }}>
             <NumInput label="Platform fee" value={feePctInput} onChange={editFee} min={0} max={10} step={0.1} suffix="%" />
+            <NumInput label="Minimum fee" value={minFee} onChange={(v) => { setMinFee(v); setDirty(true); }} min={0} max={5000} step={50} suffix="XAF" />
             <NumInput label="Lightning spread" value={spreadBps.LIGHTNING} onChange={(v) => editSpread("LIGHTNING", v)} min={0} max={1000} step={10} suffix="bps" />
             <NumInput label="On-chain spread" value={spreadBps.ONCHAIN} onChange={(v) => editSpread("ONCHAIN", v)} min={0} max={1000} step={10} suffix="bps" />
             <NumInput label="USDT spread" value={spreadBps.USDT} onChange={(v) => editSpread("USDT", v)} min={0} max={1000} step={10} suffix="bps" />

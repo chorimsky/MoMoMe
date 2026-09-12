@@ -333,6 +333,17 @@ export async function feeSchedule(): Promise<{ disbMtn: number | null; disbOrang
   return { disbMtn: a.disbMtn, disbOrange: a.disbOrange, collMtn: a.collMtn, collOrange: a.collOrange };
 }
 
+/** What Peexit charges us to disburse to an operator, as a fraction. The account reports
+ *  `mtn_fees` / `orange_fees`; a value ≤ 20 reads as a percentage, anything larger is a
+ *  flat XAF amount we cannot turn into a rate without the amount → null (unknown). */
+export async function payoutFeePct(provider: ProviderId, _country: CountryCode): Promise<number | null> {
+  if (!peexitLive()) return null;
+  const a = await accountBalances().catch(() => null);
+  const v = provider === "ORANGE" ? a?.disbOrange : a?.disbMtn;
+  if (v == null || !Number.isFinite(v)) return null;
+  return v <= 20 ? v / 100 : null;
+}
+
 /** Available PAYOUT balance (XAF) — the account's `disbursement_solde` (shared across
  *  operators). null when not live/reachable. */
 export async function availableBalanceXaf(_country: CountryCode, _provider?: ProviderId): Promise<number | null> {

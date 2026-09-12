@@ -59,7 +59,7 @@ const ref = () => `MMT-${new Date().getFullYear()}-${Math.floor(100000 + Math.ra
 
 /** Quote: the recipient gets `xaf`; the payer is asked for `xaf` plus the fee. */
 export function quote(xaf: number): { xaf: number; feeXaf: number; collectXaf: number; feePct: number } {
-  const feeXaf = Math.max(100, Math.round(xaf * TRANSFER_FEE_PCT));
+  const feeXaf = Math.max(getSettings().pricing.minFeeXaf ?? 100, Math.round(xaf * TRANSFER_FEE_PCT));
   return { xaf, feeXaf, collectXaf: xaf + feeXaf, feePct: TRANSFER_FEE_PCT };
 }
 

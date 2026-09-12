@@ -23,6 +23,8 @@ import type { DisburseRequest, DisburseResult } from "./pawapay.js";
 
 /** A normalised payout callback event. `status` is advisory only — the webhook
  *  handler always re-queries authoritatively via queryStatus before settling. */
+/** One row of a provider's payout statement, normalised. */
+export interface PayoutStatement { ref: string; providerRef?: string; status: PayoutStatus; amountXaf?: number; feeXaf?: number; at?: string; raw?: string }
 export interface PayoutCallbackEvent { ref: string; providerRef?: string; status?: PayoutStatus }
 
 export interface PayoutAdapter {
@@ -44,6 +46,10 @@ export interface PayoutAdapter {
   balance(country: CountryCode, provider?: ProviderId): Promise<number | null>;
   /** Was this ref issued by THIS rail? (webhook routing + reconcile ownership). */
   statusByKey(idempotencyKey: string): DisburseResult | null;
+  /** OPTIONAL statement: every payout the provider holds for us in its listing window,
+   *  by OUR ref. Lets reconciliation see a payout we have no record of, not only
+   *  re-check the ones we know. Absent → reconciliation re-queries per payment. */
+  listPayouts?(): Promise<PayoutStatement[]>;
   /** OPTIONAL callback auth — mirrors crypto verifyWebhook. Missing → accept (the
    *  authoritative queryStatus re-query is the real settlement gate either way). */
   verifyCallback?(rawBody: string, headers: Record<string, string | string[] | undefined>): boolean;
@@ -63,6 +69,7 @@ export const peexitAdapter: PayoutAdapter = {
   queryStatus: peexit.queryStatus,
   balance: peexit.availableBalanceXaf,
   statusByKey: peexit.statusByKey,
+  listPayouts: peexit.listPayouts,
   // Peexit authenticates its callback with HTTP Basic Auth (creds we handed it).
   verifyCallback: (_raw, headers) => {
     const a = headers["authorization"];

@@ -15,7 +15,7 @@ import type { Observability } from "../../../api/client.js";
 
 const healthTone: Record<ProviderInfo["health"], Tone> = { OPERATIONAL: "recv", DEGRADED: "warn", DOWN: "bad", NOT_CONFIGURED: "ink", SANDBOX: "info" };
 const eventTone: Record<PaymentEvent["status"], Tone> = { received: "info", verified: "info", processed: "recv", duplicate: "warn", rejected: "bad" };
-const verdictTone: Record<ReconciliationReport["records"][number]["verdict"], Tone> = { matched: "recv", pending: "info", unattributed: "warn", amount_mismatch: "bad", missing_internal: "bad" };
+const verdictTone: Record<ReconciliationReport["records"][number]["verdict"], Tone> = { matched: "recv", pending: "info", unattributed: "warn", amount_mismatch: "bad", missing_internal: "bad", state_mismatch: "bad" };
 const fmt = (n: number) => n.toLocaleString("en-US").replace(/,/g, " ");
 const ago = (iso: string) => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
 
@@ -52,7 +52,7 @@ export function InteropView() {
         <Card title="Rails connected" sub="of 7 rail classes"><div style={{ fontSize: 28, fontWeight: 800 }}>{connected.length}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{connected.map((r) => r.name).join(" · ") || "—"}</div></Card>
         <Card title="Providers operational" sub="live, healthy"><div style={{ fontSize: 28, fontWeight: 800 }}>{providers.filter((p) => p.health === "OPERATIONAL").length}<span style={{ fontSize: 14, color: "var(--ink-3)" }}> / {providers.length}</span></div></Card>
         <Card title="Provider events" sub="rejected in 24 h"><div style={{ fontSize: 28, fontWeight: 800, color: (events?.stats.last24hRejected ?? 0) > 0 ? "var(--bad)" : "var(--ink)" }}>{events?.stats.last24hRejected ?? 0}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{events?.stats.total ?? 0} recorded</div></Card>
-        <Card title="Reconciliation" sub={`deposits, last ${recon?.windowDays ?? 3} days`}><div style={{ fontSize: 28, fontWeight: 800, color: recon && (recon.totals.amount_mismatch + recon.totals.missing_internal) > 0 ? "var(--bad)" : "var(--ink)" }}>{recon ? recon.totals.amount_mismatch + recon.totals.missing_internal : "—"}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{recon ? `${recon.totals.matched} matched · ${recon.totals.unattributed} unattributed · ${recon.totals.pending} pending` : ""}</div></Card>
+        <Card title="Reconciliation" sub={`deposits + payouts, last ${recon?.windowDays ?? 3} days`}><div style={{ fontSize: 28, fontWeight: 800, color: recon && (recon.totals.amount_mismatch + recon.totals.missing_internal + (recon.totals.state_mismatch ?? 0)) > 0 ? "var(--bad)" : "var(--ink)" }}>{recon ? recon.totals.amount_mismatch + recon.totals.missing_internal + (recon.totals.state_mismatch ?? 0) : "—"}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{recon ? `${recon.totals.matched} matched · ${recon.totals.unattributed} unattributed · ${recon.totals.pending} pending` : ""}</div></Card>
       </Grid>
 
       {obs && (
@@ -123,12 +123,12 @@ export function InteropView() {
           ))}{!events?.events.length && <tr><td colSpan={6} style={{ color: "var(--ink-3)", padding: 16 }}>No provider events recorded yet.</td></tr>}</tbody></table>
       </Card>
 
-      <Card title="Reconciliation" sub="The provider's deposit list against our ledger. A mismatch or a missing internal record is money to look at today." pad={false}>
-        <table className="tbl"><thead><tr><th>Provider</th><th>Asset</th><th>Provider id</th><th>Provider amount</th><th>Our payment</th><th>Our amount</th><th>Verdict</th><th>Detail</th></tr></thead>
+      <Card title="Reconciliation" sub="Both directions: the provider's deposit list against our ledger, and the provider's payout statement against our payments. A mismatch, a state disagreement or a missing internal record is money to look at today." pad={false}>
+        <table className="tbl"><thead><tr><th>Scope</th><th>Provider</th><th>Asset</th><th>Provider id</th><th>Provider amount</th><th>Our payment</th><th>Our amount</th><th>Verdict</th><th>Detail</th></tr></thead>
           <tbody>{(recon?.records ?? []).map((r) => (
-            <tr key={r.externalId}><td>{r.provider}</td><td>{r.asset}</td><td className="mono" style={{ fontSize: 11.5 }}>{r.externalId.slice(0, 12)}…</td><td className="mono">{r.externalAmount}</td>
+            <tr key={`${r.scope}:${r.externalId}`}><td>{r.scope}</td><td>{r.provider}</td><td>{r.asset}</td><td className="mono" style={{ fontSize: 11.5 }}>{r.externalId.slice(0, 12)}…</td><td className="mono">{r.externalAmount}</td>
               <td className="mono">{r.internalPaymentRef ?? "—"}</td><td className="mono">{r.internalAmount ?? "—"}</td><td><Pill status={r.verdict} tone={verdictTone[r.verdict]} /></td><td style={{ fontSize: 12, color: "var(--ink-3)" }}>{r.detail ?? ""}</td></tr>
-          ))}{!recon?.records.length && <tr><td colSpan={8} style={{ color: "var(--ink-3)", padding: 16 }}>No provider deposits in the window.</td></tr>}</tbody></table>
+          ))}{!recon?.records.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)", padding: 16 }}>No provider deposits or payouts in the window.</td></tr>}</tbody></table>
       </Card>
     </div>
   );

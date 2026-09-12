@@ -181,14 +181,17 @@ export interface PaymentEvent {
 }
 
 export interface ReconciliationRecord {
-  scope: "deposits";
+  /** deposits = money that reached the provider for us; payouts = money the provider sent for us. */
+  scope: "deposits" | "payouts";
   provider: string;
   asset: string;
   externalId: string;              // the provider's id for the movement
   externalAmount: number;
   internalPaymentRef: string | null;
   internalAmount: number | null;
-  verdict: "matched" | "missing_internal" | "amount_mismatch" | "unattributed" | "pending";
+  /** state_mismatch (payouts): the provider's final status disagrees with our payment state —
+   *  e.g. we show DELIVERED, the provider says FAILED. Always money to look at today. */
+  verdict: "matched" | "missing_internal" | "amount_mismatch" | "unattributed" | "pending" | "state_mismatch";
   detail?: string;
 }
 export interface ReconciliationReport {

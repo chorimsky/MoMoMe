@@ -368,6 +368,7 @@ export type NotificationKind =
   | "payment_failed"         // it did not, and a refund is owed
   | "refund_needed"          // the sender must supply a destination
   | "unattributed_inbound"   // funds arrived that nobody can account for
+  | "reconciliation_mismatch" // the provider's statement disagrees with our books
   | "manual_review"          // a payment is held and needs a person
   | "deletion_request"       // someone asked for their data to go, from a device we cannot verify
   | "test_report";           // a tester submitted a checklist run

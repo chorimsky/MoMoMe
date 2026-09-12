@@ -18,6 +18,7 @@ import { id } from "../core/ids.js";
 import { config, peexitLive } from "../config.js";
 import { register, touch } from "../core/persist.js";
 import type { DisburseRequest, DisburseResult, PayoutStatus } from "./pawapay.js";
+import type { PayoutStatement } from "./payouts.js";
 
 const byKey = new Map<string, DisburseResult>();        // payment ref → result
 const statusByRef = new Map<string, PayoutStatus>();    // payment ref → last status
@@ -191,6 +192,25 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
 }
 
 const failReasonByRef = new Map<string, string>();
+/** The provider's own statement of our payouts: GET /disbursement/all_requests lists every
+ *  request of the last 3 days with its current status. Read-only, no side effects on the
+ *  cached statuses (queryStatus owns those) — reconciliation compares this list with our
+ *  payments and reports what disagrees. Empty when not live or unreachable. */
+export async function listPayouts(): Promise<PayoutStatement[]> {
+  if (!peexitLive()) return [];
+  try {
+    const res = await peex("/disbursement/all_requests", { method: "GET" });
+    if (!res.ok) return [];
+    const arr = (await res.json()) as Array<{ id?: number | string; track_id?: string; status?: string; amount?: number | string; fees?: number; created_at?: string; updated_at?: string }>;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((r) => r.track_id).map((r) => ({
+      ref: String(r.track_id), providerRef: r.id != null ? String(r.id) : undefined, status: mapStatus(r.status),
+      amountXaf: r.amount != null && Number.isFinite(Number(r.amount)) ? Number(r.amount) : undefined,
+      feeXaf: typeof r.fees === "number" ? r.fees : undefined, at: r.updated_at ?? r.created_at, raw: r.status,
+    }));
+  } catch { return []; }
+}
+
 /** The last rejection reason for a payout ref (from queryStatus), if any. */
 export function failReason(idempotencyKey: string): string | undefined {
   return failReasonByRef.get(idempotencyKey);

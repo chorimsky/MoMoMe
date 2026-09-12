@@ -647,6 +647,7 @@ api.get("/config", async (_req, res) => {
     // Live platform fee (fraction) so the customer's pre-quote fee preview tracks
     // the admin's Rates & Pricing setting instead of a hardcoded constant.
     feePct: getSettings().pricing.feePct,
+    minFeeXaf: getSettings().pricing.minFeeXaf,
     // Which crypto pay-in methods are on offer — the customer flow only shows these.
     methods: offeredMethods(),
     // Which product surfaces are enabled — the client hides anything turned off.

@@ -119,7 +119,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
-  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>> } | null>(null);
+  const [demo, setDemo] = useState<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>> } | null>(null);
   useEffect(() => { api.getConfig().then(setDemo).catch(() => {}); }, []);
 
   // Pick up an open payment left by a reload (see RESUME_KEY). Only an existing payment is
@@ -383,7 +383,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           </div>
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
-            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} lockRecipient={!!merchant} />}
+            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} minFeeXaf={demo?.minFeeXaf} lockRecipient={!!merchant} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} onMomo={features.momoTransfer ? () => go("momo") : undefined} />}
             {step === "momo" && <MomoStep s={s} back={() => go("method")} done={() => { setS((p) => ({ ...p, xaf: 0 })); go("details"); }} />}
             {/* "Is this who you meant?" — shown INSTEAD of proceeding when the server spots a

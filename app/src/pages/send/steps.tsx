@@ -54,14 +54,16 @@ function pickBestContactNumber(tels: string[] | undefined, fallback: CC): { coun
 }
 
 /* ============================================================ 1 — DETAILS */
-export function DetailsStep({ s, set, next, feePct, lockRecipient }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; lockRecipient?: boolean }) {
+export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; minFeeXaf?: number; lockRecipient?: boolean }) {
   const { t } = useI18n();
   const features = useFeatures();
   const c = COUNTRIES[s.country];
   // Live admin fee (from /config) so the preview tracks Rates & Pricing; fall
   // back to the shared default until config loads. The authoritative fee still
   // comes from the server quote on the next step.
-  const fee = Math.round(s.xaf * (feePct ?? FEE_PCT));
+  // Same rule as the server (core/pricing): the percentage with a floor — so the preview
+  // never shows 4 XAF for a quote that will say 100.
+  const fee = Math.max(Math.round(s.xaf * (feePct ?? FEE_PCT)), Math.min(minFeeXaf ?? 0, s.xaf));
   const [resolving, setResolving] = useState(false);
   const [contactNote, setContactNote] = useState<string | null>(null);
   // The name this number was opened WITH (a contact, a recent, a typed name) when the

@@ -6,6 +6,7 @@ import { latencyMiddleware } from "./core/interop/metrics.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
 import { applinks } from "./routes/applinks.js";
+import { share } from "./routes/share.js";
 import { cron } from "./routes/cron.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
@@ -121,6 +122,7 @@ export function createApp() {
   // Apple/Google app-link association files, same .well-known root. The web app rewrites
   // these two paths here so its SPA catch-all cannot answer them with index.html.
   app.use("/", applinks);
+  app.use("/", share); // Open Graph previews + QR images for shared pay links (crawlers only, via Vercel)
   app.use("/api/cron", cron); // Vercel Cron drives the background jobs here (before /api)
   // Interoperability API — mounted BEFORE /api so its paths are not swallowed by the
   // legacy router's catch-all. /api/* is unchanged and remains supported.

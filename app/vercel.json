@@ -25,6 +25,32 @@
       "destination": "https://momome-api-production.up.railway.app/.well-known/assetlinks.json"
     },
     {
+      "source": "/send",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot|Slackbot|Discordbot|LinkedInBot|Pinterest|Applebot|SkypeUriPreview|Snapchat|Viber|Line/|Iframely|Embedly|redditbot|vkShare).*"
+        }
+      ],
+      "destination": "https://momome-api-production.up.railway.app/share/send"
+    },
+    {
+      "source": "/pay/:code",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot|Slackbot|Discordbot|LinkedInBot|Pinterest|Applebot|SkypeUriPreview|Snapchat|Viber|Line/|Iframely|Embedly|redditbot|vkShare).*"
+        }
+      ],
+      "destination": "https://momome-api-production.up.railway.app/share/pay/:code"
+    },
+    {
+      "source": "/share/:path*",
+      "destination": "https://momome-api-production.up.railway.app/share/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

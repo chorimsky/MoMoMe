@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
@@ -9,7 +9,7 @@ import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { detectProvider, localDigits, lightningAddress, MAX_XAF, receiveLink } from '@shared/domain';
+import { checkPhone, localDigits, lightningAddress, MAX_XAF, receiveLink } from '@shared/domain';
 import { WEB_ORIGIN } from '@/lib/config';
 
 // The address comes from the shared builder — the same one the server serves and the
@@ -27,7 +27,7 @@ export default function ReceiveScreen() {
   // screen used to accept any 8+ digits, so it would happily show an address like
   // 60344485@momome.xyz, which the server answers with "Not a valid Mobile Money number".
   // Handing someone an address they can't be paid at is the one thing this screen must not do.
-  const usable = (d: string) => d.length >= 8 && !!detectProvider(d, 'CM');
+  const usable = (d: string) => checkPhone(d, 'CM').ok;
 
   const [savedInvalid, setSavedInvalid] = useState(false);
   useEffect(() => {
@@ -41,7 +41,15 @@ export default function ReceiveScreen() {
   }, []);
 
   const digits = localDigits(draft, 'CM');
-  const valid = usable(digits);
+  const check = checkPhone(draft, 'CM');
+  const valid = check.ok;
+  // Which thing is wrong decides what the person should do about it — the same rule and the
+  // same words as the web Receive page.
+  const problem = !draft.trim() || valid ? null
+    : check.reason === 'bad_length' ? tr('rcv_bad_length')
+    : check.reason === 'foreign_country' ? tr('rcv_bad_foreign')
+    : check.reason === 'unknown_operator' ? tr('rcv_bad_operator')
+    : tr('rcv_bad_number');
 
   const save = async () => {
     if (!valid) return;
@@ -64,10 +72,21 @@ export default function ReceiveScreen() {
   };
   const shareLine = () => `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}`;
   const shareText = () => `${shareLine()}\n${link}`;
+  // The rendered QR, as a PNG, straight from the SVG component — no native module.
+  const qrRef = useRef<{ toDataURL: (cb: (b64: string) => void) => void } | null>(null);
+  const qrPng = () => new Promise<string | null>((res) => { try { qrRef.current ? qrRef.current.toDataURL((b64) => res(b64 || null)) : res(null); } catch { res(null); } });
   const share = async () => {
-    // iOS takes `url` as a separate item and Android ignores it: give iOS the line + url,
-    // Android the line with the link in the message. Never both, or the link shows twice.
-    try { await Share.share(Platform.OS === 'ios' ? { message: shareLine(), url: link } : { message: shareText() }); } catch { /* dismissed */ }
+    // iOS's sheet takes an image AND text: send the QR as the image, the link in the text.
+    // Android's sheet takes text only — the link previews with the same QR wherever it is
+    // pasted (server-rendered Open Graph image), so nothing is lost. Never the link twice.
+    try {
+      if (Platform.OS === 'ios') {
+        const b64 = await qrPng();
+        if (b64) { await Share.share({ message: shareText(), url: `data:image/png;base64,${b64}` }); return; }
+        await Share.share({ message: shareLine(), url: link }); return;
+      }
+      await Share.share({ message: shareText() });
+    } catch { /* dismissed */ }
   };
   // WhatsApp is where the "you owe me" conversation already is: one tap drops the link
   // into it. Falls back to the system sheet when WhatsApp is not installed.
@@ -96,8 +115,9 @@ export default function ReceiveScreen() {
             onChangeText={setDraft}
             left={<Text style={{ fontSize: 18 }}>🇨🇲</Text>}
           />
-          {draft.trim().length > 0 && !valid ? (
-            <Body style={{ color: t.bad, fontSize: 13 }}>{tr('rcv_bad_number')}</Body>
+          {problem ? <Body style={{ color: t.bad, fontSize: 13 }}>{problem}</Body> : null}
+          {valid && check.provider ? (
+            <Body muted style={{ fontSize: 13 }}>{tr('rcv_on_network').replace('{op}', check.provider === 'ORANGE' ? 'Orange Money' : 'MTN MoMo')}</Body>
           ) : null}
           <Field
             label={tr('rcv_amount_opt')}
@@ -126,7 +146,7 @@ export default function ReceiveScreen() {
           {/* The QR is the web link: a phone camera opens it with no app installed, the app's
               scanner routes it to Send, and it carries the amount. */}
           <View style={[styles.qrCard, Shadow.md]}>
-            <QRCode value={link} size={210} backgroundColor="#fff" color="#111" />
+            <QRCode value={link} size={210} backgroundColor="#fff" color="#111" quietZone={8} getRef={(c) => { qrRef.current = c; }} />
           </View>
           <Pressable
             onPress={() => copy('link')}
@@ -140,8 +160,9 @@ export default function ReceiveScreen() {
             <Ionicons name={copiedWhat === 'link' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'link' ? t.recv : t.accent} />
           </Pressable>
           <Button title={tr('rcv_share_whatsapp')} icon="logo-whatsapp" onPress={shareWhatsApp} style={{ alignSelf: 'stretch' }} />
-          <Button title={tr('rcv_share_btn')} icon="share-outline" variant="outline" onPress={share} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('rcv_share_qr_btn')} icon="share-outline" variant="outline" onPress={share} style={{ alignSelf: 'stretch' }} />
           <Body muted center style={{ fontSize: 13 }}>{tr('share_get_paid')}</Body>
+          <Body muted center style={{ fontSize: 12.5 }}>{tr('rcv_preview_hint')}</Body>
 
           {/* Secondary: the Lightning Address, for someone paying from a Bitcoin wallet. */}
           <View style={{ alignSelf: 'stretch', borderTopWidth: 1, borderTopColor: t.line, paddingTop: Spacing.three, gap: Spacing.two }}>

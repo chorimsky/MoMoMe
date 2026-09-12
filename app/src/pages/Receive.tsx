@@ -13,7 +13,8 @@
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { MAX_XAF, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
+import { COUNTRIES, MAX_XAF, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
+import { downloadPayCard, sharePayCard, type PayCard } from "../lib/paycard";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
@@ -34,17 +35,15 @@ export function Receive() {
   const [amountDraft, setAmountDraft] = useState("");
   const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, "")) || 0, MAX_XAF);
   const [showLn, setShowLn] = useState(false);
-  const [shared, setShared] = useState(false);
   const origin = typeof window !== "undefined" ? window.location.origin : "https://momome.xyz";
   const link = number ? receiveLink(origin, number, amountXaf) : "";
   const shareLine = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}` : "";
-  const share = async () => {
-    // The share sheet appends `url` itself; putting the link in `text` too made every
-    // WhatsApp message show it twice. Only the WhatsApp fallback needs it in the text.
-    if (typeof navigator.share === "function") { try { await navigator.share({ title: "MoMo›Me", text: shareLine, url: link }); return; } catch { /* dismissed → fall through to WhatsApp */ } }
-    window.open(`https://wa.me/?text=${encodeURIComponent(`${shareLine}\n${link}`)}`, "_blank", "noopener");
-    setShared(true); setTimeout(() => setShared(false), 1500);
-  };
+  const who = number ? `${COUNTRIES.CM.dial} ${number.replace(/(\d)(?=(\d{2})+$)/g, "$1 ")}` : "";
+  const card = (): PayCard => ({ link, who, amountLabel: amountXaf ? `${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : undefined, headline: t("rcv_share_text"), footnote: t("rcv_card_foot") });
+  const [busy, setBusy] = useState<"share" | "save" | null>(null);
+  const [saved, setSaved] = useState(false);
+  const share = async () => { setBusy("share"); try { await sharePayCard(card(), shareLine); } finally { setBusy(null); } };
+  const save = async () => { setBusy("save"); try { if (await downloadPayCard(card()) === "ok") { setSaved(true); setTimeout(() => setSaved(false), 1600); } } finally { setBusy(null); } };
 
   // The SAME rule the send flow and the LNURL server use. This screen used to carry its own
   // copy — "at least 8 digits and a known prefix" — which accepted 677000789000 and would
@@ -135,8 +134,10 @@ export function Receive() {
               <QR value={link} size={196} />
             </div>
             <div style={{ alignSelf: "stretch" }}><CopyField label={t("rcv_link_label")} value={link} /></div>
-            <button className="btn btn-primary btn-block" onClick={share}>{shared ? t("amb_copied") : t("rcv_share_btn")}</button>
+            <button className="btn btn-primary btn-block" onClick={share} disabled={busy !== null}>{busy === "share" ? "…" : t("rcv_share_btn")}</button>
+            <button className="btn btn-quiet btn-block" onClick={save} disabled={busy !== null}>{saved ? t("rcv_saved") : busy === "save" ? "…" : t("rcv_save_qr")}</button>
             <p style={{ color: "var(--ink-2)", fontSize: 13, lineHeight: 1.5, textAlign: "center", margin: 0 }}>{t("rcv_share")}</p>
+            <p style={{ color: "var(--ink-3)", fontSize: 12.5, lineHeight: 1.5, textAlign: "center", margin: 0 }}>{t("rcv_preview_hint")}</p>
 
             {/* Secondary: the Lightning Address, for someone paying from a Bitcoin wallet. */}
             <div style={{ alignSelf: "stretch", borderTop: "1px solid var(--line)", paddingTop: 12 }}>

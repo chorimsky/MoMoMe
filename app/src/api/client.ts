@@ -2,6 +2,7 @@
    Typed API client — the single seam to the settlement backend.
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
+import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress } from "@shared/interop.js";
 import type {
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
@@ -445,6 +446,13 @@ export const api = {
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),
   adminPruneIdentities: () => req<{ removed: number; kept: number; customerIds: string[] }>("/admin/identities/prune", { method: "POST" }),
+  /* ---- interoperability layer (/api/v1) — paths are relative to BASE, so "/v1/…" ---- */
+  v1Providers: () => req<{ providers: ProviderInfo[] }>("/v1/providers"),
+  v1Rails: () => req<{ rails: RailInfo[] }>("/v1/rails"),
+  v1Events: (provider?: string) => req<{ stats: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number }; events: PaymentEvent[] }>(`/v1/webhooks/events${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`),
+  v1Reconciliation: () => req<ReconciliationReport>("/v1/reconciliation"),
+  v1Resolve: (address: string) => req<PaymentAddress>("/v1/payment-addresses/resolve", { method: "POST", body: JSON.stringify({ address }) }),
+
   adminRails: () => req<{
     liveMoney: boolean;
     monitor: { pending: number; delivered24h: number; failed24h: number };

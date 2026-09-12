@@ -20,6 +20,7 @@ import { LiquidityView } from "./views/Liquidity.js";
 import { PricingView } from "./views/Pricing.js";
 import { MobileMoneyView } from "./views/MobileMoney.js";
 import { RailsView } from "./views/Rails.js";
+import { InteropView } from "./views/Interop.js";
 import { ComplianceView } from "./views/Compliance.js";
 import { ReportsView } from "./views/Reports.js";
 import { HealthView } from "./views/Health.js";
@@ -62,14 +63,14 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 /* ---------- nav model ---------- */
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
-  | "rails" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
+  | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
   | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness" | "testing";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: null, items: [["overview", "Overview"]] },
   { group: "Payments", items: [["payments", "Payments"], ["delivery", "Delivery"]] },
   { group: "Treasury", items: [["liquidity", "Liquidity"], ["pricing", "Rates & Pricing"]] },
-  { group: "Rails", items: [["mobilemoney", "Mobile Money"], ["rails", "Payment Rails"]] },
+  { group: "Rails", items: [["mobilemoney", "Mobile Money"], ["rails", "Payment Rails"], ["interop", "Interoperability"]] },
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
   { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"], ["testing", "Testing"]] },
@@ -84,6 +85,7 @@ const VIEWS: Record<Key, ComponentType> = {
   pricing: PricingView,
   mobilemoney: MobileMoneyView,
   rails: RailsView,
+  interop: InteropView,
   merchants: MerchantsView,
   customers: CustomersView,
   identities: IdentitiesView,

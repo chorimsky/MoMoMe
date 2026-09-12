@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
+import { v1 } from "./routes/v1.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
 import { applinks } from "./routes/applinks.js";
@@ -119,6 +120,9 @@ export function createApp() {
   // these two paths here so its SPA catch-all cannot answer them with index.html.
   app.use("/", applinks);
   app.use("/api/cron", cron); // Vercel Cron drives the background jobs here (before /api)
+  // Interoperability API — mounted BEFORE /api so its paths are not swallowed by the
+  // legacy router's catch-all. /api/* is unchanged and remains supported.
+  app.use("/api/v1", v1);
   app.use("/api", api);
 
   // Unmatched route → JSON 404 (not Express's default HTML).

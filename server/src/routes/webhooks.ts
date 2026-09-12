@@ -12,6 +12,7 @@ import * as peex from "../integrations/peex/service.js";
 import { onPayoutResult } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { reconcileDeposits } from "../core/depositReconcile.js";
+import { recordEvent, markProcessed } from "../core/interop/events.js";
 import crypto from "node:crypto";
 import { config, whatsappConfigured } from "../config.js";
 import { inboundMessages, replyTo } from "../core/whatsappBot.js";
@@ -39,16 +40,21 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   const adapter = payoutByName(name);
   if (!adapter) return res.status(404).json({ error: "unknown_aggregator" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  if (adapter.verifyCallback && !adapter.verifyCallback(raw, req.headers)) return res.status(401).json({ error: "unauthorized" });
+  if (adapter.verifyCallback && !adapter.verifyCallback(raw, req.headers)) {
+    recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
+    return res.status(401).json({ error: "unauthorized" });
+  }
   let events;
   try { events = adapter.parseCallback ? adapter.parseCallback(JSON.parse(raw)) : []; }
-  catch { return res.status(400).json({ error: "bad_json" }); }
-  res.json({ ok: true }); // ack fast; settle in background
+  catch { recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "bad json" }); return res.status(400).json({ error: "bad_json" }); }
+  const rec = recordEvent({ provider: name, eventType: "callback.received", rawBody: raw, providerReference: events[0]?.providerRef ?? events[0]?.ref ?? null, status: "verified" });
+  res.json({ ok: true, ...(rec.duplicate ? { duplicate: true } : {}) }); // ack fast; settle in background
+  if (rec.duplicate) return; // the same bytes again: already handled, never twice
   for (const ev of events) {
     if (!adapter.statusByKey(ev.ref)) continue; // not one of ours
     background((async () => {
       const status = await adapter.queryStatus(ev.ref); // AUTHORITATIVE re-query
-      if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(ev.ref, status, ev.providerRef);
+      if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(ev.ref, status, ev.providerRef); markProcessed(rec.event.id, null, `payout ${status}`); }
       // else: inconclusive → leave it; the reconcile backstop settles it.
     })());
   }
@@ -121,6 +127,7 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   // req.ip is resolved via app.set("trust proxy", 1) — pass it so an IP allowlist checks
   // the ACTUAL sender rather than a caller-supplied X-Forwarded-For value.
   if (!adapter.verifyWebhook(rawBody, req.headers, req.ip)) {
+    recordEvent({ provider: req.params.provider, eventType: "webhook.rejected", rawBody, status: "rejected", detail: "signature/IP check failed" });
     return res.status(401).json({ error: "bad_signature" });
   }
 
@@ -128,12 +135,15 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
   try {
     parsed = JSON.parse(rawBody);
   } catch {
+    recordEvent({ provider: req.params.provider, eventType: "webhook.rejected", rawBody, status: "rejected", detail: "bad json" });
     return res.status(400).json({ error: "bad_json" });
   }
   lastWebhookAt.set(req.params.provider, new Date().toISOString());
 
   const event = adapter.parseEvent(parsed);
+  const rec = recordEvent({ provider: req.params.provider, eventType: event ? `webhook.${event.kind}` : "webhook.ignored", rawBody, providerReference: event?.providerRef ?? null, status: "verified" });
   if (!event) return res.json({ ok: true, ignored: true });
+  if (rec.duplicate) return res.json({ ok: true, duplicate: true }); // identical bytes already handled
   const payment = await store().findByProviderRef(event.providerRef);
   // An ERC-20 stablecoin deposit arrives WITHOUT the receive address (IBEX reports account +
   // tx hash — verified live), so it cannot match a payment by providerRef. Ack, then let the
@@ -223,5 +233,6 @@ webhooks.post("/:provider", express.raw({ type: "*/*" }), async (req, res) => {
       else if (adapter.trusted()) return;
     }
     await confirmInbound(payment, event.amount, event.eventId, event.providerRef, railFee);
+    markProcessed(rec.event.id, payment.id);
   })());
 });

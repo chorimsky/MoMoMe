@@ -36,6 +36,11 @@ const RAILS: RailAdapter[] = [ibexAdapter, phoenixdAdapter, sandboxAdapter];
 const health = new HealthTracker(RAILS.map((r) => r.name), { probeCooldownMs: 5 * 60_000 });
 
 /** Configured rails, highest priority (lowest number) first. */
+/** Read-only health of one crypto rail — for the interoperability layer's routing/ops views. */
+export function railHealth(name: string): { eligible: boolean; successRate: number; avgLatencyMs: number } {
+  return { eligible: health.eligible(name), successRate: health.successRate(name), avgLatencyMs: health.avgLatency(name) };
+}
+
 export function activeRails(): RailAdapter[] {
   return RAILS.filter((r) => r.configured()).sort((a, b) => a.priority - b.priority);
 }

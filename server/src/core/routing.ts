@@ -21,6 +21,10 @@ const ALL_PROVIDERS: ProviderId[] = ["MTN", "ORANGE", "AIRTEL"];
 const PROBE_COOLDOWN_MS = 10 * 60_000;
 const health = new HealthTracker(PAYOUTS.map((p) => p.name), { probeCooldownMs: PROBE_COOLDOWN_MS });
 const eligible = (name: string): boolean => health.eligible(name);
+/** Read-only health of one payout rail — for the interoperability layer's routing/ops views. */
+export function payoutHealth(name: string): { eligible: boolean; successRate: number; avgLatencyMs: number } {
+  return { eligible: health.eligible(name), successRate: health.successRate(name), avgLatencyMs: health.avgLatency(name) };
+}
 const executions: ExecutionLogEntry[] = [];
 
 register(

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request as ExpressRequest } from "express";
 import type {
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
   AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
@@ -13,6 +13,7 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
 import { otpSendAllowed } from "../core/otpThrottle.js";
+import { idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
@@ -334,7 +335,7 @@ function hdr(req: ReqLike, name: string): string | undefined {
   const s = Array.isArray(v) ? v[0] : v;
   return typeof s === "string" && s ? s : undefined;
 }
-type ReqLike = { headers: Record<string, string | string[] | undefined>; method?: string; url?: string; rawBody?: Buffer };
+export type ReqLike = { headers: Record<string, string | string[] | undefined>; method?: string; url?: string; rawBody?: Buffer };
 
 /**
  * Verify the per-request signature: ECDSA-P256 over
@@ -384,7 +385,7 @@ function partnerOf(req: ReqLike): string | undefined {
 const LEGACY_SENDER_UNTIL = Date.parse(process.env.LEGACY_SENDER_UNTIL ?? "2026-11-01T00:00:00Z");
 const legacyBearerAllowed = () => Number.isFinite(LEGACY_SENDER_UNTIL) && Date.now() < LEGACY_SENDER_UNTIL;
 
-async function ownerOf(req: ReqLike): Promise<string | undefined> {
+export async function ownerOf(req: ReqLike): Promise<string | undefined> {
   // Developer/partner requests authenticate with an API key, not a device signature.
   const partner = partnerOf(req);
   if (partner) return partner;
@@ -408,14 +409,14 @@ async function vaultOwnerOf(req: ReqLike): Promise<string | undefined> {
 }
 
 /** True when the request carries a valid admin session token (any role). */
-function isAdminRequest(req: { headers: Record<string, string | string[] | undefined> }): boolean {
+export function isAdminRequest(req: { headers: Record<string, string | string[] | undefined> }): boolean {
   return !!verifyToken(tokenFromHeaders(req.headers));
 }
 
 /** May this requester view this payment? Admins always; otherwise the request's
  *  AUTHENTICATED owner (signed, for enrolled devices) must match the payment's.
  *  Prevents enumerating other people's payments/ledgers by id. */
-async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promise<boolean> {
+export async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promise<boolean> {
   if (isAdminRequest(req)) return true; // admin console (e.g. ledger drawer)
   // DENY BY DEFAULT. An ownerless payment is a data bug, not an access tier — it used
   // to return true here, which made any such row world-readable by id (and, via the
@@ -429,31 +430,37 @@ async function mayViewPayment(req: ReqLike, senderId: string | undefined): Promi
 }
 
 /* ---------- quotes ---------- */
-api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req, res) => {
+/** Reply shape shared by the route handlers and the v1 interoperability layer, so both
+ *  speak with ONE implementation of the money rules (see core/interop). */
+export type Reply<T = unknown> = { status: number; body: T };
+
+/** Quote the pay-in for `xaf` XAF over `method`. The /quotes route AND the v1 intent/route
+ *  layer call this — one set of gates (paused, amount, method on offer, country, rates). */
+export async function buildQuote(input: QuoteRequest): Promise<Reply<Quote | { error: string; message: string }>> {
   await refreshSettingsIfStale(); // pick up a cross-instance kill-switch / settings change
   // Operator kill-switch — refuse new business when payments are paused.
   if (!getSettings().ops.acceptingPayments) {
-    return res.status(503).json({ error: "paused", message: "Payments are temporarily paused. Please try again shortly." });
+    return { status: 503, body: { error: "paused", message: "Payments are temporarily paused. Please try again shortly." } };
   }
-  const { xaf, method, country } = (req.body ?? {}) as QuoteRequest;
+  const { xaf, method, country } = input;
   if (typeof xaf !== "number" || !Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
-    return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
+    return { status: 400, body: { error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` } };
   }
   if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
-    return res.status(400).json({ error: "bad_method", message: "Unknown payment method." });
+    return { status: 400, body: { error: "bad_method", message: "Unknown payment method." } };
   }
   // Refuse a method the operator has disabled OR that no real rail can serve here (the
   // customer flow already hides both, but guard the API so a stale client / direct call
   // can't quote a dead rail). Refusing at QUOTE time rather than at payment creation means
   // the customer is redirected before they've entered a recipient.
   if (!offeredMethods()[method as keyof AdminSettings["methods"]]) {
-    return res.status(400).json({ error: "method_unavailable", message: "This payment method isn't available right now." });
+    return { status: 400, body: { error: "method_unavailable", message: "This payment method isn't available right now." } };
   }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]) {
-    return res.status(400).json({ error: "bad_country", message: "Unsupported country." });
+    return { status: 400, body: { error: "bad_country", message: "Unsupported country." } };
   }
   if (!COUNTRIES[country as keyof typeof COUNTRIES]?.active) {
-    return res.status(400).json({ error: "country_inactive", message: "This country isn't live yet." });
+    return { status: 400, body: { error: "country_inactive", message: "This country isn't live yet." } };
   }
   // PRICING SAFETY: never quote real money on a stale/fallback FX rate. The feed
   // refreshes every 30s; if it's dead (or never populated on a cold boot during an
@@ -467,7 +474,7 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
   // settlement will then refuse is an inconsistency, not a saving.
   await ensureFreshRates().catch(() => {});
   if (liveMoney() && !ratesFresh()) {
-    return res.status(503).json({ error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." });
+    return { status: 503, body: { error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." } };
   }
   const feeXaf = Math.round(xaf * getSettings().pricing.feePct);
   const totalXaf = xaf + feeXaf;
@@ -489,7 +496,12 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
     estimateOnly: method === "ONCHAIN",
   };
   await store().putQuote(quote);
-  res.json(quote);
+  return { status: 200, body: quote };
+}
+
+api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req, res) => {
+  const r = await buildQuote((req.body ?? {}) as QuoteRequest);
+  res.status(r.status).json(r.body);
 });
 
 /** A logo is a base64 image data URL within a sane size budget (~256 KB image →
@@ -701,20 +713,24 @@ api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 
 });
 
 /* ---------- payments ---------- */
-api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async (req, res) => {
+/** Create a payment from a quote. The /payments route AND the v1 route-execution layer call
+ *  this: every gate (owner, recipient, name match, quote validity, float, rail, mint) lives
+ *  here once. `req` supplies identity headers; `bodyIn` the request body. */
+export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): Promise<Reply> {
+  const reqBody = (bodyIn ?? {}) as Record<string, unknown> & CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string; riskToken?: string };
   await refreshSettingsIfStale(); // kill-switch / approval threshold must reflect a cross-instance change
   // WHO is paying. The header alone is not identity: an enrolled device must sign, or a
   // stolen id could open payments (and read them back) as someone else. An un-enrolled id
   // is still accepted as a bearer during the migration window (ownerOf).
   const owner = await ownerOf(req);
-  if (senderOf(req) && !owner) return res.status(401).json({ error: "device_unverified", message: "This device could not be verified. Reopen the app and try again." });
-  const { quoteId, recipient } = (req.body ?? {}) as CreatePaymentRequest;
+  if (senderOf(req) && !owner) return { status: 401, body: { error: "device_unverified", message: "This device could not be verified. Reopen the app and try again." } };
+  const { quoteId, recipient } = (reqBody ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes
   // and arbitrary payout targets).
   const country = recipient && COUNTRIES[recipient.country as keyof typeof COUNTRIES];
   // The store-review number can be "owned" and verified by a reviewer; it must never be paid.
   if (recipient && typeof recipient === "object" && typeof recipient.phone === "string" && isReviewPhone(recipient.phone)) {
-    return res.status(400).json({ error: "reserved_number", message: "This number is reserved for app review and cannot receive payments." });
+    return { status: 400, body: { error: "reserved_number", message: "This number is reserved for app review and cannot receive payments." } };
   }
   if (
     !recipient || typeof recipient !== "object" ||
@@ -722,7 +738,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     !country ||
     !country.providers.includes(recipient.provider) // provider must serve this country
   ) {
-    return res.status(400).json({ error: "bad_recipient", message: "Invalid recipient details." });
+    return { status: 400, body: { error: "bad_recipient", message: "Invalid recipient details." } };
   }
   // Does the number make sense for this country, and whose network is it on? The check
   // above only asked for eight digits, which accepted a Gabon +241 number entered as
@@ -736,7 +752,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
       : check.reason === "bad_length"
         ? `A ${country.name} Mobile Money number has ${country.nsnLen.join(" or ")} digits after ${country.dial}.`
         : "We can't tell which operator that number belongs to. Check it and try again.";
-    return res.status(400).json({ error: "bad_phone", message: msg });
+    return { status: 400, body: { error: "bad_phone", message: msg } };
   }
   // Anchor the operator to the NUMBER's prefix — the dropdown is only a hint, so the payout
   // always routes to the operator that actually owns the number. checkPhone has already
@@ -774,20 +790,20 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
      sender must answer, with a token bound to this payment; and the registered name is
      what goes on the payment, the receipt and the SMS — never the typed label. */
   const registered = await registeredName(recipient.phone, recipient.country).catch(() => null);
-  const toMerchant = !!(req.body ?? {}).merchantLinkCode || !!(req.body ?? {}).merchantCode;
+  const toMerchant = !!(reqBody ?? {}).merchantLinkCode || !!(reqBody ?? {}).merchantCode;
   if (registered) {
     if (!toMerchant && isRealName(cleanName, recipient.phone) && !namesMatch(cleanName, registered.name)) {
-      const ack = (req.body ?? {}).riskToken;
+      const ack = (reqBody ?? {}).riskToken;
       const acknowledged = typeof ack === "string"
         && verifyRiskToken(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch", ack);
       if (!acknowledged) {
-        return res.status(409).json({
+        return { status: 409, body: {
           error: "confirm_recipient",
           code: "name_mismatch",
           message: `This number is registered to ${registered.name}, not to ${cleanName}. Check the number before you pay — Mobile Money payments cannot be reversed.`,
           operatorName: registered.name,
           riskToken: riskTokenFor(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, "name_mismatch"),
-        });
+        } };
       }
     }
     recipient.name = registered.name;
@@ -799,19 +815,19 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     phone: recipient.phone, country: recipient.country, xaf: quotePeek?.xaf ?? 0,
   });
   if (risk.level === "stop") {
-    const ack = (req.body ?? {}).riskToken;
+    const ack = (reqBody ?? {}).riskToken;
     const acknowledged = typeof ack === "string" && risk.code
       && verifyRiskToken(owner ?? "", recipient.phone, recipient.country, quotePeek?.xaf ?? 0, risk.code, ack);
     if (!acknowledged) {
       // 409, not 400: nothing is wrong with the request — we are asking a question, and the
       // same request with the token proceeds.
-      return res.status(409).json({
+      return { status: 409, body: {
         error: "confirm_recipient",
         message: risk.message,
         code: risk.code,
         didYouMean: risk.didYouMean,
         riskToken: risk.token,
-      });
+      } };
     }
   }
 
@@ -819,9 +835,9 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // exactly one payment even if two requests race on the same quoteId (the
   // loser gets 404). A claimed quote is gone, so the rate can't be replayed.
   const quote = await store().claimQuote(quoteId);
-  if (!quote) return res.status(404).json({ error: "no_quote", message: "Quote not found or already used — please re-quote." });
+  if (!quote) return { status: 404, body: { error: "no_quote", message: "Quote not found or already used — please re-quote." } };
   if (Date.now() > Date.parse(quote.expiresAt)) {
-    return res.status(409).json({ error: "quote_expired", message: "This quote has expired — please re-quote." });
+    return { status: 409, body: { error: "quote_expired", message: "This quote has expired — please re-quote." } };
   }
   // ── PRE-FLIGHT PAYOUT GATE ──────────────────────────────────────────────────────
   // Before ANY inbound address/QR is minted (BTC on-chain, Lightning, or USDT), prove a
@@ -832,7 +848,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // deliberately NOT gated: those still pay out after operator sign-off.)
   const block = async (status: number, error: string, message: string) => {
     await store().putQuote(quote); // un-claim — the locked rate is untouched
-    return res.status(status).json({ error, message });
+    return { status: status, body: { error, message } };
   };
   // 1) Ops kill-switch — payouts globally paused.
   if (!getSettings().ops.acceptingPayments) return block(503, "payments_paused", "Payouts are temporarily paused. Please try again shortly.");
@@ -859,7 +875,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // Attribute the payment to the authenticated device (resolved at the top of the route,
   // before the risk tokens, so those bind to the verified owner too). A senderId-less
   // payment would be world-readable via mayViewPayment's ownerless bypass — refuse.
-  if (owner === undefined) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  if (owner === undefined) return { status: 401, body: { error: "no_device", message: "Unrecognised device." } };
 
   // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
@@ -881,7 +897,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     // non-leaking "method unavailable" — never a raw provider error / 502.
     console.error(`[pay] createInstruction failed (${quote.method}):`, e instanceof Error ? e.message : e);
     await store().putQuote(quote);
-    return res.status(503).json({ error: "method_unavailable", message: "This payment method isn't available right now. Please choose another or try again shortly." });
+    return { status: 503, body: { error: "method_unavailable", message: "This payment method isn't available right now. Please choose another or try again shortly." } };
   }
   // UNIFIED BIP-21 QR. For an on-chain Bitcoin payment, also mint a Lightning invoice for
   // the SAME BTC amount and fold it into one code: `bitcoin:<addr>?amount=…&lightning=…`.
@@ -938,7 +954,7 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   // Merchant attribution: if this came from a merchant payment link, tag it — but
   // ONLY when the recipient actually matches that merchant's settlement number, so
   // a caller can't falsely credit a merchant's sales.
-  const body = (req.body ?? {}) as { merchantLinkCode?: string; merchantCode?: string };
+  const body = (reqBody ?? {}) as { merchantLinkCode?: string; merchantCode?: string };
   const linkCode = typeof body.merchantLinkCode === "string" ? body.merchantLinkCode : "";
   const merchantCode = typeof body.merchantCode === "string" ? body.merchantCode : "";
   if (linkCode) {
@@ -987,7 +1003,20 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
     if (!loc) return;
     await store().setSenderLocation(payment.id, loc);
   }).catch(() => {});
-  res.json(payment);
+  return { status: 200, body: payment };
+}
+
+api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async (req, res) => {
+  // Idempotency-Key (optional, recommended): a retried request returns the reply already
+  // given and creates nothing. Scoped to the authenticated owner so a key cannot replay
+  // another device's payment. Without the header, behaviour is unchanged.
+  const key = hdr(req, "idempotency-key");
+  const owner = key ? await ownerOf(req) : undefined;
+  if (key && !validIdemKey(key)) return res.status(400).json({ error: "bad_idempotency_key", message: "Idempotency-Key must be 8–128 printable characters." });
+  if (key && owner) { const prior = idemLookup(owner, `payment:${key}`); if (prior) return res.status(prior.status).json(prior.body); }
+  const r = await createPaymentCore(req, req.body);
+  if (key && owner && (r.status === 200 || r.status === 409)) idemStore(owner, `payment:${key}`, r.status, r.body);
+  res.status(r.status).json(r.body);
 });
 
 /**

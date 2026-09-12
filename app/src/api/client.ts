@@ -2,7 +2,7 @@
    Typed API client — the single seam to the settlement backend.
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
-import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress } from "@shared/interop.js";
+import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress, PaymentIntent, PaymentRoute } from "@shared/interop.js";
 import type {
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
@@ -452,6 +452,14 @@ export const api = {
   v1Events: (provider?: string) => req<{ stats: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number }; events: PaymentEvent[] }>(`/v1/webhooks/events${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`),
   v1Reconciliation: () => req<ReconciliationReport>("/v1/reconciliation"),
   v1Resolve: (address: string) => req<PaymentAddress>("/v1/payment-addresses/resolve", { method: "POST", body: JSON.stringify({ address }) }),
+  /** Ask the router which way to pay is best for this destination and amount. The key makes
+   *  repeated asks for the same (destination, amount) reuse one intent instead of minting many. */
+  v1Recommend: async (destination: string, amount: number, country: string) => {
+    const key = `pick-${destination.replace(/\D/g, "")}-${amount}`;
+    const it = await req<PaymentIntent | { error: string; intent?: PaymentIntent }>("/v1/payment-intents", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ destination, amount, country }) });
+    if (!("id" in it)) return null;
+    return req<{ intent: PaymentIntent; routes: PaymentRoute[]; recommended: string | null }>(`/v1/payment-intents/${it.id}/routes`, { method: "POST" });
+  },
 
   adminRails: () => req<{
     liveMoney: boolean;

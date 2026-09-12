@@ -70,7 +70,7 @@ export const STRINGS: Dict = {
   name_manual: ["Name entered manually", "Nom saisi manuellement"],
   method_title: ["Choose how to pay", "Choisissez comment payer"],
   method_sub: ["Select your payment method. Your transfer is delivered as Mobile Money either way.", "Choisissez votre moyen de paiement. Le destinataire reçoit du Mobile Money dans tous les cas."],
-  recommended: ["RECOMMENDED", "RECOMMANDÉ"], large_hint: ["For larger amounts, Bitcoin settles more securely.", "Pour les gros montants, Bitcoin est plus sûr."],
+  recommended: ["RECOMMENDED", "RECOMMANDÉ"], m_unavailable_now: ["Not available right now", "Indisponible pour le moment"], large_hint: ["For larger amounts, Bitcoin settles more securely.", "Pour les gros montants, Bitcoin est plus sûr."],
   review_title: ["Review payment", "Vérifier le paiement"], they_receive: ["They receive", "Le destinataire reçoit"],
   total_to_pay: ["Total to pay", "Total à payer"], pay_with: ["Pay with", "Payer avec"], arrival: ["Arrival", "Délai"],
   send_exactly: ["Send exactly", "Envoyez exactement"],

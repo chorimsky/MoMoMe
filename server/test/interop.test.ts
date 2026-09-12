@@ -108,6 +108,27 @@ async function main() {
     for (let i = 0; i < 50; i++) { await new Promise((res) => setTimeout(res, 100)); const s = await j(`/payment-intents/${it.id}`); done = (s.body as { status: string }).status; if (done === "COMPLETED" || done === "FAILED") break; }
     ok("when the engine delivers, the intent reads COMPLETED", done === "COMPLETED", done);
 
+    // A SIGNED device (as the web and mobile apps are) must be accepted on v1: clients sign
+    // the path relative to /api ("/v1/…"), which is not this router's req.url.
+    {
+      const { p256 } = await import("@noble/curves/nist.js");
+      const { sha256 } = await import("@noble/hashes/sha2.js");
+      const b64 = (u8: Uint8Array) => Buffer.from(u8).toString("base64");
+      const b64url = (u8: Uint8Array) => b64(u8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const jwk = (priv: Uint8Array) => { const pub = p256.getPublicKey(priv, false); return { kty: "EC", crv: "P-256", x: b64url(pub.slice(1, 33)), y: b64url(pub.slice(33, 65)) }; };
+      const sign = (priv: Uint8Array, method: string, path: string, body: string) => { const ts = String(Date.now()); const msg = new TextEncoder().encode(`${method}\n${path}\n${ts}\n${b64(sha256(new TextEncoder().encode(body)))}`); return { ts, sig: b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true })) }; };
+      const auth = p256.utils.randomSecretKey(), wrap = p256.utils.randomSecretKey();
+      const sid = "signed-interop-dev";
+      const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+      await fetch(`${root}/me/devices`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": sid }, body: JSON.stringify({ authPub: jwk(auth), wrapPub: jwk(wrap) }) });
+      const body = JSON.stringify({ destination: "677000789", amount: 3000 });
+      const sg = sign(auth, "POST", "/v1/payment-intents", body);
+      const rs = await fetch(`${root}/v1/payment-intents`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": sid, "x-mm-ts": sg.ts, "x-mm-sig": sg.sig }, body });
+      ok("an enrolled, signing device is accepted on /api/v1 (path signed relative to /api)", rs.status === 201, String(rs.status));
+      const bad = await fetch(`${root}/v1/payment-intents`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": sid }, body });
+      ok("…and the same device unsigned is refused", bad.status === 401, String(bad.status));
+    }
+
     // Legacy /api/payments now honours Idempotency-Key too.
     const legacy = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
     let q = await (await fetch(`${legacy}/quotes`, { method: "POST", headers: H, body: JSON.stringify({ xaf: 1000, method: "LIGHTNING", country: "CM" }) })).json() as { id: string };

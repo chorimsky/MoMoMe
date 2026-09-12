@@ -58,6 +58,7 @@ export const STRINGS = {
   how_pay: ['How would you like to pay?', 'Comment souhaitez-vous payer ?'],
   method_sub: ['They receive {n} XAF as Mobile Money either way.', 'Le destinataire reçoit {n} XAF en Mobile Money dans tous les cas.'],
   recommended: ['RECOMMENDED', 'RECOMMANDÉ'],
+  m_unavailable_now: ['Not available right now', 'Indisponible pour le moment'],
 
   // send — review
   they_receive: ['They receive', 'Le destinataire reçoit'],

@@ -445,6 +445,27 @@ export default function SendScreen() {
   const stepIndex = { details: 0, method: 1, review: 2, pay: 3, success: 3 }[step];
 
 
+  // THE ROUTER PICKS: ranked routes for this destination and amount. The top viable method
+  // is badged and listed first; one the router cannot use right now is greyed with the
+  // reason. Router unreachable → the static list, exactly as before.
+  const [rec, setRec] = useState<{ recommended: Method | null; order: Method[]; unavailable: Partial<Record<Method, string>> } | null>(null);
+  useEffect(() => {
+    if (step !== 'method' || !xafNum || !phone) { setRec(null); return; }
+    let alive = true;
+    api.recommendRoute(`${COUNTRIES[country].dial}${phone}`, xafNum, country)
+      .then((r) => {
+        if (!alive || !r) return;
+        const viable = r.routes.filter((x) => x.viable).map((x) => x.method);
+        const unavailable: Partial<Record<Method, string>> = {};
+        for (const x of r.routes) if (!x.viable) { const bad = x.checks.find((c) => !c.ok); unavailable[x.method] = bad?.detail ?? bad?.name ?? 'unavailable'; }
+        const top = r.routes.find((x) => x.id === r.recommended)?.method ?? viable[0] ?? null;
+        setRec({ recommended: top, order: [...viable, ...r.routes.filter((x) => !x.viable).map((x) => x.method)], unavailable });
+      })
+      .catch(() => { /* no recommendation → static order */ });
+    return () => { alive = false; };
+  }, [step, xafNum, phone, country]);
+  const orderedMethods = rec ? [...enabledMethods].sort((a, b) => rec.order.indexOf(a) - rec.order.indexOf(b)) : enabledMethods;
+
   // Only while the picker is open, and only once per amount.
   useEffect(() => {
     if (step !== 'method' || !xafNum) return;
@@ -686,24 +707,30 @@ export default function SendScreen() {
             <Body muted>{tr('method_sub', { n: group(String(xafNum)) })}</Body>
           </View>
           <View style={{ gap: Spacing.three }}>
-            {enabledMethods.map((m) => {
+            {orderedMethods.map((m) => {
               const meta = METHOD_META[m];
+              const why = rec?.unavailable[m];
+              const isRec = rec ? rec.recommended === m : m === 'LIGHTNING';
               const c = meta.tone === 'brand' ? t.brand : meta.tone === 'recv' ? t.recv : meta.tone === 'warn' ? t.warn : t.accent;
               const wash = meta.tone === 'brand' ? t.brandWash : meta.tone === 'recv' ? t.recvWash : meta.tone === 'warn' ? t.backgroundSelected : t.accentWash;
               const pv = preview[m];
               return (
                 <Pressable
                   key={m}
-                  disabled={busy}
+                  disabled={busy || !!why}
                   onPress={() => pickMethod(m)}
                   style={({ pressed }) => [
                     styles.methodCard,
-                    { backgroundColor: t.surface, borderColor: t.line, opacity: pressed ? 0.9 : 1 },
+                    { backgroundColor: t.surface, borderColor: isRec && !why ? t.accent : t.line, opacity: why ? 0.55 : pressed ? 0.9 : 1 },
                     Shadow.sm,
                   ]}>
                   <IconCircle name={meta.icon} color={c} bg={wash} />
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.methodName, { color: t.text }]}>{METHOD_LABEL[m]}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={[styles.methodName, { color: t.text }]}>{METHOD_LABEL[m]}</Text>
+                      {isRec && !why ? <Pill label={tr('recommended')} tone="recv" /> : null}
+                    </View>
+                    {why ? <Text style={{ color: t.warn, fontSize: 12, marginTop: 2 }}>{tr('m_unavailable_now')} · {why}</Text> : null}
                     {/* The network is the irreversible mistake for a stablecoin, so it sits
                         directly under the name rather than on the next screen. */}
                     <Text style={{ color: c, fontFamily: Fonts.bodyMedium, fontSize: 12.5, marginTop: 1 }}>

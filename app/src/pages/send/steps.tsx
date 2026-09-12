@@ -353,6 +353,32 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
     return () => { alive = false; };
   }, [s.xaf]);
 
+  // THE ROUTER PICKS. One call gives the ranked routes for this destination and amount:
+  // the top viable one is preselected and badged, the rest stay a tap away, and a method
+  // the router cannot use right now says why instead of failing after the tap. If the
+  // router is unreachable, the picker behaves exactly as before.
+  const [rec, setRec] = useState<{ recommended: Method | null; order: Method[]; unavailable: Partial<Record<Method, string>> } | null>(null);
+  const userPicked = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    if (!s.xaf || !s.phone) return;
+    api.v1Recommend(`${COUNTRIES[s.country].dial}${s.phone}`, s.xaf, s.country)
+      .then((r) => {
+        if (!alive || !r) return;
+        const viable = r.routes.filter((x) => x.viable).map((x) => x.method);
+        const unavailable: Partial<Record<Method, string>> = {};
+        for (const x of r.routes) if (!x.viable) { const bad = x.checks.find((c) => !c.ok); unavailable[x.method] = bad?.detail ?? bad?.name ?? "unavailable"; }
+        const top = r.routes.find((x) => x.id === r.recommended)?.method ?? viable[0] ?? null;
+        setRec({ recommended: top, order: [...viable, ...r.routes.filter((x) => !x.viable).map((x) => x.method)], unavailable });
+        if (top && !userPicked.current && !fixed) set({ method: top });
+      })
+      .catch(() => { /* no recommendation → static order, as before */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.xaf, s.phone, s.country]);
+  const ordered = rec ? [...available].sort((a, b) => rec.order.indexOf(a) - rec.order.indexOf(b)) : available;
+  const badge = (k: Method) => (rec ? rec.recommended === k : k === "LIGHTNING");
+
   const eta = (secs: number) => secs <= 30 ? t("m_eta_seconds") : secs <= 600 ? t("m_eta_minutes") : t("m_eta_onchain");
   return (
     <FlowCard>
@@ -372,20 +398,22 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
       )}
 
       <div style={{ display: "grid", gap: 11 }}>
-        {available.map((k) => {
+        {ordered.map((k) => {
           const on = s.method === k;
+          const why = rec?.unavailable[k];
           return (
-            <button key={k} onClick={() => set({ method: k })} aria-pressed={on}
-              style={{ cursor: "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: "var(--surface)" }}>
+            <button key={k} onClick={() => { userPicked.current = true; set({ method: k }); }} aria-pressed={on} disabled={!!why}
+              style={{ cursor: why ? "not-allowed" : "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: "var(--surface)", opacity: why ? 0.55 : 1 }}>
               <span style={{ width: 42, height: 42, borderRadius: 11, flex: "none", display: "grid", placeItems: "center", background: METHOD_COLOR[k], color: "#fff", fontWeight: 800, fontSize: 21 }}>{METHOD_GLYPH[k]}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontWeight: 700, fontSize: 16 }}>{METHOD_META[k].name}</span>
-                  {k === "LIGHTNING" && <span style={{ fontSize: 9.5, fontWeight: 750, letterSpacing: ".04em", color: "var(--recv)", background: "var(--recv-wash)", padding: "2px 7px", borderRadius: 999 }}>{t("recommended")}</span>}
+                  {badge(k) && !why && <span style={{ fontSize: 9.5, fontWeight: 750, letterSpacing: ".04em", color: "var(--recv)", background: "var(--recv-wash)", padding: "2px 7px", borderRadius: 999 }}>{t("recommended")}</span>}
                 </span>
                 <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: METHOD_COLOR[k], marginTop: 2 }}>{t(NET_KEY[k])}</span>
                 <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{ml(k, "sub")}</span>
-                {preview[k] && (
+                {why && <span style={{ display: "block", fontSize: 12, color: "var(--warn)", marginTop: 4 }}>{t("m_unavailable_now")} · {why}</span>}
+                {preview[k] && !why && (
                   <span style={{ display: "block", marginTop: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
                     <span className="num" style={{ fontWeight: 700 }}>{t("m_you_send")} {k === "LIGHTNING" ? satsLabel(preview[k].amount) : preview[k].amountLabel}</span>
                     <span style={{ color: "var(--ink-3)" }}> · {eta(preview[k].etaSeconds)}</span>

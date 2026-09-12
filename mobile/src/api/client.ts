@@ -215,6 +215,15 @@ export const api = {
   /** Indicative cost, speed and network-fee burden per method — so the picker can show
    *  what differs between them instead of four rows that look the same. Stateless: mints
    *  no quote and locks no rate. */
+  /** The router's ranked routes for a destination + amount (v1). One intent per
+   *  (destination, amount) thanks to the idempotency key. null = router unavailable. */
+  recommendRoute: async (destination: string, amount: number, country: string) => {
+    const key = `pick-${destination.replace(/\D/g, '')}-${amount}`;
+    const it = await req<{ id?: string }>('/v1/payment-intents', { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ destination, amount, country }) });
+    if (!it.id) return null;
+    return req<{ recommended: string | null; routes: Array<{ id: string; method: Method; viable: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> }>(`/v1/payment-intents/${it.id}/routes`, { method: 'POST' });
+  },
+
   previewMethods: (xaf: number) =>
     req<{ methods: Array<{ method: Method; amountLabel: string; etaSeconds: number; senderPaysNetworkFee: boolean }> }>(
       `/preview?xaf=${encodeURIComponent(String(xaf))}`),

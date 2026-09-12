@@ -33,7 +33,13 @@ import { buildQuote, createPaymentCore, ownerOf, mayViewPayment, isAdminRequest,
 
 export const v1 = Router();
 
-const asReq = (req: Request): ReqLike => req as unknown as ReqLike;
+/** Clients sign the path RELATIVE TO /api ("/v1/payment-intents"); inside this router
+ *  req.url is "/payment-intents". Present the signed form to the verifier. */
+const asReq = (req: Request): ReqLike => ({
+  headers: req.headers as ReqLike["headers"], method: req.method,
+  url: (req.originalUrl ?? req.url).replace(/^\/api(?=\/)/, ""),
+  rawBody: (req as unknown as { rawBody?: Buffer }).rawBody,
+});
 const hdr = (req: Request, n: string): string | undefined => { const v = req.headers[n]; const s = Array.isArray(v) ? v[0] : v; return typeof s === "string" && s ? s : undefined; };
 
 /** Status is DERIVED from the executing payment — the intent never carries its own truth. */
@@ -147,7 +153,9 @@ v1.post("/payment-intents/:id/execute", rateLimitDurableMiddleware("v1_execute",
     ...(typeof riskToken === "string" ? { riskToken } : {}),
     ...(dest.type === "MERCHANT_CODE" ? { merchantCode: dest.value } : {}),
   };
-  const r = await createPaymentCore(req, body);
+  // createPaymentCore verifies the device signature against req.url; give it the signed form.
+  const signedReq = new Proxy(req, { get: (t, k) => (k === "url" ? (t.originalUrl ?? t.url).replace(/^\/api(?=\/)/, "") : Reflect.get(t, k)) });
+  const r = await createPaymentCore(signedReq, body);
   if (r.status !== 200) {
     route.status = "PROPOSED"; saveRoute(route);
     it.routeId = null; it.status = "QUOTED"; saveIntent(it);

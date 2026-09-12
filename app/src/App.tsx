@@ -1,6 +1,7 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import { lazy, Suspense, useEffect } from "react";
 import { useRouteSeo } from "./lib/seo.js";
+import { routeClass, trackView, wireAnalytics } from "./lib/analytics.js";
 import { api } from "./api/client.js";
 import { Landing } from "./pages/Landing.js";
 import { SendApp } from "./pages/send/SendApp.js";
@@ -50,9 +51,17 @@ function ChunkFallback() {
   return <div style={{ minHeight: "60vh", display: "grid", placeItems: "center", color: "var(--ink-3)", fontSize: 14 }}>Loading…</div>;
 }
 
+/** Every route change is a page view for the Audience report (route class, not the URL). */
+function useAnalytics() {
+  const loc = useLocation();
+  useEffect(() => { wireAnalytics(); }, []);
+  useEffect(() => { trackView(routeClass(loc.pathname)); }, [loc.pathname]);
+}
+
 export function App() {
   useRouteSeo(); // per-route canonical + robots (index public pages, noindex admin/ops/404)
   useReferralCapture();
+  useAnalytics();
   return (
     <>
       <RouteTitle />

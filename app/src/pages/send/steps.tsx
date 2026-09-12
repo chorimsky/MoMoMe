@@ -7,6 +7,7 @@ import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { useFeatures } from "../../lib/features.js";
 import { api } from "../../api/client.js";
+import { track } from "../../lib/analytics.js";
 import { pollMs } from "../../lib/net.js";
 import { FlowCard, Label, Stepper, Row, useExpiry, FixedFlow } from "./ui.js";
 import type { Draft } from "./SendApp.js";
@@ -402,7 +403,7 @@ export function MethodStep({ s, set, back, next, busy, methods }: { s: Draft; se
           const on = s.method === k;
           const why = rec?.unavailable[k];
           return (
-            <button key={k} onClick={() => { userPicked.current = true; set({ method: k }); }} aria-pressed={on} disabled={!!why}
+            <button key={k} onClick={() => { userPicked.current = true; set({ method: k }); track("method_chosen", { method: k }); }} aria-pressed={on} disabled={!!why}
               style={{ cursor: why ? "not-allowed" : "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: "var(--surface)", opacity: why ? 0.55 : 1 }}>
               <span style={{ width: 42, height: 42, borderRadius: 11, flex: "none", display: "grid", placeItems: "center", background: METHOD_COLOR[k], color: "#fff", fontWeight: 800, fontSize: 21 }}>{METHOD_GLYPH[k]}</span>
               <span style={{ flex: 1, minWidth: 0 }}>

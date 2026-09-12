@@ -19,6 +19,7 @@ import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
+import { track } from "../lib/analytics.js";
 
 /** The Lightning Address for a Mobile Money number — the shared builder, so the address
  *  shown here is byte-for-byte the one the identity layer and the LNURL server use. */
@@ -42,7 +43,7 @@ export function Receive() {
   const card = (): PayCard => ({ link, who, amountLabel: amountXaf ? `${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : undefined, headline: t("rcv_share_text"), footnote: t("rcv_card_foot") });
   const [busy, setBusy] = useState<"share" | "save" | null>(null);
   const [saved, setSaved] = useState(false);
-  const share = async () => { setBusy("share"); try { await sharePayCard(card(), shareLine); } finally { setBusy(null); } };
+  const share = async () => { setBusy("share"); track("share_link", { what: "receive", amount: amountXaf > 0 }); try { await sharePayCard(card(), shareLine); } finally { setBusy(null); } };
   const save = async () => { setBusy("save"); try { if (await downloadPayCard(card()) === "ok") { setSaved(true); setTimeout(() => setSaved(false), 1600); } } finally { setBusy(null); } };
 
   // The SAME rule the send flow and the LNURL server use. This screen used to carry its own
@@ -119,7 +120,7 @@ export function Receive() {
               <span style={{ color: "var(--ink-3)", fontWeight: 700 }}>XAF</span>
             </div>
             <p style={{ color: "var(--ink-3)", fontSize: 12, marginTop: 6 }}>{t("rcv_amount_hint")}</p>
-            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => setNumber(check.local)}>
+            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => { setNumber(check.local); track("receive_link_created", { amount: amountXaf > 0 }); }}>
               {t("rcv_create")}
             </button>
           </div>

@@ -7,7 +7,7 @@ import type { Tone } from "./AdminUI.js";
 
 export type AdminKey =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
-  | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
+  | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports" | "audience"
   | "notifications" | "health" | "settings" | "administration" | "testing";
 
 export interface Notif {

@@ -13,6 +13,7 @@ import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
 import { classifyScan } from "@shared/domain.js";
+import { track } from "../lib/analytics.js";
 
 /** Extract a MoMo›Me app path from a scanned/typed value, or null. One classifier serves
  *  both apps (shared/domain classifyScan): business links and codes, receive links, our
@@ -54,6 +55,7 @@ export function Scan() {
 
     const go = (raw: string) => {
       const path = payPathFromScan(raw);
+      track("scan", { kind: classifyScan(raw).kind });
       if (path) { stopped = true; stream?.getTracks().forEach((tk) => tk.stop()); navigate(path); }
       // A wallet's own code (an invoice, a bitcoin:/ethereum: address) is not something
       // MoMo›Me pays — say what it is and what to do, rather than "not a code".

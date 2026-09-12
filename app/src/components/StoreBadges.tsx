@@ -8,6 +8,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { APP_LINKS, STORE_LIVE, appLinkFor, platformOf } from "@shared/apps.js";
+import { track } from "../lib/analytics.js";
 import { useI18n } from "../lib/i18n.js";
 
 function PlayGlyph() {
@@ -45,7 +46,7 @@ function Badge({ href, glyph, small, big, muted }: { href: string | null; glyph:
     </>
   );
   if (!href) return <span style={{ ...badge, opacity: .55, cursor: "default" }} aria-disabled="true">{inner}</span>;
-  return <a href={href} target="_blank" rel="noopener noreferrer" style={{ ...badge, ...(muted ? { opacity: .92 } : null) }}>{inner}</a>;
+  return <a href={href} target="_blank" rel="noopener noreferrer" onClick={() => track("get_app", { store: /play\.google|apple\.com|testflight/.test(href) ? (href.includes("google") ? "play" : "apple") : "apk" })} style={{ ...badge, ...(muted ? { opacity: .92 } : null) }}>{inner}</a>;
 }
 
 /** Both badges. Android falls back to the APK while the Play listing is in review; iOS to
@@ -100,7 +101,7 @@ export function AppBanner() {
           {platform === "ios" ? (link.store ? "App Store" : "TestFlight") : (link.store ? "Google Play" : t("app_direct_download_lc"))} · {t("app_banner_sub")}
         </div>
       </div>
-      <a className="btn btn-primary btn-sm" href={link.href} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", flex: "none" }}>{t("app_banner_cta")}</a>
+      <a className="btn btn-primary btn-sm" href={link.href} target="_blank" rel="noopener noreferrer" onClick={() => track("get_app", { store: "banner" })} style={{ textDecoration: "none", flex: "none" }}>{t("app_banner_cta")}</a>
       <button type="button" onClick={dismiss} aria-label={t("app_banner_close")}
         style={{ flex: "none", width: 28, height: 28, borderRadius: "50%", border: "none", background: "transparent", color: "var(--ink-3)", fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
     </div>

@@ -269,6 +269,20 @@ export class ApiError extends Error {
   }
 }
 
+export interface AnalyticsReport {
+  generatedAt: string; days: number; from: string;
+  totals: { sessions: number; visitors: number; returning: number; views: number; actions: number; sessionSec: { avg: number; p50: number; p90: number }; bounce: number };
+  platforms: Array<{ platform: "web" | "android" | "ios"; sessions: number; visitors: number; sessionSecP50: number; share: number }>;
+  countries: Array<{ country: string; sessions: number; visitors: number; share: number }>;
+  pages: Array<{ path: string; views: number; sessions: number; avgSec: number; entries: number; exits: number }>;
+  funnel: Array<{ step: string; sessions: number; ofPrevious: number | null }>;
+  actions: Array<{ name: string; count: number; sessions: number; top?: Array<{ value: string; count: number }> }>;
+  byHour: number[]; byDay: Array<{ day: string; sessions: number; visitors: number }>;
+  languages: Array<{ lang: string; sessions: number }>; versions: Array<{ platform: "web" | "android" | "ios"; ver: string; sessions: number }>;
+  screens: Array<{ scr: string; sessions: number }>; referrers: Array<{ ref: string; sessions: number }>;
+  durations: Array<{ bucket: string; sessions: number }>;
+}
+
 export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
@@ -452,6 +466,7 @@ export const api = {
     req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashin", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),
   momoTransfer: (phone: string, amount: number) =>
     req<{ ok: boolean; op?: MomoOp }>("/admin/momo/transfer", { method: "POST", body: JSON.stringify({ phone, amount }) }),
+  adminAnalytics: (days = 7) => req<AnalyticsReport>(`/admin/analytics?days=${days}`),
   adminReports: (period?: string) => req<ReportsSnapshot>(`/admin/reports${period ? `?period=${period}` : ""}`),
   adminHealth: () => req<HealthSnapshot>("/admin/health"),
   adminAudit: () => req<AuditEntry[]>("/admin/audit"),

@@ -7,6 +7,7 @@ import { api } from '@/api/client';
 import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/components/ui';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { track } from '@/lib/analytics';
 import { useI18n } from '@/lib/i18n';
 import { classifyScan } from '@shared/domain';
 
@@ -63,6 +64,7 @@ export default function ScanScreen() {
     if (locked.current) return;
     locked.current = true;
     const r = routeForPayload(data);
+    track('scan', { kind: r.kind });
     if (r.kind === 'pay') router.push({ pathname: '/pay/[code]', params: { code: r.value } });
     else if (r.kind === 'send') router.push({ pathname: '/', params: { scanned: r.value, ...(r.amount ? { amount: String(r.amount) } : {}) } });
     else if (r.kind === 'ref') { api.claimReferral(r.value).catch(() => {}); router.push('/'); }

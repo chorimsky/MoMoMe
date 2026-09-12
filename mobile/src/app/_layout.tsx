@@ -14,7 +14,9 @@ import {
 } from '@expo-google-fonts/nunito';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
+
+import { routeClass, trackView, wireAnalytics } from '@/lib/analytics';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -50,6 +52,10 @@ function navTheme(scheme: 'light' | 'dark') {
 
 export default function RootLayout() {
   const scheme = useResolvedScheme();
+  // Every screen change is a view for the Audience report; sessions follow AppState.
+  const pathname = usePathname();
+  useEffect(() => { wireAnalytics(); }, []);
+  useEffect(() => { trackView(routeClass(pathname)); }, [pathname]);
   const [fontsLoaded, fontError] = useFonts({
     BagelFatOne_400Regular,
     Fredoka_500Medium,

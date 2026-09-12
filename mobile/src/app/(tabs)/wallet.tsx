@@ -12,6 +12,7 @@ import { getMyNumber, setMyNumber } from '@/api/client';
 import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { track } from '@/lib/analytics';
 import { useI18n } from '@/lib/i18n';
 import { checkPhone, localDigits, lightningAddress, MAX_XAF, receiveLink } from '@shared/domain';
 import { WEB_ORIGIN } from '@/lib/config';
@@ -80,6 +81,7 @@ export default function ReceiveScreen() {
   const qrRef = useRef<{ toDataURL: (cb: (b64: string) => void) => void } | null>(null);
   const qrPng = () => new Promise<string | null>((res) => { try { qrRef.current ? qrRef.current.toDataURL((b64) => res(b64 || null)) : res(null); } catch { res(null); } });
   const share = async () => {
+    track('share_link', { what: 'receive', amount: amountXaf > 0, via: 'sheet' });
     // iOS's sheet takes an image AND text: send the QR as the image, the link in the text.
     // Android's sheet takes text only — the link previews with the same QR wherever it is
     // pasted (server-rendered Open Graph image), so nothing is lost. Never the link twice.
@@ -95,6 +97,7 @@ export default function ReceiveScreen() {
   // WhatsApp is where the "you owe me" conversation already is: one tap drops the link
   // into it. Falls back to the system sheet when WhatsApp is not installed.
   const shareWhatsApp = async () => {
+    track('share_link', { what: 'receive', amount: amountXaf > 0, via: 'whatsapp' });
     const url = `whatsapp://send?text=${encodeURIComponent(shareText())}`;
     try { if (await Linking.canOpenURL(url)) { await Linking.openURL(url); return; } } catch { /* fall through */ }
     await share();

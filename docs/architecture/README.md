@@ -73,3 +73,20 @@ Cameroon is the first active entry, not an assumption.
 
 See [payment-rails](../payment-rails/README.md). In short: implement the adapter contract,
 register it in its family, describe it in the registry. The payment core does not change.
+
+## Product analytics (Admin → Insights → Audience)
+
+First-party and anonymous by construction. The web app and the mobile app send small
+batches to `POST /api/telemetry`: a page or screen view (route class, never a URL with
+ids), a session start and end with its length, and named actions (`send_step` with its
+step, `method_chosen`, `share_link`, `scan`, `receive_link_created`, `get_app`). Each
+batch carries a random visitor id the client made up and keeps, a session id, the
+platform, app version, language, timezone and a screen-size class. No phone number, no
+device key, no IP address is accepted or stored; the country comes from the timezone.
+The operator console and ops pages are never tracked, and a browser's Do-Not-Track is
+respected. Events live in a bounded, persisted ring (`server/src/core/analytics.ts`) and
+are aggregated on read by `GET /api/admin/analytics?days=N` (section `audience`: Super
+Admin, Operations Manager, Finance Manager, Read Only) into sessions and people per
+platform and country, session length, most visited pages with time on page and
+entrances/exits, the send funnel step by step, actions with their most common value,
+hour of day and day series, languages, screens, versions and referrers.

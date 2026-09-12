@@ -21,6 +21,7 @@ import { PricingView } from "./views/Pricing.js";
 import { MobileMoneyView } from "./views/MobileMoney.js";
 import { RailsView } from "./views/Rails.js";
 import { InteropView } from "./views/Interop.js";
+import { AudienceView } from "./views/Audience.js";
 import { ComplianceView } from "./views/Compliance.js";
 import { ReportsView } from "./views/Reports.js";
 import { HealthView } from "./views/Health.js";
@@ -63,7 +64,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 /* ---------- nav model ---------- */
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
-  | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports"
+  | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports" | "audience"
   | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness" | "testing";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
@@ -73,7 +74,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Rails", items: [["mobilemoney", "Mobile Money"], ["rails", "Payment Rails"], ["interop", "Interoperability"]] },
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
-  { group: "Insights", items: [["reports", "Reports"], ["notifications", "Notifications"], ["testing", "Testing"]] },
+  { group: "Insights", items: [["reports", "Reports"], ["audience", "Audience"], ["notifications", "Notifications"], ["testing", "Testing"]] },
   { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items)) as Record<Key, string>;
@@ -92,6 +93,7 @@ const VIEWS: Record<Key, ComponentType> = {
   compliance: ComplianceView,
   peex: PeexView,
   reports: ReportsView,
+  audience: AudienceView,
   notifications: NotificationsView,
   health: HealthView,
   settings: SettingsView,

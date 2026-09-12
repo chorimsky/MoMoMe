@@ -4,6 +4,7 @@ import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, Payme
 import { splitDialed, COUNTRIES, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { OpenInApp } from "../../components/OpenInApp.js";
+import { track } from "../../lib/analytics.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
 import { FixedFlow } from "./ui.js";
@@ -166,6 +167,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   }, [step]);
 
   const go = (to: Step) => { window.scrollTo({ top: 0 }); setStep(to); };
+  // The funnel: every step a session reaches, once. `merchant` marks a business checkout.
+  useEffect(() => { track("send_step", { step, ...(merchant ? { checkout: "merchant" } : {}) }); }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
   /** The server's "is this who you meant?" refusal — usually a number one digit away from
    *  someone this sender pays regularly. True when it was one, and the question is now on
    *  screen instead of a raw error. Carried by every path that creates a payment, so an

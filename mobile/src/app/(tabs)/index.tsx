@@ -27,6 +27,7 @@ import {
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useFeatures } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
+import { track } from '@/lib/analytics';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { enablePush, usePushState } from '@/lib/push';
 import { consumeIntent } from '@/lib/navIntent';
@@ -124,6 +125,8 @@ export default function SendScreen() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
+  // The funnel: every step a session reaches, once (same names as the web app).
+  useEffect(() => { track('send_step', { step, ...(merchantCode ? { checkout: 'merchant' } : {}) }); }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
   // A business link that fixed its amount: the buyer chooses how to pay, nothing else.
   const [lockedAmount, setLockedAmount] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -273,6 +276,7 @@ export default function SendScreen() {
   const pickMethod = useCallback(
     async (m: Method) => {
       setMethod(m);
+      track('method_chosen', { method: m });
       setBusy(true);
       setError(null);
       try {

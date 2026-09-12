@@ -49,6 +49,7 @@ import { egressStatus, invalidateEgressCache } from "../core/egress.js";
 import { persistDurable } from "../core/persist.js";
 import { usingPostgres } from "../db/store.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
+import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
@@ -170,6 +171,7 @@ function sectionForPath(sub: string): Section | null {
     "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
+    analytics: "audience", // product analytics: where, how long, what
     notifications: "notifications", health: "health", settings: "settings",
     readiness: "administration", // go-live console — Super Admin only (checked in the route)
     users: "administration", audit: "administration",
@@ -177,6 +179,14 @@ function sectionForPath(sub: string): Section | null {
   };
   return map[p] ?? null;
 }
+
+/** PUBLIC — product analytics batches from the apps. Anonymous by construction (see
+ *  core/analytics): random visitor + session ids, a platform, a route class, a timezone.
+ *  Nothing identifying is accepted, no IP is kept, and a bad batch is simply dropped. */
+api.post("/telemetry", rateLimitMiddleware("telemetry", 120, 60_000), (req, res) => {
+  const n = ingestTelemetry(req.body);
+  res.status(202).json({ ok: true, accepted: n });
+});
 
 api.use("/admin", (req, res, next) => {
   const session = verifyToken(tokenFromHeaders(req.headers));
@@ -2282,6 +2292,12 @@ api.get("/admin/mobile-money", async (_req, res) => {
 });
 
 /* ---------- reports ---------- */
+/** Where people use MoMo›Me, how long, what they do — for the admin Audience view. */
+api.get("/admin/analytics", (req, res) => {
+  const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
+  res.json(analyticsReport(days));
+});
+
 api.get("/admin/reports", async (req, res) => {
   const period = String(req.query.period ?? "month");
   const windowMs = period === "today" ? 86_400_000 : period === "week" ? 7 * 86_400_000 : 31 * 86_400_000;

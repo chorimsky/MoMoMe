@@ -22,6 +22,9 @@ import { getLink, merchantById } from "../core/merchantAccount.js";
 
 export const share = Router();
 
+// The apex redirects to www; a preview image must not depend on a crawler following that.
+const WEB = config.webOrigin.replace(/^https:\/\/momome\.xyz$/, "https://www.momome.xyz");
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 const fmt = (n: number) => new Intl.NumberFormat("fr-FR").format(n).replace(/ /g, " ");
 const groupLocal = (local: string) => local.replace(/(\d)(?=(\d{2})+$)/g, "$1 ").trim();
@@ -74,28 +77,28 @@ async function qrPng(res: Response, text: string): Promise<void> {
 /* ---- personal "pay me" link: /send?to=…&amount=… ---- */
 share.get("/share/send", (req, res) => {
   const to = parseTo(req.query);
-  if (!to) { res.redirect(302, `${config.webOrigin}/send`); return; }
+  if (!to) { res.redirect(302, `${WEB}/send`); return; }
   const amount = parseAmount(req.query);
-  const url = receiveLink(config.webOrigin, to.dialed, amount || undefined, to.country);
+  const url = receiveLink(WEB, to.dialed, amount || undefined, to.country);
   const who = `${COUNTRIES[to.country].dial} ${groupLocal(to.local)}`;
   page(res, {
     title: amount ? `Pay ${fmt(amount)} XAF to ${who} · MoMo›Me` : `Pay ${who} · MoMo›Me`,
     description: `Scan the code or open the link. The money lands on ${who}'s Mobile Money in seconds. Mobile Money, made simple.`,
     url, canonical: url,
-    image: `${config.webOrigin}/share/qr.png?to=${to.dialed}${amount ? `&amount=${amount}` : ""}`,
+    image: `${WEB}/share/qr.png?to=${to.dialed}${amount ? `&amount=${amount}` : ""}`,
   });
 });
 share.get("/share/qr.png", async (req, res) => {
   const to = parseTo(req.query);
   if (!to) { res.status(404).end(); return; }
   const amount = parseAmount(req.query);
-  await qrPng(res, receiveLink(config.webOrigin, to.dialed, amount || undefined, to.country));
+  await qrPng(res, receiveLink(WEB, to.dialed, amount || undefined, to.country));
 });
 
 /* ---- business link: /pay/:code ---- */
 share.get("/share/pay/:code", (req, res) => {
   const code = String(req.params.code).slice(0, 40);
-  const url = `${config.webOrigin}/pay/${encodeURIComponent(code)}`;
+  const url = `${WEB}/pay/${encodeURIComponent(code)}`;
   const link = getLink(code);
   const m = link && !link.disabledAt ? merchantById(link.merchantId) : undefined;
   if (!link || !m || m.status !== "active") { res.redirect(302, url); return; }
@@ -104,12 +107,12 @@ share.get("/share/pay/:code", (req, res) => {
     title: amt ? `Pay ${amt} to ${m.businessName} · MoMo›Me` : `Pay ${m.businessName} · MoMo›Me`,
     description: `${link.label ? `${link.label}. ` : ""}Scan the code or open the link to pay ${m.businessName} with Mobile Money. Mobile Money, made simple.`,
     url, canonical: url,
-    image: `${config.webOrigin}/share/pay/${encodeURIComponent(code)}/qr.png`,
+    image: `${WEB}/share/pay/${encodeURIComponent(code)}/qr.png`,
   });
 });
 share.get("/share/pay/:code/qr.png", async (req, res) => {
   const code = String(req.params.code).slice(0, 40);
   const link = getLink(code);
   if (!link || link.disabledAt) { res.status(404).end(); return; }
-  await qrPng(res, `${config.webOrigin}/pay/${encodeURIComponent(code)}`);
+  await qrPng(res, `${WEB}/pay/${encodeURIComponent(code)}`);
 });

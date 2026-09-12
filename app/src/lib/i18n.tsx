@@ -393,6 +393,7 @@ export const STRINGS: Dict = {
   scan_hint: ["Point at a MoMo›Me QR code", "Visez un QR code MoMo›Me"],
   scan_unsupported: ["Your browser can't scan in-app. Use your phone's camera to scan the QR, or enter the merchant code below.", "Votre navigateur ne peut pas scanner dans l'app. Utilisez l'appareil photo de votre téléphone, ou entrez le code marchand ci-dessous."],
   scan_cam_denied: ["Camera access is needed to scan. Allow it, or enter the merchant code below.", "L'accès à la caméra est nécessaire. Autorisez-le, ou entrez le code marchand ci-dessous."],
+  open_in_app: ["Open in the MoMo›Me app", "Ouvrir dans l'app MoMo›Me"],
   scan_wallet_code: ["That's a crypto wallet code (an invoice or an address). MoMo›Me pays Mobile Money numbers: scan a MoMo›Me code, or enter the number you want to pay.", "C'est un code de portefeuille crypto (une facture ou une adresse). MoMo›Me paie des numéros Mobile Money : scannez un code MoMo›Me, ou saisissez le numéro à payer."],
   scan_not_momome: ["That QR isn't a MoMo›Me code — try again.", "Ce QR n'est pas un code MoMo›Me — réessayez."],
   scan_enter_code: ["Enter merchant code (e.g. MOM-CM-004522)", "Entrez le code marchand (ex. MOM-CM-004522)"],

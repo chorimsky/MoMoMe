@@ -59,7 +59,7 @@ export function androidLinksReady(): boolean {
 /** The path prefixes a link may open in the app. Everything else — the marketing pages,
  *  the admin console — stays in the browser, which is what a person tapping a link to
  *  those actually wants. */
-const APP_PATHS = ["/pay/*", "/p/*", "/r/*", "/receive/*", "/send", "/send?*"];
+const APP_PATHS = ["/pay/*", "/send"];  // exactly the routes the app has (pay/[code], send)
 
 applinks.get("/.well-known/apple-app-site-association", (_req: Request, res: Response) => {
   if (!appleLinksReady()) {
@@ -74,6 +74,8 @@ applinks.get("/.well-known/apple-app-site-association", (_req: Request, res: Res
   res.setHeader("content-type", "application/json");
   res.setHeader("cache-control", "public, max-age=3600");
   res.json({
+    // A component's "/" is a path pattern; the query is only compared when "?" is given, so
+    // "/send" here matches /send?to=…&amount=… as intended.
     applinks: { details: [{ appIDs: [appID], components: APP_PATHS.map((p) => ({ "/": p, comment: "payment link" })) }] },
     // Lets the app read/write credentials shared with the site, and is what allows a
     // password manager to offer the same entry for both.

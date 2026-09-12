@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
 import { splitDialed, COUNTRIES, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
+import { OpenInApp } from "../../components/OpenInApp.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
 import { FixedFlow } from "./ui.js";
@@ -308,6 +309,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="wrap" style={{ maxWidth: 480, margin: "0 auto", padding: `12px clamp(16px,4vw,24px) ${showTabs ? "calc(84px + env(safe-area-inset-bottom))" : "calc(40px + env(safe-area-inset-bottom))"}` }}>
         <SiteHeader cta={false} />
+        <OpenInApp />
         {/* The send flow is one document across four steps, and each step's visible heading
             is an <h2> for its own section — so the page itself had no <h1> on any step, and
             assistive tech had no top-level landmark to jump to. This names the document

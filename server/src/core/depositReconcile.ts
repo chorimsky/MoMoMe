@@ -19,7 +19,7 @@
    no open payment (address reused, payment pruned) is captured as unattributed with the
    right units, and the RPC being down simply means "next tick".
    ============================================================ */
-import type { Payment } from "../../../shared/types.js";
+import type { InboundAsset, Payment } from "../../../shared/types.js";
 import { OVERPAY_TOLERANCE, confirmInbound, markDetected, parkForReview, recordUnattributedInbound } from "./stateMachine.js";
 import { activeRails } from "../adapters/index.js";
 import { store } from "../db/store.js";
@@ -85,13 +85,23 @@ async function runPass(): Promise<void> {
       if (hit) {
         const { p, t } = hit as { p: Payment; t: NonNullable<typeof hit.t> };
         if (methodOf(t.asset) !== p.payInstruction.method) {
-          // Same address, other token. IBEX keeps one account per currency, so the credit
-          // may not even have landed where we can spend it. An operator settles this one.
+          // Same address, other token. The rail's own deposit list says the credit landed
+          // (this deposit IS that credit), and USDT/USDC are each a dollar: settle as what
+          // arrived, in that asset, at the locked rate — the payer never waits on a person
+          // for choosing the wrong tab. A non-stablecoin surprise still holds for review.
+          const stable = (a: string) => a === "USDT" || a === "USDC";
+          if (openForDeposit(p) && stable(t.asset) && stable(p.payInstruction.asset)) {
+            console.log(`[deposit] ${p.ref} ← ${t.amount} ${t.asset} sent to its ${p.payInstruction.method} address (tx ${d.txHash}) — settling as ${t.asset}`);
+            await markDetected(p);
+            await confirmInbound(p, t.amount, d.id, p.payInstruction.providerRef, undefined, t.asset as InboundAsset);
+            done.add(d.id);
+            continue;
+          }
           if (openForDeposit(p)) {
             console.warn(`[deposit] ${p.ref} ← ${t.amount} ${t.asset} sent to its ${p.payInstruction.method} address (tx ${d.txHash}) — holding for review`);
             p.inboundEventIds = [...(p.inboundEventIds ?? []), d.id];
             await store().putPayment(p);
-            await parkForReview(p, `${t.amount} ${t.asset} was sent to this payment's ${p.payInstruction.method} address (tx ${d.txHash}) — wrong token; confirm the credit with the rail, then settle or refund`);
+            await parkForReview(p, `${t.amount} ${t.asset} was sent to this payment's ${p.payInstruction.method} address (tx ${d.txHash}) — unexpected asset; confirm the credit with the rail, then settle or refund`);
             done.add(d.id);
             continue;
           }

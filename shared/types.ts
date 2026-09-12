@@ -188,6 +188,9 @@ export interface Payment {
   spreadBps?: number;
   /** The real inbound payment instruction (address / invoice) for this payment. */
   payInstruction: PayInstruction;
+  /** When the payer sent the OTHER stablecoin to the address (USDC to a USDT address): the
+   *  asset that actually arrived and was booked. Absent when it matched the instruction. */
+  paidAsset?: InboundAsset;
   /** PawaPay payout id (set once the payout is submitted). */
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */

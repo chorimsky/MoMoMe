@@ -12,34 +12,17 @@ import { useNavigate } from "react-router-dom";
 import jsQR from "jsqr";
 import { SiteHeader } from "../components/nav.js";
 import { useI18n } from "../lib/i18n.js";
-import { lnAddressNumber, parseReceiveLink } from "@shared/domain.js";
+import { classifyScan } from "@shared/domain.js";
 
-/** Extract a MoMo›Me app path from a scanned/typed value, or null. Handles the
- *  pay/merchant checkout codes AND a referral link (?ref=…) so scanning any
- *  MoMo›Me QR does something sensible instead of "not a code". */
+/** Extract a MoMo›Me app path from a scanned/typed value, or null. One classifier serves
+ *  both apps (shared/domain classifyScan): business links and codes, receive links, our
+ *  Lightning Addresses, phone numbers, referral links. A crypto wallet code (an invoice, a
+ *  bitcoin:/ethereum: URI) is recognised too — the caller explains it instead of "not a code". */
 export function payPathFromScan(raw: string): string | null {
-  const s = (raw || "").trim();
-  const rel = (p: string) => (/^\/(pay|m)\/[A-Za-z0-9_-]+$/.test(p) ? p : null);
-  try {
-    const u = new URL(s);
-    const hit = rel(u.pathname);
-    if (hit) return hit;
-    // A receive link (/send?to=…&amount=…) — the code the Receive screen shows now.
-    const rl = parseReceiveLink(s);
-    if (rl) return `/send?to=${rl.to}${rl.amountXaf ? `&amount=${rl.amountXaf}` : ""}`;
-    // Referral link — join with the ambassador's code (browser/app onboarding).
-    const ref = u.searchParams.get("ref");
-    if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) return `/?ref=${ref.toUpperCase()}`;
-  } catch { /* not a URL */ }
-  if (rel(s)) return s;
-  if (/^MOM-[A-Za-z]{2}-\d{4,}$/i.test(s)) return `/m/${s.toUpperCase()}`;
-  // A MoMo›Me Lightning Address — the code the Receive screen shows someone so they can
-  // get paid, as `lightning:<number>@momome.xyz` or the bare address. This app GENERATED
-  // that QR and could not read it back: scanning one answered "not a code", so the most
-  // natural in-app flow (show me your code, I'll pay you) dead-ended. Route it to the send
-  // flow with the number filled in.
-  const addr = lnAddressNumber(s);
-  if (addr) return `/send?to=${addr}`;
+  const r = classifyScan(raw);
+  if (r.kind === "pay") return /^MOM-/i.test(r.value) ? `/m/${r.value}` : `/pay/${r.value}`;
+  if (r.kind === "send") return `/send?to=${r.value}${r.amountXaf ? `&amount=${r.amountXaf}` : ""}`;
+  if (r.kind === "ref") return `/?ref=${r.value}`;
   return null;
 }
 
@@ -52,7 +35,7 @@ export function Scan() {
   // Only a browser with no camera API at all is truly unsupported — otherwise we
   // scan natively (BarcodeDetector) or via the jsQR software fallback (iOS/Safari).
   const hasCamera = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
-  const [status, setStatus] = useState<"scanning" | "denied" | "unsupported" | "bad">(hasCamera ? "scanning" : "unsupported");
+  const [status, setStatus] = useState<"scanning" | "denied" | "unsupported" | "bad" | "wallet">(hasCamera ? "scanning" : "unsupported");
   const [code, setCode] = useState("");
   const [attempt, setAttempt] = useState(0); // bump to re-request the camera after a denial
 
@@ -72,7 +55,9 @@ export function Scan() {
     const go = (raw: string) => {
       const path = payPathFromScan(raw);
       if (path) { stopped = true; stream?.getTracks().forEach((tk) => tk.stop()); navigate(path); }
-      else setStatus("bad"); // keep scanning — a stray non-MoMo QR shouldn't halt the loop
+      // A wallet's own code (an invoice, a bitcoin:/ethereum: address) is not something
+      // MoMo›Me pays — say what it is and what to do, rather than "not a code".
+      else setStatus(classifyScan(raw).kind === "wallet" ? "wallet" : "bad"); // keep scanning either way
     };
 
     const readNative = async (v: HTMLVideoElement): Promise<string | null> => {
@@ -108,8 +93,8 @@ export function Scan() {
     return () => { stopped = true; cancelAnimationFrame(raf); stream?.getTracks().forEach((tk) => tk.stop()); };
   }, [hasCamera, navigate, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const submitCode = () => { const p = payPathFromScan(code); if (p) navigate(p); else setStatus("bad"); };
-  const showCamera = status === "scanning" || status === "bad";
+  const submitCode = () => { const p = payPathFromScan(code); if (p) navigate(p); else setStatus(classifyScan(code).kind === "wallet" ? "wallet" : "bad"); };
+  const showCamera = status === "scanning" || status === "bad" || status === "wallet";
 
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
@@ -127,6 +112,7 @@ export function Scan() {
         )}
 
         {status === "bad" && <div role="alert" style={{ marginTop: 10, fontSize: 13, fontWeight: 600, color: "var(--bad)" }}>{t("scan_not_momome")}</div>}
+        {status === "wallet" && <div role="alert" style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>{t("scan_wallet_code")}</div>}
         {status === "denied" && (
           <div style={{ marginTop: 14 }}>
             <p style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.55 }}>{t("scan_cam_denied")}</p>

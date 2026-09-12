@@ -1017,6 +1017,7 @@ function PayStep({
         <Body muted center>{tr('send_exactly')} {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
           {pi.method === 'LIGHTNING' ? <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }} center>{satsLabel(pi.amount)}</Body> : null}
           {ADDRESS_METHODS.has(pi.method) ? <Body muted center style={{ fontSize: 12.5 }}>{tr('exact_amount_hint')}</Body> : null}
+          {pi.method === 'USDT' || pi.method === 'USDC' ? <Body muted center style={{ fontSize: 12 }}>{tr('either_stable_hint')}</Body> : null}
       </View>
 
       {/* DEMO MODE: the instruction is simulated, so its address/invoice is fabricated.

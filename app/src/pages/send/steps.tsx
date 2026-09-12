@@ -613,6 +613,11 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
                wallet took its network fee out of it — which lands the payment in manual review. */
             <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6, lineHeight: 1.45 }}>{t("exact_amount_hint")}</div>
           )}
+          {(method === "USDT" || method === "USDC") && (
+            /* One address serves both dollars: the chain receipt says which one arrived and the
+               payment settles as that — a wrong tab is not a lost payment. */
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.45 }}>{t("either_stable_hint")}</div>
+          )}
         </div>
       </div>
 

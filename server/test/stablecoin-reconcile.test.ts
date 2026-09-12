@@ -171,16 +171,21 @@ async function main() {
     ok("…booked as a liability, not delivered again", (await get(`/api/ledger/${b.id}`) as unknown[]).length === legsB + 2);
     ok("…and NOT as unattributed", !listUnattributed().some((x) => x.eventId === "dep-6"));
 
-    // 6. USDT sent to a USDC address (same 0x, wrong token) → held with a clear reason.
+    // 6. USDT sent to a USDC address (same 0x, other stablecoin) → a dollar is a dollar:
+    //    settles as what arrived, in USDT, and says so. Nobody waits on an operator.
     const f = await newPayment(1000, "693777888");
     const hash7 = "0x" + "7".repeat(64);
     const usdtLog = { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", topics: [TRANSFER, pad("0x" + "1".repeat(40)), pad(f.payInstruction.code)], data: "0x" + BigInt(Math.round(f.payInstruction.amount * 1e6)).toString(16).padStart(64, "0") };
     receipts.set(hash7, { status: "0x1", logs: [usdtLog] });
     deposits.push({ id: "dep-7", amount: f.payInstruction.amount, hash: hash7 });
     await reconcileDeposits();
-    const pf = await get(`/api/payments/${f.id}`) as { state: string; events: Array<{ note?: string }> };
-    ok("wrong token to the right address → MANUAL_REVIEW, never auto-paid", pf.state === "MANUAL_REVIEW", pf.state);
-    ok("…and the note says which token went where", pf.events.some((ev) => /USDT was sent to this payment's USDC address/.test(ev.note ?? "")), pf.events.map((ev) => ev.note).join(" | "));
+    await new Promise((r) => setTimeout(r, 400));
+    const pf = await get(`/api/payments/${f.id}`) as { state: string; paidAsset?: string; events: Array<{ note?: string }> };
+    ok("the other stablecoin to the right address → settled, not held", ["DELIVERED", "PAYOUT_REQUESTED", "FX_LOCKED", "INBOUND_CONFIRMED"].includes(pf.state), pf.state);
+    ok("…the payment records the asset that actually arrived", pf.paidAsset === "USDT", pf.paidAsset);
+    ok("…and the note says what happened", pf.events.some((ev) => /USDT arrived at this payment's USDC address/.test(ev.note ?? "")), pf.events.map((ev) => ev.note).join(" | ").slice(0, 200));
+    const legsF = await get(`/api/ledger/${f.id}`) as Array<{ currency: string; account: string }>;
+    ok("…and the books hold USDT for it, the coin the rail was credited", legsF.some((l) => l.currency === "USDT" && l.account === "fx_position") && !legsF.some((l) => l.currency === "USDC"));
 
     // 7. On-chain BTC: the same backstop. IBEX lists the deposit (typeId 7, msat) with a txid;
     //    the explorer says which output paid our address; the payment re-prices to what arrived.

@@ -140,6 +140,7 @@ export const STRINGS = {
   open_in_wallet: ['Open in wallet', 'Ouvrir dans le portefeuille'],
   no_wallet_title: ['No wallet found', 'Aucun portefeuille trouvé'],
   no_wallet_sub: ['The code was copied instead. Open your wallet, choose Send or Pay, and paste it.', "Le code a été copié à la place. Ouvrez votre portefeuille, choisissez Envoyer ou Payer, et collez-le."],
+  either_stable_hint: ['USDT or USDC — either one sent to this address is recognised and settles the same.', "USDT ou USDC — l'un ou l'autre envoyé à cette adresse est reconnu et règle de la même façon."],
   exact_amount_hint: ['Make sure this exact amount arrives — if your wallet offers it, pay the network fee on top, not out of the amount.', "Veillez à ce que ce montant exact arrive — si votre portefeuille le propose, payez les frais réseau en plus, pas déduits du montant."],
   code_expired_title: ['This code has expired', 'Ce code a expiré'],
   code_expired_sub: ['Nothing was taken. Get a new code at today’s rate — or, if you already paid, wait: it will be delivered on its own.', 'Rien n’a été prélevé. Obtenez un nouveau code au taux du jour — ou, si vous avez déjà payé, patientez : il sera livré automatiquement.'],
@@ -201,6 +202,7 @@ export const STRINGS = {
   or_enter_code: ['Or enter a merchant code', 'Ou saisissez un code marchand'],
   pay: ['Pay', 'Payer'],
   scanned_not_momo: ['Scanned (not a MoMo›Me code):', 'Scanné (code non MoMo›Me) :'],
+  scan_wallet_code: ["That's a crypto wallet code (an invoice or an address). MoMo›Me pays Mobile Money numbers: scan a MoMo›Me code, or enter the number you want to pay.", "C'est un code de portefeuille crypto (une facture ou une adresse). MoMo›Me paie des numéros Mobile Money : scannez un code MoMo›Me, ou saisissez le numéro à payer."],
   scan_again: ['Scan again', 'Scanner à nouveau'],
 
   // activity

@@ -8,30 +8,14 @@ import { Body, Button, Card, Field, H1, H3, IconCircle, Mono, Screen } from '@/c
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
-import { lnAddressNumber, parseReceiveLink } from '@shared/domain';
+import { classifyScan } from '@shared/domain';
 
-/** Resolve a scanned QR / typed value to an action — matching the web app's
- *  `payPathFromScan`: /pay & /m links, referral links, bare MOM-CC-###### codes,
- *  and phone numbers. */
-function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'unknown'; value: string; amount?: number } {
-  const s = data.trim();
-  // A receive link (/send?to=…&amount=…) — what the Receive tab's QR encodes now.
-  const rl = parseReceiveLink(s);
-  if (rl) return { kind: 'send', value: rl.to, ...(rl.amountXaf ? { amount: rl.amountXaf } : {}) };
-  const link = s.match(/\/(?:pay|m)\/([A-Za-z0-9_-]+)/);
-  if (link) return { kind: 'pay', value: link[1] };
-  const ref = s.match(/[?&]ref=([A-Za-z0-9_-]+)/);
-  if (ref) return { kind: 'ref', value: ref[1] };
-  if (/^MOM-[A-Za-z]{2}-\d{4,8}$/i.test(s)) return { kind: 'pay', value: s.toUpperCase() };
-  // A MoMo›Me Lightning Address QR (`lightning:<number>@momome.xyz`) — the identity the
-  // Receive tab shows. Same parser as the web scanner, so both apps read it back.
-  const ln = lnAddressNumber(s);
-  if (ln) return { kind: 'send', value: ln };
-  const digits = s.replace(/[^\d]/g, '');
-  if (/^\+?\d{8,15}$/.test(s) || (digits.length >= 8 && digits.length <= 12)) {
-    return { kind: 'send', value: digits };
-  }
-  return { kind: 'unknown', value: s };
+/** Resolve a scanned QR / typed value to an action — the SAME classifier as the web app
+ *  (shared/domain classifyScan): business links and codes, receive links, our Lightning
+ *  Addresses, phone numbers, referral links, and wallet codes to be explained. */
+function routeForPayload(data: string): { kind: 'pay' | 'send' | 'ref' | 'wallet' | 'unknown'; value: string; amount?: number } {
+  const r = classifyScan(data);
+  return { kind: r.kind, value: r.value, ...(r.amountXaf ? { amount: r.amountXaf } : {}) };
 }
 
 /** A manual merchant-code / link entry — the web parity fallback for when the
@@ -72,7 +56,7 @@ export default function ScanScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
-  const [payload, setPayload] = useState<string | null>(null);
+  const [payload, setPayload] = useState<{ raw: string; wallet: boolean } | null>(null);
   const locked = useRef(false);
 
   const onScan = ({ data }: { data: string }) => {
@@ -81,7 +65,8 @@ export default function ScanScreen() {
     const r = routeForPayload(data);
     if (r.kind === 'pay') router.push({ pathname: '/pay/[code]', params: { code: r.value } });
     else if (r.kind === 'send') router.push({ pathname: '/', params: { scanned: r.value, ...(r.amount ? { amount: String(r.amount) } : {}) } });
-    else setPayload(data);
+    else if (r.kind === 'ref') { api.claimReferral(r.value).catch(() => {}); router.push('/'); }
+    else setPayload({ raw: data, wallet: r.kind === 'wallet' });
     setTimeout(() => (locked.current = false), 1500);
   };
 
@@ -133,8 +118,8 @@ export default function ScanScreen() {
       </View>
       {payload ? (
         <Card style={{ marginTop: Spacing.four }} padded>
-          <Body muted>{tr('scanned_not_momo')}</Body>
-          <Mono numberOfLines={2}>{payload}</Mono>
+          <Body muted>{tr(payload.wallet ? 'scan_wallet_code' : 'scanned_not_momo')}</Body>
+          <Mono numberOfLines={2}>{payload.raw}</Mono>
           <Button title={tr('scan_again')} variant="ghost" onPress={() => setPayload(null)} />
         </Card>
       ) : null}

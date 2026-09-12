@@ -424,3 +424,40 @@ export const msatToBtc = (msat: number): number => msat / MSAT_PER_BTC;
  *  amountSatsToSend for 0 amount lightning invoice". So invoices are always whole sats, and
  *  rounding goes up so the payer never covers less than the quote (at most 1 sat more). */
 export const btcToInvoiceMsat = (btc: number): number => Math.ceil(btc * 1e8 - 1e-9) * 1000;
+
+/** What a scanned code IS, for both scanners (web and mobile read the same set).
+ *  · pay      — a MoMo›Me business link or code (/pay/:code, /m/:code, MOM-CC-######)
+ *  · send     — someone to pay: a receive link, a MoMo›Me Lightning Address, a phone number
+ *  · ref      — a referral link
+ *  · wallet   — a crypto wallet code (BOLT11 invoice, bitcoin:/ethereum: URI, LNURL, a
+ *               foreign Lightning Address, a bare 0x address): MoMo›Me pays Mobile Money
+ *               numbers, so this is explained, not silently refused
+ *  · unknown  — anything else */
+export type ScanKind = "pay" | "send" | "ref" | "wallet" | "unknown";
+export interface ScanResult { kind: ScanKind; value: string; amountXaf?: number; walletKind?: "lightning_invoice" | "bitcoin" | "ethereum" | "lnurl" | "lightning_address" }
+export function classifyScan(raw: string): ScanResult {
+  const s = (raw ?? "").trim();
+  if (!s) return { kind: "unknown", value: s };
+  const rel = s.match(/\/(pay|m)\/([A-Za-z0-9_-]{3,40})(?:[/?#]|$)/);
+  try {
+    const u = new URL(s);
+    if (rel) return { kind: "pay", value: rel[2] };
+    const rl = parseReceiveLink(s);
+    if (rl) return { kind: "send", value: rl.to, ...(rl.amountXaf ? { amountXaf: rl.amountXaf } : {}) };
+    const ref = u.searchParams.get("ref");
+    if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) return { kind: "ref", value: ref.toUpperCase() };
+  } catch { /* not a URL */ }
+  if (rel) return { kind: "pay", value: rel[2] };
+  if (/^MOM-[A-Za-z]{2}-\d{4,8}$/i.test(s)) return { kind: "pay", value: s.toUpperCase() };
+  const own = lnAddressNumber(s);
+  if (own) return { kind: "send", value: own };
+  const lower = s.toLowerCase().replace(/^lightning:/, "");
+  if (/^lnbc[0-9a-z]{20,}$/.test(lower) || /^lntbs?[0-9a-z]{20,}$/.test(lower)) return { kind: "wallet", value: s, walletKind: "lightning_invoice" };
+  if (/^lnurl[0-9a-z]{20,}$/.test(lower)) return { kind: "wallet", value: s, walletKind: "lnurl" };
+  if (/^bitcoin:/i.test(s) || /^(bc1[0-9a-z]{25,}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/.test(s)) return { kind: "wallet", value: s, walletKind: "bitcoin" };
+  if (/^ethereum:/i.test(s) || /^0x[0-9a-fA-F]{40}$/.test(s)) return { kind: "wallet", value: s, walletKind: "ethereum" };
+  if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(lower)) return { kind: "wallet", value: s, walletKind: "lightning_address" };
+  const digits = s.replace(/\D/g, "");
+  if (/^\+?[\d\s().-]{8,18}$/.test(s) && digits.length >= 8 && digits.length <= 12) return { kind: "send", value: digits };
+  return { kind: "unknown", value: s };
+}

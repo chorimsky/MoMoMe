@@ -8,7 +8,7 @@
    - live webhooks call markDetected() / confirmInbound() directly
    Both converge on confirmInbound(), which is idempotent.
    ============================================================ */
-import type { Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
+import type { InboundAsset, Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
 import { store } from "../db/store.js";
 import { captureUnattributed } from "./unattributed.js";
 import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed } from "./notifications.js";
@@ -445,15 +445,15 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
-export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number): Promise<void> {
+export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number, arrivedAsset?: InboundAsset): Promise<void> {
   // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
   // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
   // webhooks) re-reads inside the lock, sees the booking below, and aborts — closing the
   // double-settle → double real-payout hole (memory's shared-object serialization the tests
   // rely on does NOT hold on Postgres, where each call gets an independent copy).
-  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef, railFee));
+  return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef, railFee, arrivedAsset));
 }
-async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number): Promise<void> {
+async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number, arrivedAsset?: InboundAsset): Promise<void> {
   await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p) return;
@@ -508,8 +508,20 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     ? p.payInstruction.alt
     : p.payInstruction;
   const paidMethod = leg.method;
-  const asset = leg.asset;
+  // THE OTHER STABLECOIN. One address serves USDT and USDC alike; a payer who chose USDT and
+  // sent USDC (or the reverse) paid the same address with a dollar of the other kind. The
+  // chain receipt says which token arrived, the rail credited that token's account, and a
+  // dollar is a dollar at the locked rate — so it settles as what arrived, in that asset,
+  // exactly like an under- or over-payment does. Nobody waits on an operator for a coin
+  // that is worth the same. Only a stablecoin-for-stablecoin swap qualifies; anything else
+  // unexpected still holds.
+  const swapped = !!arrivedAsset && arrivedAsset !== leg.asset && arrivedAsset !== "BTC" && leg.asset !== "BTC";
+  const asset: InboundAsset = swapped ? arrivedAsset! : leg.asset;
   const expected = leg.amount;
+  if (swapped) {
+    p.paidAsset = asset;
+    p.events.push({ at: new Date().toISOString(), state: p.state, note: `${actualAmount ?? "?"} ${asset} arrived at this payment's ${leg.asset} address — same address, same value; settled as ${asset}` });
+  }
 
   // Remember which deposit this was, so a redelivery is recognised and a genuinely NEW
   // deposit is not. When the caller has no deposit id — the reconcile backstop and the

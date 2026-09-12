@@ -25,7 +25,7 @@ import { rateLimitDurableMiddleware } from "../core/ratelimit.js";
 import { store } from "../db/store.js";
 import { listRails, listProviders } from "../core/interop/rails.js";
 import { resolveAddress } from "../core/interop/addresses.js";
-import { newIntent, getIntent, saveIntent, intentsOf, getRoute, routesOf, saveRoute, idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
+import { newIntent, getIntent, saveIntent, intentsOf, getRoute, routesOf, saveRoute, idemLookup, idemStore, validIdemKey, idemFingerprint, IDEM_MISMATCH, intentOfPayment } from "../core/interop/intents.js";
 import { discoverRoutes } from "../core/interop/router.js";
 import { listEvents, eventStats } from "../core/interop/events.js";
 import { reconciliationReport } from "../core/interop/reconcile.js";
@@ -68,14 +68,17 @@ v1.get("/countries", async (_req, res) => {
   res.json({ countries: Object.values(COUNTRIES).map((c) => {
     const operators = c.providers.map((op) => {
       const payout = providers.filter((p) => p.rail === "mobile_money" && p.reaches.includes(op) && p.countries.includes(c.code));
-      return { id: op, name: PROVIDERS[op]?.name ?? op, payoutProviders: payout.map((p) => ({ id: p.id, health: p.health })), reachable: payout.some((p) => p.health === "OPERATIONAL" || p.health === "DEGRADED" || p.health === "SANDBOX") };
+      const real = payout.some((p) => p.health === "OPERATIONAL" || p.health === "DEGRADED" || p.health === "SANDBOX");
+      // A sandbox deployment settles through the simulator, exactly as the router and the
+      // resolver say; `simulated` keeps that honest in the same breath.
+      return { id: op, name: PROVIDERS[op]?.name ?? op, payoutProviders: payout.map((p) => ({ id: p.id, health: p.health })), reachable: real || (!liveMoney() && c.active), ...(real || !c.active ? {} : { simulated: true }) };
     });
     return {
       code: c.code, name: c.name, currency: c.ccy, dial: c.dial, active: c.active, numberLengths: c.nsnLen,
       operators,
       // What activation needs beyond flipping `active`: a payout provider that reaches at
       // least one operator in this country, and the numbering plan confirmed.
-      readiness: { payoutRail: operators.some((o) => o.reachable), numberingPlanConfirmed: c.nsnLen.length === 1 },
+      readiness: { payoutRail: operators.some((o) => o.reachable && !("simulated" in o)), numberingPlanConfirmed: c.nsnLen.length === 1 },
     };
   }) });
 });
@@ -96,10 +99,11 @@ v1.post("/payment-intents", rateLimitDurableMiddleware("v1_intent", 30, 60_000),
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
   const key = hdr(req, "idempotency-key");
   if (key !== undefined && !validIdemKey(key)) return res.status(400).json({ error: "bad_idempotency_key", message: "Idempotency-Key must be 8–128 printable characters." });
-  if (key) { const prior = idemLookup(owner, `intent:${key}`); if (prior) return res.status(prior.status).json(prior.body); }
+  const fp = idemFingerprint(req.body);
+  if (key) { const prior = idemLookup(owner, `intent:${key}`, fp); if (prior?.mismatch) return res.status(422).json(IDEM_MISMATCH); if (prior) return res.status(prior.status).json(prior.body); }
 
   const b = (req.body ?? {}) as { destination?: unknown; amount?: unknown; currency?: unknown; purpose?: unknown; preferredMethod?: unknown; country?: unknown };
-  const reply = async (status: number, body: unknown) => { if (key) idemStore(owner, `intent:${key}`, status, body); return res.status(status).json(body); };
+  const reply = async (status: number, body: unknown) => { if (key) idemStore(owner, `intent:${key}`, status, body, fp); return res.status(status).json(body); };
   if (typeof b.destination !== "string") return reply(400, { error: "bad_destination", message: "destination must be a payment address string." });
   if (typeof b.amount !== "number" || !Number.isFinite(b.amount) || b.amount <= 0) return reply(400, { error: "bad_amount", message: "amount must be a positive number in the destination currency." });
   const cc = typeof b.country === "string" && COUNTRIES[b.country as keyof typeof COUNTRIES] ? (b.country as keyof typeof COUNTRIES) : undefined;
@@ -152,10 +156,11 @@ v1.post("/payment-intents/:id/execute", rateLimitDurableMiddleware("v1_execute",
   if (!it || it.owner !== owner) return res.status(404).json({ error: "not_found", message: "Not found." });
   const key = hdr(req, "idempotency-key");
   if (key !== undefined && !validIdemKey(key)) return res.status(400).json({ error: "bad_idempotency_key", message: "Idempotency-Key must be 8–128 printable characters." });
-  if (key) { const prior = idemLookup(owner, `execute:${it.id}:${key}`); if (prior) return res.status(prior.status).json(prior.body); }
-  const reply = (status: number, body: unknown) => { if (key) idemStore(owner, `execute:${it.id}:${key}`, status, body); return res.status(status).json(body); };
+  const fp = idemFingerprint(req.body);
+  if (key) { const prior = idemLookup(owner, `execute:${it.id}:${key}`, fp); if (prior?.mismatch) return res.status(422).json(IDEM_MISMATCH); if (prior) return res.status(prior.status).json(prior.body); }
+  const reply = (status: number, body: unknown) => { if (key) idemStore(owner, `execute:${it.id}:${key}`, status, body, fp); return res.status(status).json(body); };
   // Executing twice is the classic double-payment; the intent itself is the lock.
-  if (it.paymentId) return reply(200, { ...(await withLiveStatus(it)), route: it.routeId ? getRoute(it.routeId) : null, payment: await store().getPayment(it.paymentId) });
+  if (it.paymentId) return reply(200, { intent: await withLiveStatus(it), route: it.routeId ? getRoute(it.routeId) : null, payment: await store().getPayment(it.paymentId) });
 
   const { routeId, riskToken, recipientName } = (req.body ?? {}) as { routeId?: unknown; riskToken?: unknown; recipientName?: unknown };
   const route = typeof routeId === "string" ? getRoute(routeId) : routesOf(it.id).filter((r) => r.viable).sort((a, b) => b.score.total - a.score.total)[0];
@@ -212,7 +217,7 @@ v1.get("/payments/:id/status", async (req, res) => {
   res.json({
     paymentId: p.id, ref: p.ref, status: toCanonicalStatus(p.state, p.payInstruction?.expiresAt, Date.now(), [...p.events].reverse().find((e) => e.note)?.note), engineState: p.state,
     amount: p.xaf, currency: "XAF", fee: p.feeXaf, method: p.method,
-    trace: { paymentId: p.id, ref: p.ref, providerReference: p.payInstruction?.providerRef ?? null, provider: p.payInstruction?.provider ?? null, payoutProvider: p.aggregator ?? null, payoutReference: p.payoutRef ?? null },
+    trace: { paymentId: p.id, ref: p.ref, intentId: intentOfPayment(p.id)?.id ?? null, routeId: intentOfPayment(p.id)?.routeId ?? null, providerReference: p.payInstruction?.providerRef ?? null, provider: p.payInstruction?.provider ?? null, payoutProvider: p.aggregator ?? null, payoutReference: p.payoutRef ?? null },
     timeline: p.events.map((e) => ({ at: e.at, status: toCanonicalStatus(e.state, undefined, Date.now(), e.note), engineState: e.state, note: e.note })),
     ...(p.complianceFlags?.length ? { complianceFlags: p.complianceFlags } : {}),
     updatedAt: p.updatedAt,
@@ -244,16 +249,16 @@ v1.delete("/webhooks/subscriptions/:id", async (req, res) => {
 
 /* ---------- operations (admin) ---------- */
 v1.get("/webhooks/events", async (req, res) => {
-  if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
+  if (!isAdminRequest(asReq(req))) return res.status(403).json({ error: "admin_only", message: "This endpoint is for the operator console." });
   const provider = typeof req.query.provider === "string" ? req.query.provider : undefined;
   res.json({ stats: eventStats(), events: listEvents(200, provider) });
 });
 v1.get("/observability", async (req, res) => {
-  if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
+  if (!isAdminRequest(asReq(req))) return res.status(403).json({ error: "admin_only", message: "This endpoint is for the operator console." });
   const hours = Math.min(24 * 30, Math.max(1, Number(req.query.hours) || 24));
   res.json({ ...(await observability(hours)), outbound: { subscriptions: subscriptionCount(), ...outboundStats() } });
 });
 v1.get("/reconciliation", async (req, res) => {
-  if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
+  if (!isAdminRequest(asReq(req))) return res.status(403).json({ error: "admin_only", message: "This endpoint is for the operator console." });
   res.json(await reconciliationReport());
 });

@@ -13,7 +13,7 @@ import { createInstruction, adapterFor, adapterByName, confirmSettlement, method
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
 import { otpSendAllowed } from "../core/otpThrottle.js";
-import { idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
+import { idemFingerprint, IDEM_MISMATCH, idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
 import { engine as complianceEngine } from "../core/interop/compliance.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
@@ -1025,9 +1025,10 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
   const key = hdr(req, "idempotency-key");
   const owner = key ? await ownerOf(req) : undefined;
   if (key && !validIdemKey(key)) return res.status(400).json({ error: "bad_idempotency_key", message: "Idempotency-Key must be 8–128 printable characters." });
-  if (key && owner) { const prior = idemLookup(owner, `payment:${key}`); if (prior) return res.status(prior.status).json(prior.body); }
+  const fp = idemFingerprint(req.body);
+  if (key && owner) { const prior = idemLookup(owner, `payment:${key}`, fp); if (prior?.mismatch) return res.status(422).json(IDEM_MISMATCH); if (prior) return res.status(prior.status).json(prior.body); }
   const r = await createPaymentCore(req, req.body);
-  if (key && owner && (r.status === 200 || r.status === 409)) idemStore(owner, `payment:${key}`, r.status, r.body);
+  if (key && owner && (r.status === 200 || r.status === 409)) idemStore(owner, `payment:${key}`, r.status, r.body, fp);
   res.status(r.status).json(r.body);
 });
 

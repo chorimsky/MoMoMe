@@ -22,7 +22,7 @@ Quotes, payments, merchants, identities, vault, admin. Now also honours
 | POST | `/payment-intents/:id/routes` | discover and rank routes → `{ intent, routes, recommended }` |
 | POST | `/payment-intents/:id/cancel` | before the pay-in only: closes the intent and its payment (CANCELLED); 409 once anything has arrived |
 | POST | `/payment-intents/:id/execute` | `{ routeId?, riskToken?, recipientName? }` + `Idempotency-Key` → 201 `{ intent, route, payment }` |
-| GET | `/payments/:id/status` | canonical status, trace chain, timeline (id or MMM-ref) |
+| GET | `/payments/:id/status` | canonical status, trace chain (`intentId`, `routeId`, provider and payout references), timeline (id or MMM-ref) |
 | POST | `/webhooks/subscriptions` | partner: `{ url, events? }` → 201 `{ subscription, secret }` — the `whsec_…` secret is shown once; https and a public host only (max 5 active per key) |
 | GET | `/webhooks/subscriptions` | partner: its subscriptions (no secrets) + `deliveries` stats (queued / delivered / dead / recent attempts) |
 | DELETE | `/webhooks/subscriptions/:id` | partner: stop receiving events |
@@ -32,8 +32,17 @@ Quotes, payments, merchants, identities, vault, admin. Now also honours
 
 Authentication is the same as `/api`: signed device headers or a partner API key.
 Errors are `{ error, message }` with conventional status codes (400 bad input, 401 no
-identity, 404 not found / unresolvable, 409 conflict, 422 destination unavailable, 429
-rate limited, 503 paused / rates unavailable).
+identity, 403 admin-only surface, 404 not found / unresolvable, 409 conflict, 422
+destination unavailable or `idempotency_mismatch`, 429 rate limited, 503 paused / rates
+unavailable).
+
+**Idempotency.** `Idempotency-Key` (8–128 printable characters) on `POST /payment-intents`,
+`POST /payment-intents/:id/execute` and the legacy `POST /api/payments`. A replay with the
+same key and the same body returns the original reply verbatim, status code included. The
+same key with a *different* body is refused with 422 `idempotency_mismatch` — a retry that
+"fixed" the amount must use a new key. Keys live 24 h per caller. Executing an intent is
+idempotent even without a key: the intent is the lock, a second execute returns the same
+`{ intent, route, payment }`.
 
 ### Outbound webhooks (we call you)
 

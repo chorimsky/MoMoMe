@@ -146,7 +146,7 @@ async function main() {
 
     // Observability: measured, admin-only.
     r = await j("/observability");
-    ok("observability is admin-only", r.status === 401);
+    ok("observability is admin-only", r.status === 403);
     {
       const { observability, routeClass } = await import("../src/core/interop/metrics.js");
       const o = await observability(24);
@@ -175,9 +175,9 @@ async function main() {
     ok("events are stored as hashes, never bodies", /^[0-9a-f]{64}$/.test(e1.event.payloadHash));
     ok("stats count by status and provider", eventStats().byProvider.ibex >= 2);
     r = await j("/webhooks/events");
-    ok("the event log is admin-only", r.status === 401);
+    ok("the event log is admin-only", r.status === 403);
     r = await j("/reconciliation");
-    ok("reconciliation is admin-only", r.status === 401);
+    ok("reconciliation is admin-only", r.status === 403);
   } finally { server.close(); }
 
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);

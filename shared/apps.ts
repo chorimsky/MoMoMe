@@ -12,7 +12,9 @@ export const APP_LINKS = {
   play: "https://play.google.com/store/apps/details?id=momome.app",
   appStore: "https://apps.apple.com/app/id6806540524",
   apk: "https://expo.dev/artifacts/eas/PP83lQXP6dZTtqorlEa7Q-D71ucBuoVFdYkaAHae8yw.apk",
-  testflight: "",
+  // Public Beta group (build 1.1.0 (9) submitted to Beta App Review 2026-09-12). Testers can
+  // join the moment Apple approves that build; until then the page says the link is not open yet.
+  testflight: "https://testflight.apple.com/join/6zxsRcHH",
 } as const;
 
 export const STORE_LIVE = { android: false, ios: false } as const;

@@ -32,7 +32,7 @@ import { enablePush, usePushState } from '@/lib/push';
 import { consumeIntent } from '@/lib/navIntent';
 import { METHOD_LABEL, statusLabel, TERMINAL_STATES, xaf } from '@/lib/format';
 import { rememberPaidContact } from '@/lib/vault';
-import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS, satsLabel, erc20PaymentUri, lightningAddress, lnAddressNumber, localDigits } from '@shared/domain';
+import { ALL_METHODS, checkPhone, COUNTRIES, detectProvider, isRealName, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, PROVIDERS, AMOUNT_PRESETS, ADDRESS_METHODS, satsLabel, erc20PaymentUri, lightningAddress, lnAddressNumber, localDigits, splitDialed } from '@shared/domain';
 import type {
   CountryCode,
   Method,
@@ -142,7 +142,12 @@ export default function SendScreen() {
   const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {
-    if (typeof params.scanned === 'string' && params.scanned) setPhone(params.scanned.replace(/\D/g, ''));
+    if (typeof params.scanned === 'string' && params.scanned) {
+      // A receive link carries the country code (to=237…); a bare number is read under the
+      // current country. Either way the field shows the LOCAL digits, like a typed number.
+      const sp = splitDialed(params.scanned, country);
+      setCountry(sp.country); setPhone(sp.local);
+    }
     if (typeof params.amount === 'string' && params.amount) setAmount(params.amount.replace(/\D/g, ''));
     if (typeof params.merchantCode === 'string' && params.merchantCode) {
       setMerchantCode(params.merchantCode);

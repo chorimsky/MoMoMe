@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
-import { COUNTRIES, localDigits, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
+import { splitDialed, COUNTRIES, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
@@ -108,8 +108,9 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const [s, setS] = useState<Draft>(() => merchant
     ? { country: merchant.country, phone: merchant.settlementPhone, provider: merchant.provider, xaf: merchant.amountXaf && merchant.amountXaf > 0 ? merchant.amountXaf : 0, method: "LIGHTNING", recipientName: merchant.businessName, nameSource: "internal" }
     : (() => {
-        const phone = toParam ? localDigits(toParam, "CM") : "";
-        return { country: "CM" as const, phone, provider: (phone ? detectProvider(phone, "CM") ?? "MTN" : "MTN"), xaf: phone ? amountParam : 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
+        // The link carries the country code; a bare local number (older links, scans) is Cameroon.
+        const { country, local: phone } = toParam ? splitDialed(toParam, "CM") : { country: "CM" as const, local: "" };
+        return { country, phone, provider: (phone ? detectProvider(phone, country) ?? "MTN" : "MTN"), xaf: phone ? amountParam : 0, method: "LIGHTNING" as const, recipientName: "", nameSource: "idle" as const };
       })());
   const set = (patch: Partial<Draft>) => setS((p) => ({ ...p, ...patch }));
 

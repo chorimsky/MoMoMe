@@ -37,10 +37,12 @@ export function Receive() {
   const [shared, setShared] = useState(false);
   const origin = typeof window !== "undefined" ? window.location.origin : "https://momome.xyz";
   const link = number ? receiveLink(origin, number, amountXaf) : "";
-  const shareText = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}\n${link}` : "";
+  const shareLine = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}` : "";
   const share = async () => {
-    if (typeof navigator.share === "function") { try { await navigator.share({ title: "MoMo›Me", text: shareText, url: link }); return; } catch { /* dismissed → fall through to WhatsApp */ } }
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank", "noopener");
+    // The share sheet appends `url` itself; putting the link in `text` too made every
+    // WhatsApp message show it twice. Only the WhatsApp fallback needs it in the text.
+    if (typeof navigator.share === "function") { try { await navigator.share({ title: "MoMo›Me", text: shareLine, url: link }); return; } catch { /* dismissed → fall through to WhatsApp */ } }
+    window.open(`https://wa.me/?text=${encodeURIComponent(`${shareLine}\n${link}`)}`, "_blank", "noopener");
     setShared(true); setTimeout(() => setShared(false), 1500);
   };
 

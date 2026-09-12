@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Platform, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { getMyNumber, setMyNumber } from '@/api/client';
@@ -62,9 +62,12 @@ export default function ReceiveScreen() {
     setCopiedWhat(what);
     setTimeout(() => setCopiedWhat(null), 1600);
   };
-  const shareText = () => `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}\n${link}`;
+  const shareLine = () => `${tr('rcv_share_text')}${amountXaf ? ` · ${amountXaf.toLocaleString('fr-FR')} XAF` : ''}`;
+  const shareText = () => `${shareLine()}\n${link}`;
   const share = async () => {
-    try { await Share.share({ message: shareText(), url: link }); } catch { /* dismissed */ }
+    // iOS takes `url` as a separate item and Android ignores it: give iOS the line + url,
+    // Android the line with the link in the message. Never both, or the link shows twice.
+    try { await Share.share(Platform.OS === 'ios' ? { message: shareLine(), url: link } : { message: shareText() }); } catch { /* dismissed */ }
   };
   // WhatsApp is where the "you owe me" conversation already is: one tap drops the link
   // into it. Falls back to the system sheet when WhatsApp is not installed.

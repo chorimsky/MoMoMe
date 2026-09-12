@@ -255,13 +255,36 @@ export function satsLabel(btc: number): string {
   return `${sats.toLocaleString("fr-FR").replace(/\u202f/g, " ")} sats`;
 }
 
+/** A number written WITH its country code, as receive links and the WhatsApp bot emit it:
+ *  which country it belongs to, and the local digits. A bare local number is read under
+ *  `fallback`. The dial prefix alone is not proof (a Cameroon local number can start with
+ *  "237…"), so the remaining length must also fit that country's numbering plan. */
+export function splitDialed(raw: string, fallback: CountryCode = "CM"): { country: CountryCode; local: string } {
+  const d = (raw ?? "").replace(/\D/g, "");
+  for (const c of Object.values(COUNTRIES)) {
+    const dial = c.dial.replace(/\D/g, "");
+    if (d.startsWith(dial) && c.nsnLen.includes(d.length - dial.length)) return { country: c.code, local: d.slice(dial.length) };
+  }
+  // Already a complete local number for the fallback country? Keep it whole — stripping a
+  // "237" that is part of the subscriber number would pay someone else.
+  if (COUNTRIES[fallback].nsnLen.includes(d.length)) return { country: fallback, local: d };
+  return { country: fallback, local: localDigits(d, fallback) };
+}
+
 /** The link someone shares to GET PAID by anyone — a person with the app, a browser, or a
  *  Bitcoin wallet. It opens the send flow with the number (and, if asked for, the amount)
  *  filled in. The Lightning Address (`<number>@momome.xyz`) still exists for wallets, but
  *  it is useless to a friend with no wallet, which is most friends; the link serves everyone
- *  and a phone camera opens it without any app installed. */
-export function receiveLink(origin: string, nationalDigits: string, amountXaf?: number): string {
-  const base = `${origin.replace(/\/$/, "")}/send?to=${nationalDigits}`;
+ *  and a phone camera opens it without any app installed.
+ *
+ *  The number in the link ALWAYS carries its country code (`to=237680344485`): the link
+ *  travels — to the diaspora, to a group chat abroad — and "680344485" means nothing outside
+ *  Cameroon. It is the same canonical form the address resolver and the Lightning Address
+ *  use, so one number reads identically everywhere. */
+export function receiveLink(origin: string, digits: string, amountXaf?: number, country: CountryCode = "CM"): string {
+  const { country: c, local } = splitDialed(digits, country);
+  const to = `${COUNTRIES[c].dial.replace(/\D/g, "")}${local}`;
+  const base = `${origin.replace(/\/$/, "")}/send?to=${to}`;
   return amountXaf && amountXaf > 0 ? `${base}&amount=${Math.round(amountXaf)}` : base;
 }
 

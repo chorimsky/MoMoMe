@@ -20,7 +20,7 @@
 import { Router, type Request } from "express";
 import type { Method, Payment } from "../../../shared/types.js";
 import { toCanonicalStatus, type PaymentIntent } from "../../../shared/interop.js";
-import { COUNTRIES, localDigits } from "../../../shared/domain.js";
+import { COUNTRIES, PROVIDERS, localDigits } from "../../../shared/domain.js";
 import { rateLimitDurableMiddleware } from "../core/ratelimit.js";
 import { store } from "../db/store.js";
 import { listRails, listProviders } from "../core/interop/rails.js";
@@ -30,6 +30,8 @@ import { discoverRoutes } from "../core/interop/router.js";
 import { listEvents, eventStats } from "../core/interop/events.js";
 import { reconciliationReport } from "../core/interop/reconcile.js";
 import { observability } from "../core/interop/metrics.js";
+import { subscribe, listSubscriptions, removeSubscription, outboundStats, subscriptionCount } from "../core/interop/outbound.js";
+import { liveMoney } from "../config.js";
 import { cancelPayment } from "../core/stateMachine.js";
 import { buildQuote, createPaymentCore, ownerOf, mayViewPayment, isAdminRequest, type ReqLike } from "./api.js";
 
@@ -59,6 +61,24 @@ async function withLiveStatus(it: PaymentIntent): Promise<PaymentIntent & { paym
 /* ---------- discovery ---------- */
 v1.get("/rails", async (_req, res) => { res.json({ rails: await listRails() }); });
 v1.get("/providers", async (_req, res) => { res.json({ providers: await listProviders() }); });
+
+/* ---------- countries: the core is country-agnostic; this is what each one has today ---------- */
+v1.get("/countries", async (_req, res) => {
+  const providers = await listProviders();
+  res.json({ countries: Object.values(COUNTRIES).map((c) => {
+    const operators = c.providers.map((op) => {
+      const payout = providers.filter((p) => p.rail === "mobile_money" && p.reaches.includes(op) && p.countries.includes(c.code));
+      return { id: op, name: PROVIDERS[op]?.name ?? op, payoutProviders: payout.map((p) => ({ id: p.id, health: p.health })), reachable: payout.some((p) => p.health === "OPERATIONAL" || p.health === "DEGRADED" || p.health === "SANDBOX") };
+    });
+    return {
+      code: c.code, name: c.name, currency: c.ccy, dial: c.dial, active: c.active, numberLengths: c.nsnLen,
+      operators,
+      // What activation needs beyond flipping `active`: a payout provider that reaches at
+      // least one operator in this country, and the numbering plan confirmed.
+      readiness: { payoutRail: operators.some((o) => o.reachable), numberingPlanConfirmed: c.nsnLen.length === 1 },
+    };
+  }) });
+});
 
 /* ---------- payment addresses ---------- */
 v1.post("/payment-addresses/resolve", rateLimitDurableMiddleware("v1_resolve", 60, 60_000), async (req, res) => {
@@ -199,6 +219,29 @@ v1.get("/payments/:id/status", async (req, res) => {
   });
 });
 
+/* ---------- partner webhooks: we call you ---------- */
+v1.post("/webhooks/subscriptions", rateLimitDurableMiddleware("v1_sub", 10, 60_000), async (req, res) => {
+  const owner = await ownerOf(asReq(req));
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
+  const { url, events } = (req.body ?? {}) as { url?: unknown; events?: unknown };
+  if (typeof url !== "string" || url.length > 500) return res.status(400).json({ error: "bad_url", message: "Send { url: \"https://…\" }." });
+  const evs = Array.isArray(events) ? events.filter((e): e is string => typeof e === "string").slice(0, 10) : ["payment.status"];
+  const r = subscribe(owner, url, evs, !liveMoney());
+  if (!r.ok) return res.status(400).json({ error: "bad_subscription", message: r.reason });
+  // The secret is shown ONCE; we keep only what we need to sign.
+  res.status(201).json({ subscription: r.sub, secret: r.secret, signing: "X-MoMoMe-Signature: t=<ms>,v1=hex(hmac_sha256(secret, `${t}.${rawBody}`))" });
+});
+v1.get("/webhooks/subscriptions", async (req, res) => {
+  const owner = await ownerOf(asReq(req));
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
+  res.json({ subscriptions: listSubscriptions(owner), deliveries: outboundStats(owner) });
+});
+v1.delete("/webhooks/subscriptions/:id", async (req, res) => {
+  const owner = await ownerOf(asReq(req));
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
+  res.json({ ok: removeSubscription(owner, req.params.id) });
+});
+
 /* ---------- operations (admin) ---------- */
 v1.get("/webhooks/events", async (req, res) => {
   if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
@@ -208,7 +251,7 @@ v1.get("/webhooks/events", async (req, res) => {
 v1.get("/observability", async (req, res) => {
   if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
   const hours = Math.min(24 * 30, Math.max(1, Number(req.query.hours) || 24));
-  res.json(await observability(hours));
+  res.json({ ...(await observability(hours)), outbound: { subscriptions: subscriptionCount(), ...outboundStats() } });
 });
 v1.get("/reconciliation", async (req, res) => {
   if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });

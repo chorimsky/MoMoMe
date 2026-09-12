@@ -52,6 +52,9 @@ async function resolvePhone(digits: string, countryHint?: CountryCode): Promise<
     country, currency: COUNTRIES[country].ccy, rails: [], defaultRail: null, status: "UNSUPPORTED",
   };
   if (!chk.ok) return { ...base, rails: [{ rail: "mobile_money", provider: "-", currency: COUNTRIES[country].ccy, available: false, reason: chk.reason }] };
+  // The number is well-formed for its country, but the country is not live on this
+  // deployment: say so here, before anyone quotes or routes.
+  if (!COUNTRIES[country].active) return { ...base, owner: { displayName: null, nameVerified: false, kind: "person" }, rails: [{ rail: "mobile_money", provider: chk.provider ?? "-", currency: COUNTRIES[country].ccy, available: false, reason: "country_inactive" }] };
   if (reviewAccess() && isReviewPhone(chk.local)) return { ...base, status: "RESERVED" };
   if (payoutBlocked(chk.local, country)) return { ...base, status: "BLOCKED" };
   const provider = chk.provider as ProviderId;

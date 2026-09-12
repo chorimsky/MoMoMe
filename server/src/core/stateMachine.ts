@@ -15,6 +15,7 @@ import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattri
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
+import { emitPaymentEvent } from "./interop/outbound.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, balanceReasons, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
@@ -369,6 +370,8 @@ async function transition(p: Payment, state: PaymentState, note?: string): Promi
   if (["INBOUND_CONFIRMED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED", "DELIVERED", "MANUAL_REVIEW", "FAILED", "REFUNDED"].includes(state)) {
     console.log(`[settle] ${p.ref} → ${state}${note ? ` · ${note}` : ""} (xaf=${p.xaf}${p.aggregator ? `, agg=${p.aggregator}` : ""})`);
   }
+  // Partners that subscribed hear about it (enqueue only — never on the money path).
+  try { emitPaymentEvent(p); } catch { /* observability, never a settlement failure */ }
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

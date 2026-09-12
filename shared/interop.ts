@@ -81,7 +81,8 @@ export type PaymentStatus =
   | "CREATED" | "VALIDATING" | "COMPLIANCE_REVIEW" | "QUOTED" | "AUTHORIZED" | "ROUTING"
   | "PROCESSING" | "PENDING_SETTLEMENT" | "COMPLETED" | "FAILED" | "CANCELLED" | "EXPIRED" | "REFUNDED";
 
-export function toCanonicalStatus(state: PaymentState, expiresAt?: string, now = Date.now()): PaymentStatus {
+export function toCanonicalStatus(state: PaymentState, expiresAt?: string, now = Date.now(), lastNote?: string): PaymentStatus {
+  if (state === "FAILED" && lastNote && /^cancelled by/i.test(lastNote)) return "CANCELLED";
   switch (state) {
     case "QUOTED": return "QUOTED";
     case "AWAITING_INBOUND": return expiresAt && Date.parse(expiresAt) < now ? "EXPIRED" : "AUTHORIZED";

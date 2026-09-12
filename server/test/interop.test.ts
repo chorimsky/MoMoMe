@@ -129,6 +129,33 @@ async function main() {
       ok("…and the same device unsigned is refused", bad.status === 401, String(bad.status));
     }
 
+    // Cancellation: only before the pay-in; a paid intent cannot be cancelled.
+    {
+      const it2 = await j("/payment-intents", { method: "POST", body: JSON.stringify({ destination: "699000777", amount: 2000 }) });
+      const id2 = (it2.body as { id: string }).id;
+      await j(`/payment-intents/${id2}/routes`, { method: "POST" });
+      const ex2 = await j(`/payment-intents/${id2}/execute`, { method: "POST", body: "{}" });
+      ok("second intent executes", ex2.status === 201, String(ex2.status));
+      const c = await j(`/payment-intents/${id2}/cancel`, { method: "POST" });
+      ok("an un-paid intent cancels (canonical CANCELLED)", c.status === 200 && (c.body as { status: string }).status === "CANCELLED", `${c.status} ${(c.body as { status: string }).status}`);
+      const st2 = await j(`/payments/${(ex2.body as { payment: { id: string } }).payment.id}/status`);
+      ok("…and the payment status reads CANCELLED too", (st2.body as { status: string }).status === "CANCELLED", (st2.body as { status: string }).status);
+      const paidCancel = await j(`/payment-intents/${it.id}/cancel`, { method: "POST" });
+      ok("a COMPLETED intent refuses to cancel (409)", paidCancel.status === 409, String(paidCancel.status));
+    }
+
+    // Observability: measured, admin-only.
+    r = await j("/observability");
+    ok("observability is admin-only", r.status === 401);
+    {
+      const { observability, routeClass } = await import("../src/core/interop/metrics.js");
+      const o = await observability(24);
+      ok("payment funnel counts what this test created", o.payments.total >= 3 && o.payments.delivered >= 1, `total ${o.payments.total} delivered ${o.payments.delivered}`);
+      ok("delivery timing is measured from the timeline", !!o.payments.timings.toDeliveredMs && o.payments.timings.toDeliveredMs.p50 >= 0);
+      ok("per-rail breakdown present", o.payments.byRail.some((x) => x.rail === "lightning"));
+      ok("API latency is recorded per route class, ids collapsed", o.api.some((x) => x.route === "POST /api/v1/payment-intents/:id/routes") && routeClass("GET", "/api/payments/pay_abc123def456/status") === "GET /api/payments/:id/status", o.api.map((x) => x.route).slice(0, 4).join(" | "));
+    }
+
     // Legacy /api/payments now honours Idempotency-Key too.
     const legacy = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
     let q = await (await fetch(`${legacy}/quotes`, { method: "POST", headers: H, body: JSON.stringify({ xaf: 1000, method: "LIGHTNING", country: "CM" }) })).json() as { id: string };

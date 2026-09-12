@@ -413,6 +413,21 @@ async function beginRefund(p: Payment, note: string): Promise<void> {
   await transition(p, "REFUND_PENDING", note);
 }
 
+/** The sender changes their mind BEFORE paying. Only an un-paid, un-booked payment can be
+ *  cancelled: nothing has moved, so nothing is owed. Recorded as FAILED with a "cancelled"
+ *  note (the canonical status reads CANCELLED). If crypto arrives anyway afterwards, the
+ *  normal recovery paths still book and deliver it — a cancel never strands money. */
+export async function cancelPayment(pIn: Payment, by: string): Promise<{ ok: boolean; reason?: string }> {
+  return store().lockPayment(pIn.id, async () => {
+    const p = await store().getPayment(pIn.id);
+    if (!p) return { ok: false, reason: "not_found" };
+    if (p.state !== "AWAITING_INBOUND") return { ok: false, reason: p.state === "FAILED" ? "already_closed" : "already_paid" };
+    if (inboundBooked(p)) return { ok: false, reason: "already_paid" };
+    await transition(p, "FAILED", `cancelled by ${by} — no funds received`);
+    return { ok: true };
+  });
+}
+
 /** Inbound seen in mempool / HTLC held. Idempotent, only moves forward. Only an
  *  as-yet-unseen inbound (still AWAITING_INBOUND) advances to DETECTED — guarding by
  *  state, not rank(), so a stray "detected" webhook can't resurrect a held/terminal

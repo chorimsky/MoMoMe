@@ -3,6 +3,16 @@
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
 import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress, PaymentIntent, PaymentRoute } from "@shared/interop.js";
+export interface Observability {
+  generatedAt: string;
+  api: Array<{ route: string; count: number; p50: number; p95: number; p99: number; errors5xx: number; errors4xx: number }>;
+  payments: { windowHours: number; total: number; delivered: number; failed: number; refunded: number; held: number; open: number; expired: number; successRate: number | null;
+    timings: { toInboundMs: { p50: number; p95: number } | null; toDeliveredMs: { p50: number; p95: number } | null; payoutMs: { p50: number; p95: number } | null };
+    byRail: Array<{ rail: string; method: string; total: number; delivered: number; failed: number; held: number; successRate: number | null; toDeliveredP50Ms: number | null }>;
+    reasons: Array<{ reason: string; count: number }> };
+  providers: Array<{ id: string; rail: string; health: string; successRate: number; avgLatencyMs: number }>;
+  webhooks: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number };
+}
 import type {
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
@@ -499,6 +509,9 @@ export const api = {
     items: NotificationRecord[];
   }>("/admin/notifications/outbox"),
   adminNotifications: () => req<Array<{ id: string; t: string; s: string; tone: string; time: string }>>("/admin/notifications"),
+  /** Cancel an un-paid payment (before any pay-in). 409 once anything has arrived. */
+  cancelPayment: (id: string) => req<Payment>(`/payments/${id}/cancel`, { method: "POST" }),
+  v1Observability: (hours = 24) => req<Observability>(`/v1/observability?hours=${hours}`),
   retryPayment: (id: string) => req<{ ok: boolean; reason?: string; message?: string; payment: Payment }>(`/admin/payments/${id}/retry`, { method: "POST" }),
   refundPayment: (id: string) => req<{ ok: boolean; payment: Payment }>(`/admin/payments/${id}/refund`, { method: "POST" }),
 

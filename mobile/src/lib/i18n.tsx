@@ -58,6 +58,8 @@ export const STRINGS = {
   how_pay: ['How would you like to pay?', 'Comment souhaitez-vous payer ?'],
   method_sub: ['They receive {n} XAF as Mobile Money either way.', 'Le destinataire reçoit {n} XAF en Mobile Money dans tous les cas.'],
   recommended: ['RECOMMENDED', 'RECOMMANDÉ'],
+  cancel_payment: ['Cancel this payment', 'Annuler ce paiement'],
+  cancel_confirm: ['Only cancel if you have NOT sent anything yet. If you already paid, keep waiting — it will be delivered.', 'Annulez seulement si vous n\'avez encore RIEN envoyé. Si vous avez déjà payé, patientez — ce sera livré.'],
   m_unavailable_now: ['Not available right now', 'Indisponible pour le moment'],
 
   // send — review

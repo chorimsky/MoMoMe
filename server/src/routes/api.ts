@@ -28,7 +28,7 @@ import { assessRecipient, verifyRiskToken, riskTokenFor } from "../core/recipien
 import { mintBlockedReason } from "../adapters/ibex.js";
 import { appLinksStatus } from "./applinks.js";
 import { reconcileDeposits } from "../core/depositReconcile.js";
-import { settle, confirmInbound, adminRetryWhy, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
+import { settle, confirmInbound, cancelPayment, adminRetryWhy, adminRefund, completeRefund, availableFloatXaf, floatBasisNote, strandedEarmarks, releaseStrandedEarmarks, reconcileOneInbound } from "../core/stateMachine.js";
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
@@ -1039,6 +1039,15 @@ api.post("/payments", rateLimitDurableMiddleware("payments", 30, 60_000), async 
  * Real IBEX (production) settles only via the provider webhook, so there this
  * is a no-op that just returns current state.
  */
+/** Cancel an un-paid payment. Only before any pay-in: nothing has moved, nothing is owed. */
+api.post("/payments/:id/cancel", rateLimitDurableMiddleware("cancel", 30, 60_000), async (req, res) => {
+  const p = await store().getPayment(req.params.id);
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
+  const r = await cancelPayment(p, "sender");
+  if (!r.ok) return res.status(409).json({ error: r.reason, message: r.reason === "already_paid" ? "This payment has already been paid — it cannot be cancelled." : "This payment is already closed." });
+  res.json(await store().getPayment(p.id) ?? p);
+});
+
 api.post("/payments/:id/confirm", async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });

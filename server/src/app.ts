@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cors from "cors";
 import { api } from "./routes/api.js";
 import { v1 } from "./routes/v1.js";
+import { latencyMiddleware } from "./core/interop/metrics.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
 import { applinks } from "./routes/applinks.js";
@@ -81,6 +82,7 @@ export function createApp() {
   // polling of /payments/:id doesn't re-preflight every few seconds on some browsers.
   app.use(cors({ origin: corsOrigin, maxAge: 86400 }));
   app.use(securityHeaders);
+  app.use(latencyMiddleware); // observability: p50/p95/p99 per route class
 
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().
   app.use("/webhooks", webhooks);

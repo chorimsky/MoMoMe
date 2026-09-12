@@ -242,6 +242,8 @@ export const api = {
     req<Payment>(`/payments/${id}/simulate`, { method: 'POST' }),
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
+  /** Cancel an un-paid payment (before any pay-in). 409 once anything has arrived. */
+  cancelPayment: (id: string) => req<Payment>(`/payments/${id}/cancel`, { method: 'POST' }),
 
   /** Delete this device's account and the data tied to it. Partial by law — the response
    *  says exactly what went and what had to stay. */

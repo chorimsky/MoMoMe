@@ -1143,7 +1143,16 @@ function PayStep({
       ) : null}
       {/* A way out. Guarded by a question, because "start over" after paying is how a
           second payment happens — the first one still lands and shows in Activity. */}
-      <Button title={tr('start_over')} variant="outline" icon="close" onPress={onStartOver} style={{ alignSelf: 'stretch' }} />
+      {/* Start over used to leave the invoice open on the activity list. Cancel closes it
+          server-side first; the server refuses once anything has arrived. */}
+      <Button title={tr('start_over')} variant="outline" icon="close" style={{ alignSelf: 'stretch' }}
+        onPress={() => {
+          if (payment.state !== 'AWAITING_INBOUND') { onStartOver(); return; }
+          Alert.alert(tr('cancel_payment'), tr('cancel_confirm'), [
+            { text: tr('keep_waiting'), style: 'cancel' },
+            { text: tr('cancel_payment'), style: 'destructive', onPress: async () => { try { await api.cancelPayment(payment.id); } catch { /* paid or closed */ } onStartOver(); } },
+          ]);
+        }} />
     </View>
   );
 }

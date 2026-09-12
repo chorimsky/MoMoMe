@@ -518,6 +518,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
 
 /* ============================================================ 4 — PAY */
 export function PayStep({ payment, method, back, next, refresh, busy, demoMode }: { payment: Payment; method: Method; back: () => void; next: () => void; refresh: () => void; busy: boolean; demoMode?: boolean }) {
+  const [cancelling, setCancelling] = useState(false);
   const { t, ml } = useI18n();
   const inst = payment.payInstruction;
   const { label, expired: lockPassed } = useExpiry(inst.expiresAt);
@@ -675,6 +676,14 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         </>
       )}
       <button className="btn btn-quiet" onClick={back} style={{ width: "100%", marginTop: 6, fontSize: 13 }}>{t("back")}</button>
+      {/* Changed their mind before paying: close it cleanly instead of leaving an open
+          invoice on their activity list. The server refuses once anything has arrived. */}
+      {!expired && payment.state === "AWAITING_INBOUND" && (
+        <button className="btn btn-quiet" disabled={cancelling} style={{ width: "100%", marginTop: 2, fontSize: 12.5, color: "var(--ink-3)" }}
+          onClick={async () => { if (!window.confirm(t("cancel_confirm"))) return; setCancelling(true); try { await api.cancelPayment(payment.id); back(); } catch { /* already paid or closed: the poll will show it */ } finally { setCancelling(false); } }}>
+          {cancelling ? "…" : t("cancel_payment")}
+        </button>
+      )}
       {/* "Tapping simulates your payment" is sandbox copy. It was printed under the LIVE pay
           screen too, telling a real payer that the button below fakes a payment. */}
       {demoMode && <p style={{ textAlign: "center", fontSize: 11, color: "var(--ink-3)", marginTop: 10 }}>{t("demo_note")}</p>}

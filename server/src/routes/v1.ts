@@ -29,6 +29,8 @@ import { newIntent, getIntent, saveIntent, intentsOf, getRoute, routesOf, saveRo
 import { discoverRoutes } from "../core/interop/router.js";
 import { listEvents, eventStats } from "../core/interop/events.js";
 import { reconciliationReport } from "../core/interop/reconcile.js";
+import { observability } from "../core/interop/metrics.js";
+import { cancelPayment } from "../core/stateMachine.js";
 import { buildQuote, createPaymentCore, ownerOf, mayViewPayment, isAdminRequest, type ReqLike } from "./api.js";
 
 export const v1 = Router();
@@ -47,7 +49,7 @@ async function withLiveStatus(it: PaymentIntent): Promise<PaymentIntent & { paym
   if (!it.paymentId) return it;
   const p = await store().getPayment(it.paymentId);
   if (!p) return it;
-  const status = toCanonicalStatus(p.state, p.payInstruction?.expiresAt);
+  const status = toCanonicalStatus(p.state, p.payInstruction?.expiresAt, Date.now(), [...p.events].reverse().find((e) => e.note)?.note);
   const complianceStatus = p.state === "MANUAL_REVIEW" ? "review" : it.complianceStatus === "unknown" ? "clear" : it.complianceStatus;
   if (status !== it.status || complianceStatus !== it.complianceStatus) { it.status = status; it.complianceStatus = complianceStatus; saveIntent(it); }
   const delivered = p.events.find((e) => e.state === "DELIVERED")?.at;
@@ -167,15 +169,32 @@ v1.post("/payment-intents/:id/execute", rateLimitDurableMiddleware("v1_execute",
   return reply(201, { intent: it, route, payment: p });
 });
 
+/* ---------- cancellation: before the pay-in, nothing has moved ---------- */
+v1.post("/payment-intents/:id/cancel", async (req, res) => {
+  const it = getIntent(req.params.id);
+  const owner = await ownerOf(asReq(req));
+  if (!it || it.owner !== owner) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (it.paymentId) {
+    const p = await store().getPayment(it.paymentId);
+    if (!p) return res.status(404).json({ error: "not_found", message: "Not found." });
+    const r = await cancelPayment(p, "sender");
+    if (!r.ok) return res.status(409).json({ error: r.reason, message: r.reason === "already_paid" ? "This payment has already been paid — it cannot be cancelled. Wait for delivery or a refund." : "This payment is already closed." });
+  }
+  if (it.routeId) { const rt = getRoute(it.routeId); if (rt) { rt.status = "EXPIRED"; saveRoute(rt); } }
+  it.status = "CANCELLED"; saveIntent(it);
+  res.json(await withLiveStatus(it));
+});
+
 /* ---------- payments: canonical status with the trace chain ---------- */
 v1.get("/payments/:id/status", async (req, res) => {
   const p = await store().getPayment(req.params.id) ?? await store().findPaymentByRef(req.params.id);
   if (!p || !(await mayViewPayment(asReq(req), p.senderId))) return res.status(404).json({ error: "not_found", message: "Not found." });
   res.json({
-    paymentId: p.id, ref: p.ref, status: toCanonicalStatus(p.state, p.payInstruction?.expiresAt), engineState: p.state,
+    paymentId: p.id, ref: p.ref, status: toCanonicalStatus(p.state, p.payInstruction?.expiresAt, Date.now(), [...p.events].reverse().find((e) => e.note)?.note), engineState: p.state,
     amount: p.xaf, currency: "XAF", fee: p.feeXaf, method: p.method,
     trace: { paymentId: p.id, ref: p.ref, providerReference: p.payInstruction?.providerRef ?? null, provider: p.payInstruction?.provider ?? null, payoutProvider: p.aggregator ?? null, payoutReference: p.payoutRef ?? null },
-    timeline: p.events.map((e) => ({ at: e.at, status: toCanonicalStatus(e.state), engineState: e.state, note: e.note })),
+    timeline: p.events.map((e) => ({ at: e.at, status: toCanonicalStatus(e.state, undefined, Date.now(), e.note), engineState: e.state, note: e.note })),
+    ...(p.complianceFlags?.length ? { complianceFlags: p.complianceFlags } : {}),
     updatedAt: p.updatedAt,
   });
 });
@@ -185,6 +204,11 @@ v1.get("/webhooks/events", async (req, res) => {
   if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
   const provider = typeof req.query.provider === "string" ? req.query.provider : undefined;
   res.json({ stats: eventStats(), events: listEvents(200, provider) });
+});
+v1.get("/observability", async (req, res) => {
+  if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });
+  const hours = Math.min(24 * 30, Math.max(1, Number(req.query.hours) || 24));
+  res.json(await observability(hours));
 });
 v1.get("/reconciliation", async (req, res) => {
   if (!isAdminRequest(asReq(req))) return res.status(401).json({ error: "unauthorized" });

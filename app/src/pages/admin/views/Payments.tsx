@@ -256,6 +256,13 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
             ))}
           </Block>
 
+          {p.complianceFlags?.length ? (
+            <Block title="Compliance flags">
+              <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8, lineHeight: 1.45 }}>Raised before this payment was created. The payout holds for review because of them.</p>
+              {p.complianceFlags.map((f, i) => <div key={i} style={{ fontSize: 12.5, padding: "6px 0", borderBottom: "1px solid var(--line-2)", color: /^watchlist|^velocity/.test(f) ? "var(--bad)" : "var(--ink-2)" }}>{f}</div>)}
+            </Block>
+          ) : null}
+
           {p.displayStatus !== "Completed" && (
             <Block title="Actions">
               {canMoveFunds && !p.events.some((e) => e.state === "FX_LOCKED") ? (

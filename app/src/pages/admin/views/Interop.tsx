@@ -11,6 +11,7 @@ import type { Tone } from "../AdminUI.js";
 import { Card, Grid, KV, Pill, SectionTitle } from "../AdminUI.js";
 import { api } from "../../../api/client.js";
 import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress } from "@shared/interop.js";
+import type { Observability } from "../../../api/client.js";
 
 const healthTone: Record<ProviderInfo["health"], Tone> = { OPERATIONAL: "recv", DEGRADED: "warn", DOWN: "bad", NOT_CONFIGURED: "ink", SANDBOX: "info" };
 const eventTone: Record<PaymentEvent["status"], Tone> = { received: "info", verified: "info", processed: "recv", duplicate: "warn", rejected: "bad" };
@@ -23,14 +24,15 @@ export function InteropView() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [events, setEvents] = useState<{ stats: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number }; events: PaymentEvent[] } | null>(null);
   const [recon, setRecon] = useState<ReconciliationReport | null>(null);
+  const [obs, setObs] = useState<Observability | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [addr, setAddr] = useState("");
   const [resolved, setResolved] = useState<PaymentAddress | null | "none">(null);
 
   const load = async () => {
     try {
-      const [r, p, e, c] = await Promise.all([api.v1Rails(), api.v1Providers(), api.v1Events(), api.v1Reconciliation()]);
-      setRails(r.rails); setProviders(p.providers); setEvents(e); setRecon(c); setErr(null);
+      const [r, p, e, c, o] = await Promise.all([api.v1Rails(), api.v1Providers(), api.v1Events(), api.v1Reconciliation(), api.v1Observability(24)]);
+      setRails(r.rails); setProviders(p.providers); setEvents(e); setRecon(c); setObs(o); setErr(null);
     } catch (e) { setErr(e instanceof Error ? e.message : "Could not load"); }
   };
   useEffect(() => { void load(); const t = setInterval(() => void load(), 30_000); return () => clearInterval(t); }, []);
@@ -52,6 +54,28 @@ export function InteropView() {
         <Card title="Provider events" sub="rejected in 24 h"><div style={{ fontSize: 28, fontWeight: 800, color: (events?.stats.last24hRejected ?? 0) > 0 ? "var(--bad)" : "var(--ink)" }}>{events?.stats.last24hRejected ?? 0}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{events?.stats.total ?? 0} recorded</div></Card>
         <Card title="Reconciliation" sub={`deposits, last ${recon?.windowDays ?? 3} days`}><div style={{ fontSize: 28, fontWeight: 800, color: recon && (recon.totals.amount_mismatch + recon.totals.missing_internal) > 0 ? "var(--bad)" : "var(--ink)" }}>{recon ? recon.totals.amount_mismatch + recon.totals.missing_internal : "—"}</div><div style={{ fontSize: 12, color: "var(--ink-3)" }}>{recon ? `${recon.totals.matched} matched · ${recon.totals.unattributed} unattributed · ${recon.totals.pending} pending` : ""}</div></Card>
       </Grid>
+
+      {obs && (
+        <Grid cols={2}>
+          <Card title="Payments · last 24 h" sub="Measured from each payment's own timeline — created → pay-in → delivered.">
+            <Grid cols={3} gap={10}>
+              <KV k="Success rate" v={obs.payments.successRate == null ? "—" : `${Math.round(obs.payments.successRate * 100)}%`} tone={obs.payments.successRate != null && obs.payments.successRate < 0.9 ? "warn" : "recv"} />
+              <KV k="Delivered / failed" v={`${obs.payments.delivered} / ${obs.payments.failed + obs.payments.refunded}`} />
+              <KV k="Held · open · expired" v={`${obs.payments.held} · ${obs.payments.open} · ${obs.payments.expired}`} tone={obs.payments.held ? "warn" : undefined} />
+              <KV k="To pay-in p50 / p95" v={obs.payments.timings.toInboundMs ? `${Math.round(obs.payments.timings.toInboundMs.p50 / 1000)}s / ${Math.round(obs.payments.timings.toInboundMs.p95 / 1000)}s` : "—"} />
+              <KV k="To delivered p50 / p95" v={obs.payments.timings.toDeliveredMs ? `${Math.round(obs.payments.timings.toDeliveredMs.p50 / 1000)}s / ${Math.round(obs.payments.timings.toDeliveredMs.p95 / 1000)}s` : "—"} />
+              <KV k="Payout leg p50" v={obs.payments.timings.payoutMs ? `${(obs.payments.timings.payoutMs.p50 / 1000).toFixed(1)}s` : "—"} />
+            </Grid>
+            <table className="tbl" style={{ marginTop: 12 }}><thead><tr><th>Rail</th><th>Total</th><th>Delivered</th><th>Failed</th><th>Held</th><th>Success</th><th>p50 to delivered</th></tr></thead>
+              <tbody>{obs.payments.byRail.map((x) => <tr key={x.method}><td>{x.method}</td><td>{x.total}</td><td>{x.delivered}</td><td>{x.failed}</td><td>{x.held}</td><td>{x.successRate == null ? "—" : `${Math.round(x.successRate * 100)}%`}</td><td>{x.toDeliveredP50Ms == null ? "—" : `${Math.round(x.toDeliveredP50Ms / 1000)}s`}</td></tr>)}</tbody></table>
+            {obs.payments.reasons.length > 0 && <div style={{ marginTop: 10, fontSize: 12, color: "var(--ink-3)" }}>Why payments did not complete: {obs.payments.reasons.map((r) => `${r.reason} (${r.count})`).join(" · ")}</div>}
+          </Card>
+          <Card title="API latency" sub="p50 / p95 / p99 in ms per route class since the last restart; ids collapsed." pad={false}>
+            <table className="tbl"><thead><tr><th>Route</th><th>Calls</th><th>p50</th><th>p95</th><th>p99</th><th>5xx</th></tr></thead>
+              <tbody>{obs.api.slice(0, 14).map((x) => <tr key={x.route}><td className="mono" style={{ fontSize: 11.5 }}>{x.route}</td><td>{x.count}</td><td>{x.p50}</td><td>{x.p95}</td><td style={{ color: x.p99 > 2000 ? "var(--warn)" : undefined }}>{x.p99}</td><td style={{ color: x.errors5xx ? "var(--bad)" : undefined }}>{x.errors5xx}</td></tr>)}</tbody></table>
+          </Card>
+        </Grid>
+      )}
 
       <Card title="Providers" sub="Health from live success rate and circuit state; liquidity where the rail exposes it. MoMo›Me orchestrates — each row is the regulated party doing the financial activity." pad={false}>
         <table className="tbl"><thead><tr><th>Provider</th><th>Rail</th><th>Reaches</th><th>Health</th><th>Success</th><th>Latency</th><th>Liquidity</th></tr></thead>

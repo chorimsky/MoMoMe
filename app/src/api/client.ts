@@ -13,7 +13,7 @@ export interface Observability {
   providers: Array<{ id: string; rail: string; health: string; successRate: number; avgLatencyMs: number }>;
   webhooks: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number };
 }
-import type {
+import type { MomoTransfer,
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
@@ -459,6 +459,13 @@ export const api = {
   },
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
+  momoQuote: (xaf: number) => req<{ xaf: number; feeXaf: number; collectXaf: number; feePct: number }>(`/momo/transfers/quote?xaf=${xaf}`),
+  momoResolve: (to: string, country?: string) => req<{ route: "direct" | "lightning"; to: MomoTransfer["to"] }>("/momo/transfers/resolve", { method: "POST", body: JSON.stringify({ to, country }) }),
+  momoCreate: (b: { from: string; to: string; xaf: number; country?: string; fromName?: string; toName?: string }) => req<MomoTransfer>("/momo/transfers", { method: "POST", body: JSON.stringify(b) }),
+  momoGet: (id: string) => req<MomoTransfer>(`/momo/transfers/${id}`),
+  momoCancel: (id: string) => req<MomoTransfer>(`/momo/transfers/${id}/cancel`, { method: "POST" }),
+  adminMomoTransfers: () => req<{ enabled: boolean; transfers: MomoTransfer[] }>("/admin/momo/transfers"),
+  adminMomoRelease: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/release`, { method: "POST" }),
   adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[]; fees: MomoFeeInfo | null }>("/admin/momo"),
   momoCashout: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>
     req<{ ok: boolean; op?: MomoOp }>("/admin/momo/cashout", { method: "POST", body: JSON.stringify({ phone, amount, name, country }) }),

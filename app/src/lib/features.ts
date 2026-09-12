@@ -10,7 +10,7 @@ import { api } from "../api/client.js";
 
 const DEFAULTS: AppFeatures = {
   directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true,
-  merchant: true, receive: true, contacts: true,
+  merchant: true, receive: true, contacts: true, momoTransfer: false, // admin-gated: off until the server says so
 };
 
 let _features: AppFeatures = DEFAULTS;

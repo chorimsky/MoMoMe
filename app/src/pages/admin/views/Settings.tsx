@@ -362,6 +362,7 @@ export function SettingsView() {
               ["referrals", "Referrals & ambassadors", "Shareable referral codes and the ambassador dashboard"],
               ["developerApi", "Developer API", "Partner API keys and the developer portal"],
               ["diaspora", "Diaspora corridor", "The diaspora remittance landing page"],
+              ["momoTransfer", "Mobile Money → Mobile Money transfers", "MTN pays Orange and any network pays any other: the payer approves a collection on their phone, the recipient is paid from the float; beyond our rails, over Lightning to a Lightning Address. OFF by default — invisible to users and refused by the API until you turn it on."],
             ] as const;
             return rows.map(([k, name, desc], i) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none" }}>

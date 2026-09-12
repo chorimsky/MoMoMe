@@ -20,6 +20,7 @@ const DEFAULTS: AppFeatures = {
   merchant: true,
   receive: true,
   contacts: true,
+  momoTransfer: false, // admin-gated: never on until the server says so
 };
 
 let features: AppFeatures = DEFAULTS;

@@ -9,6 +9,7 @@ import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, r
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { reconcileDeposits } from "./core/depositReconcile.js";
 import { reconciliationSweep } from "./core/interop/reconcile.js";
+import { reconcileTransfers } from "./core/momoTransfer.js";
 import { flush as flushOutbound } from "./core/interop/outbound.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
@@ -39,6 +40,7 @@ export async function reconcileTick(): Promise<void> {
   await keepWebhookRegistered();
   await flushOutbound().catch((e) => console.error("outbound webhooks", e));
   await reconciliationSweep().catch((e) => console.error("reconciliation sweep", e));
+  await reconcileTransfers().catch((e) => console.error("momo transfers", e));
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

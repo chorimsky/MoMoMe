@@ -50,6 +50,7 @@ import { persistDurable } from "../core/persist.js";
 import { usingPostgres } from "../db/store.js";
 import { createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
+import * as momoTransfer from "../core/momoTransfer.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
@@ -186,6 +187,60 @@ function sectionForPath(sub: string): Section | null {
 api.post("/telemetry", rateLimitMiddleware("telemetry", 120, 60_000), (req, res) => {
   const n = ingestTelemetry(req.body);
   res.status(202).json({ ok: true, accepted: n });
+});
+
+/* ============================================================
+   Mobile Money → Mobile Money transfers (admin-gated feature: features.momoTransfer).
+   MTN pays Orange, Orange pays MTN, and beyond our rails a Lightning Address. The payer
+   approves a collection prompt on their phone; the recipient is paid from the float.
+   ============================================================ */
+const transferDenied = (req: ExpressRequest, res: import("express").Response): boolean => {
+  if (momoTransfer.enabled() || isAdminRequest(req)) return false;
+  res.status(403).json({ error: "feature_disabled", message: "Mobile Money transfers are not available yet." });
+  return true;
+};
+api.get("/momo/transfers/quote", (req, res) => {
+  if (transferDenied(req, res)) return;
+  const xaf = Math.round(Number(req.query.xaf));
+  if (!Number.isFinite(xaf) || xaf <= 0) return res.status(400).json({ error: "bad_amount", message: "xaf required." });
+  res.json(momoTransfer.quote(xaf));
+});
+api.post("/momo/transfers/resolve", (req, res) => {
+  if (transferDenied(req, res)) return;
+  const b = (req.body ?? {}) as { to?: unknown; country?: unknown };
+  if (typeof b.to !== "string") return res.status(400).json({ error: "bad_recipient", message: "to required." });
+  const r = momoTransfer.resolveDestination(b.to, (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode);
+  if (!r.ok) return res.status(422).json({ error: r.error, message: r.message });
+  res.json({ route: r.route, to: r.to });
+});
+api.post("/momo/transfers", rateLimitMiddleware("momo_transfer", 20, 60_000), async (req, res) => {
+  if (transferDenied(req, res)) return;
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
+  const b = (req.body ?? {}) as { from?: unknown; to?: unknown; xaf?: unknown; country?: unknown; fromName?: unknown; toName?: unknown };
+  if (typeof b.from !== "string" || typeof b.to !== "string") return res.status(400).json({ error: "bad_request", message: "from and to are required." });
+  const r = await momoTransfer.createTransfer({ owner, fromPhone: b.from, toAddress: b.to, xaf: Number(b.xaf), country: (typeof b.country === "string" && b.country in COUNTRIES ? b.country : undefined) as CountryCode | undefined, fromName: typeof b.fromName === "string" ? cleanText(b.fromName, 60) : undefined, toName: typeof b.toName === "string" ? cleanText(b.toName, 60) : undefined, byAdmin: isAdminRequest(req) });
+  if (!r.ok) return res.status(r.status).json({ error: r.error, message: r.message });
+  res.status(201).json(r.transfer);
+});
+api.get("/momo/transfers", async (req, res) => {
+  if (transferDenied(req, res)) return;
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
+  res.json({ transfers: momoTransfer.transfersOf(owner).slice(0, 50) });
+});
+api.get("/momo/transfers/:id", async (req, res) => {
+  const t = momoTransfer.getTransfer(req.params.id);
+  const owner = await ownerOf(req);
+  if (!t || (t.owner !== owner && !isAdminRequest(req))) return res.status(404).json({ error: "not_found", message: "Not found." });
+  res.json(t);
+});
+api.post("/momo/transfers/:id/cancel", async (req, res) => {
+  const t = momoTransfer.getTransfer(req.params.id);
+  const owner = await ownerOf(req);
+  if (!t || (t.owner !== owner && !isAdminRequest(req))) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (!momoTransfer.cancelTransfer(t, owner ?? "admin")) return res.status(409).json({ error: "not_cancellable", message: "The payer has already approved; the transfer is on its way." });
+  res.json(t);
 });
 
 api.use("/admin", (req, res, next) => {
@@ -2022,6 +2077,15 @@ api.post("/admin/treasury/withdraw", async (req, res) => {
 /* ---------- Mobile Money ops (manual cash-in / cash-out) ----------
    View: live rail balances + op history (mobilemoney section). Mutations
    (cashout/cashin) require fund-movement rights, gated in the /admin middleware. */
+/** All Mobile Money → Mobile Money transfers, and the operator's release of a held one. */
+api.get("/admin/momo/transfers", (_req, res) => { res.json({ enabled: momoTransfer.enabled(), transfers: momoTransfer.allTransfers(300) }); });
+api.post("/admin/momo/transfers/:id/release", async (req, res) => {
+  const t = momoTransfer.getTransfer(req.params.id);
+  if (!t) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (!(await momoTransfer.releaseTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_releasable", message: "Only a transfer held for review can be released." });
+  res.json(t);
+});
+
 api.get("/admin/momo", async (_req, res) => {
   const [balances, fees] = await Promise.all([momoOps.balances("CM"), momoOps.feeInfo().catch(() => null)]);
   res.json({ balances, history: momoOps.history(), fees });

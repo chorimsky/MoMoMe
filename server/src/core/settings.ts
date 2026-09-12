@@ -34,7 +34,7 @@ const DEFAULTS: AdminSettings = {
   // operator can still switch any method off here.
   methods: DEFAULT_METHODS,
   // Product surfaces — all on by default; a super-admin can disable any of them.
-  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, receive: true, contacts: true },
+  features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, receive: true, contacts: true, momoTransfer: false },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).

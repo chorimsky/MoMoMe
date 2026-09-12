@@ -10,6 +10,7 @@ import { api, ApiError } from "../../api/client.js";
 import { FixedFlow } from "./ui.js";
 import { DetailsStep, MethodStep, ReviewStep, PayStep, ProcessingStep } from "./steps.js";
 import { SuccessStep } from "./Success.js";
+import { MomoStep } from "./MomoStep.js";
 import { Activity } from "./Activity.js";
 import { Help } from "./Help.js";
 import { Contacts } from "./Contacts.js";
@@ -26,7 +27,7 @@ export interface Draft {
   nameSource: NameSource;
 }
 
-type Step = "details" | "method" | "review" | "pay" | "processing" | "success";
+type Step = "details" | "method" | "momo" | "review" | "pay" | "processing" | "success";
 // The open payment this tab is in the middle of. A reload on the Pay screen used to lose
 // the live invoice: the customer could still pay it (it settles server-side and shows in
 // Activity) but the screen they came back to was an empty form — which is how people pay
@@ -383,7 +384,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} lockRecipient={!!merchant} />}
-            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} />}
+            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} onMomo={features.momoTransfer ? () => go("momo") : undefined} />}
+            {step === "momo" && <MomoStep s={s} back={() => go("method")} done={() => { setS((p) => ({ ...p, xaf: 0 })); go("details"); }} />}
             {/* "Is this who you meant?" — shown INSTEAD of proceeding when the server spots a
                 number one digit away from someone this sender pays regularly. Mobile Money
                 does not reverse, so this is a decision, not a toast. */}

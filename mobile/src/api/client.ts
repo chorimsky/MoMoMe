@@ -11,7 +11,7 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { devicePublicKeys, enrolledFor, forgetDeviceKeys, markEnrolled, signRequest } from '@/lib/deviceSign';
 
-import type {
+import type { MomoTransfer,
   AmbassadorSummary,
   AppFeatures,
   CountryCode,
@@ -243,6 +243,10 @@ export const api = {
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
   /** Cancel an un-paid payment (before any pay-in). 409 once anything has arrived. */
+  momoQuote: (xaf: number) => req<{ xaf: number; feeXaf: number; collectXaf: number; feePct: number }>(`/momo/transfers/quote?xaf=${xaf}`),
+  momoCreate: (b: { from: string; to: string; xaf: number; country?: string; fromName?: string; toName?: string }) => req<MomoTransfer>('/momo/transfers', { method: 'POST', body: JSON.stringify(b) }),
+  momoGet: (id: string) => req<MomoTransfer>(`/momo/transfers/${id}`),
+  momoCancel: (id: string) => req<MomoTransfer>(`/momo/transfers/${id}/cancel`, { method: 'POST' }),
   cancelPayment: (id: string) => req<Payment>(`/payments/${id}/cancel`, { method: 'POST' }),
 
   /** Delete this device's account and the data tied to it. Partial by law — the response

@@ -328,7 +328,10 @@ export type LedgerAccount =
   /** What a rail KEPT out of an inbound — our own node's liquidity purchase, a routing
    *  fee on a sweep. Booked so fx_position equals what the node actually holds; the
    *  customer is never charged (Lightning credits the locked amount in full). */
-  | "rail_fees";
+  | "rail_fees"
+  /** XAF collected from a Mobile Money payer, sitting in the aggregator's COLLECTION
+   *  wallet (an asset of ours) until the aggregator settles it to the payout wallet. */
+  | "momo_collect_clearing";
 
 /** Crypto that arrived with no payment to attach it to.
  *
@@ -371,6 +374,8 @@ export type NotificationKind =
   | "payment_failed"         // it did not, and a refund is owed
   | "refund_needed"          // the sender must supply a destination
   | "unattributed_inbound"   // funds arrived that nobody can account for
+  | "transfer_delivered"     // a Mobile Money → Mobile Money transfer landed
+  | "transfer_failed"        // it did not; the payer's money is being returned
   | "reconciliation_mismatch" // the provider's statement disagrees with our books
   | "manual_review"          // a payment is held and needs a person
   | "deletion_request"       // someone asked for their data to go, from a device we cannot verify
@@ -675,6 +680,10 @@ export interface AdminSettings {
     merchant: boolean;     // become-a-merchant onboarding + dashboard + payment links (accept payments)
     receive: boolean;      // "Get paid" — the personal Lightning-address / receive surface
     contacts: boolean;     // the encrypted contact book + cross-device backup
+    /** Mobile Money → Mobile Money transfers (MTN → Orange and across networks), settled
+     *  over the payout rails or, beyond them, over Lightning. OFF by default: not shown to
+     *  users and refused by the API until an admin turns it on. */
+    momoTransfer: boolean;
   };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the
@@ -1043,4 +1052,32 @@ export interface TestReport {
   failed: number;
   skipped: number;
   createdAt: string;
+}
+
+/* ---------- Mobile Money → Mobile Money transfers ----------
+   The payer approves a collection request on their phone (MTN or Orange), the money is
+   paid out to the recipient's number — any network — from the payout float. When the
+   recipient is beyond our payout rails (another country, another platform) but has a
+   Lightning Address, the value crosses over Lightning instead. Admin-gated feature. */
+export type MomoTransferState = "AWAITING_PAYER" | "COLLECTED" | "PAYING_OUT" | "DELIVERED" | "FAILED" | "EXPIRED" | "CANCELLED" | "REFUND_PENDING" | "REFUNDED";
+export type MomoTransferRoute = "direct" | "lightning";
+export interface MomoParty { phone: string; country: CountryCode; provider: ProviderId; name?: string }
+export interface MomoTransfer {
+  id: string; ref: string; createdAt: string; updatedAt: string;
+  owner: string;
+  from: MomoParty;
+  /** The recipient: a Mobile Money number we can pay, or a Lightning Address elsewhere. */
+  to: MomoParty | { lightningAddress: string; name?: string };
+  route: MomoTransferRoute;
+  /** What the recipient gets, what the payer is asked for, and our fee (payer pays it). */
+  xaf: number; feeXaf: number; collectXaf: number;
+  state: MomoTransferState;
+  collectRail: string; collectRef?: string; simulated?: boolean;
+  payoutRail?: string; payoutRef?: string;
+  /** Lightning route: sats paid and the rail's transaction id. */
+  paidBtc?: number; lightningRef?: string;
+  refundRef?: string;
+  complianceFlags?: string[];
+  expiresAt: string;
+  events: Array<{ at: string; state: MomoTransferState; note?: string }>;
 }

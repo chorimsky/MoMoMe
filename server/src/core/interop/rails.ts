@@ -99,7 +99,9 @@ export async function listRails(country: CountryCode = "CM"): Promise<RailInfo[]
     const m = methodsOfRail(id)[0];
     const spread = m ? (() => { try { return rateFor(m).spreadBps; } catch { return undefined; } })() : undefined;
     return {
-      id, name: RAIL_NAME[id], capabilities: CAPS[id], providers: ps,
+      // Mobile Money RECEIVES (a payer's own network collects) only when the admin has turned
+      // Mobile Money → Mobile Money transfers on; the API says so instead of pretending.
+      id, name: RAIL_NAME[id], capabilities: id === "mobile_money" && getSettings().features.momoTransfer ? { ...CAPS[id], directions: ["receive", "send"] } : CAPS[id], providers: ps,
       limits: id === "mobile_money" ? { currency: ccy, min: MIN_XAF, max: Math.min(MAX_XAF, maxPayout) } : { currency: ccy, min: MIN_XAF, max: MAX_XAF },
       fees: { platformPct: feePct, ...(spread !== undefined ? { spreadBps: spread } : {}) },
       regulatedParty: REGULATED_PARTY[id],

@@ -3,7 +3,7 @@
    Data: api.adminMobileMoney() (aggregator name derived from live config).
    ============================================================ */
 import { useEffect, useState } from "react";
-import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance, MomoFeeInfo, ProviderId } from "@shared/types.js";
+import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance, MomoFeeInfo, ProviderId, MomoTransfer } from "@shared/types.js";
 import { PROVIDERS, COUNTRIES, detectProvider } from "@shared/domain.js";
 import { canMovePaymentFunds } from "@shared/roles.js";
 import { api } from "../../../api/client.js";
@@ -193,7 +193,35 @@ function MomoOpsPanel() {
           </div>
         </div>
       )}
+      <TransfersCard />
     </div>
+  );
+}
+
+const T_TONE: Record<string, string> = { DELIVERED: "var(--recv)", FAILED: "var(--bad)", REFUNDED: "var(--bad)", REFUND_PENDING: "var(--warn)", EXPIRED: "var(--ink-3)", CANCELLED: "var(--ink-3)" };
+/** Mobile Money → Mobile Money transfers: every one, its route and where it stands. */
+function TransfersCard() {
+  const [d, setD] = useState<{ enabled: boolean; transfers: MomoTransfer[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => api.adminMomoTransfers().then(setD).catch(() => {});
+  useEffect(() => { load(); const id = setInterval(load, 20_000); return () => clearInterval(id); }, []);
+  const release = async (id: string) => { setBusy(id); try { await api.adminMomoRelease(id); await load(); } finally { setBusy(null); } };
+  return (
+    <Card title="Mobile Money → Mobile Money transfers" sub={d ? (d.enabled ? "Feature ON for users (Settings → Product features)." : "Feature OFF: users cannot see or use it; only this console can create test transfers.") : "…"} pad={false}>
+      <table className="tbl"><thead><tr><th>When</th><th>Ref</th><th>From</th><th>To</th><th>Amount</th><th>Route</th><th>State</th><th>Last note</th><th></th></tr></thead>
+        <tbody>{(d?.transfers ?? []).slice(0, 60).map((t) => (
+          <tr key={t.id}>
+            <td style={{ whiteSpace: "nowrap" }}>{new Date(t.createdAt).toLocaleString()}</td><td className="mono">{t.ref}</td>
+            <td className="num">{t.from.provider} {t.from.phone}</td>
+            <td className="num">{"phone" in t.to ? `${t.to.provider} ${t.to.phone}` : t.to.lightningAddress}</td>
+            <td className="num">{fmt(t.xaf)} <span style={{ color: "var(--ink-3)" }}>+{fmt(t.feeXaf)}</span></td>
+            <td>{t.route === "lightning" ? "⚡ Lightning" : "direct"}</td>
+            <td style={{ color: T_TONE[t.state] ?? "var(--ink)", fontWeight: 650 }}>{t.state}</td>
+            <td style={{ fontSize: 12, color: "var(--ink-3)", maxWidth: 260 }}>{t.events.at(-1)?.note ?? ""}</td>
+            <td>{t.state === "REFUND_PENDING" && t.complianceFlags?.length && !t.refundRef ? <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy === t.id} onClick={() => void release(t.id)}>Release</button> : null}</td>
+          </tr>
+        ))}{d && !d.transfers.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)", padding: 16 }}>No transfers yet.</td></tr>}</tbody></table>
+    </Card>
   );
 }
 

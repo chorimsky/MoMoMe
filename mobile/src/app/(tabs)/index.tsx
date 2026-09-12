@@ -27,6 +27,7 @@ import {
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useFeatures } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
+import { MomoStep } from '@/components/momo-step';
 import { track } from '@/lib/analytics';
 import { StringKey, statusKey, useI18n } from '@/lib/i18n';
 import { enablePush, usePushState } from '@/lib/push';
@@ -44,7 +45,7 @@ import type {
   Quote,
 } from '@shared/types';
 
-type Step = 'details' | 'method' | 'review' | 'pay' | 'success';
+type Step = 'details' | 'method' | 'momo' | 'review' | 'pay' | 'success';
 // Once the sender has paid the crypto invoice, the payment walks these states
 // server-side; we show a staged Processing view for them.
 const AWAITING_STATES: PaymentState[] = ['QUOTED', 'AWAITING_INBOUND'];
@@ -451,7 +452,7 @@ export default function SendScreen() {
     ]);
   };
 
-  const stepIndex = { details: 0, method: 1, review: 2, pay: 3, success: 3 }[step];
+  const stepIndex = { details: 0, method: 1, momo: 2, review: 2, pay: 3, success: 3 }[step];
 
 
   // THE ROUTER PICKS: ranked routes for this destination and amount. The top viable method
@@ -514,7 +515,7 @@ export default function SendScreen() {
           onBack={
             step === 'method'
               ? () => setStep('details')
-              : step === 'review'
+              : step === 'review' || step === 'momo'
                 ? () => setStep('method')
                 : undefined
           }
@@ -716,6 +717,19 @@ export default function SendScreen() {
             <Body muted>{tr('method_sub', { n: group(String(xafNum)) })}</Body>
           </View>
           <View style={{ gap: Spacing.three }}>
+            {features.momoTransfer && detected ? (
+              /* Admin-gated: pay from the payer's OWN Mobile Money, any network to any network. */
+              <Pressable disabled={busy} onPress={() => { track('method_chosen', { method: 'MOMO' }); setStep('momo'); }}
+                style={({ pressed }) => [styles.methodCard, { backgroundColor: t.surface, borderColor: t.line, opacity: pressed ? 0.9 : 1 }, Shadow.sm]}>
+                <IconCircle name="phone-portrait-outline" color={t.recv} bg={t.recvWash} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.methodName, { color: t.text }]}>{tr('mt_tile_name')}</Text>
+                  <Text style={{ color: t.recv, fontFamily: Fonts.bodyMedium, fontSize: 12.5, marginTop: 1 }}>{tr('mt_tile_net')}</Text>
+                  <Body muted>{tr('mt_tile_sub')}</Body>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={t.muted} />
+              </Pressable>
+            ) : null}
             {orderedMethods.map((m) => {
               const meta = METHOD_META[m];
               const why = rec?.unavailable[m];
@@ -768,6 +782,10 @@ export default function SendScreen() {
           )}
         </View>
       )}
+
+      {step === 'momo' && detected ? (
+        <MomoStep country={country} toPhone={localDigits(phone, country)} toProvider={detected} toName={recipientName || undefined} xaf={xafNum} back={() => setStep('method')} done={reset} />
+      ) : null}
 
       {/* ---------------- REVIEW ---------------- */}
       {step === 'review' && quote && (

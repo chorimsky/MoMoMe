@@ -14,11 +14,12 @@ import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
 import { otpSendAllowed } from "../core/otpThrottle.js";
 import { idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
+import { engine as complianceEngine } from "../core/interop/compliance.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth, sendOtpSms, canSendSms, notifyDeletionRequest, notifyTestReport } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtpSms, notify, canSendSms, notifyDeletionRequest, notifyTestReport } from "../core/notifications.js";
 import { isReviewPhone } from "../core/review.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
 import { fileTestReport, listTestReports, normaliseResults } from "../core/testReports.js";
@@ -877,6 +878,16 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
   // payment would be world-readable via mayViewPayment's ownerless bypass — refuse.
   if (owner === undefined) return { status: 401, body: { error: "no_device", message: "Unrecognised device." } };
 
+  // ── compliance screen BEFORE anything is minted ────────────────────────────────────
+  // Watchlist hit or velocity limit → refused now (nothing is created, nothing to refund).
+  // CDD trigger / near a limit → created, but settlement HOLDS for an operator.
+  const screen = await complianceEngine.screenTransaction({ owner, recipientPhone: recipient.phone, recipientName: cleanName || undefined, country: recipient.country, xaf: quote.xaf, merchantCode: (reqBody as { merchantCode?: string }).merchantCode ?? null });
+  if (screen.verdict === "blocked") {
+    console.warn(`[compliance] refused payment to ${recipient.provider} ${recipient.phone}: ${screen.flags.join(" | ")}`);
+    void notify({ kind: "manual_review", audience: "operator", body: `Refused: ${quote.xaf} XAF to ${recipient.provider} ${recipient.phone} — ${screen.flags.join("; ")}` }).catch(() => {});
+    return { status: 403, body: { error: "compliance_blocked", message: "This payment can't be processed right now. If you believe this is a mistake, contact support." } };
+  }
+
   // ── all payout preconditions met → safe to mint the inbound address below ─────────
   const now = new Date().toISOString();
   const ref = await nextRef();
@@ -938,6 +949,7 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
     method: quote.method,
     recipient,
     senderId: owner, // authenticated device id — attributes the payment to its sender
+    ...(screen.flags.length ? { complianceFlags: screen.flags } : {}),
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
@@ -1829,6 +1841,12 @@ api.put("/admin/settings", async (req, res) => {
   const cp = patch.compliance;
   if (cp) {
     const posXaf = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n > 0 && n <= 1_000_000_000;
+    if (cp.velocity) {
+      const nonNeg = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1_000_000_000;
+      for (const k of ["senderDayXaf", "recipientDayXaf", "senderHourCount"] as const) {
+        if (cp.velocity[k] !== undefined && !nonNeg(cp.velocity[k])) return res.status(400).json({ error: "bad_compliance", message: `velocity.${k} must be 0 (off) or a positive number.` });
+      }
+    }
     for (const k of ["ctrThresholdXaf", "cddThresholdXaf", "structuringXaf"] as const) {
       if (cp[k] !== undefined && !posXaf(cp[k])) return res.status(400).json({ error: "bad_compliance", message: `${k} must be a positive XAF amount.` });
     }

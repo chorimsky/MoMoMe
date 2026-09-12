@@ -45,6 +45,7 @@ const DEFAULTS: AdminSettings = {
     ctrThresholdXaf: 5_000_000, cddThresholdXaf: 1_000_000,
     structuringWindowH: 24, structuringXaf: 5_000_000,
     sanctionsList: [], retentionYears: 10,
+    velocity: { senderDayXaf: 2_000_000, recipientDayXaf: 2_000_000, senderHourCount: 20 },
   },
 };
 
@@ -67,7 +68,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     methods: { ...DEFAULTS.methods, ...(d.methods ?? {}) },
     features: { ...DEFAULTS.features, ...(d.features ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
-    compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}) },
+    compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}), velocity: { ...DEFAULTS.compliance.velocity, ...(d.compliance?.velocity ?? {}) } },
   };
 });
 
@@ -107,7 +108,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     methods: { ...settings.methods, ...(patch.methods ?? {}) },
     features: { ...settings.features, ...(patch.features ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
-    compliance: { ...settings.compliance, ...(patch.compliance ?? {}) },
+    compliance: { ...settings.compliance, ...(patch.compliance ?? {}), velocity: { ...settings.compliance.velocity, ...(patch.compliance?.velocity ?? {}) } },
   };
   touch("settings");
   return settings;

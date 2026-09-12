@@ -202,6 +202,10 @@ export interface Payment {
    *  told apart from a genuine SECOND deposit to the same receive address — the first is
    *  ignored, the second is booked to refund_payable rather than silently kept. */
   inboundEventIds?: string[];
+  /** Pre-transaction compliance flags (CDD trigger, velocity near limit, watchlist near-
+   *  match…). Non-empty → the payment is held for an operator at settlement instead of
+   *  paying out automatically. Set by core/interop/compliance.ts at creation. */
+  complianceFlags?: string[];
   /** Which rail paid the refund out (e.g. "ibex") — so its status is
    *  re-queried on the SAME rail. Set alongside refundTxId. */
   refundProvider?: string;
@@ -682,6 +686,10 @@ export interface AdminSettings {
     sanctionsList: string[];
     /** AML record retention (years). CEMAC standard = 10. */
     retentionYears: number;
+    /** Transaction-monitoring velocity limits, enforced BEFORE a payment is created:
+     *  rolling 24 h XAF per sender device and per recipient number, and payments per hour
+     *  per sender. Beyond the limit the payment is refused, not held. 0 = off. */
+    velocity: { senderDayXaf: number; recipientDayXaf: number; senderHourCount: number };
   };
   /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
    *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until

@@ -391,6 +391,16 @@ export function SettingsView() {
               <LabeledInput label="Record retention" type="number" suffix="yr" mono error={retentionErr}
                 value={String(compliance.retentionYears)} onChange={(v) => editCompliance({ retentionYears: Number(v) })} />
             </Grid>
+            <div style={{ fontSize: 13, fontWeight: 650, margin: "14px 0 6px" }}>Velocity limits</div>
+            <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 10px", lineHeight: 1.45 }}>Enforced before a payment is created: over the limit is refused, within 80% of it is created and held for review at settlement. 0 = off.</p>
+            <Grid cols={3} gap={12}>
+              <LabeledInput label="Per sender · 24 h" type="number" suffix="XAF" mono
+                value={String(compliance.velocity?.senderDayXaf ?? 0)} onChange={(v) => editCompliance({ velocity: { ...(compliance.velocity ?? { senderDayXaf: 0, recipientDayXaf: 0, senderHourCount: 0 }), senderDayXaf: Number(v) } })} />
+              <LabeledInput label="Per recipient · 24 h" type="number" suffix="XAF" mono
+                value={String(compliance.velocity?.recipientDayXaf ?? 0)} onChange={(v) => editCompliance({ velocity: { ...(compliance.velocity ?? { senderDayXaf: 0, recipientDayXaf: 0, senderHourCount: 0 }), recipientDayXaf: Number(v) } })} />
+              <LabeledInput label="Per sender · 1 h" type="number" suffix="tx" mono
+                value={String(compliance.velocity?.senderHourCount ?? 0)} onChange={(v) => editCompliance({ velocity: { ...(compliance.velocity ?? { senderDayXaf: 0, recipientDayXaf: 0, senderHourCount: 0 }), senderHourCount: Number(v) } })} />
+            </Grid>
             <div>
               <div style={{ fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 6 }}>Sanctions / TF watchlist</div>
               <textarea value={watchlistText} onChange={(e) => { setWatchlistText(e.target.value); setDirty(true); }} rows={3}

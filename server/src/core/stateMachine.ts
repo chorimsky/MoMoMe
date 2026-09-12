@@ -616,6 +616,12 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     { account: "fee_revenue", direction: "credit", amount: p.feeXaf, currency: "XAF" },
   ]);
 
+  // Pre-transaction compliance flags (CDD trigger, near a velocity limit, …) were stamped at
+  // creation: the pay-in is booked, the payout waits for a person.
+  if (p.complianceFlags?.length) {
+    await parkForReview(p, `compliance review — ${p.complianceFlags.join("; ")}`);
+    return;
+  }
   // Pre-payout guards: corridor limit + available float.
   if (p.xaf > PROVIDER_PAYOUT_MAX[p.recipient.provider]) {
     await parkForReview(p, `exceeds ${p.recipient.provider} payout limit`);

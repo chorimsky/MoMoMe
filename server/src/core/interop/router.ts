@@ -24,6 +24,7 @@ import { availableFloatXaf } from "../stateMachine.js";
 import { railOfMethod } from "./rails.js";
 import { id } from "../ids.js";
 import { saveRoute } from "./intents.js";
+import { engine as complianceEngine } from "./compliance.js";
 
 const ETA: Record<Method, number> = { LIGHTNING: 5, ONCHAIN: 1800, USDT: 180, USDC: 180 };
 
@@ -80,7 +81,8 @@ export async function discoverRoutes(intent: PaymentIntent, dest: PaymentAddress
     const cryptoRail = activeRails().find((r) => r.supports(method) && (r.name !== "sandbox" || simulated));
     const ch = cryptoRail ? railHealth(cryptoRail.name) : null;
     checks.push({ name: "source_rail_operational", ok: !!ch?.eligible, detail: cryptoRail ? cryptoRail.name : "no real rail" });
-    checks.push({ name: "compliance", ok: true, detail: needsApproval ? "will hold for operator approval (above threshold)" : "clear" });
+    const screen = await complianceEngine.screenTransaction({ owner: intent.owner, recipientPhone: dest.value, recipientName: dest.owner.displayName ?? undefined, country, xaf: intent.amount, merchantCode: dest.type === "MERCHANT_CODE" ? dest.value : null });
+    checks.push({ name: "compliance", ok: screen.verdict !== "blocked", detail: screen.verdict === "blocked" ? screen.flags.join("; ") : screen.verdict === "review" || needsApproval ? `will hold for operator review — ${[...screen.flags, ...(needsApproval ? ["above approval threshold"] : [])].join("; ")}` : "clear" });
 
     let quote: PaymentQuote | null = null;
     let quoteDetail: string | undefined;

@@ -168,7 +168,7 @@ const occurred = (p: Payment) => p.displayStatus === "Completed" || OCCURRED.has
 
 const norm = (s: string) => s.trim().toLowerCase();
 /** Screen a subject (name + phone) against the configured sanctions/TF watchlist. */
-function sanctionsHit(phone: string, name: string | undefined, list: string[]): string | null {
+export function sanctionsHit(phone: string, name: string | undefined, list: string[]): string | null {
   const digits = phone.replace(/\D/g, "");
   for (const entry of list) {
     const e = norm(entry);

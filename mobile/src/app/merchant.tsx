@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
+const BRAND_MARK = require('../../assets/images/icon.png') as number;
+
 import { ApiError, api, errMessage } from '@/api/client';
 import { Body, Button, Card, Chip, ErrorBar, Field, H2, IconCircle, Label, Mono, Pill, Screen, Segmented } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
@@ -407,7 +409,7 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
           </Body>
           <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold }}>{tr('pay_here')}</Body>
           <View style={styles.posterQr}>
-            <QRCode value={url} size={190} backgroundColor="#fff" color="#111" />
+            <QRCode value={url} size={190} backgroundColor="#fff" color="#111" ecl="H" logo={BRAND_MARK} logoSize={Math.round(190 * 0.2)} logoBackgroundColor="#fff" logoBorderRadius={8} logoMargin={3} />
           </View>
           <Mono style={{ fontSize: 12 }}>{merchant.code}</Mono>
           <Button
@@ -501,7 +503,7 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
       </View>
       {showQr ? (
         <View style={styles.linkQr}>
-          <QRCode value={url} size={150} backgroundColor="#fff" color="#111" />
+          <QRCode value={url} size={150} backgroundColor="#fff" color="#111" ecl="H" logo={BRAND_MARK} logoSize={Math.round(150 * 0.2)} logoBackgroundColor="#fff" logoBorderRadius={8} logoMargin={3} />
         </View>
       ) : null}
     </View>

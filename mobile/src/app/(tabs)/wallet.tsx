@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
+// The mark in the QR's centre — same as the web's branded QR (favicon mark). Level-H codes
+// recover 30%, the mark covers ~4%: always scannable.
+const BRAND_MARK = require('../../../assets/images/icon.png') as number;
+
 import { getMyNumber, setMyNumber } from '@/api/client';
 import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
@@ -146,7 +150,7 @@ export default function ReceiveScreen() {
           {/* The QR is the web link: a phone camera opens it with no app installed, the app's
               scanner routes it to Send, and it carries the amount. */}
           <View style={[styles.qrCard, Shadow.md]}>
-            <QRCode value={link} size={210} backgroundColor="#fff" color="#111" quietZone={8} getRef={(c) => { qrRef.current = c; }} />
+            <QRCode value={link} size={210} backgroundColor="#fff" color="#111" quietZone={8} ecl="H" logo={BRAND_MARK} logoSize={Math.round(210 * 0.2)} logoBackgroundColor="#fff" logoBorderRadius={8} logoMargin={3} getRef={(c) => { qrRef.current = c; }} />
           </View>
           <Pressable
             onPress={() => copy('link')}

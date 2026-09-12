@@ -219,11 +219,19 @@ export function Momo({ size = 96, mood = "happy", className, interactive = true 
    scannable). Long payloads (a `lightning:` BOLT11 invoice) stay at level L
    and unbranded so the dense code remains comfortably scannable on screen. */
 let _qrMark: HTMLImageElement | null = null;
+let _qrMarkFor: string | null | undefined; // which brand logo the cached mark was chosen for
+/** The image in the QR's centre: the uploaded brand logo when it is compact enough to sit
+ *  in a square (a wide wordmark would be unreadable there), otherwise the built-in mark. */
 function qrMark(): HTMLImageElement {
-  if (_qrMark) return _qrMark;
+  if (_qrMark && _qrMarkFor === _brandLogo) return _qrMark;
   const img = new Image();
   img.src = "/favicon.svg";
-  _qrMark = img;
+  _qrMark = img; _qrMarkFor = _brandLogo;
+  if (_brandLogo) {
+    const probe = new Image();
+    probe.onload = () => { if (probe.naturalHeight && probe.naturalWidth / probe.naturalHeight <= 1.4 && _qrMarkFor === _brandLogo) { _qrMark = probe; } };
+    probe.src = _brandLogo;
+  }
   return img;
 }
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

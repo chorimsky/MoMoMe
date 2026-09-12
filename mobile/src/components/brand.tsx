@@ -4,8 +4,10 @@
  * Kept here so headers, the splash and the receipt all draw the identical mark.
  */
 
+import { api } from '@/api/client';
+import { useSyncExternalStore } from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import { Text, View, type ViewStyle } from 'react-native';
+import { Image, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '@/hooks/use-theme';
 
@@ -51,6 +53,30 @@ function Bolt({ height, color = GREEN }: { height: number; color?: string }) {
  * "MoMoMe" wordmark in Bagel Fat One with the green bolt for the middle glyph.
  * `mono` collapses every letter to a single colour (for one-colour contexts).
  */
+/* ---------- the LIVE brand logo (admin-uploaded) ----------
+   The operator uploads a logo once in the admin console; every surface shows it — web
+   header, receipts, and now the app. Same external-store pattern as use-features: fetched
+   once from /config, built-in wordmark until then and whenever none is set. */
+let _brandLogo: string | null = null;
+let _brandLoaded = false;
+const _brandListeners = new Set<() => void>();
+function loadBrandLogo() {
+  if (_brandLoaded) return;
+  _brandLoaded = true;
+  api.getConfig().then((c) => { if (c.brandLogo !== _brandLogo) { _brandLogo = c.brandLogo ?? null; _brandListeners.forEach((l) => l()); } }).catch(() => { _brandLoaded = false; });
+}
+export function useBrandLogo(): string | null {
+  return useSyncExternalStore((cb) => { _brandListeners.add(cb); loadBrandLogo(); return () => { _brandListeners.delete(cb); }; }, () => _brandLogo, () => null);
+}
+
+/** The brand, wherever a logo goes: the uploaded logo when the operator set one, the
+ *  built-in wordmark otherwise. `size` is the height. */
+export function BrandLogo({ size = 22, mono, color }: { size?: number; mono?: boolean; color?: string }) {
+  const logo = useBrandLogo();
+  if (logo) return <Image source={{ uri: logo }} accessibilityLabel="MoMoMe" style={{ height: size, width: size * 4, maxWidth: size * 6 }} resizeMode="contain" />;
+  return <Wordmark size={size} mono={mono} color={color} />;
+}
+
 export function Wordmark({ size = 22, mono, color }: { size?: number; mono?: boolean; color?: string }) {
   const t = useTheme();
   const one = mono ? (color ?? t.text) : undefined;

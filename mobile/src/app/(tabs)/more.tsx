@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Href, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Wordmark } from '@/components/brand';
+import { BrandLogo } from '@/components/brand';
 import { Body, Card, H1, IconCircle, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useFeatures } from '@/hooks/use-features';
@@ -96,7 +96,7 @@ export default function MoreScreen() {
       ))}
 
       <View style={{ alignItems: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five }}>
-        <Wordmark size={20} />
+        <BrandLogo size={20} />
         <Body muted center style={{ fontSize: 13 }}>
           {tr('tagline')}
         </Body>

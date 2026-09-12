@@ -17,7 +17,8 @@ import crypto from "node:crypto";
 import { config, whatsappConfigured } from "../config.js";
 import { inboundMessages, replyTo } from "../core/whatsappBot.js";
 import { noteInbound } from "../core/whatsapp.js";
-import { sendText, markRead } from "../adapters/whatsapp.js";
+import { sendText, markRead, statusUpdates } from "../adapters/whatsapp.js";
+import { updateDelivery } from "../core/notifications.js";
 
 export const webhooks = Router();
 
@@ -105,6 +106,11 @@ webhooks.post("/whatsapp", express.raw({ type: "*/*" }), (req, res) => {
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return res.status(400).json({ error: "bad_json" }); }
   res.json({ ok: true }); // Meta retries on anything but a fast 200
+  // Delivery receipts for messages WE sent — the outbox learns whether the person got it.
+  for (const st of statusUpdates(body)) {
+    const known = updateDelivery(st.id, st.status, st.detail);
+    if (st.status === "failed") console.warn(`[whatsapp] message ${st.id} to ${st.recipient ?? "?"} failed: ${st.detail}${known ? "" : " (no outbox record)"}`);
+  }
   for (const m of inboundMessages(body)) {
     noteInbound(m.from);
     // A number flooding the bot burns transcription/model spend: 20 messages a minute is

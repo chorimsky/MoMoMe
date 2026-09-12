@@ -47,10 +47,19 @@ anything else is recorded as skipped with the reason instead of silently lost.
 3. **Webhook**: WhatsApp → Configuration → Callback URL
    `https://momome-api-production.up.railway.app/webhooks/whatsapp`, Verify token = the value
    above, subscribe to the **messages** field.
-4. **Template** (for notices outside the 24 h window): create a *Utility* template, body
-   `You have received {{1}} on your Mobile Money via MoMo›Me. Ref {{2}}.` (and a French
-   one if you set `WHATSAPP_TEMPLATE_LANG=fr`). Put its name in `WHATSAPP_TEMPLATE_DELIVERED`.
-5. Admin → Settings → Notification channels → switch **WhatsApp** on. The row shows
+4. **Templates** (for notices outside the 24 h window) — *Utility* category, body params
+   `{{1}}` = amount with currency, `{{2}}` = reference. One per notice kind, each optional:
+   - `WHATSAPP_TEMPLATE_DELIVERED` — "You have received {{1}} on your Mobile Money via MoMo›Me. Ref {{2}}."
+   - `WHATSAPP_TEMPLATE_REFUND` — "Your MoMo›Me payment of {{1}} could not be delivered. Open the app to claim your refund. Ref {{2}}."
+   - `WHATSAPP_TEMPLATE_REVIEW` — "Your MoMo›Me payment of {{1}} is being checked by our team. You will be told as soon as it is settled. Ref {{2}}."
+   `WHATSAPP_TEMPLATE_LANG` is the language code of those templates (default `en`). Submit
+   French copies under the same names in language `fr` and set `WHATSAPP_TEMPLATE_LANG_FR=fr`:
+   French notices then go out in French. A kind without a template is recorded as skipped
+   with the reason — never sent into a void.
+5. **Delivery receipts** arrive on the same webhook: sent → delivered → read, or failed with
+   Meta's reason (131047 = outside the 24 h window). The outbox record is updated, so
+   Admin → Notifications shows whether the person GOT the message, not only that we sent it.
+6. Admin → Settings → Notification channels → switch **WhatsApp** on. The row shows
    "Not connected" until step 2 is done.
 
 Cost: Meta charges per conversation (utility ≈ a few cents in Cameroon; a reply inside a

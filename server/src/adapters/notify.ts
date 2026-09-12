@@ -11,13 +11,15 @@
 
    ADD A CHANNEL: implement NotifyChannel and append it to CHANNELS.
    ============================================================ */
-import type { NotificationAudience } from "../../../shared/types.js";
+import type { NotificationAudience, NotificationKind } from "../../../shared/types.js";
 import { fetchT } from "./http.js";
 import { pushTokenFor, dropDeadToken } from "../core/pushTokens.js";
 import { whatsappChannel } from "./whatsapp.js";
 
 export interface OutboundMessage {
   audience: NotificationAudience;
+  /** What this message is — a channel that has per-kind templates (WhatsApp) picks by it. */
+  kind?: NotificationKind;
   /** Phone in international form for SMS; empty for operator messages. */
   to: string;
   body: string;
@@ -34,8 +36,9 @@ export interface NotifyChannel {
    *  number). Recorded as SKIPPED — "nothing could carry it" — rather than as a failed
    *  send, which would read as a gateway fault. */
   unreachable?(msg: OutboundMessage): string | undefined;
-  /** Deliver. Never throws — a channel failure must not take down a payment. */
-  send(msg: OutboundMessage): Promise<{ ok: boolean; detail?: string }>;
+  /** Deliver. Never throws — a channel failure must not take down a payment. `id` is the
+   *  provider's message id when it gives one (status callbacks refer to it). */
+  send(msg: OutboundMessage): Promise<{ ok: boolean; detail?: string; id?: string }>;
 }
 
 /* ---------- operator log ----------

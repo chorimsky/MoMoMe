@@ -50,6 +50,22 @@ export async function downloadMedia(mediaId: string): Promise<{ bytes: Buffer; m
   } catch { return null; }
 }
 
+/** Meta's status callbacks for messages WE sent: sent → delivered → read, or failed with
+ *  an error (131047 = re-engagement: outside the 24 h window; 131026 = not a WhatsApp
+ *  number; 130472 = user's number is part of an experiment…). Returns them normalised. */
+export function statusUpdates(body: unknown): Array<{ id: string; status: "sent" | "delivered" | "read" | "failed"; detail?: string; recipient?: string }> {
+  const out: Array<{ id: string; status: "sent" | "delivered" | "read" | "failed"; detail?: string; recipient?: string }> = [];
+  const entries = (body as { entry?: Array<{ changes?: Array<{ value?: { statuses?: Array<Record<string, unknown>> } }> }> })?.entry ?? [];
+  for (const e of entries) for (const c of e.changes ?? []) for (const st of c.value?.statuses ?? []) {
+    const id = String(st.id ?? ""); const status = String(st.status ?? "");
+    if (!id || !["sent", "delivered", "read", "failed"].includes(status)) continue;
+    const errs = (st.errors as Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }> | undefined) ?? [];
+    const detail = status === "failed" ? errs.map((x) => `${x.code ?? ""} ${x.title ?? x.message ?? ""}${x.error_data?.details ? ` — ${x.error_data.details}` : ""}`.trim()).join("; ") || "delivery failed" : undefined;
+    out.push({ id, status: status as "sent" | "delivered" | "read" | "failed", detail, recipient: typeof st.recipient_id === "string" ? st.recipient_id : undefined });
+  }
+  return out;
+}
+
 /** Mark an inbound message as read (the two blue ticks) — a courtesy, best-effort. */
 export function markRead(messageId: string): Promise<SendResult> {
   return post({ status: "read", message_id: messageId });
@@ -74,14 +90,20 @@ export const whatsappChannel: NotifyChannel = {
     const to = msg.audience === "sender" ? senderPhone(msg.to) ?? "" : msg.to;
     if (!to) return { ok: false, detail: "no phone" };
     if (inReplyWindow(to)) return sendText(to, msg.body);
-    // Outside the window Meta delivers templates only. Delivery notices have a template
-    // slot; everything else is recorded as skipped-with-reason rather than sent into a void.
-    const tpl = config.whatsapp.templateDelivered;
-    if (tpl && /^(Delivered|Livré|You have received)/i.test(msg.body)) {
+    // Outside the window Meta delivers templates only. Each notice kind has a template slot
+    // (approved separately on Meta); French bodies use the French template language when
+    // one is configured. Anything without a template is recorded skipped-with-reason
+    // rather than sent into a void.
+    const tpl = msg.kind === "payment_delivered" ? config.whatsapp.templateDelivered
+      : msg.kind === "refund_needed" || msg.kind === "payment_failed" ? config.whatsapp.templateRefund
+      : msg.kind === "manual_review" ? config.whatsapp.templateReview : "";
+    if (tpl) {
       const amount = msg.body.match(/(\d[\d  ]*\d)\s*XAF/)?.[1]?.replace(/\s/g, " ") ?? "";
       const ref = msg.body.match(/MMM-\d{4}-\d+/)?.[0] ?? "";
-      return sendTemplate(to, tpl, config.whatsapp.templateLang, [amount ? `${amount} XAF` : "", ref]);
+      const french = /\b(Livré|Réf|remboursement|vérifi|reçu)\b/i.test(msg.body);
+      const lang = french && config.whatsapp.templateLangFr ? config.whatsapp.templateLangFr : config.whatsapp.templateLang;
+      return sendTemplate(to, tpl, lang, [amount ? `${amount} XAF` : "", ref]);
     }
-    return { ok: false, detail: "Outside WhatsApp's 24 h reply window and no approved template for this message — not sent. The person can message our number to open the window." };
+    return { ok: false, detail: `Outside WhatsApp's 24 h reply window and no approved template for "${msg.kind ?? "this message"}" — not sent. The person can message our number to open the window, or set WHATSAPP_TEMPLATE_* on the server.` };
   },
 };

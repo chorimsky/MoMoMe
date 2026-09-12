@@ -125,10 +125,11 @@ export async function notify(input: {
       paymentRef: input.paymentRef, status: "queued",
     });
     try {
-      const r = await ch.send({ audience: input.audience, to: input.to ?? "", body: input.body });
+      const r = await ch.send({ audience: input.audience, kind: input.kind, to: input.to ?? "", body: input.body });
       rec.attempts += 1;
       rec.status = r.ok ? "sent" : "failed";
-      if (r.ok) rec.sentAt = new Date().toISOString();
+      if (r.ok) { rec.sentAt = new Date().toISOString(); rec.deliveryStatus = "sent"; }
+      if (r.id) rec.providerMessageId = r.id;
       if (r.ok && ch.name === "whatsapp") deliveredOverWhatsApp = true;
       if (r.detail) rec.detail = r.detail;
     } catch (e) {
@@ -141,6 +142,22 @@ export async function notify(input: {
     out.push(rec);
   }
   return out;
+}
+
+/** A channel provider reported what happened to a message it carried (WhatsApp statuses:
+ *  sent → delivered → read, or failed with a reason). Updates the record so the outbox
+ *  answers "did they GET it?", not only "did we send it?". */
+export function updateDelivery(providerMessageId: string, status: "sent" | "delivered" | "read" | "failed", detail?: string): boolean {
+  const rec = outbox.find((r) => r.providerMessageId === providerMessageId);
+  if (!rec) return false;
+  // never regress read → delivered → sent
+  const rank = { sent: 1, delivered: 2, read: 3, failed: 9 } as const;
+  if (rec.deliveryStatus && rank[rec.deliveryStatus] > rank[status] && status !== "failed") return true;
+  rec.deliveryStatus = status;
+  if (status === "failed") { rec.status = "failed"; rec.detail = detail ?? "provider reported delivery failure"; }
+  else if (detail) rec.detail = detail;
+  touch("notifications");
+  return true;
 }
 
 /* ---------- the messages themselves ----------

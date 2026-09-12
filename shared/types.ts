@@ -399,6 +399,11 @@ export interface NotificationRecord {
   /** Why it failed, or why it was skipped — "SMS is enabled in settings but no provider is
    *  configured" is the one an operator most needs to see. */
   detail?: string;
+  /** The channel provider's own id for the message (WhatsApp wamid…). Lets a later status
+   *  callback (delivered / read / failed) update THIS record. */
+  providerMessageId?: string;
+  /** Provider-confirmed delivery state, when the channel reports one. */
+  deliveryStatus?: "sent" | "delivered" | "read" | "failed";
 }
 
 export interface LedgerEntry {

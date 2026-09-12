@@ -86,7 +86,7 @@ export function NotificationsView() {
             <div style={{ marginTop: 14, borderTop: "1px solid var(--line-2)", paddingTop: 10 }}>
               {sent.slice(0, 8).map((r) => (
                 <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "5px 0", fontSize: 12.5 }}>
-                  <span style={{ color: "var(--ink-3)", minWidth: 58 }}>{r.status}</span>
+                  <span style={{ color: r.deliveryStatus === "failed" ? "var(--bad)" : r.deliveryStatus === "read" || r.deliveryStatus === "delivered" ? "var(--recv)" : "var(--ink-3)", minWidth: 72 }} title={r.detail}>{r.deliveryStatus && r.deliveryStatus !== "sent" ? r.deliveryStatus : r.status}</span>
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.body}</span>
                   <span className="mono" style={{ color: "var(--ink-3)", fontSize: 11 }}>{r.channel}</span>
                 </div>

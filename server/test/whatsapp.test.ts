@@ -8,6 +8,8 @@ process.env.WHATSAPP_PHONE_NUMBER_ID = "123456";
 process.env.WHATSAPP_VERIFY_TOKEN = "verify-me";
 process.env.WHATSAPP_APP_SECRET = "app-secret";
 process.env.WHATSAPP_TEMPLATE_DELIVERED = "momome_delivered";
+process.env.WHATSAPP_TEMPLATE_REFUND = "momome_refund";
+process.env.WHATSAPP_TEMPLATE_LANG_FR = "fr";
 process.env.WEB_ORIGIN = "https://momome.xyz";
 process.env.META_AI_API_KEY = "test-meta-key";
 delete process.env.SMS_WEBHOOK_URL;
@@ -19,7 +21,7 @@ import type { Payment } from "../../shared/types.js";
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}${d ? `  (${d})` : ""}`); pass++; } else { console.log(`  ✗ ${n}${d ? `  (${d})` : ""}`); fail++; } };
 
-const sent: Array<{ to: string; type: string; text?: string; template?: string; params?: string[] }> = [];
+const sent: Array<{ to: string; type: string; text?: string; template?: string; params?: string[]; lang?: string }> = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: unknown, init?: unknown) => {
   const url = String((input as { url?: string })?.url ?? input);
@@ -45,7 +47,7 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
   if (url.includes("graph.facebook.com")) {
     const b = JSON.parse(String((init as { body?: string })?.body ?? "{}")) as { to: string; type: string; text?: { body: string }; template?: { name: string; components?: Array<{ parameters: Array<{ text: string }> }> }; status?: string };
     if (b.status === "read") return J({ success: true });
-    sent.push({ to: b.to, type: b.type, text: b.text?.body, template: b.template?.name, params: b.template?.components?.[0]?.parameters.map((p) => p.text) });
+    sent.push({ to: b.to, type: b.type, text: b.text?.body, template: b.template?.name, params: b.template?.components?.[0]?.parameters.map((p) => p.text), lang: (b.template as { language?: { code?: string } } | undefined)?.language?.code });
     return J({ messages: [{ id: `wamid.${sent.length}` }] });
   }
   if (url.includes("coinbase.com") && url.includes("BTC-USD")) return J({ data: { amount: "65000.00" } });
@@ -136,6 +138,36 @@ async function main() {
     await notifyDelivered(pay({ ref: "MMM-2026-418901", recipient: { phone: "677000598", country: "CM", provider: "MTN", name: "", nameSource: "manual" } }));
     const tpl = sent.find((m) => m.to === "237677000598");
     ok("recipient OUTSIDE the window gets the approved template with amount + ref", tpl?.type === "template" && tpl.template === "momome_delivered" && tpl.params?.[0] === "1 000 XAF" && tpl.params?.[1] === "MMM-2026-418901", JSON.stringify(tpl));
+    const tplRec = listNotifications().find((r) => r.paymentRef === "MMM-2026-418901" && r.channel === "whatsapp");
+    ok("the outbox keeps the provider's message id and a 'sent' delivery state", !!tplRec?.providerMessageId && tplRec.deliveryStatus === "sent", `${tplRec?.providerMessageId} ${tplRec?.deliveryStatus}`);
+
+    // Delivery receipts: Meta tells us delivered / read / failed for OUR messages.
+    const statusBody = (id: string, status: string, errors?: unknown[]) => JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { statuses: [{ id, status, recipient_id: "237677000598", ...(errors ? { errors } : {}) }] } }] }] });
+    let sb = statusBody(tplRec!.providerMessageId!, "read");
+    await fetch(`${base}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": sign(sb) }, body: sb });
+    await wait(300);
+    ok("a 'read' receipt updates the record", listNotifications().find((r) => r.id === tplRec!.id)?.deliveryStatus === "read");
+    sb = statusBody(tplRec!.providerMessageId!, "delivered");
+    await fetch(`${base}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": sign(sb) }, body: sb });
+    await wait(300);
+    ok("…and a late 'delivered' never regresses 'read'", listNotifications().find((r) => r.id === tplRec!.id)?.deliveryStatus === "read");
+    // A refund notice OUTSIDE the window uses the refund template, in French when the body is French.
+    const { linkDevice } = await import("../src/core/account.js");
+    linkDevice("dev-fr-sender", "237699000555"); // sender anchored → reachable on WhatsApp
+    const { notifyPayoutFailed } = await import("../src/core/notifications.js");
+    const { setPushToken: setTok } = await import("../src/core/pushTokens.js");
+    setTok("dev-fr-sender", "ExponentPushToken[frfrfrfrfrfrfrfr]", "android", "fr"); // language = fr
+    sent.length = 0;
+    await notifyPayoutFailed(pay({ ref: "MMM-2026-418902", senderId: "dev-fr-sender" }), "rail rejected");
+    const rt = sent.find((m) => m.to === "237699000555");
+    ok("a refund notice outside the window uses the REFUND template in French", rt?.type === "template" && rt.template === "momome_refund" && rt.lang === "fr", JSON.stringify(rt));
+    // The failure receipt for a message marks the outbox record failed with Meta's reason.
+    const refRec = listNotifications().find((r) => r.paymentRef === "MMM-2026-418902" && r.channel === "whatsapp");
+    sb = statusBody(refRec!.providerMessageId!, "failed", [{ code: 131047, title: "Re-engagement message", message: "Message failed to send because more than 24 hours have passed since the customer last replied to this number." }]);
+    await fetch(`${base}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": sign(sb) }, body: sb });
+    await wait(300);
+    const failedRec = listNotifications().find((r) => r.id === refRec!.id);
+    ok("a 'failed' receipt marks the record failed with Meta's reason", failedRec?.status === "failed" && /131047/.test(failedRec.detail ?? ""), failedRec?.detail);
 
     // ---- Meta Model API: understanding, then the same checks ----
     console.log("\nMeta Model API — the model proposes, the code disposes\n");

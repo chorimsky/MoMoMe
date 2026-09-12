@@ -94,7 +94,12 @@ export const config = {
     /** Approved message template for business-initiated delivery notices (outside the 24 h
      *  reply window Meta only delivers templates). Body params: {{1}} amount, {{2}} ref. */
     templateDelivered: env("WHATSAPP_TEMPLATE_DELIVERED"),
+    /** Optional templates for the other notices (same {{1}} amount / {{2}} ref shape). */
+    templateRefund: env("WHATSAPP_TEMPLATE_REFUND"),
+    templateReview: env("WHATSAPP_TEMPLATE_REVIEW"),
     templateLang: env("WHATSAPP_TEMPLATE_LANG", "en"),
+    /** Language code of the French copies of the templates, when approved (e.g. "fr"). */
+    templateLangFr: env("WHATSAPP_TEMPLATE_LANG_FR"),
     apiUrl: env("WHATSAPP_API_URL", "https://graph.facebook.com/v21.0"),
   },
   /** Meta Model API (Muse) — voice-note transcription and intent parsing for the WhatsApp

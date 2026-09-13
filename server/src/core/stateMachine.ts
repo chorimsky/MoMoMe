@@ -901,16 +901,17 @@ export type RetryOutcome =
 export async function adminRetry(pIn: Payment): Promise<boolean> {
   return (await adminRetryWhy(pIn)).ok;
 }
-export async function adminRetryWhy(pIn: Payment): Promise<RetryOutcome> {
+export async function adminRetryWhy(pIn: Payment, by = "admin"): Promise<RetryOutcome> {
   // Serialize with every other money path (mirrors adminRefund / onPayoutResult): without
   // the lock + fresh read, an operator double-click, or a retry racing reconcile / a payout
   // callback, could both observe "not in flight" and submit TWO real disbursements — the
   // adapter's per-instance in-memory idempotency map cannot be the sole double-pay guard.
-  return store().lockPayment(pIn.id, () => adminRetryLocked(pIn.id));
+  return store().lockPayment(pIn.id, () => adminRetryLocked(pIn.id, by));
 }
 const refuse = (reason: Exclude<RetryOutcome, { ok: true }>["reason"], message: string): RetryOutcome => ({ ok: false, reason, message });
-async function adminRetryLocked(paymentId: string): Promise<RetryOutcome> {
+async function adminRetryLocked(paymentId: string, by = "admin"): Promise<RetryOutcome> {
   const p = await store().getPayment(paymentId); // fresh read under the lock
+  const wasHeld = p?.state === "MANUAL_REVIEW" && !!p.complianceFlags?.length;
   if (!p) return refuse("not_found", "Payment not found.");
   if (p.displayStatus === "Completed") return refuse("completed", "Already delivered — nothing to retry.");
   if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return refuse("refunded", "This inbound was refunded; it must not be paid out again."); // never re-pay a refunded inbound
@@ -968,7 +969,9 @@ async function adminRetryLocked(paymentId: string): Promise<RetryOutcome> {
   p.payoutRef = res.providerRef;
   // Hand off to the confirmation path: onPayoutResult posts the delivery legs and
   // transitions to DELIVERED — only once the payout actually COMPLETED.
-  await transition(p, "PAYOUT_REQUESTED", "retried by admin");
+  // The audit line says what the operator did: a compliance hold is APPROVED, a failed
+  // payout is RETRIED — and by whom.
+  await transition(p, "PAYOUT_REQUESTED", wasHeld ? `approved after compliance review by ${by}` : `retried by ${by}`);
   // The per-payment lock is HELD here — call onPayoutResultLocked (not onPayoutResult,
   // which re-acquires the same lock → re-entrant deadlock), mirroring confirmInboundLocked.
   if (res.simulated) { await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); return { ok: true }; }

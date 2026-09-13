@@ -251,7 +251,7 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
                 <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
                   <span className="mono" style={{ fontSize: 11, color: e.direction === "debit" ? "var(--bad)" : "var(--recv)", fontWeight: 700 }}>{e.direction === "debit" ? "DR" : "CR"}</span> {e.account}
                 </span>
-                <span className="num" style={{ fontSize: 12.5, fontWeight: 650, whiteSpace: "nowrap" }}>{fmt(e.amount, e.currency === "XAF" ? 0 : 2)} {e.currency}</span>
+                <span className="num" style={{ fontSize: 12.5, fontWeight: 650, whiteSpace: "nowrap" }}>{e.currency === "XAF" ? fmt(e.amount) : e.currency === "BTC" ? e.amount.toFixed(8) : fmt(e.amount, 2)} {e.currency}</span>
               </div>
             ))}
           </Block>
@@ -272,9 +272,11 @@ function PaymentDrawer({ p, onClose, onChanged }: { p: Payment; onClose: () => v
                 <p style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.45 }}>The sender never paid — nothing arrived, so there is nothing to pay out or refund. The customer can simply start a new payment.</p>
               ) : canMoveFunds ? (
                 <>
-                  <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, lineHeight: 1.45 }}>This payment hasn't been delivered. Retry the Mobile Money payout, or refund the sender.</p>
+                  {/* A compliance hold is a decision, not a failure: the button says what the
+                      operator is doing. The endpoint is the same (retry = pay out now). */}
+                  <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10, lineHeight: 1.45 }}>{p.state === "MANUAL_REVIEW" && p.complianceFlags?.length ? "Held for compliance review — the sender's money is booked. Approving pays it out now; refunding returns it to the sender." : "This payment hasn't been delivered. Retry the Mobile Money payout, or refund the sender."}</p>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => act("retry")} style={{ flex: 1 }}>{busy === "retry" ? "Retrying…" : "Retry payout"}</button>
+                    <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => act("retry")} style={{ flex: 1 }}>{busy === "retry" ? (p.state === "MANUAL_REVIEW" ? "Paying out…" : "Retrying…") : p.state === "MANUAL_REVIEW" && p.complianceFlags?.length ? "Approve & pay out" : "Retry payout"}</button>
                     <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => act("refund")} style={{ flex: 1 }}>{busy === "refund" ? "Refunding…" : "Refund"}</button>
                   </div>
                   {actErr && <div role="alert" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--bad)", marginTop: 10, lineHeight: 1.45 }}>{actErr}</div>}

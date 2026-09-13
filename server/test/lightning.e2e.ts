@@ -197,7 +197,7 @@ async function main() {
 
     // change-own-password: wrong current rejected, correct accepted, old password then fails.
     const badChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "nope", newPassword: "newsupportpass" }) }));
-    ok("change password with wrong current → 401", badChange.status === 401);
+    ok("change password with wrong current → 403 (the session itself stays valid)", badChange.status === 403);
     const goodChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "support-pass", newPassword: "newsupportpass" }) }));
     ok("change own password → 200", goodChange.status === 200);
     const oldFails = await POST("/api/admin/login", { username: "agent1", password: "support-pass" });

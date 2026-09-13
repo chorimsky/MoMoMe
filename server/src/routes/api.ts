@@ -344,7 +344,9 @@ api.post("/admin/password", async (req, res) => {
   if (pwIssue) return res.status(400).json({ error: "weak_password", message: pwIssue });
   const r = changeOwnPassword(session.uid, String(currentPassword ?? ""), newPassword as string);
   if (!r.ok) {
-    if (r.reason === "bad_current") return res.status(401).json({ error: "bad_current", message: "Current password is incorrect." });
+    // 403, not 401: the session is valid, the typed current password is not. A 401 here made
+    // the console drop the session and say "expired" for a typo in the old password.
+    if (r.reason === "bad_current") return res.status(403).json({ error: "bad_current", message: "Current password is incorrect." });
     return res.status(404).json({ error: "not_found", message: "Account not found." });
   }
   res.json({ ok: true });
@@ -2754,7 +2756,8 @@ api.get("/admin/audit", async (_req, res) => {
 api.post("/admin/payments/:id/retry", async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
-  const out = await adminRetryWhy(p);
+  const uid = (req as unknown as AdminReq).session?.uid;
+  const out = await adminRetryWhy(p, (uid && getUser(uid)?.username) || "admin");
   res.json({ ...out, payment: p });
 });
 api.post("/admin/payments/:id/refund", async (req, res) => {

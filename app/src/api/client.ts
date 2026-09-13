@@ -230,7 +230,10 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and
     // signal the console to fall back to the login gate.
-    if (res.status === 401 && path.startsWith("/admin/") && path !== "/admin/login") {
+    // A wrong password typed into the step-up prompt or the change-password form is a 401
+    // on THOSE routes — not an expired session. Dropping the token there logged the
+    // operator out for a typo.
+    if (res.status === 401 && path.startsWith("/admin/") && !["/admin/login", "/admin/elevate", "/admin/password", "/admin/forgot"].includes(path)) {
       setAdminToken(null);
       try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
     }

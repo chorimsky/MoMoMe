@@ -7,7 +7,7 @@
    ============================================================ */
 import type { PaymentState, TreasuryPool, TreasuryRail, TreasuryWithdrawal } from "../../../shared/types.js";
 import { btcToMsat, msatToBtc } from "../../../shared/domain.js";
-import { config } from "../config.js";
+import { config, ibexConfigured } from "../config.js";
 import { getSettings } from "./settings.js";
 import { store } from "../db/store.js";
 import { id } from "./ids.js";
@@ -90,7 +90,9 @@ export async function cryptoLiabilities(): Promise<Record<Asset, number>> {
 export async function treasuryPools(): Promise<TreasuryPool[]> {
   const liab = await cryptoLiabilities();
   let balances: Record<string, { currencyId: number; balance: number }> | null = null;
-  try { balances = await accountBalances(); } catch { balances = null; }
+  // No rail configured → no balance to ask for. Asking anyway cost a 2.5 s OAuth timeout on
+  // every open of the Liquidity page in a sandbox deployment.
+  try { balances = ibexConfigured() ? await accountBalances() : null; } catch { balances = null; }
   return (["BTC", "USDT", "USDC"] as Asset[]).map((asset) => {
     const acct = accountFor[asset]();
     const row = balances && acct ? balances[acct] : undefined;

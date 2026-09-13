@@ -38,7 +38,11 @@ export function Screen({
   contentStyle?: ViewStyle;
 }) {
   const t = useTheme();
-  const inner = <View style={[styles.screenInner, contentStyle]}>{children}</View>;
+  // Under a native stack header (edges=[]) the content otherwise starts flush against the
+  // header; with the top edge inset the header IS the breathing room.
+  const inner = (
+    <View style={[styles.screenInner, edges.length === 0 && { paddingTop: Spacing.three }, contentStyle]}>{children}</View>
+  );
   // Android: SDK 54 draws edge-to-edge, and an edge-to-edge window is NOT resized for the
   // keyboard — "Android resizes the window itself" stopped being true. Without this, on
   // every input screen the keyboard sits over whatever is in the lower half and the

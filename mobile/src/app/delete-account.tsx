@@ -50,7 +50,7 @@ export default function DeleteAccountScreen() {
   };
 
   return (
-    <Screen scroll>
+    <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('del_title') }} />
       {result ? (
         <View style={{ gap: Spacing.four, alignItems: 'center', paddingTop: Spacing.six }}>

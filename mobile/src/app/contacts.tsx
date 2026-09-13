@@ -74,21 +74,23 @@ export default function ContactsScreen() {
     router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name, t: mintIntent() } });
 
   return (
-    <Screen scroll>
+    <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('contacts_title') }} />
 
       {/* The stack header already says "Contacts"; a second heading under it was a duplicate
           title over a block of empty space, pushing the list below the fold. */}
       <Body muted style={styles.head}>{tr('contacts_sub')}</Body>
 
+      {/* Two equal columns: the French labels are long enough that a natural-width
+          secondary button squeezed the primary one onto three lines. */}
       <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.four }}>
         <Button title={tr('contacts_add')} icon="person-add" onPress={() => setEditing('new')} style={{ flex: 1 }} />
         <Button
           title={tr('backup_restore')}
           icon="cloud-upload-outline"
           variant="outline"
-          size="md"
           onPress={() => router.push('/contacts-backup' as Href)}
+          style={{ flex: 1 }}
         />
       </View>
 

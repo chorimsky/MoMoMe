@@ -53,12 +53,23 @@ export default function PayLinkScreen() {
     });
   };
 
+  // The header title belongs to every branch — a deep link lands here cold, and the
+  // loading/error states are what a person sees first.
+  const title = <Stack.Screen options={{ title: tr('pay_screen_title') }} />;
+
   if (error) {
     return (
-      <Screen>
+      <Screen edges={[]}>
+        {title}
         <Card style={{ marginTop: Spacing.five, alignItems: 'center', gap: Spacing.three }} padded>
           <IconCircle name="alert-circle" color={t.bad} bg={t.badWash} size={56} />
           <Body center>{error}</Body>
+          <Button
+            title={tr('pay_link_go_home')}
+            variant="outline"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            style={{ alignSelf: 'stretch' }}
+          />
         </Card>
       </Screen>
     );
@@ -66,7 +77,8 @@ export default function PayLinkScreen() {
 
   if (!link) {
     return (
-      <Screen>
+      <Screen edges={[]}>
+        {title}
         <View style={styles.center}>
           <ActivityIndicator color={t.accent} />
         </View>
@@ -75,8 +87,8 @@ export default function PayLinkScreen() {
   }
 
   return (
-    <Screen scroll>
-      <Stack.Screen options={{ title: tr('pay_screen_title') }} />
+    <Screen scroll edges={[]}>
+      {title}
       <Card style={{ marginTop: Spacing.four, alignItems: 'center', gap: Spacing.three }} padded elevated>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={68} />
         <H2 style={{ textAlign: 'center' }}>{link.merchant.businessName}</H2>

@@ -20,9 +20,11 @@ import { receiptText as sharedReceiptText, receiptTitle, recipientLine, receiptD
 
 type Tr = ReturnType<typeof useI18n>['t'];
 
-function fmtDate(iso: string): string {
+/** The date in the app's own language: a French receipt reads "13 sept. 2026, 20:35",
+ *  not "13 Sep 2026 at 8:35 PM". */
+function fmtDate(iso: string, lang: 'en' | 'fr' = 'en'): string {
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    return new Date(iso).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
@@ -91,7 +93,7 @@ export function ReceiptModal({
   onClose: () => void;
 }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [showHow, setShowHow] = useState(false);
   const dial = COUNTRIES[payment.recipient.country]?.dial ?? '';
 
@@ -141,7 +143,7 @@ export function ReceiptModal({
               <Body muted>{tr('reference')}</Body>
               <Mono>{payment.ref}</Mono>
             </View>
-            <Row label={tr('r_date')} value={fmtDate(payment.createdAt)} />
+            <Row label={tr('r_date')} value={fmtDate(payment.createdAt, lang)} />
             <View style={styles.row}>
               <Body muted>{tr('r_status')}</Body>
               {/* From the PAYMENT, not assumed. This pill used to read "Completed" for

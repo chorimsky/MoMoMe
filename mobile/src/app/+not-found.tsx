@@ -9,7 +9,7 @@ import { useI18n } from '@/lib/i18n';
 export default function NotFound() {
   const { t: tr } = useI18n();
   return (
-    <Screen>
+    <Screen edges={[]}>
       <Stack.Screen options={{ title: tr('nf_title') }} />
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three }}>
         <H2>{tr('nf_title')}</H2>

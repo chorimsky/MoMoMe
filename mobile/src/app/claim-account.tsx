@@ -59,7 +59,7 @@ export default function ClaimAccountScreen() {
   };
 
   return (
-    <Screen scroll>
+    <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('your_number') }} />
 
       {error ? (

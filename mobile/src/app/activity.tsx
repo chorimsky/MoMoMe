@@ -22,7 +22,7 @@ const FILTERS: { key: Filter; labelKey: StringKey }[] = [
 
 export default function ActivityScreen() {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [items, setItems] = useState<Payment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -122,7 +122,7 @@ export default function ActivityScreen() {
                   </Body>
                   <Body muted style={{ fontSize: 12.5 }}>
                     {PROVIDERS[p.recipient.provider]?.short} · {METHOD_LABEL[p.method]} ·{' '}
-                    {new Date(p.createdAt).toLocaleDateString()}
+                    {new Date(p.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB')}
                   </Body>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>

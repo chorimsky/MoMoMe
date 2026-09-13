@@ -112,7 +112,7 @@ export default function ContactsBackupScreen() {
   };
 
   return (
-    <Screen scroll>
+    <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('bk_title') }} />
 
       {error ? (

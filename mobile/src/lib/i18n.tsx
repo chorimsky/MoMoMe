@@ -202,6 +202,31 @@ export const STRINGS = {
   or_enter_code: ['Or enter a merchant code', 'Ou saisissez un code marchand'],
   pay: ['Pay', 'Payer'],
   scanned_not_momo: ['Scanned (not a MoMo›Me code):', 'Scanné (code non MoMo›Me) :'],
+  // Server error codes → localized messages (mapped by errMessage()). The server speaks
+  // English; the person reads in their language.
+  err_network: ["You're offline — check your connection and try again.", 'Vous semblez hors ligne — vérifiez votre connexion et réessayez.'],
+  err_not_found: ["We couldn't find that — check the code or link and try again.", 'Introuvable — vérifiez le code ou le lien et réessayez.'],
+  err_no_merchant: ['This merchant code is not active.', "Ce code marchand n'est pas actif."],
+  err_no_payment: ['This payment could not be found.', 'Ce paiement est introuvable.'],
+  err_quote_expired: ['The rate expired — please start again to get a fresh quote.', 'Le taux a expiré — recommencez pour obtenir un nouveau devis.'],
+  err_no_quote: ['This quote is no longer valid — please start again.', "Ce devis n'est plus valide — veuillez recommencer."],
+  err_bad_amount: ['Enter an amount between 500 and 5,000,000 XAF.', 'Saisissez un montant entre 500 et 5 000 000 XAF.'],
+  err_amount_too_high: ['That amount is above the maximum payout for this operator.', 'Ce montant dépasse le paiement maximum pour cet opérateur.'],
+  err_payments_paused: ['Payments are paused for a moment — please try again shortly.', 'Les paiements sont momentanément suspendus — réessayez sous peu.'],
+  err_payouts_unavailable: ["Payouts to this number aren't available right now — please try again shortly.", "Les paiements vers ce numéro sont indisponibles pour l'instant — réessayez sous peu."],
+  err_rates_unavailable: ['Live exchange rates are momentarily unavailable — please try again in a moment.', 'Les taux de change en direct sont momentanément indisponibles — réessayez dans un instant.'],
+  err_method_unavailable: ["This payment method isn't available right now — try another.", "Ce moyen de paiement n'est pas disponible actuellement — essayez-en un autre."],
+  err_bad_recipient: ["Check the recipient's number and try again.", 'Vérifiez le numéro du destinataire et réessayez.'],
+  err_bad_phone: ["This number isn't valid for the selected country — check the digits and the country.", "Ce numéro n'est pas valide pour le pays sélectionné — vérifiez les chiffres et le pays."],
+  err_bad_number: ["This number isn't valid — check the digits.", "Ce numéro n'est pas valide — vérifiez les chiffres."],
+  err_country_inactive: ["We don't deliver to this country yet.", 'Nous ne livrons pas encore dans ce pays.'],
+  err_no_device: ["This device isn't recognised — restart the app and try again.", "Cet appareil n'est pas reconnu — relancez l'application et réessayez."],
+  err_rate_limited: ['Too many attempts — please wait a moment and try again.', 'Trop de tentatives — patientez un instant et réessayez.'],
+  err_otp_limit: ['Too many codes requested — please wait before asking for another.', 'Trop de codes demandés — patientez avant d\'en demander un autre.'],
+  err_sms_unavailable: ["We can't send a text message right now — please try again shortly.", "Impossible d'envoyer un SMS pour l'instant — réessayez sous peu."],
+  err_feature_off: ["This feature isn't available yet.", "Cette fonctionnalité n'est pas encore disponible."],
+  err_forbidden: ["You can't do that from this device.", 'Action impossible depuis cet appareil.'],
+  err_unauthorized: ['Please sign in again.', 'Veuillez vous reconnecter.'],
   err_generic: ['Something went wrong — please try again.', "Une erreur s'est produite — veuillez réessayer."],
   mm_recipient: ['Mobile Money recipient', 'Bénéficiaire Mobile Money'],
   mt_tile_name: ['Mobile Money', 'Mobile Money'],
@@ -293,7 +318,7 @@ export const STRINGS = {
   // contacts
   contacts_title: ['Contacts', 'Contacts'],
   contacts_sub: ['People you pay — saved privately on your device.', 'Vos bénéficiaires — enregistrés en privé sur votre appareil.'],
-  contacts_add: ['Add contact', 'Ajouter un contact'],
+  contacts_add: ['Add contact', 'Ajouter'],
   contacts_empty: ['No saved contacts yet.', 'Aucun contact enregistré.'],
   contacts_empty_hint: ['Add someone, or they’re saved automatically after you pay.', 'Ajoutez quelqu’un — ou c’est automatique après un paiement.'],
   contacts_new: ['New contact', 'Nouveau contact'],
@@ -324,7 +349,7 @@ export const STRINGS = {
   paid_today: ['paid today', 'payé aujourd’hui'],
   paid_yesterday: ['paid yesterday', 'payé hier'],
   paid_days_ago: ['paid {n} days ago', 'payé il y a {n} jours'],
-  backup_restore: ['Back up & restore', 'Sauvegarder et restaurer'],
+  backup_restore: ['Back up', 'Sauvegarder'],
   // backup / restore
   bk_title: ['Back up & restore', 'Sauvegarder et restaurer'],
   bk_backup_cta: ['Back up across devices', 'Sauvegarder sur vos appareils'],
@@ -370,6 +395,7 @@ export const STRINGS = {
   pay_now: ['Pay now', 'Payer maintenant'],
   settles_instantly: ["Settles to the merchant's Mobile Money instantly", 'Réglé instantanément sur le Mobile Money du marchand'],
   pay_screen_title: ['Pay', 'Payer'],
+  pay_link_go_home: ['Back to Send', "Retour à l'envoi"],
 
   // receipt
   rcpt_success: ['Payment successful', 'Paiement réussi'],
@@ -617,6 +643,8 @@ function subscribe(cb: () => void) {
   };
 }
 const getSnapshot = () => lang;
+/** The current language outside React — for code that has no hook (the API client). */
+export const currentLang = (): Lang => lang;
 
 /** Translate a key, with optional {name} interpolation. */
 export function translate(l: Lang, key: StringKey, vars?: Record<string, string | number>): string {

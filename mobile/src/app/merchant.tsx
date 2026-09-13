@@ -53,7 +53,7 @@ export default function MerchantScreen() {
 
   if (loading) {
     return (
-      <Screen>
+      <Screen edges={[]}>
         <Stack.Screen options={{ title: tr('merchant') }} />
         <View style={styles.center}><ActivityIndicator color={t.accent} /></View>
       </Screen>
@@ -216,7 +216,7 @@ function Dashboard({
   onEdit: () => void;
 }) {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [code, setCode] = useState('');
   const [amount, setAmount] = useState('');
   const [linkKind, setLinkKind] = useState<'link' | 'invoice'>('link');
@@ -370,7 +370,7 @@ function Dashboard({
                     {p.recipient.name || p.recipient.phone}
                   </Body>
                   <Body muted style={{ fontSize: 12 }}>
-                    {METHOD_LABEL[p.method]} · {new Date(p.createdAt).toLocaleDateString()}
+                    {METHOD_LABEL[p.method]} · {new Date(p.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB')}
                   </Body>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 2 }}>

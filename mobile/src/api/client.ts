@@ -10,6 +10,7 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { devicePublicKeys, enrolledFor, forgetDeviceKeys, markEnrolled, signRequest } from '@/lib/deviceSign';
+import { currentLang, STRINGS, translate, type StringKey } from '@/lib/i18n';
 
 import type { MomoTransfer,
   AmbassadorSummary,
@@ -372,10 +373,16 @@ export async function setMyNumber(n: string): Promise<void> {
 }
 
 /** Human message for any thrown error (network / API / unknown). */
+/** Localize an API error: offline → offline copy; a known server error `code` → its
+ *  localized string; otherwise the server's (English) message, then a generic line.
+ *  Mirrors the web's errMessage(). */
 export function errMessage(e: unknown): string {
+  const l = currentLang();
   if (e instanceof ApiError) {
-    if (e.status === 0) return "You're offline. Check your connection and try again.";
-    return e.message;
+    if (e.status === 0) return translate(l, 'err_network');
+    const key = e.code ? `err_${e.code}` : '';
+    if (key && key in STRINGS) return translate(l, key as StringKey);
+    return e.message || translate(l, 'err_generic');
   }
-  return 'Something went wrong. Please try again.';
+  return translate(l, 'err_generic');
 }

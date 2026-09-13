@@ -35,7 +35,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen scroll>
+    <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('settings_label') }} />
 
       <View style={{ gap: Spacing.two, marginBottom: Spacing.four }}>

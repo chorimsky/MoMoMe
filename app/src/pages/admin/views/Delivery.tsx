@@ -42,9 +42,9 @@ export function DeliveryView() {
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>{PROVIDERS[p.id].name}</div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
                 <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Success rate</span>
-                <span className="num" style={{ fontSize: 16, fontWeight: 750 }}>{fmt(p.successRatePct)}%</span>
+                <span className="num" style={{ fontSize: 16, fontWeight: 750, color: p.successRatePct == null ? "var(--ink-3)" : undefined }}>{p.successRatePct == null ? "—" : `${fmt(p.successRatePct)}%`}</span>
               </div>
-              <Bar pct={p.successRatePct} tone={p.successRatePct >= 95 ? "recv" : p.successRatePct >= 80 ? "warn" : "bad"} />
+              <Bar pct={p.successRatePct ?? 0} tone={p.successRatePct == null ? "ink" : p.successRatePct >= 95 ? "recv" : p.successRatePct >= 80 ? "warn" : "bad"} />
               <div style={{ marginTop: 12 }}>
                 <KV k="Avg delivery" v={`${p.avgDeliverySec}s`} />
                 <KV k="Failures" v={p.failures} />

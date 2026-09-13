@@ -48,8 +48,12 @@ export function LiquidityView() {
       <SectionTitle t="Liquidity" s="Settlement pools across Bitcoin, USDT and XAF payout float." />
       <Grid cols={3} gap={16}>
         {data.pools.map((pool) => {
-          const pct = pool.capacity > 0 ? (pool.balance / pool.capacity) * 100 : 0;
-          const tone = poolTone(pct);
+          // A sandbox deployment reports the static exposure CEILING as the XAF pool (see
+          // floatBasis): a commitment cap, not a measured balance — so it can exceed the
+          // capacity. Show it at 100 % with the basis, never "400 %".
+          const ceilingOnly = pool.asset === "XAF" && /static exposure ceiling/i.test(data.floatBasis ?? "");
+          const pct = pool.capacity > 0 ? Math.min(100, (pool.balance / pool.capacity) * 100) : 0;
+          const tone = ceilingOnly ? "ink" : poolTone(pct);
           const belowFloor = pool.asset === "XAF" && pool.balance < data.floorXaf;
           return (
             <div key={pool.asset} className="card" style={{ padding: 18 }}>
@@ -78,7 +82,7 @@ export function LiquidityView() {
               <Bar pct={pct} tone={tone} />
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
                 <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>Utilization</span>
-                <span className="num" style={{ fontSize: 12, fontWeight: 700, color: `var(--${tone})` }}>{fmt(pct, 1)}%</span>
+                <span className="num" style={{ fontSize: 12, fontWeight: 700, color: `var(--${tone})` }}>{ceilingOnly ? "ceiling, not a balance" : `${fmt(pct, 1)}%`}</span>
               </div>
 
               {pool.asset === "XAF" && (

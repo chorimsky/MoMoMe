@@ -175,6 +175,8 @@ function sectionForPath(sub: string): Section | null {
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
     notifications: "notifications", health: "health", settings: "settings",
+    methods: "settings",                    // pay-in method switches, edited on Settings
+    "deletion-requests": "notifications",   // the account-deletion queue lives on the Notifications view
     readiness: "administration", // go-live console — Super Admin only (checked in the route)
     users: "administration", audit: "administration",
     testing: "testing",
@@ -214,9 +216,12 @@ api.post("/momo/transfers/resolve", (req, res) => {
   if (!r.ok) return res.status(422).json({ error: r.error, message: r.message });
   res.json({ route: r.route, to: r.to });
 });
+/** The requester of a transfer: a device or partner key — or the admin console itself,
+ *  which may create TEST transfers while the feature is off for users. */
+const transferOwner = async (req: ExpressRequest): Promise<string | null> => (await ownerOf(req)) ?? (isAdminRequest(req) ? `admin:${verifyToken(tokenFromHeaders(req.headers))?.uid ?? "console"}` : null);
 api.post("/momo/transfers", rateLimitMiddleware("momo_transfer", 20, 60_000), async (req, res) => {
   if (transferDenied(req, res)) return;
-  const owner = await ownerOf(req);
+  const owner = await transferOwner(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
   const b = (req.body ?? {}) as { from?: unknown; to?: unknown; xaf?: unknown; country?: unknown; fromName?: unknown; toName?: unknown };
   if (typeof b.from !== "string" || typeof b.to !== "string") return res.status(400).json({ error: "bad_request", message: "from and to are required." });
@@ -226,7 +231,7 @@ api.post("/momo/transfers", rateLimitMiddleware("momo_transfer", 20, 60_000), as
 });
 api.get("/momo/transfers", async (req, res) => {
   if (transferDenied(req, res)) return;
-  const owner = await ownerOf(req);
+  const owner = await transferOwner(req);
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device or API key." });
   res.json({ transfers: momoTransfer.transfersOf(owner).slice(0, 50) });
 });
@@ -2348,7 +2353,7 @@ api.get("/admin/delivery", async (_req, res) => {
       const failures = ps.filter((p) => p.displayStatus === "Failed").length;
       return {
         id,
-        successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : 100,
+        successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : null,
         avgDeliverySec: avg(done.map(deliverySec).filter((n): n is number => n != null)),
         failures,
         pending: ps.filter(isProcessing).length,
@@ -2425,7 +2430,7 @@ api.get("/admin/reports", async (req, res) => {
     byProvider: PROVIDER_IDS.map((id) => {
       const ps = all.filter((p) => p.recipient.provider === id);
       const done = ps.filter((p) => p.displayStatus === "Completed");
-      return { id, volumeXaf: done.reduce((s, p) => s + p.xaf, 0), payments: done.length, successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : 100 };
+      return { id, volumeXaf: done.reduce((s, p) => s + p.xaf, 0), payments: done.length, successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : null };
     }),
     failures: { total: 0, attempts: 0, reasons: [] }, // filled below
   };

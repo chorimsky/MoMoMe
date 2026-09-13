@@ -817,6 +817,10 @@ export interface LiquidityPool {
 export interface LiquiditySnapshot {
   pools: LiquidityPool[];
   floorXaf: number;
+  /** Where the XAF float figure comes from: a measured rail balance, or the static exposure
+   *  ceiling when no rail can be queried (a commitment cap, NOT a balance). */
+  floatBasis?: string;
+  stranded?: { count: number; xaf: number; items: unknown[] };
 }
 
 /* ---------- pricing / FX ---------- */
@@ -870,7 +874,8 @@ export interface RevenueReport {
 /* ---------- delivery ---------- */
 export interface DeliverySnapshot {
   status: { delivered: number; processing: number; failed: number; pending: number };
-  providers: Array<{ id: ProviderId; successRatePct: number; avgDeliverySec: number; failures: number; pending: number; volumeXaf: number }>;
+  /** successRatePct is null when the provider had no payments in the window: no rate, not 100. */
+  providers: Array<{ id: ProviderId; successRatePct: number | null; avgDeliverySec: number; failures: number; pending: number; volumeXaf: number }>;
 }
 
 /* ---------- mobile money ---------- */
@@ -894,7 +899,7 @@ export interface ReportsSnapshot {
   payments: number;
   customers: number;
   daily: Array<{ date: string; volumeXaf: number; payments: number }>;
-  byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number }>;
+  byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number | null }>;
   /** Why payments did not complete in the window, most common first. `reason` is the note
    *  the state machine wrote on the terminal transition (e.g. "invoice expired — not paid"),
    *  normalised so amounts and ids do not split one cause into many rows. */

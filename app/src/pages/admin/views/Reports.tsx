@@ -13,7 +13,7 @@ import { Failed, Loading } from "./Overview.js";
 function exportCsv(rows: ReportsSnapshot["byProvider"]) {
   const head = ["Provider", "Payments", "Volume XAF", "Success rate %"];
   const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = rows.map((p) => [PROVIDERS[p.id].name, p.payments, p.volumeXaf, p.successRatePct].map(esc).join(","));
+  const lines = rows.map((p) => [PROVIDERS[p.id].name, p.payments, p.volumeXaf, p.successRatePct ?? ""].map(esc).join(","));
   const csv = [head.map(esc).join(","), ...lines].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   const a = document.createElement("a");
@@ -102,7 +102,7 @@ export function ReportsView() {
                   <span style={{ fontSize: 12.5, fontWeight: 650 }}>{PROVIDERS[p.id].name}</span>
                   <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.payments)}</span>
                   <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(p.volumeXaf)} XAF</span>
-                  <span className="num" style={{ fontSize: 13, fontWeight: 700, color: "var(--recv)" }}>{fmt(p.successRatePct)}%</span>
+                  <span className="num" style={{ fontSize: 13, fontWeight: 700, color: p.successRatePct == null ? "var(--ink-3)" : "var(--recv)" }}>{p.successRatePct == null ? "—" : `${fmt(p.successRatePct)}%`}</span>
                 </div>
               ))}
             </div>

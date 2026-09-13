@@ -36,6 +36,20 @@ export function sendTemplate(to: string, name: string, lang: string, params: str
   return post({ to: waDigits(to), type: "template", template: { name, language: { code: lang },
     components: params.length ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }] : [] } });
 }
+/** A one-time code. Inside the 24 h reply window a plain text works; outside it Meta only
+ *  delivers templates, and a code needs the AUTHENTICATION kind — its body carries the code
+ *  as {{1}} and the "copy code" button carries it again as the button's URL parameter. The
+ *  generic notice templates cannot carry a code at all, which is why OTPs never go through
+ *  the notify() channel path. */
+export function sendAuthCode(to: string, code: string, lang: string, purpose: string): Promise<SendResult> {
+  if (inReplyWindow(to)) return sendText(to, `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.`);
+  const tpl = config.whatsapp.templateOtp;
+  if (!tpl) return Promise.resolve({ ok: false, detail: "Outside WhatsApp's 24 h reply window and WHATSAPP_TEMPLATE_OTP is not set — a code cannot be delivered over WhatsApp." });
+  return post({ to: waDigits(to), type: "template", template: { name: tpl, language: { code: lang }, components: [
+    { type: "body", parameters: [{ type: "text", text: code }] },
+    { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: code }] },
+  ] } });
+}
 /** Download an inbound media object (a voice note): GET /{id} → { url, mime_type }, then the
  *  bytes from that URL with the same bearer. null when anything is off. */
 export async function downloadMedia(mediaId: string): Promise<{ bytes: Buffer; mime: string } | null> {
@@ -89,6 +103,8 @@ export const whatsappChannel: NotifyChannel = {
   send: async (msg) => {
     const to = msg.audience === "sender" ? senderPhone(msg.to) ?? "" : msg.to;
     if (!to) return { ok: false, detail: "no phone" };
+    // Codes have their own path (sendAuthCode): a notice template has no slot for one.
+    if (msg.kind === "one_time_code") return { ok: false, detail: "A one-time code does not go through the notice channel — use sendOtp()." };
     if (inReplyWindow(to)) return sendText(to, msg.body);
     // Outside the window Meta delivers templates only. Each notice kind has a template slot
     // (approved separately on Meta); French bodies use the French template language when

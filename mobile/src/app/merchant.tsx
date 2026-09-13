@@ -7,7 +7,7 @@ import QRCode from 'react-native-qrcode-svg';
 
 const BRAND_MARK = require('../../assets/images/icon.png') as number;
 
-import { ApiError, api, errMessage } from '@/api/client';
+import { ApiError, api, errMessage, type OtpVia } from '@/api/client';
 import { Body, Button, Card, Chip, ErrorBar, Field, H2, IconCircle, Label, Mono, Pill, Screen, Segmented } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -63,9 +63,11 @@ export default function MerchantScreen() {
   return (
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
-      {error ? (
-        <ErrorBar message={error} style={{ marginTop: Spacing.four }} />
-      ) : merchant && !editing ? (
+      {/* An action's error sits ABOVE the screen it happened on. It used to replace the whole
+          dashboard: a failed code request left the merchant with nothing but a red bar and no
+          way to retry. */}
+      {error ? <ErrorBar message={error} style={{ marginTop: Spacing.four }} /> : null}
+      {merchant && !editing ? (
         <Dashboard
           merchant={merchant}
           summary={summary}
@@ -224,17 +226,33 @@ function Dashboard({
   const [clientName, setClientName] = useState('');
   const [dueDate, setDueDate] = useState('');
 
-  const requestVerify = async () => {
+  // Where the code went and what else exists: "check WhatsApp" is a different instruction
+  // from "check your messages", and "send by SMS instead" only makes sense when SMS exists.
+  const [sentVia, setSentVia] = useState<OtpVia | null>(null);
+  const [otpChannels, setOtpChannels] = useState<Record<OtpVia, boolean> | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
+  const requestVerify = async (prefer?: OtpVia) => {
     setBusy(true);
+    setError(null);
     try {
-      const r = await api.merchantVerifyRequest();
+      const r = await api.merchantVerifyRequest({ via: prefer, lang });
       if (r.devCode) setCode(r.devCode);
+      setSentVia(r.via ?? (r.sent ? 'sms' : null));
+      setOtpChannels(r.channels ?? null);
+      setCooldown(30);
     } catch (e) {
       setError(errMessage(e));
     } finally {
       setBusy(false);
     }
   };
+  const otherVia: OtpVia | null =
+    sentVia === 'whatsapp' && otpChannels?.sms ? 'sms' : sentVia === 'sms' && otpChannels?.whatsapp ? 'whatsapp' : null;
   const doVerify = async () => {
     setBusy(true);
     try {
@@ -295,14 +313,37 @@ function Dashboard({
       </View>
 
       {!merchant.verifiedPhone ? (
-        <Card padded style={{ borderColor: t.warn }}>
+        <Card padded style={{ borderColor: t.warn, gap: Spacing.two }}>
           <Label>{tr('verify_your_number')}</Label>
           <Body>{tr('verify_own_sub')}</Body>
-          <View style={{ flexDirection: 'row', gap: Spacing.two }}>
-            <Field placeholder={tr('six_digit_code')} keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
-            <Button title={tr('verify')} size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
-          </View>
-          <Button title={tr('send_me_code')} variant="ghost" size="md" onPress={requestVerify} />
+          {!sentVia && !code ? (
+            <>
+              <Button title={tr('send_me_code')} icon="chatbubble-ellipses" onPress={() => requestVerify()} loading={busy} />
+              <Body muted style={{ fontSize: 12.5 }}>{tr('otp_send_hint')}</Body>
+            </>
+          ) : (
+            <>
+              {sentVia ? (
+                <Body style={{ color: t.recv, fontSize: 13, fontFamily: Fonts.bodyBold }}>
+                  {tr(sentVia === 'whatsapp' ? 'otp_sent_whatsapp' : 'otp_sent_sms')}
+                </Body>
+              ) : null}
+              <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                <Field placeholder={tr('six_digit_code')} keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
+                <Button title={tr('verify')} size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
+              </View>
+              <Button
+                title={cooldown > 0 ? `${tr('otp_resend')} (${cooldown}s)` : tr('otp_resend')}
+                variant="ghost"
+                size="md"
+                disabled={busy || cooldown > 0}
+                onPress={() => requestVerify(sentVia ?? undefined)}
+              />
+              {otherVia ? (
+                <Button title={tr(otherVia === 'sms' ? 'otp_via_sms' : 'otp_via_whatsapp')} variant="ghost" size="md" disabled={busy} onPress={() => requestVerify(otherVia)} />
+              ) : null}
+            </>
+          )}
         </Card>
       ) : null}
 

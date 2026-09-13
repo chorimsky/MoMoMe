@@ -200,6 +200,9 @@ export interface AppConfig {
 }
 
 /* ---------- the public surface the app uses ---------- */
+export type OtpVia = 'whatsapp' | 'sms';
+export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
+
 export const api = {
   getConfig: () => req<AppConfig>('/config'),
 
@@ -291,8 +294,9 @@ export const api = {
     tier: 'individual' | 'business';
     ref?: string;
   }) => req<{ merchant: MerchantAccount }>('/merchant', { method: 'POST', body: JSON.stringify(body) }),
-  merchantVerifyRequest: () =>
-    req<{ sent: boolean; devCode?: string }>('/merchant/verify/request', { method: 'POST', body: '{}' }),
+  /** `via` = channel preference; the reply says where the code went and which channels exist. */
+  merchantVerifyRequest: (opts: { via?: OtpVia; lang?: 'en' | 'fr' } = {}) =>
+    req<OtpSent>('/merchant/verify/request', { method: 'POST', body: JSON.stringify(opts) }),
   merchantVerify: (code: string) =>
     req<{ merchant: MerchantAccount }>('/merchant/verify', { method: 'POST', body: JSON.stringify({ code }) }),
   merchantSummary: () => req<MerchantSummary>('/merchant/me/summary'),
@@ -326,8 +330,8 @@ export const api = {
 
   // phone-anchor + E2E recovery: `recovery` is the vault key wrapped by the user's
   // recovery code (server-opaque). Restore returns the account's records + blob.
-  anchorRequest: (phone: string) =>
-    req<{ sent: boolean; devCode?: string }>('/me/anchor/request', { method: 'POST', body: JSON.stringify({ phone }) }),
+  anchorRequest: (phone: string, opts: { via?: OtpVia; lang?: 'en' | 'fr' } = {}) =>
+    req<OtpSent>('/me/anchor/request', { method: 'POST', body: JSON.stringify({ phone, ...opts }) }),
   anchorVerify: (phone: string, code: string, recovery: unknown) =>
     req<{ ok: boolean; accountId: string }>('/me/anchor/verify', {
       method: 'POST',
@@ -340,10 +344,10 @@ export const api = {
     ),
 
   // account claim: own your Mobile Money number via OTP (identity provisioned on first payment)
-  requestClaim: (phone: string) =>
-    req<{ sent: boolean; devCode?: string }>('/identities/claim/request', {
+  requestClaim: (phone: string, opts: { via?: OtpVia; lang?: 'en' | 'fr' } = {}) =>
+    req<OtpSent>('/identities/claim/request', {
       method: 'POST',
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ phone, ...opts }),
     }),
   verifyClaim: (phone: string, code: string) =>
     req<{ claimed: boolean; identity: { digits: string; lightningAddress?: string } }>(

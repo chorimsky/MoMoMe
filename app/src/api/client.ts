@@ -290,6 +290,9 @@ export interface AnalyticsReport {
   durations: Array<{ bucket: string; sessions: number }>;
 }
 
+export type OtpVia = "whatsapp" | "sms";
+export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
+
 export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
@@ -372,7 +375,10 @@ export const api = {
   merchantMe: () => req<{ merchant: MerchantAccount }>("/merchant/me"),
   createMerchant: (body: { businessName: string; category: string; country: CountryCode; settlementPhone: string; tier: "individual" | "business"; location?: MerchantAccount["location"]; ref?: string }) =>
     req<{ merchant: MerchantAccount }>("/merchant", { method: "POST", body: JSON.stringify(body) }),
-  merchantVerifyRequest: () => req<{ sent: boolean; devCode?: string }>("/merchant/verify/request", { method: "POST", body: "{}" }),
+  /** `via` = the person's channel preference; the reply says where the code actually went
+   *  and which channels exist, so the UI can offer "send by SMS instead". */
+  merchantVerifyRequest: (opts: { via?: OtpVia; lang?: "en" | "fr" } = {}) =>
+    req<OtpSent>("/merchant/verify/request", { method: "POST", body: JSON.stringify(opts) }),
   merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
   merchantSummary: () => req<MerchantSummary>("/merchant/me/summary"),
   merchantLinks: () => req<{ links: MerchantLink[] }>("/merchant/links"),
@@ -400,8 +406,8 @@ export const api = {
 
   // Phase 4 — phone-anchor + E2E recovery. `recovery` is the vault key wrapped by
   // the user's recovery code (server-opaque). Restore returns account records + blob.
-  anchorRequest: (phone: string) =>
-    req<{ sent: boolean; devCode?: string }>("/me/anchor/request", { method: "POST", body: JSON.stringify({ phone }) }),
+  anchorRequest: (phone: string, opts: { via?: OtpVia; lang?: "en" | "fr" } = {}) =>
+    req<OtpSent>("/me/anchor/request", { method: "POST", body: JSON.stringify({ phone, ...opts }) }),
   anchorVerify: (phone: string, code: string, recovery: unknown) =>
     req<{ ok: boolean; accountId: string }>("/me/anchor/verify", { method: "POST", body: JSON.stringify({ phone, code, recovery }) }),
   anchorRestore: (phone: string, code: string) =>
@@ -559,8 +565,8 @@ export const api = {
   mergeMerchants: (keepId: string, dupeId: string) =>
     req<Merchant>("/admin/merchants/merge", { method: "POST", body: JSON.stringify({ keepId, dupeId }) }),
 
-  requestClaim: (phone: string) =>
-    req<{ sent: boolean; devCode?: string }>("/identities/claim/request", { method: "POST", body: JSON.stringify({ phone }) }),
+  requestClaim: (phone: string, opts: { via?: OtpVia; lang?: "en" | "fr" } = {}) =>
+    req<OtpSent>("/identities/claim/request", { method: "POST", body: JSON.stringify({ phone, ...opts }) }),
   verifyClaim: (phone: string, code: string) =>
     req<{ claimed: boolean; identity: Identity }>("/identities/claim/verify", { method: "POST", body: JSON.stringify({ phone, code }) }),
 

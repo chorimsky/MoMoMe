@@ -56,6 +56,17 @@ anything else is recorded as skipped with the reason instead of silently lost.
    French copies under the same names in language `fr` and set `WHATSAPP_TEMPLATE_LANG_FR=fr`:
    French notices then go out in French. A kind without a template is recorded as skipped
    with the reason — never sent into a void.
+   **Verification codes** (merchant number, "own your number", account claim) use a
+   separate **Authentication**-category template — Meta builds the body for you ("{{1}} is
+   your verification code"), you only pick the *Copy code* button and the expiry line. Create
+   it in Business Manager → Message templates → *Authentication*, submit `en` and `fr`
+   copies under one name, and set `WHATSAPP_TEMPLATE_OTP=<that name>`. With it set, every
+   code goes to WhatsApp first and falls back to SMS in the same request when Meta refuses
+   (131026 = not a WhatsApp number); the person can also ask for "send by SMS instead".
+   Without it, WhatsApp is not offered for codes at all — the notice templates have no slot
+   for a code and are never used for one. Admin → Notifications → "Verification codes" says
+   where codes can go right now. Authentication conversations are the cheapest Meta
+   category (≈ a third of an SMS in Cameroon) and cannot be spoofed with a sender-ID trick.
 5. **Delivery receipts** arrive on the same webhook: sent → delivered → read, or failed with
    Meta's reason (131047 = outside the 24 h window). The outbox record is updated, so
    Admin → Notifications shows whether the person GOT the message, not only that we sent it.

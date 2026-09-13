@@ -97,6 +97,10 @@ export const config = {
     /** Optional templates for the other notices (same {{1}} amount / {{2}} ref shape). */
     templateRefund: env("WHATSAPP_TEMPLATE_REFUND"),
     templateReview: env("WHATSAPP_TEMPLATE_REVIEW"),
+    /** An AUTHENTICATION-category template (Meta's one-time-passcode kind, with the
+     *  "copy code" button). Body {{1}} and the button parameter are both the code. When set,
+     *  verification codes go over WhatsApp first and SMS is the fallback. */
+    templateOtp: env("WHATSAPP_TEMPLATE_OTP"),
     templateLang: env("WHATSAPP_TEMPLATE_LANG", "en"),
     /** Language code of the French copies of the templates, when approved (e.g. "fr"). */
     templateLangFr: env("WHATSAPP_TEMPLATE_LANG_FR"),

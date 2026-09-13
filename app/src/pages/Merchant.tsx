@@ -13,7 +13,7 @@ import { fmt } from "../lib/format.js";
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
 import { CATEGORIES, catLabel } from "../lib/categories.js";
-import { api, ApiError } from "../api/client.js";
+import { api, ApiError, type OtpVia } from "../api/client.js";
 
 const cardStyle: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)", padding: "clamp(16px, 3.6vw, 20px)" };
 
@@ -155,9 +155,14 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
 
 /* ---------- verify settlement number ---------- */
 function Verify({ merchant, onVerified, onEdit, onLater }: { merchant: MerchantAccount; onVerified: (m: MerchantAccount) => void; onEdit: () => void; onLater: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  // Where the code went and what else is available — "check WhatsApp" is a different
+  // instruction from "check your messages", and "send by SMS instead" only makes sense
+  // when SMS exists. WhatsApp is preferred: cheaper, a copy-code button, no sender-ID spoofing.
+  const [via, setVia] = useState<OtpVia | undefined>();
+  const [channels, setChannels] = useState<Record<OtpVia, boolean> | undefined>();
   // An SMS that never arrives used to leave the merchant with no way forward: the "send"
   // button vanished once pressed. Resend is offered after a short cooldown.
   const [cooldown, setCooldown] = useState(0);
@@ -170,11 +175,15 @@ function Verify({ merchant, onVerified, onEdit, onLater }: { merchant: MerchantA
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function request() {
+  async function request(prefer?: OtpVia) {
     setBusy(true); setErr(null);
-    try { const r = await api.merchantVerifyRequest(); setDevCode(r.devCode ?? null); setSent(true); setCooldown(30); }
+    try {
+      const r = await api.merchantVerifyRequest({ via: prefer, lang });
+      setDevCode(r.devCode ?? null); setVia(r.via); setChannels(r.channels); setSent(true); setCooldown(30);
+    }
     catch (e) { setErr(e instanceof ApiError ? e.message : t("mrc_v_err_send")); } finally { setBusy(false); }
   }
+  const other: OtpVia | undefined = via === "whatsapp" && channels?.sms ? "sms" : via === "sms" && channels?.whatsapp ? "whatsapp" : undefined;
   async function verify() {
     setBusy(true); setErr(null);
     try { const { merchant: m } = await api.merchantVerify(code); onVerified(m); }
@@ -191,16 +200,30 @@ function Verify({ merchant, onVerified, onEdit, onLater }: { merchant: MerchantA
       </div>
       <div style={cardStyle}>
         {!sent ? (
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={request}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_send")}</button>
+          <div style={{ display: "grid", gap: 10 }}>
+            <button className="btn btn-primary btn-block" disabled={busy} onClick={() => request()}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_send")}</button>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.5 }}>{t("mrc_v_send_hint")}</div>
+          </div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
+            {via && (
+              <div role="status" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-2)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--recv)", flex: "none" }} />
+                {t(via === "whatsapp" ? "otp_sent_whatsapp" : "otp_sent_sms")}
+              </div>
+            )}
             {devCode && <div style={{ padding: "9px 12px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>{t("bk_demo_code")}: <span className="num" style={{ fontWeight: 700, color: "var(--accent)" }}>{devCode}</span></div>}
             <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder={t("bk_code_ph")} inputMode="numeric" autoFocus
               style={{ ...inputStyle, fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 24, letterSpacing: "0.3em", textAlign: "center" }} />
             <button className="btn btn-primary btn-block" disabled={code.length !== 6 || busy} onClick={verify}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("mrc_v_verify")}</button>
-            <button type="button" className="btn btn-quiet btn-block" disabled={busy || cooldown > 0} onClick={request} style={{ fontSize: 13 }}>
+            <button type="button" className="btn btn-quiet btn-block" disabled={busy || cooldown > 0} onClick={() => request(via)} style={{ fontSize: 13 }}>
               {cooldown > 0 ? `${t("mrc_v_resend")} (${cooldown}s)` : t("mrc_v_resend")}
             </button>
+            {other && (
+              <button type="button" className="btn btn-quiet btn-block" disabled={busy} onClick={() => request(other)} style={{ fontSize: 13 }}>
+                {t(other === "sms" ? "otp_via_sms" : "otp_via_whatsapp")}
+              </button>
+            )}
           </div>
         )}
         {err && <div role="alert" style={{ fontSize: 13, fontWeight: 600, color: "var(--bad)", marginTop: 10 }}>{err}</div>}

@@ -16,13 +16,14 @@ type Step = 'number' | 'otp' | 'done';
 
 export default function ClaimAccountScreen() {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [step, setStep] = useState<Step>('number');
   const [country, setCountry] = useState<CountryCode>('CM');
   const [pickCountry, setPickCountry] = useState(false);
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +35,9 @@ export default function ClaimAccountScreen() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.requestClaim(digits);
+      const r = await api.requestClaim(digits, { lang });
       setDevCode(r.devCode ?? null);
+      setVia(r.via ?? null);
       setStep('otp');
     } catch (e) {
       setError(errMessage(e));
@@ -130,6 +132,11 @@ export default function ClaimAccountScreen() {
             </Body>
           </View>
           <Card padded>
+            {via ? (
+              <Body style={{ color: t.recv, fontSize: 13, fontFamily: Fonts.bodyBold, marginBottom: Spacing.three }}>
+                {tr(via === 'whatsapp' ? 'otp_sent_whatsapp' : 'otp_sent_sms')}
+              </Body>
+            ) : null}
             {devCode ? (
               <View style={{ marginBottom: Spacing.three }}>
                 <Pill label={`${tr('demo_code')}: ${devCode}`} tone="accent" icon="information-circle" />

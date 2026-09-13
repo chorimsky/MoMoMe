@@ -19,7 +19,7 @@ import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth, sendOtpSms, notify, canSendSms, notifyDeletionRequest, notifyTestReport } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtp, notify, canSendOtp, otpChannels, notifyDeletionRequest, notifyTestReport, type OtpChannel } from "../core/notifications.js";
 import { isReviewPhone } from "../core/review.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
 import { fileTestReport, listTestReports, normaliseResults } from "../core/testReports.js";
@@ -52,7 +52,7 @@ import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, 
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
 import { platformFee } from "../core/pricing.js";
-import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
@@ -754,6 +754,13 @@ api.post("/admin/merchants/merge", async (req, res) => {
   res.json(m);
 });
 
+/** The person's channel preference for a one-time code, from the request body. Absent →
+ *  WhatsApp first, SMS fallback (see sendOtp). */
+function otpPrefs(body: unknown): { prefer?: OtpChannel; lang?: "en" | "fr" } {
+  const b = (body ?? {}) as { via?: string; lang?: string };
+  return { prefer: b.via === "sms" ? "sms" : b.via === "whatsapp" ? "whatsapp" : undefined, lang: b.lang === "fr" ? "fr" : "en" };
+}
+
 /* ---------- consumer account claim (Phase 2) ---------- */
 api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6, 60_000), async (req, res) => {
   const phoneRaw = String((req.body ?? {}).phone ?? "");
@@ -771,9 +778,9 @@ api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6,
   }
   // devCode is sandbox-only; in production the code is sent by SMS — it USED to be
   // generated and never sent, which made the claim flow impossible to complete live.
-  const sentSms = liveMoney() ? await sendOtpSms(`${COUNTRIES.CM.dial}${phoneRaw.replace(/\D/g, "").slice(-9)}`, r.code!, "claim your account") : false;
-  if (liveMoney() && !sentSms) return res.status(503).json({ error: "sms_unavailable", message: "We could not send the code right now. Please try again shortly." });
-  res.json({ sent: true, devCode: liveMoney() ? undefined : r.code });
+  const sent = liveMoney() ? await sendOtp(`${COUNTRIES.CM.dial}${phoneRaw.replace(/\D/g, "").slice(-9)}`, r.code!, "claim your account", otpPrefs(req.body)) : { sent: false as const };
+  if (liveMoney() && !sent.sent) return res.status(503).json({ error: "sms_unavailable", message: "We could not send the code right now. Please try again shortly." });
+  res.json({ sent: true, via: sent.via, channels: otpChannels(), devCode: liveMoney() ? undefined : r.code });
 });
 
 api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 20, 60_000), async (req, res) => {
@@ -1344,14 +1351,17 @@ api.post("/me/delete", rateLimitDurableMiddleware("account_delete", 5, 60_000), 
   const device = forgetDevice(owner);
   const referrals = forgetReferrals(owner);
   clearPushToken(owner); // the push token describes the person's device — it goes too
+  // A merchant profile is the person's business name and settlement number, keyed to this
+  // device. It used to survive deletion — and keep resolving its pay links.
+  const merchant = forgetMerchant(owner);
 
   // Count what is being kept, so the person is told plainly rather than left to assume.
   const retainedPayments = (await store().listPayments()).filter((p) => p.senderId === owner).length;
 
-  console.warn(`[privacy] account deletion for a device: vault=${vaultRecords} device=${device} referrals=${referrals} retainedPayments=${retainedPayments}`);
+  console.warn(`[privacy] account deletion for a device: vault=${vaultRecords} device=${device} referrals=${referrals} merchant=${merchant.merchant} links=${merchant.links} retainedPayments=${retainedPayments}`);
   res.json({
     ok: true,
-    deleted: { contacts: vaultRecords, device, referrals },
+    deleted: { contacts: vaultRecords, device, referrals, merchant: merchant.merchant, payLinks: merchant.links },
     retained: {
       payments: retainedPayments,
       reason: "Completed payment records are kept because anti-money-laundering law requires a money transmitter to retain them. They are no longer linked to a device you control.",
@@ -1425,11 +1435,11 @@ api.post("/me/anchor/request", rateLimitDurableMiddleware("anchor_req", 6, 60_00
   // This answered `sent: true` without sending anything — the same defect the merchant
   // route had: requestAnchor only GENERATES the code. In production the dev code is
   // withheld, so "own your number" waited for an SMS that never existed.
-  const sent = await sendOtpSms(`${COUNTRIES.CM.dial}${phoneIn.replace(/\D/g, "").slice(-9)}`, r.code!, "confirm your number");
-  if (!sent && liveMoney()) {
+  const sent = await sendOtp(`${COUNTRIES.CM.dial}${phoneIn.replace(/\D/g, "").slice(-9)}`, r.code!, "confirm your number", otpPrefs(req.body));
+  if (!sent.sent && liveMoney()) {
     return res.status(503).json({ error: "sms_unavailable", message: "We can't send confirmation codes right now. Please try again later." });
   }
-  res.json({ sent, devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
+  res.json({ sent: sent.sent, via: sent.via, channels: otpChannels(), devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
 });
 
 api.post("/me/anchor/verify", rateLimitDurableMiddleware("anchor_verify", 20, 60_000), async (req, res) => {
@@ -1527,13 +1537,14 @@ api.post("/merchant", rateLimitMiddleware("merchant_write", 20, 60_000), async (
   // verification by wiring an SMS provider and setting SMS_ENABLED=true.
   // Gate on whether an SMS can ACTUALLY be delivered, not on a separate flag that could
   // be true while the channel behind it is unwired.
-  if (!canSendSms()) m = activateUnverified(m.id) ?? m;
+  if (!canSendOtp()) m = activateUnverified(m.id) ?? m;
   // Referral attribution: if this device arrived via an ambassador's ?ref, credit them
   // (once — recordReferral is a no-op if already attributed or self-referral). Skipped
   // when the referrals feature is switched off.
   const ref = typeof (req.body as { ref?: string }).ref === "string" ? (req.body as { ref?: string }).ref! : "";
   if (ref && getSettings().features.referrals) recordReferral(owner, ref);
-  res.status(201).json({ merchant: publicMerchant(m), smsEnabled: config.smsEnabled });
+  const channels = otpChannels();
+  res.status(201).json({ merchant: publicMerchant(m), smsEnabled: channels.sms, otpChannels: channels });
 });
 
 /** Send an OTP to the settlement number to prove ownership. */
@@ -1553,14 +1564,16 @@ api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6,
   // code. In production the dev code is withheld, so a merchant waited for an SMS that did
   // not exist, never reached verifiedPhone, and could never create a pay link. Send it, and
   // report what actually happened.
-  const sent = await sendOtpSms(`${COUNTRIES[m.country].dial}${m.settlementPhone}`, r.code!, "verify your business number");
-  if (!sent && liveMoney()) {
+  const sent = await sendOtp(`${COUNTRIES[m.country].dial}${m.settlementPhone}`, r.code!, "verify your business number", otpPrefs(req.body));
+  if (!sent.sent && liveMoney()) {
     return res.status(503).json({
       error: "sms_unavailable",
       message: "We can't send verification codes right now. Please contact support so we can verify your number.",
     });
   }
-  res.json({ sent, devCode: liveMoney() ? undefined : r.code });
+  // `via` tells the client where to look ("check WhatsApp" vs "check your messages") and
+  // `channels` whether offering "send by SMS instead" makes sense.
+  res.json({ sent: sent.sent, via: sent.via, channels: otpChannels(), devCode: liveMoney() ? undefined : r.code });
 });
 
 /** Verify the OTP → the merchant account goes live. */

@@ -23,7 +23,7 @@ const inputStyle: React.CSSProperties = {
 type Step = "phone" | "code" | "showCode" | "restoreCode" | "done";
 
 export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode: "backup" | "restore"; onClose: () => void; onRestored: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   // mode is internal state so a second-device "backup" that the server rejects with
   // restore_first can switch this dialog straight into the restore flow.
   const [mode, setMode] = useState<"backup" | "restore">(initialMode);
@@ -31,6 +31,7 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [via, setVia] = useState<"whatsapp" | "sms" | undefined>();
   const [recoveryCode, setRecoveryCode] = useState("");
   const [restoreCode, setRestoreCode] = useState("");
   const [pendingBlob, setPendingBlob] = useState<{ salt: string; iterations: number; iv: string; ct: string } | null>(null);
@@ -45,8 +46,8 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
   async function sendCode() {
     setBusy(true); setErr(null);
     try {
-      const r = await api.anchorRequest(phone);
-      setDevCode(r.devCode ?? null);
+      const r = await api.anchorRequest(phone, { lang });
+      setDevCode(r.devCode ?? null); setVia(r.via);
       setStep("code");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -131,6 +132,7 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
       {step === "code" && (
         <>
           <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "4px 0 12px" }}>{t("bk_enter_code")} <span className="num" style={{ fontWeight: 700, color: "var(--ink)" }}>{dial} {phone}</span></p>
+          {via && <p role="status" style={{ fontSize: 13, color: "var(--recv)", margin: "0 0 12px", fontWeight: 600 }}>{t(via === "whatsapp" ? "otp_sent_whatsapp" : "otp_sent_sms")}</p>}
           {devCode && <div style={{ marginBottom: 12, padding: "9px 12px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>{t("bk_demo_code")}: <span className="num" style={{ fontWeight: 700, color: "var(--accent)" }}>{devCode}</span></div>}
           <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder={t("bk_code_ph")} inputMode="numeric" autoFocus
             style={{ ...inputStyle, fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 24, letterSpacing: "0.3em", textAlign: "center" }} />

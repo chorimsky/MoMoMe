@@ -68,11 +68,19 @@ async function main() {
     })).json() as any;
     ok("a payment exists against this device", !!pay?.id, pay?.id ?? pay?.error);
 
+    // A merchant profile — the person's business name and settlement number, keyed to
+    // this device. It used to survive deletion and keep resolving its pay links.
+    const mc = await (await post("/api/merchant", ME, { businessName: "Chez Moi", country: "CM", settlementPhone: "677000790" })).json() as any;
+    ok("a merchant profile exists against this device", !!mc?.merchant?.code, mc?.merchant?.code ?? mc?.error);
+
     /* ---- delete ---- */
     const res = await post("/api/me/delete", ME);
     const out = await res.json() as any;
     ok("deletion succeeds for the device that owns the account", res.status === 200 && out.ok === true, String(res.status));
     ok("it reports the contacts it destroyed", out.deleted?.contacts === 2, String(out.deleted?.contacts));
+    ok("…and the merchant profile", out.deleted?.merchant === true, String(out.deleted?.merchant));
+    ok("the merchant profile is actually gone", (await get("/api/merchant/me", ME)).status === 404);
+    ok("…and its code no longer resolves for buyers", (await get(`/api/merchant/by-code/${mc.merchant.code}`, ME)).status === 404);
 
     /* ---- the promise: gone ---- */
     const after = await (await get("/api/me/vault", ME)).json() as any;

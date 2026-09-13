@@ -22,6 +22,8 @@ import type {
 } from "../../../shared/types.js";
 import { COUNTRIES } from "../../../shared/domain.js";
 import { channelsFor, smsChannel } from "../adapters/notify.js";
+import { sendAuthCode } from "../adapters/whatsapp.js";
+import { config, whatsappConfigured } from "../config.js";
 import { pushTokenFor, pushTokenCount } from "./pushTokens.js";
 import { getSettings } from "./settings.js";
 import { id } from "./ids.js";
@@ -267,23 +269,69 @@ export function canSendSms(): boolean {
   return smsChannel.configured() && getSettings().channels.SMS;
 }
 
-/** Send a one-time code, and say whether it actually went.
+export type OtpChannel = "whatsapp" | "sms";
+
+/** Which channels can carry a one-time code right now. WhatsApp needs the Cloud API wired
+ *  AND an approved authentication template (outside the 24 h reply window nothing else is
+ *  delivered); SMS needs a gateway. Both also need their Settings switch on. */
+export function otpChannels(): Record<OtpChannel, boolean> {
+  return {
+    whatsapp: whatsappConfigured() && !!config.whatsapp.templateOtp && getSettings().channels.WhatsApp,
+    sms: canSendSms(),
+  };
+}
+export function canSendOtp(): boolean {
+  const c = otpChannels();
+  return c.whatsapp || c.sms;
+}
+
+/** Send a one-time code and say where it actually went.
  *
- *  Merchant verification used to call requestAnchor(), which only GENERATES a code, and then
- *  answer `{ sent: true }`. Nothing was ever sent. In production the dev code is withheld, so
- *  the merchant waited for an SMS that did not exist, never reached verifiedPhone, and could
- *  never create a pay link — the whole merchant flow dead-ended on a message that was never
- *  dispatched. The code is sent but NOT recorded: see `recordAs`. */
+ *  WhatsApp first, SMS as the fallback — a WhatsApp authentication template is cheaper than
+ *  an SMS in this market, arrives with a "copy code" button, and cannot be spoofed by a
+ *  sender-ID trick the way an SMS can. `prefer` lets the person pick ("send it by SMS
+ *  instead" when their WhatsApp is on another phone). The code is sent but NOT recorded:
+ *  the outbox is readable by every operator with the notifications section, and a stored
+ *  OTP is a stored ability to complete somebody else's verification.
+ *
+ *  History: this used to go through notify(), which would have handed the code to the
+ *  WhatsApp channel as a "manual_review" notice — a template with amount/reference slots
+ *  and no place for a code — so a merchant on WhatsApp got a blank review notice, and the
+ *  SMS was then skipped as "already delivered over WhatsApp". */
+export async function sendOtp(
+  to: string,
+  code: string,
+  purpose: string,
+  opts: { prefer?: OtpChannel; lang?: "en" | "fr" } = {},
+): Promise<{ sent: boolean; via?: OtpChannel }> {
+  const avail = otpChannels();
+  const order: OtpChannel[] = opts.prefer === "sms" ? ["sms", "whatsapp"] : ["whatsapp", "sms"];
+  const logged = `One-time code sent to ${to} (${purpose}). The code itself is not recorded.`;
+  for (const ch of order) {
+    if (!avail[ch]) continue;
+    const rec = record({ kind: "one_time_code", audience: "recipient", channel: ch, to, body: logged, status: "queued" });
+    let r: { ok: boolean; detail?: string; id?: string };
+    try {
+      r = ch === "whatsapp"
+        ? await sendAuthCode(to, code, opts.lang === "fr" && config.whatsapp.templateLangFr ? config.whatsapp.templateLangFr : config.whatsapp.templateLang, purpose)
+        : await smsChannel.send({ audience: "recipient", kind: "one_time_code", to, body: `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.` });
+    } catch (e) {
+      r = { ok: false, detail: e instanceof Error ? e.message : "send threw" };
+    }
+    rec.attempts += 1;
+    rec.status = r.ok ? "sent" : "failed";
+    if (r.ok) { rec.sentAt = new Date().toISOString(); rec.deliveryStatus = "sent"; }
+    if (r.id) rec.providerMessageId = r.id;
+    if (r.detail) rec.detail = r.detail;
+    touch("notifications");
+    if (r.ok) return { sent: true, via: ch };
+  }
+  return { sent: false };
+}
+
+/** @deprecated use sendOtp — kept so older call sites keep their shape. */
 export async function sendOtpSms(to: string, code: string, purpose: string): Promise<boolean> {
-  if (!canSendSms()) return false;
-  const recs = await notify({
-    kind: "manual_review", // operational, not a payment event
-    audience: "recipient",
-    to,
-    body: `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.`,
-    recordAs: `One-time code sent to ${to} (${purpose}). The code itself is not recorded.`,
-  }).catch(() => []);
-  return recs.some((r) => r.status === "sent");
+  return (await sendOtp(to, code, purpose, { prefer: "sms" })).sent;
 }
 
 /* ---------- reading the outbox ---------- */
@@ -295,9 +343,13 @@ export function listNotifications(limit = 100): NotificationRecord[] {
 export function notificationHealth(): {
   total: number; sent: number; failed: number; skipped: number;
   channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: NotificationAudience[]; devices?: number }>;
+  /** Where verification codes can go right now. Merchant verification, "own your number"
+   *  and account claim all dead-end when this is all false — the console must say so. */
+  otp: Record<OtpChannel, boolean> & { whatsappTemplate: boolean };
 } {
   const all: NotificationAudience[] = ["recipient", "sender", "operator"];
   return {
+    otp: { ...otpChannels(), whatsappTemplate: !!config.whatsapp.templateOtp },
     total: outbox.length,
     sent: outbox.filter((r) => r.status === "sent").length,
     failed: outbox.filter((r) => r.status === "failed").length,

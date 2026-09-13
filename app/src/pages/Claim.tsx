@@ -16,12 +16,13 @@ import { FlowCard, Label } from "./send/ui.js";
 type Step = "number" | "otp" | "done";
 
 export function Claim() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [step, setStep] = useState<Step>("number");
   const [country, setCountry] = useState<keyof typeof COUNTRIES>("CM");
   const [phone, setPhone] = useState("6 90 55 18 72");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [via, setVia] = useState<"whatsapp" | "sms" | undefined>();
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -31,8 +32,8 @@ export function Claim() {
   async function sendCode() {
     setBusy(true); setErr(null);
     try {
-      const r = await api.requestClaim(phone);
-      setDevCode(r.devCode ?? null);
+      const r = await api.requestClaim(phone, { lang });
+      setDevCode(r.devCode ?? null); setVia(r.via);
       setStep("otp");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -83,6 +84,7 @@ export function Claim() {
             <FlowCard>
               <h1 style={{ fontSize: 24, marginTop: 4 }}>{t("claim_otp_title")}</h1>
               <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 18px", lineHeight: 1.5 }}>{t("claim_otp_sub")} <span className="num" style={{ fontWeight: 700, color: "var(--ink)" }}>{c.dial} {phone}</span></p>
+              {via && <p role="status" style={{ fontSize: 13, color: "var(--recv)", margin: "-10px 0 12px", fontWeight: 600 }}>{t(via === "whatsapp" ? "otp_sent_whatsapp" : "otp_sent_sms")}</p>}
               {devCode && (
                 <div style={{ marginBottom: 14, padding: "10px 13px", borderRadius: "var(--r)", background: "var(--accent-wash)", border: "1px solid var(--line)", fontSize: 12.5, color: "var(--ink-2)" }}>
                   {t("claim_demo_code")}: <span className="num" style={{ fontWeight: 700, color: "var(--accent)" }}>{devCode}</span>

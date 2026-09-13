@@ -386,6 +386,7 @@ export type NotificationKind =
   | "transfer_failed"        // it did not; the payer's money is being returned
   | "reconciliation_mismatch" // the provider's statement disagrees with our books
   | "manual_review"          // a payment is held and needs a person
+  | "one_time_code"          // a verification code (the code itself is never recorded)
   | "deletion_request"       // someone asked for their data to go, from a device we cannot verify
   | "test_report";           // a tester submitted a checklist run
 

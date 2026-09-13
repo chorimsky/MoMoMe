@@ -157,6 +157,22 @@ export function disableLink(code: string, merchantId: string): boolean {
   return true;
 }
 
+/** Account deletion: the merchant profile (business name, settlement number, location) is
+ *  personal data tied to the device, so it goes with the device; its pay links stop
+ *  resolving. Sales are payments and are retained under the same rule as every payment.
+ *  Returns what was removed so the person can be told. */
+export function forgetMerchant(owner: string): { merchant: boolean; links: number } {
+  const id = ownerIndex.get(owner);
+  if (!id) return { merchant: false, links: 0 };
+  const m = merchants.get(id);
+  let n = 0;
+  for (const [code, l] of links) if (l.merchantId === id) { links.delete(code); n++; }
+  merchants.delete(id); ownerIndex.delete(owner);
+  if (m) codeIndex.delete(m.code);
+  touch("merchants2");
+  return { merchant: true, links: n };
+}
+
 /* ---------- sales (a merchant's incoming payments) ---------- */
 /** Payments that settle to this merchant — STRICTLY those explicitly tagged with
  *  this merchant's id (set only when a payment went through the merchant's own

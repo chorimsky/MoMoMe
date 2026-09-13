@@ -9,7 +9,8 @@ import { Card, SectionTitle, toneColor, toneWash } from "../AdminUI.js";
 import { useAdmin } from "../context.js";
 
 type Health = { total: number; sent: number; failed: number; skipped: number;
-  channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }> };
+  channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }>;
+  otp?: { whatsapp: boolean; sms: boolean; whatsappTemplate: boolean } };
 
 export function NotificationsView() {
   const { notifications, dismiss } = useAdmin();
@@ -89,6 +90,20 @@ export function NotificationsView() {
               </div>
             );
           })}
+          {health.otp && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13 }}>
+              <div>
+                <strong>VERIFICATION CODES</strong>
+                <span style={{ color: "var(--ink-3)", marginLeft: 8, fontSize: 12 }}>merchant number, own-your-number, account claim</span>
+              </div>
+              <span style={{ color: health.otp.whatsapp || health.otp.sms ? "var(--ok, inherit)" : "var(--bad)", fontSize: 12.5, textAlign: "right" }}>
+                {health.otp.whatsapp && health.otp.sms ? "WhatsApp first, SMS fallback"
+                  : health.otp.whatsapp ? "WhatsApp only"
+                  : health.otp.sms ? `SMS only${!health.otp.whatsappTemplate ? " — set WHATSAPP_TEMPLATE_OTP to send codes over WhatsApp" : ""}`
+                  : "nowhere — nobody can verify a number. Set WHATSAPP_TEMPLATE_OTP (an approved authentication template) or SMS_WEBHOOK_URL."}
+              </span>
+            </div>
+          )}
           {sent.length > 0 && (
             <div style={{ marginTop: 14, borderTop: "1px solid var(--line-2)", paddingTop: 10 }}>
               {sent.slice(0, 8).map((r) => (

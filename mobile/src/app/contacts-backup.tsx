@@ -26,7 +26,7 @@ type Step = 'number' | 'otp' | 'code' | 'done';
 
 export default function ContactsBackupScreen() {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [mode, setMode] = useState<Mode>('choose');
   const [step, setStep] = useState<Step>('number');
   const [country, setCountry] = useState<CountryCode>('CM');
@@ -34,6 +34,7 @@ export default function ContactsBackupScreen() {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
   const [recoveryCode, setRecoveryCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +55,9 @@ export default function ContactsBackupScreen() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.anchorRequest(digits);
+      const r = await api.anchorRequest(digits, { lang });
       setDevCode(r.devCode ?? null);
+      setVia(r.via ?? null);
       setStep('otp');
     } catch (e) {
       setError(errMessage(e));
@@ -161,7 +163,7 @@ export default function ContactsBackupScreen() {
         />
       ) : null}
       {mode === 'backup' && step === 'otp' ? (
-        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} busy={busy} onVerify={doBackup} />
+        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} busy={busy} onVerify={doBackup} />
       ) : null}
       {mode === 'backup' && step === 'code' ? (
         <View style={{ gap: Spacing.four, paddingTop: Spacing.five, alignItems: 'center' }}>
@@ -194,7 +196,7 @@ export default function ContactsBackupScreen() {
         />
       ) : null}
       {mode === 'restore' && step === 'otp' ? (
-        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} busy={busy} onVerify={() => setStep('code')} />
+        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} busy={busy} onVerify={() => setStep('code')} />
       ) : null}
       {mode === 'restore' && step === 'code' ? (
         <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
@@ -299,6 +301,7 @@ function OtpStep({
   otp,
   setOtp,
   devCode,
+  via,
   busy,
   onVerify,
 }: {
@@ -307,12 +310,18 @@ function OtpStep({
   otp: string;
   setOtp: (s: string) => void;
   devCode: string | null;
+  via: 'whatsapp' | 'sms' | null;
   busy: boolean;
   onVerify: () => void;
 }) {
   return (
     <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
       <Card padded>
+        {via ? (
+          <Body style={{ color: t.recv, fontSize: 13, fontFamily: Fonts.bodyBold, marginBottom: Spacing.three }}>
+            {tr(via === 'whatsapp' ? 'otp_sent_whatsapp' : 'otp_sent_sms')}
+          </Body>
+        ) : null}
         {devCode ? (
           <Mono style={{ color: t.accent, marginBottom: Spacing.three }}>{tr('demo_code')}: {devCode}</Mono>
         ) : null}

@@ -30,11 +30,15 @@ function setBrandLogo(v: string | null) {
   _brandSubs.forEach((f) => f(v));
 }
 if (typeof window !== "undefined") window.addEventListener("mm-brand-logo", (e) => setBrandLogo((e as CustomEvent).detail ?? null));
+/** The live brand logo without a hook — for canvas renderers (pay card, receipt). */
+export function brandLogoNow(): string | null { return _brandLogo; }
 export function useBrandLogo(): string | null {
   const [v, setV] = useState<string | null>(_brandLogo);
   useEffect(() => {
     _brandSubs.add(setV);
-    if (!_brandLoaded) { _brandLoaded = true; api.getConfig().then((c) => setBrandLogo(c.brandLogo)).catch(() => {}); }
+    // A failed first fetch (server restarting, flaky link) must not pin the built-in wordmark
+    // for the rest of the session: the next mount tries again.
+    if (!_brandLoaded) { _brandLoaded = true; api.getConfig().then((c) => setBrandLogo(c.brandLogo)).catch(() => { _brandLoaded = false; }); }
     return () => { _brandSubs.delete(setV); };
   }, []);
   return v;

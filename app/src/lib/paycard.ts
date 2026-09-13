@@ -6,6 +6,8 @@ import QRCode from "qrcode";
 
 const C = { paper: "#FAF9F5", card: "#ffffff", ink: "#1a1714", ink2: "#56504a", ink3: "#8b837a", brand: "#FFC92E", line: "#ece6da" };
 
+import { brandLogoNow } from "../components/atoms.js";
+
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
@@ -36,8 +38,9 @@ export async function payCardPng(c: PayCard): Promise<Blob> {
   ctx.fillText(c.link.replace(/^https?:\/\//, ""), W / 2, qy + 640 + 150);
   ctx.fillStyle = C.ink3; ctx.font = "500 30px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   ctx.fillText(c.footnote, W / 2, H - 130);
-  ctx.fillStyle = C.ink; ctx.font = "800 34px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  ctx.fillText("MoMo›Me", W / 2, H - 60);
+  // The brand at the foot of the card: the operator's uploaded logo when there is one,
+  // otherwise the wordmark in its own face with the green bolt — never a plain-text stand-in.
+  await drawBrand(ctx, W / 2, H - 60);
   return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
 }
 
@@ -69,4 +72,25 @@ export async function sharePayCard(c: PayCard, text: string): Promise<"shared" |
   }
   window.open(`https://wa.me/?text=${encodeURIComponent(`${text}\n${c.link}`)}`, "_blank", "noopener");
   return "whatsapp";
+}
+
+const BOLT = new Path2D("M15.5 1 L2 27 Q1 29 3.5 29 H9.5 L7 47 Q6.8 49.5 9 47.5 L21 22 Q22 20 19.5 20 H13.5 L17.8 3 Q18.4 0.5 15.5 1 Z");
+async function drawBrand(ctx: CanvasRenderingContext2D, cx: number, baseline: number): Promise<void> {
+  const logo = brandLogoNow();
+  if (logo) {
+    const img = await new Promise<HTMLImageElement | null>((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = logo; });
+    if (img && img.naturalHeight) { const h = 56; const w = Math.min(320, img.naturalWidth * (h / img.naturalHeight)); ctx.drawImage(img, cx - w / 2, baseline - h + 8, w, h); return; }
+  }
+  try { await document.fonts.load('400 40px "Bagel Fat One"'); } catch { /* fallback face */ }
+  const face = document.fonts.check('400 40px "Bagel Fat One"') ? '"Bagel Fat One"' : "system-ui, sans-serif";
+  ctx.font = `400 44px ${face}`; ctx.textBaseline = "alphabetic";
+  const parts: Array<[string, string]> = [["Mo", "#FFC92E"], ["Mo", "#EA6A28"], ["⚡", ""], ["Me", "#EA6A28"]];
+  const boltW = 22; const total = parts.reduce((a, [t]) => a + (t === "⚡" ? boltW : ctx.measureText(t).width), 0);
+  let x = cx - total / 2;
+  ctx.textAlign = "left";
+  for (const [t, color] of parts) {
+    if (t === "⚡") { ctx.save(); ctx.translate(x, baseline - 34); ctx.scale(boltW / 23, 36 / 50); ctx.fillStyle = "#1FA971"; ctx.fill(BOLT); ctx.restore(); x += boltW; continue; }
+    ctx.fillStyle = color; ctx.fillText(t, x, baseline); x += ctx.measureText(t).width;
+  }
+  ctx.textAlign = "center";
 }

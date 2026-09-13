@@ -209,7 +209,10 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: 
       {!lockRecipient && (<>
       <Label>{t("mm_number")}</Label>
           <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ position: "relative", flex: "none" }}>
+            {/* A select sizes itself to its WIDEST option ("+241 GA — soon"), which on a 375 px
+                phone pushed the row 23 px past the screen. Fix the box to the selected value's
+                width; the options still open at full length. */}
+            <div style={{ position: "relative", flex: "none", width: 118, minWidth: 0 }}>
               <select value={s.country} disabled={lockRecipient} aria-label={t("country_label")} onChange={(e) => { const cc = e.target.value as Draft["country"]; set({ country: cc, provider: COUNTRIES[cc].providers[0] }); }}
                 style={{ appearance: "none", cursor: lockRecipient ? "default" : "pointer", padding: "14px 28px 14px 12px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface-2)", font: "inherit", fontWeight: 700, fontSize: 14, color: "var(--ink)", height: "100%", width: "100%", opacity: lockRecipient ? 0.75 : 1 }}>
                 {Object.values(COUNTRIES).map((co) => <option key={co.code} value={co.code} disabled={!co.active}>{co.dial} {co.code}{co.active ? "" : " — soon"}</option>)}
@@ -476,7 +479,9 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
         <Flag country={s.country} size={26} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <span style={{ fontWeight: 700, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.recipientName || c.name}</span>
+            {/* The name is what the payer is checking — on a phone it wraps to a second line
+                rather than being cut to "MANGA SER…" beside the operator chip. */}
+            <span style={{ fontWeight: 700, fontSize: 15, overflowWrap: "anywhere", lineHeight: 1.25 }}>{s.recipientName || c.name}</span>
             {verified && <span style={{ width: 15, height: 15, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, flex: "none" }}>✓</span>}
           </div>
           <div className="num" style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{c.dial} {s.phone}</div>

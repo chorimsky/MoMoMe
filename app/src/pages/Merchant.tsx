@@ -113,12 +113,12 @@ function Onboard({ onDone, initial }: { onDone: (m: MerchantAccount) => void; in
           <div><label style={labelStyle}>{t("mrc_o_name")}</label>
             <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Chez Alain Restaurant" maxLength={80} style={inputStyle} autoFocus /></div>
           <div><label style={labelStyle}>{t("mrc_o_category")}</label>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label={t("mrc_o_category")} style={{ ...inputStyle, cursor: "pointer" }}>
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c[lang]}</option>)}
             </select></div>
           <div><label style={labelStyle}>{t("mrc_o_settlement")}</label>
             <div style={{ display: "flex", gap: 8 }}>
-              <select value={country} onChange={(e) => setCountry(e.target.value as CountryCode)} style={{ ...inputStyle, width: "auto", fontWeight: 700, cursor: "pointer" }}>
+              <select value={country} onChange={(e) => setCountry(e.target.value as CountryCode)} aria-label={t("country_label")} style={{ ...inputStyle, width: "auto", fontWeight: 700, cursor: "pointer" }}>
                 {Object.values(COUNTRIES).map((c) => <option key={c.code} value={c.code} disabled={!c.active}>{c.dial} {c.code}{c.active ? "" : " — soon"}</option>)}
               </select>
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="670 000 000" type="tel" inputMode="tel" style={{ ...inputStyle, flex: 1, fontFamily: "var(--font-mono)" }} />

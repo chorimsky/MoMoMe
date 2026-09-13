@@ -52,7 +52,9 @@ export function Row({ k, v, sub, strong, tone }: { k: string; v: string; sub?: s
           ellipsize instead of overflowing off the card; short amounts never truncate. */}
       <span style={{ textAlign: "right", minWidth: 0, flex: 1, overflow: "hidden" }}>
         <span className="num" style={{ display: "block", fontSize: strong ? 17 : 14, fontWeight: strong ? 750 : 600, color: tone === "recv" ? "var(--recv)" : "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
-        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>}
+        {/* The sub-line (network, secondary amount) wraps rather than trailing off in "…" —
+            a cut "Réseau Lightn…" tells the payer nothing. */}
+        {sub && <span className="num" style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", overflowWrap: "anywhere", lineHeight: 1.35 }}>{sub}</span>}
       </span>
     </div>
   );

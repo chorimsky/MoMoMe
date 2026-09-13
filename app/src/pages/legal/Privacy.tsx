@@ -1,8 +1,11 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { DocShell, Sec, Summary } from "./LegalLayout.js";
+import { useI18n } from "../../lib/i18n.js";
 
 export function Privacy() {
+  const { lang } = useI18n();
+  if (lang === "fr") return <PrivacyFr />;
   return (
     <DocShell kicker="Legal" title="Privacy Policy" updated="1 June 2026" current="privacy" langToggle>
       <Summary>
@@ -74,6 +77,90 @@ export function Privacy() {
         <p>
           We’ll update this policy as the service evolves; the date above shows the current version. Privacy
           questions can go to our team via the <Link to="/contact">contact page</Link>.
+        </p>
+      </Sec>
+    </DocShell>
+  );
+}
+
+/** The same policy in French. Keep both in step. */
+function PrivacyFr() {
+  return (
+    <DocShell kicker="Juridique" title="Politique de confidentialité" updated="1er juin 2026" current="privacy" langToggle>
+      <Summary>
+        Nous ne collectons que ce qui est nécessaire pour transférer votre argent et respecter nos obligations
+        légales : qui paie, qui est payé, et combien. Nous ne vendons pas vos données et nous ne vous demandons
+        pas d'ouvrir un compte pour envoyer un paiement.
+      </Summary>
+
+      <Sec n="01" title="Ce que nous collectons">
+        <ul>
+          <li><strong>Données de paiement</strong> — le numéro Mobile Money du destinataire, le montant, le nom renvoyé par l'opérateur et la référence.</li>
+          <li><strong>Données de l'expéditeur</strong> — le moyen de paiement utilisé et, lorsque la loi l'exige, des informations d'identité pour vérifier un paiement.</li>
+          <li><strong>Données techniques</strong> — des informations sur l'appareil et le navigateur ainsi qu'une localisation approximative, pour sécuriser le service et prévenir la fraude.</li>
+        </ul>
+      </Sec>
+
+      <Sec n="02" title="Pourquoi nous les utilisons">
+        <ul>
+          <li>pour livrer votre paiement sur le bon compte Mobile Money ;</li>
+          <li>pour vous afficher un reçu et répondre aux demandes d'aide liées à votre référence ;</li>
+          <li>pour détecter et prévenir la fraude, et respecter nos obligations de lutte contre le blanchiment et les sanctions ;</li>
+          <li>pour conserver les enregistrements que la loi nous impose.</li>
+        </ul>
+      </Sec>
+
+      <Sec n="03" title="Avec qui nous les partageons">
+        <p>
+          Nous partageons le strict nécessaire avec les parties qui font fonctionner un paiement : les
+          <strong> opérateurs Mobile Money</strong> (MTN, Orange) qui créditent le destinataire, les
+          <strong> partenaires de paiement et de règlement</strong> qui acheminent les fonds, et les régulateurs
+          ou autorités lorsque la loi nous y oblige. Nous ne vendons <strong>pas</strong> vos données personnelles
+          et ne les partageons pas à des fins publicitaires.
+        </p>
+      </Sec>
+
+      <Sec n="04" title="Durée de conservation">
+        <p>
+          Nous conservons les enregistrements de transactions aussi longtemps que le droit des services
+          financiers l'exige — généralement plusieurs années après un paiement — puis nous les supprimons ou les
+          anonymisons. Les journaux de sécurité et de lutte contre la fraude sont conservés moins longtemps.
+        </p>
+      </Sec>
+
+      <Sec n="05" title="Vos droits">
+        <p>
+          Vous pouvez <Link to="/delete-account">supprimer votre compte et ses données</Link> vous-même, depuis
+          l'appareil sur lequel vous utilisez MoMo›Me. Vos contacts enregistrés, les clés de cet appareil et vos
+          liens de parrainage sont supprimés immédiatement. Les enregistrements des paiements déjà envoyés sont
+          conservés — la loi anti-blanchiment impose à un transmetteur de fonds de les garder — et cette page vous
+          dit exactement ce qui reste.
+        </p>
+        <p>
+          Sous réserve du droit local, vous pouvez nous demander une copie des données personnelles que nous
+          détenons à votre sujet, leur rectification, ou leur suppression lorsque nous ne sommes pas tenus de les
+          conserver. Pour toute demande, utilisez la <Link to="/contact">page de contact</Link> en indiquant la
+          référence de paiement concernée.
+        </p>
+      </Sec>
+
+      <Sec n="06" title="Sécurité">
+        <p>
+          Les données de paiement sont chiffrées en transit et au repos, et leur accès est limité au personnel
+          qui en a besoin pour faire fonctionner le service ou vous assister. Aucun système n'est parfaitement
+          sûr, mais nous travaillons selon les standards du secteur et réagissons rapidement en cas d'incident.
+        </p>
+      </Sec>
+
+      <Sec n="07" title="Mineurs">
+        <p>MoMo›Me s'adresse aux adultes. Nous ne collectons pas sciemment de données de personnes de moins de 18 ans.</p>
+      </Sec>
+
+      <Sec n="08" title="Modifications et contact">
+        <p>
+          Nous mettrons cette politique à jour au fil de l'évolution du service ; la date ci-dessus indique la
+          version en vigueur. Les questions de confidentialité peuvent être adressées à notre équipe via la{" "}
+          <Link to="/contact">page de contact</Link>.
         </p>
       </Sec>
     </DocShell>

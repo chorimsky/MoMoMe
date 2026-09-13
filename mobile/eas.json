@@ -10,7 +10,7 @@
       "channel": "development",
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
-        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://www.momome.xyz"
       }
     },
     "preview": {
@@ -22,7 +22,7 @@
       },
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
-        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://www.momome.xyz"
       }
     },
     "ios-sim": {
@@ -32,7 +32,7 @@
       },
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
-        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://www.momome.xyz"
       }
     },
     "production": {
@@ -47,7 +47,7 @@
       },
       "env": {
         "EXPO_PUBLIC_API_BASE": "https://momome-api-production.up.railway.app/api",
-        "EXPO_PUBLIC_WEB_ORIGIN": "https://momome.xyz"
+        "EXPO_PUBLIC_WEB_ORIGIN": "https://www.momome.xyz"
       }
     }
   },

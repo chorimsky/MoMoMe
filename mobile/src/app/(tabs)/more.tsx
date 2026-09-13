@@ -96,7 +96,7 @@ export default function MoreScreen() {
       ))}
 
       <View style={{ alignItems: 'center', gap: Spacing.two, marginTop: Spacing.four, marginBottom: Spacing.five }}>
-        <BrandLogo size={20} />
+        <BrandLogo size={24} />
         <Body muted center style={{ fontSize: 13 }}>
           {tr('tagline')}
         </Body>

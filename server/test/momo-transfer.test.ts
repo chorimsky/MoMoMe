@@ -64,6 +64,18 @@ async function main() {
     r = await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000111", to: "699000598", xaf: 5000 }) });
     ok("a watchlisted recipient is refused before any collection", r.status === 403 && r.body.error === "compliance_blocked");
     updateSettings({ compliance: { ...getSettings().compliance, sanctionsList: [] } });
+    // A CDD-flagged transfer collects, then HOLDS for a person — under review, not failed.
+    updateSettings({ compliance: { ...getSettings().compliance, cddThresholdXaf: 4000 } });
+    r = await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000555", to: "699000666", xaf: 5000 }) });
+    const held = r.body;
+    await reconcileTransfers();
+    ok("a flagged transfer is HELD after collection, with the flag on record", getTransfer(held.id)!.state === "HELD" && !!getTransfer(held.id)!.complianceFlags?.length, getTransfer(held.id)!.state);
+    const { releaseTransfer, refundHeldTransfer } = await import("../src/core/momoTransfer.js");
+    ok("an operator releases it → delivered", (await releaseTransfer(getTransfer(held.id)!, "ops")) && getTransfer(held.id)!.state === "DELIVERED", getTransfer(held.id)!.state);
+    r = await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000555", to: "699000777", xaf: 5000 }) });
+    const held2 = r.body; await reconcileTransfers();
+    ok("…or refunds it → REFUNDED, fee included", (await refundHeldTransfer(getTransfer(held2.id)!, "ops")) && getTransfer(held2.id)!.state === "REFUNDED" && balanced(held2.id), getTransfer(held2.id)!.state);
+    updateSettings({ compliance: { ...getSettings().compliance, cddThresholdXaf: 1_000_000 } });
     updateSettings({ features: { ...getSettings().features, momoTransfer: false } });
     ok("turned off again: refused again, existing transfers still readable", (await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000111", to: "699000222", xaf: 5000 }) })).status === 403 && (await j(`/momo/transfers/${t.id}`)).status === 200);
   } finally { server.close(); }

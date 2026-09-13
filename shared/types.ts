@@ -1085,7 +1085,9 @@ export interface TestReport {
    paid out to the recipient's number — any network — from the payout float. When the
    recipient is beyond our payout rails (another country, another platform) but has a
    Lightning Address, the value crosses over Lightning instead. Admin-gated feature. */
-export type MomoTransferState = "AWAITING_PAYER" | "COLLECTED" | "PAYING_OUT" | "DELIVERED" | "FAILED" | "EXPIRED" | "CANCELLED" | "REFUND_PENDING" | "REFUNDED";
+/** HELD: collected, then stopped by a compliance flag for an operator to release or refund —
+ *  under review, not failed. REFUND_PENDING: a payout that failed after collection. */
+export type MomoTransferState = "AWAITING_PAYER" | "COLLECTED" | "HELD" | "PAYING_OUT" | "DELIVERED" | "FAILED" | "EXPIRED" | "CANCELLED" | "REFUND_PENDING" | "REFUNDED";
 export type MomoTransferRoute = "direct" | "lightning";
 export interface MomoParty { phone: string; country: CountryCode; provider: ProviderId; name?: string }
 export interface MomoTransfer {

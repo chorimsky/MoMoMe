@@ -81,7 +81,7 @@ export const config = {
    *  derives from PAWAPAY_ENV (sandbox|production). */
   /** Where the customer-facing web app lives — links the WhatsApp bot and notifications
    *  hand out (send / receive / status) open here, and in the app via app links. */
-  webOrigin: env("WEB_ORIGIN", "https://momome.xyz").replace(/\/$/, ""),
+  webOrigin: env("WEB_ORIGIN", "https://www.momome.xyz").replace(/\/$/, ""), // www: the host the app links and share previews are served on (the apex redirects)
   /** WhatsApp Business (Cloud API). Text + voice-note handling on our number, and a
    *  notification channel. Unset → the channel reports unconfigured and the webhook 404s. */
   whatsapp: {

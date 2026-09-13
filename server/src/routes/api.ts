@@ -2105,6 +2105,12 @@ api.post("/admin/momo/transfers/:id/release", async (req, res) => {
   if (!(await momoTransfer.releaseTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_releasable", message: "Only a transfer held for review can be released." });
   res.json(t);
 });
+api.post("/admin/momo/transfers/:id/refund", async (req, res) => {
+  const t = momoTransfer.getTransfer(req.params.id);
+  if (!t) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (!(await momoTransfer.refundHeldTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_refundable", message: "Only a transfer held for review can be refunded from here." });
+  res.json(t);
+});
 
 /** Partner pricing on a key, and what it did in a month (the basis of its invoice). */
 api.patch("/admin/apikeys/:id", (req, res) => {

@@ -15,7 +15,7 @@ import { COUNTRIES, PROVIDERS, checkPhone } from '@shared/domain';
 import type { CountryCode, MomoTransfer, ProviderId } from '@shared/types';
 
 const fmt = (n: number) => n.toLocaleString('fr-FR');
-const FINAL = ['DELIVERED', 'FAILED', 'EXPIRED', 'CANCELLED', 'REFUNDED'];
+const FINAL = ['DELIVERED', 'FAILED', 'EXPIRED', 'CANCELLED', 'REFUNDED', 'HELD'];
 
 export function MomoStep({ country, toPhone, toProvider, toName, xaf, back, done }: { country: CountryCode; toPhone: string; toProvider: ProviderId; toName?: string; xaf: number; back: () => void; done: () => void }) {
   const t = useTheme();
@@ -49,11 +49,11 @@ export function MomoStep({ country, toPhone, toProvider, toName, xaf, back, done
 
   if (transfer) {
     const st = transfer.state;
-    const title = st === 'AWAITING_PAYER' ? tr('mt_approve_title') : st === 'DELIVERED' ? tr('mt_done_title') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_title') : st === 'REFUND_PENDING' || st === 'REFUNDED' ? tr('mt_refund_title') : tr('mt_stopped_title');
-    const desc = st === 'AWAITING_PAYER' ? tr('mt_approve_desc').replace('{amount}', fmt(transfer.collectXaf)).replace('{op}', PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === 'DELIVERED' ? tr('mt_done_desc').replace('{amount}', fmt(transfer.xaf)).replace('{to}', to) : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_desc') : st === 'REFUND_PENDING' ? tr('mt_refund_pending_desc') : st === 'REFUNDED' ? tr('mt_refunded_desc') : st === 'EXPIRED' ? tr('mt_expired_desc') : st === 'CANCELLED' ? tr('mt_cancelled_desc') : tr('mt_failed_desc');
+    const title = st === 'AWAITING_PAYER' ? tr('mt_approve_title') : st === 'DELIVERED' ? tr('mt_done_title') : st === 'HELD' ? tr('mt_held_title') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_title') : st === 'REFUND_PENDING' || st === 'REFUNDED' ? tr('mt_refund_title') : tr('mt_stopped_title');
+    const desc = st === 'AWAITING_PAYER' ? tr('mt_approve_desc').replace('{amount}', fmt(transfer.collectXaf)).replace('{op}', PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === 'DELIVERED' ? tr('mt_done_desc').replace('{amount}', fmt(transfer.xaf)).replace('{to}', to) : st === 'HELD' ? tr('mt_held_desc') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_desc') : st === 'REFUND_PENDING' ? tr('mt_refund_pending_desc') : st === 'REFUNDED' ? tr('mt_refunded_desc') : st === 'EXPIRED' ? tr('mt_expired_desc') : st === 'CANCELLED' ? tr('mt_cancelled_desc') : tr('mt_failed_desc');
     return (
       <Card padded elevated style={{ alignItems: 'center', gap: Spacing.three }}>
-        <Text style={{ fontSize: 40 }}>{st === 'DELIVERED' ? '✅' : st === 'AWAITING_PAYER' ? '📲' : st === 'COLLECTED' || st === 'PAYING_OUT' ? '⏳' : '⚠️'}</Text>
+        <Text style={{ fontSize: 40 }}>{st === 'DELIVERED' ? '✅' : st === 'AWAITING_PAYER' ? '📲' : st === 'HELD' ? '🕒' : st === 'COLLECTED' || st === 'PAYING_OUT' ? '⏳' : '⚠️'}</Text>
         <H2 style={{ textAlign: 'center' }}>{title}</H2>
         <Body center muted>{desc}</Body>
         <Mono style={{ color: t.muted, fontSize: 12 }}>{tr('reference')} · {transfer.ref}</Mono>

@@ -198,7 +198,7 @@ function MomoOpsPanel() {
   );
 }
 
-const T_TONE: Record<string, string> = { DELIVERED: "var(--recv)", FAILED: "var(--bad)", REFUNDED: "var(--bad)", REFUND_PENDING: "var(--warn)", EXPIRED: "var(--ink-3)", CANCELLED: "var(--ink-3)" };
+const T_TONE: Record<string, string> = { DELIVERED: "var(--recv)", FAILED: "var(--bad)", REFUNDED: "var(--bad)", REFUND_PENDING: "var(--warn)", HELD: "var(--warn)", EXPIRED: "var(--ink-3)", CANCELLED: "var(--ink-3)" };
 /** Mobile Money → Mobile Money transfers: every one, its route and where it stands. */
 function TransfersCard() {
   const [d, setD] = useState<{ enabled: boolean; transfers: MomoTransfer[] } | null>(null);
@@ -206,6 +206,7 @@ function TransfersCard() {
   const load = () => api.adminMomoTransfers().then(setD).catch(() => {});
   useEffect(() => { load(); const id = setInterval(load, 20_000); return () => clearInterval(id); }, []);
   const release = async (id: string) => { setBusy(id); try { await api.adminMomoRelease(id); await load(); } finally { setBusy(null); } };
+  const refundHeld = async (id: string) => { if (!window.confirm("Refund this held transfer to the payer, fee included?")) return; setBusy(id); try { await api.adminMomoRefund(id); await load(); } finally { setBusy(null); } };
   return (
     <Card title="Mobile Money → Mobile Money transfers" sub={d ? (d.enabled ? "Feature ON for users (Settings → Product features)." : "Feature OFF: users cannot see or use it; only this console can create test transfers.") : "…"} pad={false}>
       <table className="tbl"><thead><tr><th>When</th><th>Ref</th><th>From</th><th>To</th><th>Amount</th><th>Route</th><th>State</th><th>Last note</th><th></th></tr></thead>
@@ -218,7 +219,7 @@ function TransfersCard() {
             <td>{t.route === "lightning" ? "⚡ Lightning" : "direct"}</td>
             <td style={{ color: T_TONE[t.state] ?? "var(--ink)", fontWeight: 650 }}>{t.state}</td>
             <td style={{ fontSize: 12, color: "var(--ink-3)", maxWidth: 260 }}>{t.events.at(-1)?.note ?? ""}</td>
-            <td>{t.state === "REFUND_PENDING" && t.complianceFlags?.length && !t.refundRef ? <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy === t.id} onClick={() => void release(t.id)}>Release</button> : null}</td>
+            <td style={{ whiteSpace: "nowrap" }}>{t.state === "HELD" ? <><button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy === t.id} onClick={() => void release(t.id)}>Release</button> <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--bad)" }} disabled={busy === t.id} onClick={() => void refundHeld(t.id)}>Refund</button></> : null}</td>
           </tr>
         ))}{d && !d.transfers.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)", padding: 16 }}>No transfers yet.</td></tr>}</tbody></table>
     </Card>

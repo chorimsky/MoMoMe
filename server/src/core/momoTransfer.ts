@@ -157,7 +157,7 @@ async function onCollected(t: MomoTransfer): Promise<void> {
     { account: "customer_wallet", direction: "debit", amount: t.feeXaf, currency: "XAF" },
     { account: "fee_revenue", direction: "credit", amount: t.feeXaf, currency: "XAF" },
   ]);
-  if (t.complianceFlags?.length) { move(t, "REFUND_PENDING", `held: ${t.complianceFlags.join("; ")} — refund unless an operator releases`); return; }
+  if (t.complianceFlags?.length) { move(t, "HELD", `held for compliance review: ${t.complianceFlags.join("; ")} — an operator releases or refunds`); return; }
   await startPayout(t);
 }
 
@@ -258,8 +258,15 @@ export async function reconcileTransfers(now = Date.now()): Promise<void> {
 
 /** An operator releases a held transfer (compliance flags) — pays it out. */
 export async function releaseTransfer(t: MomoTransfer, by: string): Promise<boolean> {
-  if (t.state !== "REFUND_PENDING" || !t.complianceFlags?.length || t.refundRef) return false;
+  if (t.state !== "HELD") return false;
   move(t, "COLLECTED", `released by ${by}`);
   await startPayout(t);
+  return true;
+}
+/** An operator refunds a held transfer instead of releasing it. */
+export async function refundHeldTransfer(t: MomoTransfer, by: string): Promise<boolean> {
+  if (t.state !== "HELD") return false;
+  move(t, "REFUND_PENDING", `refund decided by ${by}`);
+  await refund(t);
   return true;
 }

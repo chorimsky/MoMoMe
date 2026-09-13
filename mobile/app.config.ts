@@ -18,7 +18,7 @@ const API_BASE =
   'https://momome-api-production.up.railway.app/api';
 
 // The web origin the app deep-links to.
-const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN ?? 'https://momome.xyz';
+const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN ?? 'https://www.momome.xyz';
 const WEB_HOST = WEB_ORIGIN.replace(/^https?:\/\//, '');
 // The apex 308-redirects to www, and NEITHER Apple nor Google follows a redirect when
 // fetching the association file — so declaring only the apex silently disables deep links.

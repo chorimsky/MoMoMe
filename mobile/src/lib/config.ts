@@ -4,5 +4,5 @@ import Constants from 'expo-constants';
 export const WEB_ORIGIN = (
   process.env.EXPO_PUBLIC_WEB_ORIGIN ??
   (Constants.expoConfig?.extra?.webOrigin as string | undefined) ??
-  'https://momome.xyz'
+  'https://www.momome.xyz'
 ).replace(/\/$/, '');

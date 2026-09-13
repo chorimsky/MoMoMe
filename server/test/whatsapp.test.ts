@@ -10,7 +10,7 @@ process.env.WHATSAPP_APP_SECRET = "app-secret";
 process.env.WHATSAPP_TEMPLATE_DELIVERED = "momome_delivered";
 process.env.WHATSAPP_TEMPLATE_REFUND = "momome_refund";
 process.env.WHATSAPP_TEMPLATE_LANG_FR = "fr";
-process.env.WEB_ORIGIN = "https://momome.xyz";
+process.env.WEB_ORIGIN = "https://www.momome.xyz";
 process.env.META_AI_API_KEY = "test-meta-key";
 delete process.env.SMS_WEBHOOK_URL;
 
@@ -86,7 +86,7 @@ async function main() {
     ok("language follows the verb", detectLang("envoyer 5000 à 677000789") === "fr" && detectLang("send 5000 to 677000789") === "en");
 
     let r = await replyTo({ from: "237699000111", kind: "text", text: "send 5000 to 677000789" });
-    ok("send → a pay link with the number and amount", r.includes("https://momome.xyz/send?to=237677000789&amount=5000"), r.split("\n")[1]);
+    ok("send → a pay link with the number and amount", r.includes("https://www.momome.xyz/send?to=237677000789&amount=5000"), r.split("\n")[1]);
     ok("…and the registered name, before they tap", /Pay \*5 000 XAF\* to \*[A-Z ]+ · MTN 677000789\*/.test(r) || /name not on file/.test(r), r.split("\n")[0]);
     r = await replyTo({ from: "237699000111", kind: "text", text: "envoyer 2500 à 6 77 00 07 89" });
     ok("French, spaced digits → French reply, same link", r.startsWith("Payer") && r.includes("to=237677000789&amount=2500"), r.split("\n")[0]);
@@ -95,7 +95,7 @@ async function main() {
     r = await replyTo({ from: "237699000111", kind: "text", text: "send 10 to 677000789" });
     ok("an amount below the minimum is refused", /between/.test(r));
     r = await replyTo({ from: "237699000111", kind: "text", text: "receive 15000" });
-    ok("receive → the sender's own receive link (their WhatsApp number)", r.includes("https://momome.xyz/send?to=237699000111&amount=15000"), r.split("\n")[1]);
+    ok("receive → the sender's own receive link (their WhatsApp number)", r.includes("https://www.momome.xyz/send?to=237699000111&amount=15000"), r.split("\n")[1]);
     r = await replyTo({ from: "15551234567", kind: "text", text: "my link" });
     ok("a WhatsApp number that is not Mobile Money cannot get a receive link", /does not look like a Mobile Money number/.test(r));
     r = await replyTo({ from: "237699000111", kind: "audio" });

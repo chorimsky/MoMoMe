@@ -33,8 +33,9 @@ network is its own island; a person on MTN cannot pay a person on Orange.
    operator is alerted to do it by hand; the money is never silently kept.
 
 The compliance engine screens every transfer before the collection (watchlist, velocity,
-CDD). A flagged transfer collects, then holds (`REFUND_PENDING` with flags) for an operator
-to **Release** or refund from Admin → Mobile Money → Transfers.
+CDD). A flagged transfer collects, then holds (`HELD`) for an operator to **Release** or
+**Refund** from Admin → Mobile Money → Transfers. The payer sees "received — under review",
+never a failure.
 
 ## Cost
 
@@ -86,7 +87,8 @@ configured); a number in a country that is not live → refused with `country_in
 | POST | `/api/admin/momo/transfers/:id/release` | pay out a transfer held for review |
 
 States: `AWAITING_PAYER → COLLECTED → PAYING_OUT → DELIVERED`, or `FAILED` / `EXPIRED` /
-`CANCELLED` before collection, `REFUND_PENDING → REFUNDED` after it. Every change is an event
+`CANCELLED` before collection, `HELD` (compliance review) after it, and
+`REFUND_PENDING → REFUNDED` when a payout fails or an operator refunds a held one. Every change is an event
 on the transfer; every movement is a ledger entry under the transfer's id.
 
 `/api/v1/rails` advertises `mobile_money` directions `["receive", "send"]` only while the

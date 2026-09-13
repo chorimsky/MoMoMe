@@ -228,6 +228,8 @@ export const STRINGS = {
   mt_expired_desc: ['The request was not approved in time. Nothing was taken — you can try again.', "La demande n'a pas été approuvée à temps. Rien n'a été prélevé — vous pouvez réessayer."],
   mt_cancelled_desc: ['You cancelled the request. Nothing was taken.', "Vous avez annulé la demande. Rien n'a été prélevé."],
   mt_failed_desc: ['Your network declined the request. Nothing was taken — check your balance and try again.', "Votre réseau a refusé la demande. Rien n'a été prélevé — vérifiez votre solde et réessayez."],
+  mt_held_title: ['Received — under review', 'Reçu — en cours de vérification'],
+  mt_held_desc: ['Your approval came through and the money is safe with us. This transfer needs a quick check by our team, usually within one business day. You will be told the moment it is delivered or, if it cannot be, returned to your number in full.', "Votre approbation est arrivée et l'argent est en sécurité chez nous. Ce transfert nécessite une courte vérification par notre équipe, en général sous un jour ouvré. Vous serez prévenu dès qu'il est livré ou, si ce n'est pas possible, remboursé intégralement sur votre numéro."],
   mt_cancel: ['Cancel the request', 'Annuler la demande'],
   mt_done_btn: ['Done', 'Terminé'],
   scan_wallet_code: ["That's a crypto wallet code (an invoice or an address). MoMo›Me pays Mobile Money numbers: scan a MoMo›Me code, or enter the number you want to pay.", "C'est un code de portefeuille crypto (une facture ou une adresse). MoMo›Me paie des numéros Mobile Money : scannez un code MoMo›Me, ou saisissez le numéro à payer."],

@@ -44,7 +44,7 @@ export function MomoStep({ s, back, done }: { s: Draft; back: () => void; done: 
 
   // Follow the transfer until it settles one way or the other.
   useEffect(() => {
-    if (!transfer || ["DELIVERED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED"].includes(transfer.state)) return;
+    if (!transfer || ["DELIVERED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED", "HELD"].includes(transfer.state)) return;
     const id = setInterval(() => { api.momoGet(transfer.id).then(setTransfer).catch(() => {}); }, 3000);
     return () => clearInterval(id);
   }, [transfer?.id, transfer?.state]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,19 +52,19 @@ export function MomoStep({ s, back, done }: { s: Draft; back: () => void; done: 
   const to = `${PROVIDERS[s.provider]?.name ?? s.provider} · ${COUNTRIES[s.country].dial} ${s.phone}`;
   if (transfer) {
     const st = transfer.state;
-    const title = st === "AWAITING_PAYER" ? t("mt_approve_title") : st === "DELIVERED" ? t("mt_done_title") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_title") : st === "REFUND_PENDING" || st === "REFUNDED" ? t("mt_refund_title") : t("mt_stopped_title");
-    const desc = st === "AWAITING_PAYER" ? t("mt_approve_desc").replace("{amount}", fmt(transfer.collectXaf)).replace("{op}", PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === "DELIVERED" ? t("mt_done_desc").replace("{amount}", fmt(transfer.xaf)).replace("{to}", to) : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_desc") : st === "REFUND_PENDING" ? t("mt_refund_pending_desc") : st === "REFUNDED" ? t("mt_refunded_desc") : st === "EXPIRED" ? t("mt_expired_desc") : st === "CANCELLED" ? t("mt_cancelled_desc") : t("mt_failed_desc");
+    const title = st === "AWAITING_PAYER" ? t("mt_approve_title") : st === "DELIVERED" ? t("mt_done_title") : st === "HELD" ? t("mt_held_title") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_title") : st === "REFUND_PENDING" || st === "REFUNDED" ? t("mt_refund_title") : t("mt_stopped_title");
+    const desc = st === "AWAITING_PAYER" ? t("mt_approve_desc").replace("{amount}", fmt(transfer.collectXaf)).replace("{op}", PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === "DELIVERED" ? t("mt_done_desc").replace("{amount}", fmt(transfer.xaf)).replace("{to}", to) : st === "HELD" ? t("mt_held_desc") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_desc") : st === "REFUND_PENDING" ? t("mt_refund_pending_desc") : st === "REFUNDED" ? t("mt_refunded_desc") : st === "EXPIRED" ? t("mt_expired_desc") : st === "CANCELLED" ? t("mt_cancelled_desc") : t("mt_failed_desc");
     return (
       <FlowCard>
         <Stepper i={3} />
         <div style={{ textAlign: "center", padding: "18px 0 8px" }}>
-          <div style={{ fontSize: 40 }}>{st === "DELIVERED" ? "✅" : st === "AWAITING_PAYER" ? "📲" : st === "COLLECTED" || st === "PAYING_OUT" ? <Spinner size={28} /> : "⚠️"}</div>
+          <div style={{ fontSize: 40 }}>{st === "DELIVERED" ? "✅" : st === "AWAITING_PAYER" ? "📲" : st === "HELD" ? "🕒" : st === "COLLECTED" || st === "PAYING_OUT" ? <Spinner size={28} /> : "⚠️"}</div>
           <h2 style={{ fontSize: 20, marginTop: 10 }}>{title}</h2>
           <p style={{ color: "var(--ink-2)", fontSize: 14, lineHeight: 1.5, margin: "8px 0 14px" }}>{desc}</p>
           <div className="num" style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("reference")} · {transfer.ref}</div>
         </div>
         {st === "AWAITING_PAYER" && <button className="btn btn-ghost btn-block" disabled={busy} onClick={cancel}>{t("mt_cancel")}</button>}
-        {["DELIVERED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED"].includes(st) && <button className="btn btn-primary btn-block" onClick={done}>{t("mt_done_btn")}</button>}
+        {["DELIVERED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED", "HELD"].includes(st) && <button className="btn btn-primary btn-block" onClick={done}>{t("mt_done_btn")}</button>}
       </FlowCard>
     );
   }

@@ -5,7 +5,7 @@
  */
 
 import { api } from '@/api/client';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { Image, Text, View, type ViewStyle } from 'react-native';
 
@@ -73,7 +73,18 @@ export function useBrandLogo(): string | null {
  *  built-in wordmark otherwise. `size` is the height. */
 export function BrandLogo({ size = 22, mono, color }: { size?: number; mono?: boolean; color?: string }) {
   const logo = useBrandLogo();
-  if (logo) return <Image source={{ uri: logo }} accessibilityLabel="MoMoMe" style={{ height: size, width: size * 4, maxWidth: size * 6 }} resizeMode="contain" />;
+  // The uploaded logo may be a wide wordmark or a square mark: measure it once and give it
+  // the width its own proportions call for (a square mark drawn into a 4:1 box was a dot).
+  // (Image.getSize does not answer for data: URIs on iOS; the load event carries the size.)
+  const [aspect, setAspect] = useState<number | null>(null);
+  useEffect(() => { setAspect(null); }, [logo]);
+  if (logo) {
+    const h = aspect != null && aspect < 1.4 ? size * 1.6 : size; // a compact mark reads at the wordmark's cap height when a touch taller
+    return (
+      <Image source={{ uri: logo }} accessibilityLabel="MoMoMe" style={{ height: h, width: h * (aspect ?? 4) }} resizeMode="contain"
+        onLoad={(e) => { const src = e.nativeEvent?.source; if (src && src.height > 0) setAspect(Math.min(6, Math.max(0.5, src.width / src.height))); }} />
+    );
+  }
   return <Wordmark size={size} mono={mono} color={color} />;
 }
 

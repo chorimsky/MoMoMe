@@ -219,10 +219,14 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
     // No response at all — offline / DNS / dropped connection / timeout (common on
     // patchy mobile data). Surface as a typed network error (status 0) so the UI shows
     // a friendly "you're offline, retry" instead of a raw "Failed to fetch" or a hang.
+    if (path.startsWith("/admin/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: false } })); } catch { /* non-browser */ } }
     throw new ApiError("network", 0);
   } finally {
     clearTimeout(timer);
   }
+  // A gateway answering for a server that is not there (502/503/504 from the edge or a
+  // dev proxy) is the same thing as no answer, for the operator looking at the console.
+  if (path.startsWith("/admin/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: ![502, 503, 504].includes(res.status) } })); } catch { /* non-browser */ } }
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and
     // signal the console to fall back to the login gate.

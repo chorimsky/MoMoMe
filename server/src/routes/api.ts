@@ -276,7 +276,7 @@ api.use("/admin", (req, res, next) => {
     /^\/payments\/[^/]+\/(retry|refund)$/,           // re-pays or refunds a real payment
     /^\/users(\/|$)/,                                // who can access the console at all
     /^\/apikeys(\/|$)/,                              // partner keys authorize real payments
-    /^\/rails\/egress(\/|$)/,                        // repoints the IP allowlist a rail trusts
+    /^\/rails\/egress(?!\/recheck)(\/|$)/,           // repoints the IP allowlist a rail trusts (a re-check only re-reads it)
   ];
   if (req.method !== "GET" && ELEVATED_ONLY.some((re) => re.test(sub)) && !isElevated({ uid: user.id, role, elevatedUntil: session.elevatedUntil })) {
     return res.status(403).json({

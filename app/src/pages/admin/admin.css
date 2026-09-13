@@ -61,3 +61,10 @@
   .mm-admin-burger { min-width: 44px; min-height: 44px; display: inline-flex !important; align-items: center; justify-content: center; }
   .mm-admin-main .btn { min-height: 44px; }
 }
+
+/* Wide tables on a phone: scroll the table, never the page. `.tbl` is the table the newer
+   views (Interoperability, Audience, Mobile Money transfers, reconciliation) use bare; on a
+   narrow screen it becomes its own horizontal scroller, like .mm-tablewrap does for lists. */
+@media (max-width: 920px) {
+  table.tbl { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; white-space: nowrap; }
+}

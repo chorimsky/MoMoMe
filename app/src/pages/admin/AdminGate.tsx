@@ -8,7 +8,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
-import { api, getAdminToken, type AdminSessionUser } from "../../api/client.js";
+import { api, ApiError, getAdminToken, type AdminSessionUser } from "../../api/client.js";
 import "./admin.css";
 
 type Phase = "checking" | "out" | "in";
@@ -52,8 +52,18 @@ export function AdminGate({ children }: { children: ReactNode }) {
         if (s.authenticated && s.user && getAdminToken()) { setUser(s.user); setPhase("in"); }
         else setPhase("out");
       })
-      .catch(() => { if (alive) setPhase("out"); });
-    const onUnauth = () => { if (alive) { setUser(null); setPhase("out"); setErr("Your session expired. Please sign in again."); } };
+      .catch((e) => {
+        if (!alive) return;
+        setPhase("out");
+        // No server at all is a different message from "please sign in": the form would only fail.
+        if (e instanceof ApiError && (e.status === 0 || e.status >= 500)) setErr("Can't reach the server right now. Check the deployment, then try again.");
+      });
+    const onUnauth = (e: Event) => {
+      if (!alive) return;
+      setUser(null); setPhase("out");
+      if ((e as CustomEvent<{ reason?: string }>).detail?.reason === "signout") { setErr(null); setNotice("Signed out."); }
+      else setErr("Your session expired. Please sign in again.");
+    };
     window.addEventListener("mm-admin-unauthorized", onUnauth);
     return () => { alive = false; window.removeEventListener("mm-admin-unauthorized", onUnauth); };
   }, []);

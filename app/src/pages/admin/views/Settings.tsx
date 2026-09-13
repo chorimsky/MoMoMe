@@ -12,7 +12,7 @@ import { Card, Grid, SectionTitle, Toggle } from "../AdminUI.js";
 import { Logo } from "../../../components/atoms.js";
 import { fmt } from "../../../lib/format.js";
 import { processLogo, analyzeLogo } from "../../../lib/logo.js";
-import { Loading } from "./Overview.js";
+import { Failed, Loading } from "./Overview.js";
 import { useAdminUser } from "../AdminGate.js";
 import { isSuperAdmin } from "@shared/roles.js";
 
@@ -125,7 +125,10 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops || !methods || !features || !compliance) return <Loading t="Settings" s="General configuration and operational controls." />;
+  if (!company || !channels || !ops || !methods || !features || !compliance) {
+    if (err) return <Failed t="Settings" msg={err} />;
+    return <Loading t="Settings" s="General configuration and operational controls." />;
+  }
 
   const edit = (patch: Partial<AdminSettings["company"]>) => { setCompany((c) => ({ ...c!, ...patch })); setDirty(true); };
 

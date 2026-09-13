@@ -182,7 +182,8 @@ export function AdminConsole() {
 
   const logout = () => {
     api.adminLogout();
-    try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
+    // A deliberate sign-out is not an expired session: the gate says "Signed out", not "expired".
+    try { window.dispatchEvent(new CustomEvent("mm-admin-unauthorized", { detail: { reason: "signout" } })); } catch { /* non-browser */ }
   };
 
   const View = VIEWS[active] ?? OverviewView;
@@ -303,6 +304,7 @@ export function AdminConsole() {
           <Link to="/send" className="btn btn-ghost mm-admin-cust" style={{ padding: "8px 13px", fontSize: 13, textDecoration: "none" }}>Customer app ↗</Link>
         </header>
         <main style={{ flex: 1, padding: "22px", maxWidth: 1320, width: "100%", margin: "0 auto" }}>
+          <OfflineBanner />
           <View />
         </main>
       </div>
@@ -329,5 +331,24 @@ export function AdminConsole() {
     </div>
    </AdminContext.Provider>
     </>
+  );
+}
+
+/** Shown while the last admin call could not reach the server at all; clears on the next
+ *  call that gets an answer. Views keep their own "couldn't load" states — this says why. */
+function OfflineBanner() {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setOffline(!(e as CustomEvent<{ online: boolean }>).detail?.online);
+    window.addEventListener("mm-admin-connectivity", on);
+    return () => window.removeEventListener("mm-admin-connectivity", on);
+  }, []);
+  if (!offline) return null;
+  return (
+    <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, background: "var(--warn-wash, rgba(255,180,0,.12))", border: "1px solid var(--warn)", color: "var(--warn-ink, var(--ink))", fontSize: 13, marginBottom: 16 }}>
+      <span aria-hidden>⚠</span>
+      <span><b>Can't reach the server.</b> What you see may be stale; the console will recover on its own when the connection is back.</span>
+      <button type="button" className="btn btn-ghost" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => window.location.reload()}>Reload</button>
+    </div>
   );
 }

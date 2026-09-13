@@ -24,8 +24,14 @@ export function NotificationsView() {
   const [delReqs, setDelReqs] = useState<DeletionRequest[]>([]);
   const loadDel = () => { api.adminDeletionRequests().then((r) => setDelReqs(r.items)).catch(() => {}); };
   useEffect(loadDel, []);
+  const [delErr, setDelErr] = useState<string | null>(null);
+  // Answering a deletion request is a legal act on someone's data: one click is not enough,
+  // and a failure must be seen, not swallowed.
   const answer = async (r: DeletionRequest, resolution: "deleted" | "no_account" | "rejected") => {
-    try { await api.resolveDeletionRequest(r.id, resolution); loadDel(); } catch { /* shown on next load */ }
+    const what = resolution === "deleted" ? "confirm that this person's data has been deleted" : resolution === "no_account" ? "answer that no account exists for this number" : "reject this request";
+    if (!window.confirm(`${r.ref} · ${r.country} ${r.phone}\n\nYou are about to ${what}. The person will be told. Continue?`)) return;
+    setDelErr(null);
+    try { await api.resolveDeletionRequest(r.id, resolution); loadDel(); } catch (e) { setDelErr(e instanceof Error ? e.message : "Could not record the answer."); }
   };
   useEffect(() => {
     let alive = true;
@@ -41,6 +47,7 @@ export function NotificationsView() {
 
       {delReqs.some((r) => !r.resolvedAt) && (
         <Card title="Deletion requests" sub="Filed from momome.xyz/delete-account by people who cannot present the device. Verify the number is theirs, delete what the law allows, then answer here.">
+          {delErr && <div role="alert" style={{ color: "var(--bad)", fontSize: 12.5, marginBottom: 8 }}>{delErr}</div>}
           {delReqs.filter((r) => !r.resolvedAt).map((r) => (
             <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13, flexWrap: "wrap" }}>
               <div style={{ minWidth: 0 }}>

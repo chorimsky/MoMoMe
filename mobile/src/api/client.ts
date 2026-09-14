@@ -203,6 +203,9 @@ export interface AppConfig {
 export type OtpVia = 'whatsapp' | 'sms';
 export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
 
+export type ReceivedItem = { ref: string; xaf: number; state: string; displayStatus: string; createdAt: string; updatedAt: string; method: string };
+export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
+
 export const api = {
   getConfig: () => req<AppConfig>('/config'),
 
@@ -349,6 +352,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ phone, ...opts }),
     }),
+  /** Payments received by the number this device has proven it owns (claim / own-your-number). */
+  received: () => req<ReceivedList>('/me/received'),
   verifyClaim: (phone: string, code: string) =>
     req<{ claimed: boolean; identity: { digits: string; lightningAddress?: string } }>(
       '/identities/claim/verify',

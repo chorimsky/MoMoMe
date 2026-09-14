@@ -3,14 +3,14 @@
    provisioned on first payment; here they verify ownership by OTP and
    activate it. Mobile-Money-framed: no crypto, no wallet, no seed phrase.
    ============================================================ */
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import type { Identity } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Spinner } from "../components/atoms.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { useI18n, errMessage } from "../lib/i18n.js";
-import { api } from "../api/client.js";
+import { api, type ReceivedList } from "../api/client.js";
 import { FlowCard, Label } from "./send/ui.js";
 
 type Step = "number" | "otp" | "done";
@@ -19,13 +19,25 @@ export function Claim() {
   const { t, lang } = useI18n();
   const [step, setStep] = useState<Step>("number");
   const [country, setCountry] = useState<keyof typeof COUNTRIES>("CM");
-  const [phone, setPhone] = useState("6 90 55 18 72");
+  // /claim?phone=… arrives from the Receive page ("see what you've received"); otherwise
+  // empty. This used to be prefilled with a demo number that shipped to production.
+  const [params] = useSearchParams();
+  const [phone, setPhone] = useState(() => (params.get("phone") ?? "").replace(/\D/g, "").slice(-9));
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<"whatsapp" | "sms" | undefined>();
   const [channels, setChannels] = useState<Record<"whatsapp" | "sms", boolean> | undefined>();
   const other = via === "whatsapp" && channels?.sms ? "sms" as const : via === "sms" && channels?.whatsapp ? "whatsapp" as const : undefined;
   const [identity, setIdentity] = useState<Identity | null>(null);
+  // "You can track every payment you receive" was a promise with nothing behind it: the
+  // done screen showed the number and a Done button. This is the list.
+  const [received, setReceived] = useState<ReceivedList | null>(null);
+  useEffect(() => {
+    if (step !== "done") return;
+    let alive = true;
+    api.received().then((r) => { if (alive) setReceived(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [step]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -118,6 +130,27 @@ export function Claim() {
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("claim_status_active")}
                 </span>
               </div>
+              {received && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("claim_received_title")}</div>
+                    <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{received.totals.count} · {new Intl.NumberFormat("fr-FR").format(received.totals.xaf)} XAF</div>
+                  </div>
+                  {received.items.length === 0 ? (
+                    <p style={{ color: "var(--ink-3)", fontSize: 13, margin: 0 }}>{t("claim_received_none")}</p>
+                  ) : received.items.slice(0, 10).map((p) => (
+                    <div key={p.ref} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderTop: "1px solid var(--line-2)", fontSize: 13 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="num" style={{ fontWeight: 700 }}>{new Intl.NumberFormat("fr-FR").format(p.xaf)} XAF</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · <span className="num">{p.ref}</span></div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--ink-3)", whiteSpace: "nowrap" }}>
+                        {p.displayStatus === "Completed" ? t("s_delivered") : p.displayStatus === "Failed" ? t("failed") : t("pending")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <Link to="/send" className="btn btn-primary" style={{ width: "100%", marginTop: 18, padding: "16px", textDecoration: "none" }}>{t("claim_done_btn")}</Link>
             </FlowCard>
           )}

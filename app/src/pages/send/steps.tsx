@@ -54,7 +54,7 @@ function pickBestContactNumber(tels: string[] | undefined, fallback: CC): { coun
 }
 
 /* ============================================================ 1 — DETAILS */
-export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; minFeeXaf?: number; lockRecipient?: boolean }) {
+export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hideRecents }: { s: Draft; set: (p: Partial<Draft>) => void; next: () => void; feePct?: number; minFeeXaf?: number; lockRecipient?: boolean; hideRecents?: boolean }) {
   const { t } = useI18n();
   const features = useFeatures();
   const c = COUNTRIES[s.country];
@@ -188,7 +188,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: 
         )}
       </div>
 
-      {!lockRecipient && recents.length > 0 && (
+      {!lockRecipient && !hideRecents && recents.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <Label>{t("send_again")}</Label>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, margin: "0 -2px" }}>

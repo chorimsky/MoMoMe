@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { api, errMessage } from '@/api/client';
+import { api, errMessage, type ReceivedList } from '@/api/client';
+import { xaf } from '@/lib/format';
 import { Body, Button, Card, Field, H2, IconCircle, Label, Mono, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -24,6 +25,14 @@ export default function ClaimAccountScreen() {
   const [code, setCode] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
+  // What this number has been paid — the reason to claim it at all.
+  const [received, setReceived] = useState<ReceivedList | null>(null);
+  useEffect(() => {
+    if (step !== 'done') return;
+    let alive = true;
+    api.received().then((r) => { if (alive) setReceived(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [step]);
   const [channels, setChannels] = useState<Record<'whatsapp' | 'sms', boolean> | null>(null);
   const otherVia: 'whatsapp' | 'sms' | null =
     via === 'whatsapp' && channels?.sms ? 'sms' : via === 'sms' && channels?.whatsapp ? 'whatsapp' : null;
@@ -192,6 +201,32 @@ export default function ClaimAccountScreen() {
               </>
             ) : null}
           </Card>
+          {received ? (
+            <Card padded style={{ gap: Spacing.two }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <Label>{tr('claim_received_title')}</Label>
+                <Body muted style={{ fontSize: 12.5 }}>{received.totals.count} · {xaf(received.totals.xaf)}</Body>
+              </View>
+              {received.items.length === 0 ? (
+                <Body muted style={{ fontSize: 13 }}>{tr('claim_received_none')}</Body>
+              ) : (
+                received.items.slice(0, 10).map((p) => (
+                  <View key={p.ref} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.two, borderTopWidth: 1, borderTopColor: t.line2 }}>
+                    <View style={{ flex: 1 }}>
+                      <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{xaf(p.xaf)}</Body>
+                      <Body muted style={{ fontSize: 11.5 }}>
+                        {new Date(p.createdAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {p.ref}
+                      </Body>
+                    </View>
+                    <Pill
+                      label={p.displayStatus === 'Completed' ? tr('st_delivered') : p.displayStatus === 'Failed' ? tr('st_failed') : tr('st_processing')}
+                      tone={p.displayStatus === 'Completed' ? 'recv' : p.displayStatus === 'Failed' ? 'bad' : 'neutral'}
+                    />
+                  </View>
+                ))
+              )}
+            </Card>
+          ) : null}
           <Button title={tr('start_sending')} icon="arrow-forward" onPress={() => router.replace('/')} />
         </View>
       ) : null}

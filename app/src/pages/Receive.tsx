@@ -13,7 +13,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { COUNTRIES, MAX_XAF, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
+import { COUNTRIES, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
 import { downloadPayCard, sharePayCard, type PayCard } from "../lib/paycard";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
 import { QR, CopyField } from "../components/atoms.js";
@@ -53,6 +53,13 @@ export function Receive() {
   const valid = check.ok;
   const address = number ? receiveAddress(number) : "";
   // Which thing is wrong decides what the person should do about it.
+  // The amount asked for must be one a payer can send: below the minimum the payer's form
+  // refuses it, above the operator's ceiling the payout does. Asking for 300 XAF used to
+  // produce a link that nobody could complete.
+  const amountCap = check.ok && check.provider ? Math.min(MAX_XAF, PROVIDER_PAYOUT_MAX[check.provider]) : MAX_XAF;
+  const amountProblem = amountXaf > 0 && amountXaf < MIN_XAF ? t("rcv_amount_min").replace("{min}", new Intl.NumberFormat("fr-FR").format(MIN_XAF))
+    : amountXaf > amountCap ? t("rcv_amount_max").replace("{max}", new Intl.NumberFormat("fr-FR").format(amountCap))
+    : null;
   const problem = !draft.trim() || valid ? null
     : check.reason === "bad_length" ? t("rcv_bad_length")
     : check.reason === "foreign_country" ? t("rcv_bad_foreign")
@@ -119,14 +126,18 @@ export function Receive() {
                 style={{ flex: 1, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--paper)", color: "var(--ink)", fontSize: 16 }} />
               <span style={{ color: "var(--ink-3)", fontWeight: 700 }}>XAF</span>
             </div>
-            <p style={{ color: "var(--ink-3)", fontSize: 12, marginTop: 6 }}>{t("rcv_amount_hint")}</p>
-            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid} onClick={() => { setNumber(check.local); track("receive_link_created", { amount: amountXaf > 0 }); }}>
+            {amountProblem
+              ? <p role="alert" style={{ color: "var(--warn-ink)", fontSize: 12.5, marginTop: 6 }}>{amountProblem}</p>
+              : <p style={{ color: "var(--ink-3)", fontSize: 12, marginTop: 6 }}>{t("rcv_amount_hint")}</p>}
+            <button className="btn btn-primary btn-block" style={{ marginTop: 16 }} disabled={!valid || !!amountProblem} onClick={() => { setNumber(check.local); track("receive_link_created", { amount: amountXaf > 0 }); }}>
               {t("rcv_create")}
             </button>
           </div>
         ) : (
           <div style={{ padding: 18, border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_your_link")}</div>
+            {/* Whose number this pays — the one thing to check before sharing it. */}
+            <div className="num" style={{ fontSize: 14, color: "var(--ink-2)", marginTop: -8 }}>{t("rcv_who")} <b style={{ color: "var(--ink)" }}>{who}</b></div>
             {amountXaf > 0 && <div className="num" style={{ fontSize: 22, fontWeight: 750, color: "var(--ink)" }}>{new Intl.NumberFormat("fr-FR").format(amountXaf)} <span style={{ fontSize: 13, color: "var(--ink-3)" }}>XAF</span></div>}
             {/* The QR is the web link: a phone camera opens it with no app installed, the
                 MoMo›Me app's scanner routes it to Send, and it carries the amount. */}
@@ -151,6 +162,11 @@ export function Receive() {
                   <div style={{ padding: 10, background: "#fff", borderRadius: 12, border: "1px solid var(--line)" }}><QR value={`lightning:${address}`} size={150} /></div>
                 </div>
               )}
+            </div>
+            {/* Closing the loop: the person who shared a code wants to know when it was paid. */}
+            <div style={{ alignSelf: "stretch", borderTop: "1px solid var(--line)", paddingTop: 12, textAlign: "center" }}>
+              <p style={{ color: "var(--ink-2)", fontSize: 12.5, margin: "0 0 8px" }}>{t("rcv_track_hint")}</p>
+              <Link className="btn btn-quiet" to={`/claim?phone=${encodeURIComponent(number)}`} style={{ fontSize: 13, textDecoration: "none" }}>{t("rcv_track")}</Link>
             </div>
             <button className="btn btn-ghost" onClick={() => { setNumber(null); setDraft(""); }}>{t("rcv_change")}</button>
           </div>

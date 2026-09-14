@@ -356,6 +356,22 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           </div>
         )}
 
+        {/* A "Pay me" link: say plainly that this is a request from a person — who and how
+            much — before the form. The link used to land on the bare send form with the
+            number silently filled in and the payer's own recent contacts on top of it. */}
+        {!merchant && toParam && tab === "pay" && step !== "success" && (
+          <div style={{ margin: "0 0 14px", padding: "14px 16px", borderRadius: "var(--r-lg)", background: "var(--recv-wash)", border: "1px solid color-mix(in oklab, var(--recv) 30%, var(--line))" }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 750, color: "var(--ink-3)" }}>{t("req_kicker")}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>{s.recipientName && s.nameSource !== "manual" ? s.recipientName : t("req_someone")}</div>
+            <div className="num" style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 1 }}>{COUNTRIES[s.country].dial} {s.phone}</div>
+            {amountParam > 0 ? (
+              <div className="num" style={{ fontSize: 24, fontWeight: 750, color: "var(--ink)", marginTop: 8 }}>{new Intl.NumberFormat("fr-FR").format(amountParam)} <span style={{ fontSize: 14, color: "var(--ink-3)" }}>XAF</span> <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-3)" }}>{t("req_asked")}</span></div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 6 }}>{t("req_open")}</div>
+            )}
+          </div>
+        )}
+
         {demo?.demoMode && tab === "pay" && step === "details" && (
           <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>
             <span style={{ fontWeight: 700, color: "var(--ink)" }}>🧪 {t("demo_label")}</span> · {demo.demoHint}
@@ -384,7 +400,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           </div>
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
-            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} minFeeXaf={demo?.minFeeXaf} lockRecipient={!!merchant} />}
+            {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} minFeeXaf={demo?.minFeeXaf} lockRecipient={!!merchant} hideRecents={!!toParam} />}
             {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} onMomo={features.momoTransfer ? () => go("momo") : undefined} />}
             {step === "momo" && <MomoStep s={s} back={() => go("method")} done={() => { setS((p) => ({ ...p, xaf: 0 })); go("details"); }} />}
             {/* "Is this who you meant?" — shown INSTEAD of proceeding when the server spots a

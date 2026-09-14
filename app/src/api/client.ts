@@ -293,6 +293,9 @@ export interface AnalyticsReport {
 export type OtpVia = "whatsapp" | "sms";
 export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
 
+export type ReceivedItem = { ref: string; xaf: number; state: string; displayStatus: string; createdAt: string; updatedAt: string; method: string };
+export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
+
 export const api = {
   getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
 
@@ -567,6 +570,8 @@ export const api = {
 
   requestClaim: (phone: string, opts: { via?: OtpVia; lang?: "en" | "fr" } = {}) =>
     req<OtpSent>("/identities/claim/request", { method: "POST", body: JSON.stringify({ phone, ...opts }) }),
+  /** Payments received by the number this device has proven it owns (claim / own-your-number). */
+  received: () => req<ReceivedList>("/me/received"),
   verifyClaim: (phone: string, code: string) =>
     req<{ claimed: boolean; identity: Identity }>("/identities/claim/verify", { method: "POST", body: JSON.stringify({ phone, code }) }),
 

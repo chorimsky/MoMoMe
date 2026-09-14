@@ -792,6 +792,10 @@ api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 
       : "No account found for this number.";
     return res.status(400).json({ error: r.reason, message });
   }
+  // The OTP just proved this device holds the number: link it, so /me/received (what
+  // has this number been paid) works from here without a second code.
+  const dev = await ownerOf(req);
+  if (dev) linkDevice(dev, String(phone));
   res.json({ claimed: true, identity: r.identity });
 });
 
@@ -1275,6 +1279,30 @@ api.get("/ledger/:paymentId", async (req, res) => {
 /* ---------- encrypted contact vault (zero-knowledge) ----------
    The server stores/returns opaque ciphertext only; all crypto is on-device.
    Scoped to the anonymous sender/device id — a missing id means no vault. */
+/** Payments RECEIVED by the number this device has proven it owns (the anchor OTP). This
+ *  closes the receive loop: someone who shared a "pay me" code can see it was paid, without
+ *  waiting for an SMS that may or may not be configured. Ownership proof is mandatory —
+ *  reading payments to an arbitrary number would leak every sender's activity. The reply is
+ *  the recipient's view only: amount, state, when — never the payer. */
+api.get("/me/received", async (req, res) => {
+  const dev = await ownerOf(req);
+  if (!dev) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const acct = accountOf(dev);
+  if (!acct) return res.status(403).json({ error: "not_anchored", message: "Confirm your number first to see what it has received." });
+  const digits = acct.replace(/^acct:/, "");
+  const local = digits.slice(-9);
+  const all = await store().listPayments();
+  // Only money that actually moved: a payer who opened the link and never funded it is
+  // not something the recipient should be told about (and there are many of those).
+  const mine = all
+    .filter((p) => samePhone(p.recipient.phone, local, p.recipient.country) && p.state !== "QUOTED" && p.state !== "AWAITING_INBOUND")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 50)
+    .map((p) => ({ ref: p.ref, xaf: p.xaf, state: p.state, displayStatus: p.displayStatus, createdAt: p.createdAt, updatedAt: p.updatedAt, method: p.method }));
+  const received = mine.filter((p) => p.displayStatus === "Completed");
+  res.json({ phone: local, items: mine, totals: { count: received.length, xaf: received.reduce((s, p) => s + p.xaf, 0) } });
+});
+
 api.get("/me/vault", async (req, res) => {
   if (!getSettings().features.contacts) return res.json([]); // feature off → empty book
   const sid = await vaultOwnerOf(req);

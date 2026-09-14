@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
@@ -14,11 +15,13 @@ import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { track } from '@/lib/analytics';
 import { useI18n } from '@/lib/i18n';
-import { checkPhone, localDigits, lightningAddress, MAX_XAF, receiveLink } from '@shared/domain';
+import { checkPhone, localDigits, lightningAddress, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, receiveLink } from '@shared/domain';
 import { WEB_ORIGIN } from '@/lib/config';
 
 // The address comes from the shared builder — the same one the server serves and the
 // identity layer stores — so what this screen shows is what a wallet can pay.
+
+const COUNTRY_DIAL = '+237';
 
 export default function ReceiveScreen() {
   const t = useTheme();
@@ -67,6 +70,14 @@ export default function ReceiveScreen() {
   const address = number ? lightningAddress(number, 'CM') : '';
   const [amountDraft, setAmountDraft] = useState('');
   const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, '')) || 0, MAX_XAF);
+  // The amount asked for must be one a payer can send: below the minimum the payer's form
+  // refuses it, above the operator's ceiling the payout does.
+  const savedCheck = number ? checkPhone(number, 'CM') : null;
+  const amountCap = savedCheck?.ok && savedCheck.provider ? Math.min(MAX_XAF, PROVIDER_PAYOUT_MAX[savedCheck.provider]) : MAX_XAF;
+  const amountProblem =
+    amountXaf > 0 && amountXaf < MIN_XAF ? tr('rcv_amount_min', { min: MIN_XAF.toLocaleString('fr-FR') })
+    : amountXaf > amountCap ? tr('rcv_amount_max', { max: amountCap.toLocaleString('fr-FR') })
+    : null;
   // The link serves everyone: app, browser, or a phone camera with nothing installed.
   const link = number ? receiveLink(WEB_ORIGIN, number, amountXaf) : '';
   const [copiedWhat, setCopiedWhat] = useState<'link' | 'address' | null>(null);
@@ -126,15 +137,6 @@ export default function ReceiveScreen() {
           {valid && check.provider ? (
             <Body muted style={{ fontSize: 13 }}>{tr('rcv_on_network').replace('{op}', check.provider === 'ORANGE' ? 'Orange Money' : 'MTN MoMo')}</Body>
           ) : null}
-          <Field
-            label={tr('rcv_amount_opt')}
-            placeholder="0"
-            keyboardType="number-pad"
-            value={amountDraft}
-            onChangeText={(x) => setAmountDraft(x.replace(/\D/g, ''))}
-            right={<Text style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>XAF</Text>}
-          />
-          <Body muted style={{ fontSize: 12.5 }}>{tr('rcv_amount_hint')}</Body>
           <Button
             title={tr('create_pay_link')}
             icon="link"
@@ -149,7 +151,24 @@ export default function ReceiveScreen() {
       ) : (
         <Card padded elevated style={{ alignItems: 'center', gap: Spacing.four }}>
           <Label>{tr('your_pay_link')}</Label>
-          {amountXaf > 0 ? <Text style={[styles.addr, { color: t.text }]}>{amountXaf.toLocaleString('fr-FR')} XAF</Text> : null}
+          {/* Whose number this pays — the one thing to check before sharing it. */}
+          <Body muted style={{ marginTop: -Spacing.two }}>
+            {tr('rcv_who')} <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{COUNTRY_DIAL} {number.replace(/(\d)(?=(\d{2})+$)/g, '$1 ')}</Body>
+          </Body>
+          {/* The amount lives here, next to the code it changes — it used to be reachable
+              only through "Change number". */}
+          <View style={{ alignSelf: 'stretch', gap: Spacing.one }}>
+            <Field
+              label={tr('rcv_amount_opt')}
+              placeholder="0"
+              keyboardType="number-pad"
+              value={amountDraft}
+              onChangeText={(x) => setAmountDraft(x.replace(/\D/g, ''))}
+              right={<Text style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>XAF</Text>}
+            />
+            <Body style={{ fontSize: 12.5, color: amountProblem ? t.bad : t.muted }}>{amountProblem ?? tr('rcv_amount_hint')}</Body>
+          </View>
+          {amountXaf > 0 && !amountProblem ? <Text style={[styles.addr, { color: t.text }]}>{amountXaf.toLocaleString('fr-FR')} XAF</Text> : null}
           {/* The QR is the web link: a phone camera opens it with no app installed, the app's
               scanner routes it to Send, and it carries the amount. */}
           <View style={[styles.qrCard, Shadow.md]}>
@@ -166,8 +185,8 @@ export default function ReceiveScreen() {
             <Mono style={{ flex: 1 }} numberOfLines={1}>{link.replace(/^https?:\/\//, '')}</Mono>
             <Ionicons name={copiedWhat === 'link' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'link' ? t.recv : t.accent} />
           </Pressable>
-          <Button title={tr('rcv_share_whatsapp')} icon="logo-whatsapp" onPress={shareWhatsApp} style={{ alignSelf: 'stretch' }} />
-          <Button title={tr('rcv_share_qr_btn')} icon="share-outline" variant="outline" onPress={share} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('rcv_share_whatsapp')} icon="logo-whatsapp" onPress={shareWhatsApp} disabled={!!amountProblem} style={{ alignSelf: 'stretch' }} />
+          <Button title={tr('rcv_share_qr_btn')} icon="share-outline" variant="outline" onPress={share} disabled={!!amountProblem} style={{ alignSelf: 'stretch' }} />
           <Body muted center style={{ fontSize: 13 }}>{tr('share_get_paid')}</Body>
           <Body muted center style={{ fontSize: 12.5 }}>{tr('rcv_preview_hint')}</Body>
 
@@ -186,6 +205,11 @@ export default function ReceiveScreen() {
               <Mono style={{ flex: 1 }} numberOfLines={1}>{address}</Mono>
               <Ionicons name={copiedWhat === 'address' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'address' ? t.recv : t.accent} />
             </Pressable>
+          </View>
+          {/* Closing the loop: the person who shared a code wants to know when it was paid. */}
+          <View style={{ alignSelf: 'stretch', borderTopWidth: 1, borderTopColor: t.line, paddingTop: Spacing.three, gap: Spacing.two, alignItems: 'center' }}>
+            <Body muted center style={{ fontSize: 12.5 }}>{tr('rcv_track_hint')}</Body>
+            <Button title={tr('rcv_track')} icon="receipt-outline" variant="outline" size="md" onPress={() => router.push('/claim-account')} />
           </View>
           <Button
             title={tr('change_number')}

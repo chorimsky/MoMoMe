@@ -23,17 +23,19 @@ export function Claim() {
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<"whatsapp" | "sms" | undefined>();
+  const [channels, setChannels] = useState<Record<"whatsapp" | "sms", boolean> | undefined>();
+  const other = via === "whatsapp" && channels?.sms ? "sms" as const : via === "sms" && channels?.whatsapp ? "whatsapp" as const : undefined;
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const fail = (e: unknown) => setErr(errMessage(e, t));
 
-  async function sendCode() {
+  async function sendCode(prefer?: "whatsapp" | "sms") {
     setBusy(true); setErr(null);
     try {
-      const r = await api.requestClaim(phone, { lang });
-      setDevCode(r.devCode ?? null); setVia(r.via);
+      const r = await api.requestClaim(phone, { lang, via: prefer });
+      setDevCode(r.devCode ?? null); setVia(r.via); setChannels(r.channels);
       setStep("otp");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -76,7 +78,7 @@ export function Claim() {
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t("mm_number_ph")} aria-label={t("mm_number_ph")} inputMode="tel"
                   style={{ flex: 1, padding: "14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
               </div>
-              <button className="btn btn-primary" disabled={!validNumber || busy} onClick={sendCode} style={{ width: "100%", marginTop: 24, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("claim_send_code")}</button>
+              <button className="btn btn-primary" disabled={!validNumber || busy} onClick={() => void sendCode()} style={{ width: "100%", marginTop: 24, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("claim_send_code")}</button>
             </FlowCard>
           )}
 
@@ -94,6 +96,7 @@ export function Claim() {
                 style={{ width: "100%", padding: "16px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 26, letterSpacing: "0.3em", textAlign: "center", color: "var(--ink)", outline: "none" }} />
               <button className="btn btn-primary" disabled={code.length !== 6 || busy} onClick={verify} style={{ width: "100%", marginTop: 18, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("claim_verify")}</button>
               <button className="btn btn-quiet" onClick={() => { setCode(""); setStep("number"); }} style={{ width: "100%", marginTop: 6, fontSize: 13 }}>{t("claim_resend")}</button>
+              {other && <button className="btn btn-quiet" disabled={busy} onClick={() => void sendCode(other)} style={{ width: "100%", marginTop: 2, fontSize: 13 }}>{t(other === "sms" ? "otp_via_sms" : "otp_via_whatsapp")}</button>}
             </FlowCard>
           )}
 

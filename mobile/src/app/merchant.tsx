@@ -61,7 +61,9 @@ export default function MerchantScreen() {
   }
 
   return (
-    <Screen scroll edges={[]}>
+    // Keyed on the view so the ScrollView remounts at the top: the dashboard used to open
+    // wherever the onboarding form had been scrolled to, with the verify card off-screen.
+    <Screen scroll edges={[]} key={merchant && !editing ? 'dashboard' : 'form'}>
       <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
       {/* An action's error sits ABOVE the screen it happened on. It used to replace the whole
           dashboard: a failed code request left the merchant with nothing but a red bar and no

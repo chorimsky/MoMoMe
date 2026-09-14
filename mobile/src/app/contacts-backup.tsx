@@ -35,6 +35,9 @@ export default function ContactsBackupScreen() {
   const [otp, setOtp] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
+  const [channels, setChannels] = useState<Record<'whatsapp' | 'sms', boolean> | null>(null);
+  const otherVia: 'whatsapp' | 'sms' | null =
+    via === 'whatsapp' && channels?.sms ? 'sms' : via === 'sms' && channels?.whatsapp ? 'whatsapp' : null;
   const [recoveryCode, setRecoveryCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,13 +54,14 @@ export default function ContactsBackupScreen() {
     setError(null);
   };
 
-  const sendCode = async () => {
+  const sendCode = async (prefer?: 'whatsapp' | 'sms') => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.anchorRequest(digits, { lang });
+      const r = await api.anchorRequest(digits, { lang, via: prefer });
       setDevCode(r.devCode ?? null);
       setVia(r.via ?? null);
+      setChannels(r.channels ?? null);
       setStep('otp');
     } catch (e) {
       setError(errMessage(e));
@@ -159,11 +163,11 @@ export default function ContactsBackupScreen() {
           valid={valid}
           busy={busy}
           sub={tr('bk_backup_sub')}
-          onNext={sendCode}
+          onNext={() => sendCode()}
         />
       ) : null}
       {mode === 'backup' && step === 'otp' ? (
-        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} busy={busy} onVerify={doBackup} />
+        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} otherVia={otherVia} onSwitch={sendCode} busy={busy} onVerify={doBackup} />
       ) : null}
       {mode === 'backup' && step === 'code' ? (
         <View style={{ gap: Spacing.four, paddingTop: Spacing.five, alignItems: 'center' }}>
@@ -192,11 +196,11 @@ export default function ContactsBackupScreen() {
           valid={valid}
           busy={busy}
           sub={tr('bk_restore_sub')}
-          onNext={sendCode}
+          onNext={() => sendCode()}
         />
       ) : null}
       {mode === 'restore' && step === 'otp' ? (
-        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} busy={busy} onVerify={() => setStep('code')} />
+        <OtpStep t={t} tr={tr} otp={otp} setOtp={setOtp} devCode={devCode} via={via} otherVia={otherVia} onSwitch={sendCode} busy={busy} onVerify={() => setStep('code')} />
       ) : null}
       {mode === 'restore' && step === 'code' ? (
         <View style={{ gap: Spacing.four, paddingTop: Spacing.four }}>
@@ -302,6 +306,8 @@ function OtpStep({
   setOtp,
   devCode,
   via,
+  otherVia,
+  onSwitch,
   busy,
   onVerify,
 }: {
@@ -311,6 +317,8 @@ function OtpStep({
   setOtp: (s: string) => void;
   devCode: string | null;
   via: 'whatsapp' | 'sms' | null;
+  otherVia: 'whatsapp' | 'sms' | null;
+  onSwitch: (prefer: 'whatsapp' | 'sms') => void;
   busy: boolean;
   onVerify: () => void;
 }) {
@@ -334,6 +342,9 @@ function OtpStep({
           maxLength={6}
         />
         <Button title={tr('bk_verify')} icon="checkmark" onPress={onVerify} loading={busy} disabled={otp.length !== 6} style={{ marginTop: Spacing.three }} />
+        {otherVia ? (
+          <Button title={tr(otherVia === 'sms' ? 'otp_via_sms' : 'otp_via_whatsapp')} variant="ghost" size="md" disabled={busy} onPress={() => onSwitch(otherVia)} />
+        ) : null}
       </Card>
     </View>
   );

@@ -17,7 +17,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
 
-type Result = { deleted: { contacts: number; device: boolean; referrals: boolean }; retained: { payments: number; reason: string } };
+type Result = { deleted: { contacts: number; device: boolean; referrals: boolean; merchant?: boolean; payLinks?: number }; retained: { payments: number; reason: string } };
 
 export default function DeleteAccountScreen() {
   const t = useTheme();
@@ -60,6 +60,7 @@ export default function DeleteAccountScreen() {
             <View style={{ gap: Spacing.two }}>
               <Body>• {tr('del_done_contacts', { n: result.deleted.contacts })}</Body>
               {result.deleted.device ? <Body>• {tr('del_done_device')}</Body> : null}
+              {result.deleted.merchant ? <Body>• {tr('del_done_merchant', { n: result.deleted.payLinks ?? 0 })}</Body> : null}
               <Body>• {tr('del_done_payments', { n: result.retained.payments })}</Body>
             </View>
           </Card>

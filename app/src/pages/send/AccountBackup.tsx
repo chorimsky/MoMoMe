@@ -32,6 +32,8 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<"whatsapp" | "sms" | undefined>();
+  const [channels, setChannels] = useState<Record<"whatsapp" | "sms", boolean> | undefined>();
+  const other = via === "whatsapp" && channels?.sms ? "sms" as const : via === "sms" && channels?.whatsapp ? "whatsapp" as const : undefined;
   const [recoveryCode, setRecoveryCode] = useState("");
   const [restoreCode, setRestoreCode] = useState("");
   const [pendingBlob, setPendingBlob] = useState<{ salt: string; iterations: number; iv: string; ct: string } | null>(null);
@@ -43,11 +45,11 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
   const validPhone = phone.replace(/\D/g, "").length >= 8;
   const fail = (e: unknown, fallback?: string) => setErr(e instanceof ApiError ? e.message : (fallback ?? t("error_generic")));
 
-  async function sendCode() {
+  async function sendCode(prefer?: "whatsapp" | "sms") {
     setBusy(true); setErr(null);
     try {
-      const r = await api.anchorRequest(phone, { lang });
-      setDevCode(r.devCode ?? null); setVia(r.via);
+      const r = await api.anchorRequest(phone, { lang, via: prefer });
+      setDevCode(r.devCode ?? null); setVia(r.via); setChannels(r.channels);
       setStep("code");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -125,7 +127,7 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
             <span className="num" style={{ fontWeight: 700, color: "var(--ink-2)", fontSize: 15, flex: "none" }}>{dial}</span>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t("mm_number_ph")} type="tel" inputMode="tel" autoFocus style={{ ...inputStyle, fontFamily: "var(--font-mono)" }} />
           </div>
-          <button className="btn btn-primary btn-block" disabled={!validPhone || busy} onClick={sendCode} style={{ marginTop: 16 }}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("bk_send_code")}</button>
+          <button className="btn btn-primary btn-block" disabled={!validPhone || busy} onClick={() => void sendCode()} style={{ marginTop: 16 }}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("bk_send_code")}</button>
         </>
       )}
 
@@ -137,6 +139,7 @@ export function AccountBackup({ mode: initialMode, onClose, onRestored }: { mode
           <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder={t("bk_code_ph")} inputMode="numeric" autoFocus
             style={{ ...inputStyle, fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 24, letterSpacing: "0.3em", textAlign: "center" }} />
           <button className="btn btn-primary btn-block" disabled={code.length !== 6 || busy} onClick={isBackup ? doBackup : doRestore} style={{ marginTop: 14 }}>{busy ? <Spinner size={15} color="var(--brand-ink)" /> : t("bk_verify")}</button>
+          {other && <button type="button" className="btn btn-quiet btn-block" disabled={busy} onClick={() => void sendCode(other)} style={{ marginTop: 6, fontSize: 13 }}>{t(other === "sms" ? "otp_via_sms" : "otp_via_whatsapp")}</button>}
         </>
       )}
 

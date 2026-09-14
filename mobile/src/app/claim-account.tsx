@@ -24,6 +24,9 @@ export default function ClaimAccountScreen() {
   const [code, setCode] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
+  const [channels, setChannels] = useState<Record<'whatsapp' | 'sms', boolean> | null>(null);
+  const otherVia: 'whatsapp' | 'sms' | null =
+    via === 'whatsapp' && channels?.sms ? 'sms' : via === 'sms' && channels?.whatsapp ? 'whatsapp' : null;
   const [address, setAddress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +34,14 @@ export default function ClaimAccountScreen() {
   const digits = useMemo(() => localDigits(phone, country), [phone, country]);
   const validNumber = digits.length >= 8;
 
-  const sendCode = async () => {
+  const sendCode = async (prefer?: 'whatsapp' | 'sms') => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.requestClaim(digits, { lang });
+      const r = await api.requestClaim(digits, { lang, via: prefer });
       setDevCode(r.devCode ?? null);
       setVia(r.via ?? null);
+      setChannels(r.channels ?? null);
       setStep('otp');
     } catch (e) {
       setError(errMessage(e));
@@ -114,7 +118,7 @@ export default function ClaimAccountScreen() {
                 ))}
               </View>
             ) : null}
-            <Button title={tr('send_code')} icon="send" onPress={sendCode} loading={busy} disabled={!validNumber} style={{ marginTop: Spacing.three }} />
+            <Button title={tr('send_code')} icon="send" onPress={() => sendCode()} loading={busy} disabled={!validNumber} style={{ marginTop: Spacing.three }} />
           </Card>
         </View>
       ) : null}
@@ -151,6 +155,9 @@ export default function ClaimAccountScreen() {
               maxLength={6}
             />
             <Button title={tr('verify')} icon="checkmark" onPress={verify} loading={busy} disabled={code.length !== 6} style={{ marginTop: Spacing.three }} />
+            {otherVia ? (
+              <Button title={tr(otherVia === 'sms' ? 'otp_via_sms' : 'otp_via_whatsapp')} variant="ghost" size="md" disabled={busy} onPress={() => sendCode(otherVia)} />
+            ) : null}
             <Button
               title={tr('use_diff_number')}
               variant="ghost"

@@ -301,7 +301,7 @@ export const STRINGS = {
   contact_support: ['Contact & support', 'Contact et assistance'],
   // account deletion
   del_title: ['Delete my account', 'Supprimer mon compte'],
-  del_intro: ['Deleting your account removes the data tied to this phone: your saved contacts, this device’s keys and your referral links. It cannot be undone.', 'Supprimer votre compte efface les données liées à ce téléphone : vos contacts enregistrés, les clés de cet appareil et vos liens de parrainage. C’est irréversible.'],
+  del_intro: ['Deleting your account removes the data tied to this phone: your saved contacts, this device’s keys, your referral links and any merchant profile. It cannot be undone.', 'Supprimer votre compte efface les données liées à ce téléphone : vos contacts enregistrés, les clés de cet appareil, vos liens de parrainage et votre éventuel profil marchand. C’est irréversible.'],
   del_stays: ['Records of payments you have already sent are kept. Anti-money-laundering law requires a money transfer service to retain them; they are no longer linked to a device you control.', 'Les enregistrements des paiements déjà envoyés sont conservés. La loi anti-blanchiment impose à un service de transfert d’argent de les garder ; ils ne sont plus liés à un appareil que vous contrôlez.'],
   del_button: ['Delete my account', 'Supprimer mon compte'],
   del_confirm_title: ['Delete your account?', 'Supprimer votre compte ?'],
@@ -309,6 +309,7 @@ export const STRINGS = {
   del_confirm_yes: ['Yes, delete it', 'Oui, supprimer'],
   del_done_title: ['Your account has been deleted', 'Votre compte a été supprimé'],
   del_done_contacts: ['{n} saved contact(s) deleted', '{n} contact(s) enregistré(s) supprimé(s)'],
+  del_done_merchant: ['Merchant profile removed ({n} payment link(s) switched off)', 'Profil marchand supprimé ({n} lien(s) de paiement désactivé(s))'],
   del_done_device: ['This device’s keys were removed', 'Les clés de cet appareil ont été retirées'],
   del_done_payments: ['{n} past payment record(s) kept, as the law requires', '{n} enregistrement(s) de paiement conservé(s), comme l’exige la loi'],
   del_web_link: ['Deleting for a phone you no longer have? Ask us on the web', 'Vous n’avez plus ce téléphone ? Faites la demande sur le site'],

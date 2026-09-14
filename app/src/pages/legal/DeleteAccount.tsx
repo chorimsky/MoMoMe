@@ -19,7 +19,7 @@ import { useI18n } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
 
 interface DeleteResult {
-  deleted: { contacts: number; device: boolean; referrals: boolean };
+  deleted: { contacts: number; device: boolean; referrals: boolean; merchant?: boolean; payLinks?: number };
   retained: { payments: number; reason: string };
 }
 
@@ -75,8 +75,8 @@ export function DeleteAccount() {
   return (
     <DocShell kicker={L("Legal", "Juridique")} title={L("Delete your account", "Supprimer votre compte")} updated={L("3 September 2026", "3 septembre 2026")} current="privacy" langToggle>
       <Summary>
-        {L("You can delete your MoMo›Me account and the data tied to it from this page, on this device. Your saved contacts, this device’s keys and your referral links go immediately. Records of payments you have already sent are kept, because the law that governs money transfer requires it.",
-           "Vous pouvez supprimer votre compte MoMo›Me et les données qui y sont liées depuis cette page, sur cet appareil. Vos contacts enregistrés, les clés de cet appareil et vos liens de parrainage disparaissent immédiatement. Les enregistrements des paiements déjà envoyés sont conservés, parce que la loi qui régit le transfert d'argent l'exige.")}
+        {L("You can delete your MoMo›Me account and the data tied to it from this page, on this device. Your saved contacts, this device’s keys, your referral links and any merchant profile go immediately. Records of payments you have already sent are kept, because the law that governs money transfer requires it.",
+           "Vous pouvez supprimer votre compte MoMo›Me et les données qui y sont liées depuis cette page, sur cet appareil. Vos contacts enregistrés, les clés de cet appareil, vos liens de parrainage et votre éventuel profil marchand disparaissent immédiatement. Les enregistrements des paiements déjà envoyés sont conservés, parce que la loi qui régit le transfert d'argent l'exige.")}
       </Summary>
 
       <Sec n="01" title={L("What gets deleted", "Ce qui est supprimé")}>
@@ -126,6 +126,7 @@ export function DeleteAccount() {
               <li>{fr ? `${result.deleted.contacts} contact${result.deleted.contacts === 1 ? "" : "s"} enregistré${result.deleted.contacts === 1 ? "" : "s"} supprimé${result.deleted.contacts === 1 ? "" : "s"}` : `${result.deleted.contacts} saved contact${result.deleted.contacts === 1 ? "" : "s"} deleted`}</li>
               <li>{result.deleted.device ? L("This device’s keys were removed", "Les clés de cet appareil ont été supprimées") : L("This device had no keys stored", "Cet appareil n'avait aucune clé enregistrée")}</li>
               <li>{result.deleted.referrals ? L("Referral links removed", "Liens de parrainage supprimés") : L("No referral links to remove", "Aucun lien de parrainage à supprimer")}</li>
+              {result.deleted.merchant && <li>{L(`Merchant profile removed${result.deleted.payLinks ? ` (${result.deleted.payLinks} payment link${result.deleted.payLinks === 1 ? "" : "s"} switched off)` : ""}`, `Profil marchand supprimé${result.deleted.payLinks ? ` (${result.deleted.payLinks} lien${result.deleted.payLinks === 1 ? "" : "s"} de paiement désactivé${result.deleted.payLinks === 1 ? "" : "s"})` : ""}`)}</li>}
               <li>
                 {result.retained.payments} past payment record
                 {result.retained.payments === 1 ? "" : "s"} kept — {result.retained.reason}

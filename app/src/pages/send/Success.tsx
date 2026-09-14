@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useRef, useContext, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
 import { COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo, useBrandLogo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { downloadReceipt, shareReceipt, cryptoMethod, cryptoSent, usdStr, type ReceiptStrings } from "../../lib/receipt.js";
-import { FlowCard, Row } from "./ui.js";
+import { FlowCard, Row, MerchantFlow } from "./ui.js";
 
 function fullPhone(p: Payment): string {
   return COUNTRIES[p.recipient.country].dial + " " + p.recipient.phone;
@@ -150,6 +150,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
 export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payment; reset: () => void; onViewActivity: () => void }) {
   const { t, lang } = useI18n();
   const [showReceipt, setShowReceipt] = useState(false);
+  const biz = useContext(MerchantFlow);
   return (
     <FlowCard>
       <div style={{ textAlign: "center", padding: "10px 0 4px" }}>
@@ -173,7 +174,10 @@ export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payme
       <div style={{ marginTop: 22, background: "var(--surface-2)", borderRadius: "var(--r)", padding: "4px 16px", border: "1px solid var(--line)" }}>
         <Row k={t("recipient")} v={payment.recipient.name} />
         <hr className="hair" />
-        <Row k={t("mobile_number")} v={fullPhone(payment)} />
+        {/* A business checkout shows the merchant code; the owner's number is not the
+            payer's business. The downloadable receipt keeps the destination — it is the
+            payer's proof of where the money went. */}
+        {biz ? <Row k={t("mrc_merchant_code")} v={biz.code ?? payment.merchantId ?? "—"} /> : <Row k={t("mobile_number")} v={fullPhone(payment)} />}
         <hr className="hair" />
         <Row k={t("reference")} v={payment.ref} />
         <hr className="hair" />

@@ -100,7 +100,7 @@ export default function SendScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const features = useFeatures();
-  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; country?: string; name?: string; t?: string }>();
+  const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; merchantLinkCode?: string; country?: string; name?: string; t?: string }>();
 
   const [step, setStep] = useState<Step>('details');
   // What each method actually costs and how long it takes. Fetched when the picker opens —
@@ -126,6 +126,12 @@ export default function SendScreen() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined);
+  // The payment LINK code, when the checkout came from one: it is what marks the link (or
+  // invoice) paid on the merchant's side. Web sent it; the app only ever sent the merchant
+  // code, so a link paid from the app stayed "open" forever.
+  const [merchantLinkCode, setMerchantLinkCode] = useState<string | undefined>(undefined);
+  const merchantRef = useRef<string | undefined>(undefined);
+  merchantRef.current = merchantCode;
   // The funnel: every step a session reaches, once (same names as the web app).
   useEffect(() => { track('send_step', { step, ...(merchantCode ? { checkout: 'merchant' } : {}) }); }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
   // A business link that fixed its amount: the buyer chooses how to pay, nothing else.
@@ -155,6 +161,7 @@ export default function SendScreen() {
     if (typeof params.amount === 'string' && params.amount) setAmount(params.amount.replace(/\D/g, ''));
     if (typeof params.merchantCode === 'string' && params.merchantCode) {
       setMerchantCode(params.merchantCode);
+      setMerchantLinkCode(typeof params.merchantLinkCode === 'string' && params.merchantLinkCode ? params.merchantLinkCode : undefined);
       setLockedAmount(typeof params.amount === 'string' && params.amount.replace(/\D/g, '').length > 0);
     }
     if (params.country === 'CM' || params.country === 'GA' || params.country === 'TD' || params.country === 'CG' || params.country === 'CF')
@@ -168,7 +175,7 @@ export default function SendScreen() {
     }
     // `t` is a nonce from the contact list: opening the SAME contact twice must re-seed the
     // form, and without it the params are identical and this effect never re-runs.
-  }, [params.scanned, params.amount, params.merchantCode, params.country, params.name, params.t]);
+  }, [params.scanned, params.amount, params.merchantCode, params.merchantLinkCode, params.country, params.name, params.t]);
 
   useEffect(() => {
     api
@@ -240,6 +247,11 @@ export default function SendScreen() {
       }
       return;
     }
+    // A business checkout: the recipient IS the business (name from the pay link), and the
+    // operator's registered name belongs to the owner, not to the customer's screen. The
+    // lookup used to replace "Buea Coffee House" with the owner's name and then warn about
+    // the mismatch it had just created.
+    if (merchantRef.current) return;
     let alive = true;
     const id = setTimeout(() => {
       api
@@ -330,6 +342,7 @@ export default function SendScreen() {
         recipient: recipientBody(),
         ...(token ? { riskToken: token } : {}),
         ...(merchantCode ? { merchantCode } : {}),
+        ...(merchantLinkCode ? { merchantLinkCode } : {}),
       });
       setPayment(p);
       setStep('pay');
@@ -435,6 +448,7 @@ export default function SendScreen() {
         recipient: recipientBody(),
         ...(riskToken ? { riskToken } : {}),
         ...(merchantCode ? { merchantCode } : {}),
+        ...(merchantLinkCode ? { merchantLinkCode } : {}),
       });
       setPayment(p);
     } catch (e) {
@@ -496,7 +510,7 @@ export default function SendScreen() {
       {step === 'details' ? (
         <View style={styles.brandRow}>
           <MomoMark size={36} />
-          <H1 style={{ flex: 1 }}>{tr('send_money')}</H1>
+          <H1 style={{ flex: 1 }}>{merchantCode ? tr('pay_business_title') : tr('send_money')}</H1>
           {features.contacts ? (
             <Pressable
               onPress={() => router.push('/contacts')}
@@ -562,6 +576,24 @@ export default function SendScreen() {
             </View>
           ) : null}
 
+          {merchantCode ? (
+            // The business being paid — name, code and operator. The settlement number stays
+            // out of sight: the customer knows the shop, not the owner's phone.
+            <Card padded>
+              <View style={styles.cardHead}>
+                <Label>{tr('paying_business')}</Label>
+                {shownProvider ? <Pill label={PROVIDERS[shownProvider].name} tone={providerTone(shownProvider)} /> : null}
+              </View>
+              <View style={[styles.nameRow, { alignItems: 'center' }]}>
+                <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={44} />
+                <View style={{ flex: 1 }}>
+                  <Body style={{ color: t.text, fontFamily: Fonts.displayBold, fontSize: 18 }}>{recipientName || tr('mm_recipient')}</Body>
+                  <Body muted style={{ fontSize: 12.5 }}>{tr('merchant_code_label')} · {merchantCode}</Body>
+                </View>
+                <Ionicons name="checkmark-circle" size={20} color={t.recv} />
+              </View>
+            </Card>
+          ) : (
           <Card padded>
             <View style={styles.cardHead}>
               <Label>{tr('recipient')}</Label>
@@ -665,9 +697,10 @@ export default function SendScreen() {
               </View>
             ) : null}
           </Card>
+          )}
 
           <Card padded>
-            <Label>{tr('amount')}</Label>
+            <Label>{merchantCode && lockedAmount ? tr('amount_due') : tr('amount')}</Label>
             <View style={styles.amountRow}>
               <TextInput
                 value={amount ? group(amount) : ''}
@@ -800,7 +833,11 @@ export default function SendScreen() {
             </View>
             {/* The number itself, always: a name alone is not enough to check a payment
                 against before committing money to it. */}
-            {recipientName ? <Body muted center style={{ fontSize: 13, marginTop: 2 }}>{COUNTRIES[country].dial} {phone}</Body> : null}
+            {merchantCode ? (
+              <Body muted center style={{ fontSize: 13, marginTop: 2 }}>{tr('merchant_code_label')} · {merchantCode}</Body>
+            ) : recipientName ? (
+              <Body muted center style={{ fontSize: 13, marginTop: 2 }}>{COUNTRIES[country].dial} {phone}</Body>
+            ) : null}
             <Body muted center style={{ fontSize: 11.5, marginTop: Spacing.two, lineHeight: 16, paddingHorizontal: Spacing.four }}>{tr('cashout_note')}</Body>
           </View>
 
@@ -812,7 +849,8 @@ export default function SendScreen() {
             <Divider />
             {/* What leaves the sender's wallet, and on which network — the two facts a
                 stablecoin payer must get right, shown before they commit rather than after. */}
-            <Row label={tr('you_send')} value={quote.inboundAmountLabel} />
+            {/* Lightning wallets show sats, not 0.0000… BTC — the number the payer will match. */}
+            <Row label={tr('you_send')} value={quote.method === 'LIGHTNING' ? satsLabel(quote.inboundAmount) : quote.inboundAmountLabel} />
             {method ? (
               <View style={styles.kv}>
                 <Body muted>{tr('network')}</Body>
@@ -878,6 +916,7 @@ export default function SendScreen() {
           <PayStep
             payment={payment}
             recipientLabel={recipientName || phone}
+            merchantCode={merchantCode}
             providerShort={provider ? PROVIDERS[provider].short : ''}
             demoMode={demoMode}
             busy={busy}
@@ -985,6 +1024,7 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 function PayStep({
   payment,
   recipientLabel,
+  merchantCode,
   providerShort,
   demoMode,
   busy,
@@ -994,6 +1034,8 @@ function PayStep({
 }: {
   payment: Payment;
   recipientLabel: string;
+  /** Set for a business checkout: the card shows the merchant code, not the owner's number. */
+  merchantCode?: string;
   providerShort: string;
   demoMode: boolean;
   busy: boolean;
@@ -1149,12 +1191,12 @@ function PayStep({
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{recipientLabel}</Text>
         </View>
         <View style={styles.kv}>
-          <Body muted>{tr('mobile_money')}</Body>
+          <Body muted>{merchantCode ? tr('merchant_code_label') : tr('mobile_money')}</Body>
           <Body style={{ color: t.textSecondary }}>
-            {providerShort ? `${providerShort} · ` : ''}{payment.recipient.phone}
+            {providerShort ? `${providerShort} · ` : ''}{merchantCode ?? payment.recipient.phone}
           </Body>
         </View>
-        {pi.method === 'LIGHTNING' ? (
+        {pi.method === 'LIGHTNING' && !merchantCode ? (
           <View style={styles.kv}>
             <Body muted>{tr('lightning_address')}</Body>
             <Mono style={{ fontSize: 12 }}>{lightningAddress(payment.recipient.phone, payment.recipient.country)}</Mono>

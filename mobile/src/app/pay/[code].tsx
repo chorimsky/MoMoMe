@@ -45,6 +45,8 @@ export default function PayLinkScreen() {
         scanned: link.merchant.settlementPhone,
         amount: link.amountXaf ? String(link.amountXaf) : '',
         merchantCode: link.merchant.code,
+        // A payment LINK (not a bare merchant code): its code marks the link paid.
+        ...(link.code !== link.merchant.code ? { merchantLinkCode: link.code } : {}),
         // The business name as the recipient label, with the in-app intent token that
         // Send requires before it honours a `name` param (see lib/navIntent).
         name: link.merchant.businessName,
@@ -82,6 +84,22 @@ export default function PayLinkScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={t.accent} />
         </View>
+      </Screen>
+    );
+  }
+
+  if (link.paid) {
+    return (
+      <Screen edges={[]}>
+        {title}
+        <Card style={{ marginTop: Spacing.five, alignItems: 'center', gap: Spacing.three }} padded>
+          <IconCircle name="checkmark" color={t.recv} bg={t.recvWash} size={56} />
+          <H2 style={{ textAlign: 'center' }}>{tr('inv_paid_title')}</H2>
+          <Body muted center>
+            {tr('inv_paid_body', { name: link.merchant.businessName, amount: xaf(link.paid.xaf) })}
+          </Body>
+          <Button title={tr('pay_link_go_home')} variant="outline" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ alignSelf: 'stretch' }} />
+        </Card>
       </Screen>
     );
   }

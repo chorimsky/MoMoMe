@@ -14,7 +14,7 @@ import { useI18n } from "../lib/i18n.js";
 
 export function Pay({ mode = "link" }: { mode?: "link" | "merchant" }) {
   const { code } = useParams<{ code: string }>();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [link, setLink] = useState<MerchantLinkPublic | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
 
@@ -40,6 +40,21 @@ export function Pay({ mode = "link" }: { mode?: "link" | "merchant" }) {
           <h1 style={{ fontSize: 22, marginTop: 22 }}>{t("mrc_link_invalid_t")}</h1>
           <p style={{ color: "var(--ink-2)", marginTop: 8, lineHeight: 1.5 }}>{t("mrc_link_invalid_d")}</p>
           <Link to="/send" className="btn btn-primary" style={{ marginTop: 20, textDecoration: "none" }}>{t("lp_cta_pay")}</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (link.paid) {
+    return (
+      <div className="app-bg" style={{ background: "var(--paper)", minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
+        <div style={{ maxWidth: 360 }}>
+          <Link to="/" style={{ display: "inline-flex" }}><Logo size={34} /></Link>
+          <div aria-hidden="true" style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontSize: 24, fontWeight: 800, margin: "22px auto 0" }}>✓</div>
+          <h1 style={{ fontSize: 22, marginTop: 14 }}>{t("mrc_inv_paid_t")}</h1>
+          <p style={{ color: "var(--ink-2)", marginTop: 8, lineHeight: 1.5 }}>
+            {t("mrc_inv_paid_d")} <b>{link.merchant.businessName}</b>{link.label ? ` · ${link.label}` : ""} — <span className="num">{new Intl.NumberFormat("fr-FR").format(link.paid.xaf)} XAF</span>, {new Date(link.paid.at).toLocaleDateString(lang === "fr" ? "fr-FR" : "en-GB", { day: "numeric", month: "short", year: "numeric" })}.
+          </p>
         </div>
       </div>
     );

@@ -26,6 +26,11 @@ export function Label({ children }: { children: ReactNode }) {
  *  step for the buyer, so the stepper omits it and the Method step has nothing to go back to. */
 export const FixedFlow = createContext(false);
 
+/** The business being paid, inside a merchant checkout — the payer knows the business,
+ *  not the person whose Mobile Money number settles it, so the Review and Pay steps show
+ *  the business name and code and keep the settlement number to themselves. */
+export const MerchantFlow = createContext<{ businessName: string; code?: string; verified?: boolean } | null>(null);
+
 export function Stepper({ i }: { i: number }) {
   const { t } = useI18n();
   const fixed = useContext(FixedFlow);

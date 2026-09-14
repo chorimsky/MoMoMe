@@ -591,6 +591,10 @@ export interface MerchantLinkPublic {
   kind: MerchantLinkKind;
   clientName?: string;
   dueDate?: string;
+  /** An invoice that has already been settled: the page says so instead of taking a
+   *  second payment for the same bill. Links stay open by design (a counter QR is paid
+   *  many times); invoices are paid once. */
+  paid?: { at: string; xaf: number };
   merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean };
 }
 

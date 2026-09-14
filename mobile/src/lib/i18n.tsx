@@ -149,6 +149,9 @@ export const STRINGS = {
   start_over_confirm: ['If you have already paid, don’t start over — the payment will still be delivered and shows in Activity.', 'Si vous avez déjà payé, ne recommencez pas — le paiement sera quand même livré et apparaîtra dans Activité.'],
   keep_waiting: ['Keep waiting', 'Continuer d’attendre'],
   to: ['To', 'À'],
+  merchant_code_label: ['Merchant', 'Marchand'],
+  pay_business_title: ['Pay a business', 'Payer un commerce'],
+  paying_business: ['Paying', 'Vous payez'],
   mobile_money: ['Mobile Money', 'Mobile Money'],
   reference: ['Reference', 'Référence'],
   simulate_demo: ['Simulate payment (demo)', 'Simuler le paiement (démo)'],
@@ -397,6 +400,8 @@ export const STRINGS = {
   settles_instantly: ["Settles to the merchant's Mobile Money instantly", 'Réglé instantanément sur le Mobile Money du marchand'],
   pay_screen_title: ['Pay', 'Payer'],
   pay_link_go_home: ['Back to Send', "Retour à l'envoi"],
+  inv_paid_title: ['This invoice is already paid', 'Cette facture est déjà réglée'],
+  inv_paid_body: ['Nothing more to pay to {name} — {amount} was received.', 'Plus rien à payer à {name} — {amount} a été reçu.'],
 
   // receipt
   rcpt_success: ['Payment successful', 'Paiement réussi'],

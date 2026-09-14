@@ -6,10 +6,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { MerchantAccount, MerchantLink, MerchantSummary, CountryCode } from "@shared/types.js";
-import { COUNTRIES } from "@shared/domain.js";
+import { COUNTRIES, MIN_XAF, PROVIDER_PAYOUT_MAX } from "@shared/domain.js";
 import { SiteHeader } from "../components/nav.js";
 import { Spinner, QR, Logo } from "../components/atoms.js";
 import { fmt } from "../lib/format.js";
+const fill = (s: string, vars: Record<string, string>): string => s.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
 import { CATEGORIES, catLabel } from "../lib/categories.js";
@@ -346,17 +347,25 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
   const origin = useMemo(() => (typeof window !== "undefined" ? window.location.origin : ""), []);
   const urlFor = (code: string) => `${origin}/pay/${code}`;
 
+  // A refused link (amount outside what a customer can pay) used to vanish silently: the
+  // button un-busied and nothing appeared.
+  const [lnkErr, setLnkErr] = useState<string | null>(null);
   async function create() {
-    setBusy(true);
+    setBusy(true); setLnkErr(null);
     try {
       const xaf = Number(amount.replace(/\D/g, "")) || 0;
+      if (xaf > 0 && (xaf < MIN_XAF || xaf > PROVIDER_PAYOUT_MAX[merchant.provider])) {
+        setLnkErr(fill(t("mrc_lt_amount_range"), { min: fmt(MIN_XAF), max: fmt(PROVIDER_PAYOUT_MAX[merchant.provider]) }));
+        return;
+      }
       const { link } = await api.createMerchantLink({
         amountXaf: xaf > 0 ? xaf : undefined, label: label.trim() || undefined, kind,
         clientName: kind === "invoice" ? clientName.trim() || undefined : undefined,
         dueDate: kind === "invoice" && dueDate ? dueDate : undefined,
       });
       setAmount(""); setLabel(""); setClientName(""); setDueDate(""); onChange(); setShowQr(link.code);
-    } finally { setBusy(false); }
+    } catch (e) { setLnkErr(e instanceof ApiError ? e.message : t("error_generic")); }
+    finally { setBusy(false); }
   }
   const copy = (code: string) => { void navigator.clipboard?.writeText(urlFor(code)).then(() => { setCopied(code); setTimeout(() => setCopied(null), 1500); }); };
 
@@ -387,6 +396,7 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
           <div><label style={labelStyle}>{invoice ? t("mrc_lt_ref_opt") : t("mrc_lt_label_short")}</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={invoice ? "INV-20260045" : "Table 4"} maxLength={60} style={inputStyle} /></div>
         </div>
+        {lnkErr && <div role="alert" style={{ fontSize: 13, fontWeight: 600, color: "var(--bad)", marginBottom: 8 }}>{lnkErr}</div>}
         <button className="btn btn-primary btn-block" disabled={busy} onClick={create}>{busy ? "…" : invoice ? t("mrc_lt_create_inv") : t("mrc_lt_create_link")}</button>
       </div>
 
@@ -416,7 +426,7 @@ function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; l
                     state promised it, the card never offered it. Native share where available. */}
                 <a className="btn btn-ghost btn-sm" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}
                   href={`https://wa.me/?text=${encodeURIComponent(`${merchant.businessName}${l.amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(l.amountXaf)} XAF` : ""}${l.label ? ` · ${l.label}` : ""}\n${urlFor(l.code)}`)}`}
-                  onClick={(e) => { if (typeof navigator.share === "function") { e.preventDefault(); void navigator.share({ title: merchant.businessName, url: urlFor(l.code) }).catch(() => {}); } }}>
+                  onClick={(e) => { if (typeof navigator.share === "function") { e.preventDefault(); void navigator.share({ title: merchant.businessName, text: `${merchant.businessName}${l.amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(l.amountXaf)} XAF` : ""}${l.label ? ` · ${l.label}` : ""}`, url: urlFor(l.code) }).catch(() => {}); } }}>
                   {t("mrc_lt_share")}
                 </a>
               </div>

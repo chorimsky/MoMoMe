@@ -7,7 +7,7 @@ import { OpenInApp } from "../../components/OpenInApp.js";
 import { track } from "../../lib/analytics.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
 import { api, ApiError } from "../../api/client.js";
-import { FixedFlow } from "./ui.js";
+import { MerchantFlow, FixedFlow } from "./ui.js";
 import { DetailsStep, MethodStep, ReviewStep, PayStep, ProcessingStep } from "./steps.js";
 import { SuccessStep } from "./Success.js";
 import { MomoStep } from "./MomoStep.js";
@@ -319,6 +319,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
             assistive tech had no top-level landmark to jump to. This names the document
             once; the step headings stay correctly nested beneath it. */}
         <h1 className="sr-only">{merchant ? t("mrc_paying") : t("pay_title")}</h1>
+        <MerchantFlow.Provider value={merchant ? { businessName: merchant.businessName, code: merchant.code, verified: merchant.verified } : null}>
         <FixedFlow.Provider value={!!(merchant?.amountXaf && merchant.amountXaf > 0)}>
 
         {merchant && (
@@ -427,6 +428,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
           </div>
         )}
         </FixedFlow.Provider>
+        </MerchantFlow.Provider>
       </div>
 
       {showTabs && (

@@ -13,7 +13,7 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { WEB_ORIGIN } from '@/lib/config';
 import { CATEGORIES, categoryLabel } from '@/lib/categories';
-import { METHOD_LABEL, statusLabel } from '@/lib/format';
+import { METHOD_LABEL, statusLabel, xaf } from '@/lib/format';
 import { statusKey, useI18n } from '@/lib/i18n';
 import { detectProvider, localDigits, PROVIDERS, checkPhone, COUNTRIES } from '@shared/domain';
 import type { MerchantAccount, MerchantLink, MerchantSummary } from '@shared/types';
@@ -287,7 +287,9 @@ function Dashboard({
       setDueDate('');
       onChange();
     } catch (e) {
-      setError(errMessage(e));
+      // The server's bad_amount here names the LINK range (it depends on the merchant's
+      // operator), which the generic localized line would misstate.
+      setError(e instanceof ApiError && e.code === 'bad_amount' ? e.message : errMessage(e));
     } finally {
       setBusy(false);
     }
@@ -396,7 +398,7 @@ function Dashboard({
           <Body muted style={{ marginTop: Spacing.three }}>{tr('no_links')}</Body>
         ) : (
           <View style={{ marginTop: Spacing.two }}>
-            {links.filter((l) => !l.disabledAt).map((l) => <LinkRow key={l.code} link={l} onChange={onChange} />)}
+            {links.filter((l) => !l.disabledAt).map((l) => <LinkRow key={l.code} link={l} businessName={merchant.businessName} onChange={onChange} />)}
           </View>
         )}
       </Card>
@@ -497,7 +499,7 @@ function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
   );
 }
 
-function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void }) {
+function LinkRow({ link, businessName, onChange }: { link: MerchantLink; businessName: string; onChange: () => void }) {
   const t = useTheme();
   const { t: tr } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -526,7 +528,16 @@ function LinkRow({ link, onChange }: { link: MerchantLink; onChange: () => void 
         <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_show_qr')} onPress={() => setShowQr((v) => !v)}>
           <Ionicons name="qr-code-outline" size={18} color={showQr ? t.accent : t.muted} />
         </Pressable>
-        <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_share_link')} onPress={() => Share.share({ message: url })}>
+        <Pressable
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={tr('a11y_share_link')}
+          // What the customer reads before tapping: who, how much, for what — not a bare URL.
+          onPress={() =>
+            Share.share({
+              message: `${businessName}${link.amountXaf ? ` · ${xaf(link.amountXaf)}` : ''}${link.label ? ` · ${link.label}` : ''}\n${url}`,
+            })
+          }>
           <Ionicons name="share-outline" size={18} color={t.accent} />
         </Pressable>
         <Pressable

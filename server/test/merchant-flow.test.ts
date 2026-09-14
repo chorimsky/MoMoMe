@@ -123,6 +123,45 @@ async function main() {
        after.merchant?.verifiedPhone !== true, String(after.merchant?.verifiedPhone));
     const relink = await post("/api/merchant/links", { amountXaf: 100, label: "x" });
     ok("…and pay links are blocked again until it is re-proven", relink.status === 403, String(relink.status));
+
+    /* ---- receive-payment flow: what the customer sees, what a link may ask for ---- */
+    console.log("\nReceive payment — the customer's side\n");
+    // Re-verify on the new number (MTN 677… so the sandbox payout succeeds), then trade.
+    await post("/api/merchant", { businessName: "Chez Alice", country: "CM", settlementPhone: "677000789" });
+    smsSent = [];
+    await post("/api/merchant/verify/request", {});
+    await post("/api/merchant/verify", { code: (smsSent[0].message.match(/\d{6}/) ?? [])[0] });
+
+    const tooSmall = await post("/api/merchant/links", { amountXaf: 200, label: "gum" });
+    ok("a fixed amount below what a customer can pay is refused at creation", tooSmall.status === 400 && (await tooSmall.json()).error === "bad_amount", String(tooSmall.status));
+    const tooBig = await post("/api/merchant/links", { amountXaf: 2_000_000, label: "car" });
+    ok("…and one above the operator's payout ceiling too", tooBig.status === 400, String(tooBig.status));
+    const inv = await (await post("/api/merchant/links", { amountXaf: 15000, kind: "invoice", label: "INV-1", clientName: "Ngo Alice" })).json();
+    ok("an invoice in range is created", !!inv.link?.code, inv.link?.code);
+
+    const buyer = "buyer-device";
+    const q = await (await post("/api/quotes", { xaf: 15000, method: "LIGHTNING", country: "CM" }, buyer)).json();
+    const pay = await post("/api/payments", { quoteId: q.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Chez Alice" }, merchantLinkCode: inv.link.code }, buyer);
+    const pb = await pay.json();
+    ok("a customer can pay the invoice", pay.status === 200, `${pay.status} ${pb.error ?? ""}`);
+    ok("the payment carries the BUSINESS name, not the owner's registered name", pb.recipient?.name === "Chez Alice", pb.recipient?.name);
+    await post(`/api/payments/${pb.id}/simulate`, {}, buyer);
+    let st = "";
+    for (let i = 0; i < 60 && st !== "DELIVERED"; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      st = (await (await get(`/api/payments/${pb.id}`, buyer)).json()).state;
+    }
+    ok("…and it settles", st === "DELIVERED", st);
+
+    const pub = await (await fetch(`${base}/api/merchant/pay/${inv.link.code}`)).json();
+    ok("the public invoice page now says paid", pub.paid?.xaf === 15000, JSON.stringify(pub.paid));
+    const q2 = await (await post("/api/quotes", { xaf: 15000, method: "LIGHTNING", country: "CM" }, buyer)).json();
+    const again = await post("/api/payments", { quoteId: q2.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Chez Alice" }, merchantLinkCode: inv.link.code }, buyer);
+    ok("a second payment on the same invoice is refused", again.status === 409 && (await again.json()).error === "invoice_paid", String(again.status));
+
+    const open = await (await post("/api/merchant/links", { label: "Counter" })).json();
+    const pubOpen = await (await fetch(`${base}/api/merchant/pay/${open.link.code}`)).json();
+    ok("an open link never reports paid — it is meant to be paid many times", pubOpen.paid === undefined && pubOpen.amountXaf === undefined);
   } finally {
     server.close();
   }

@@ -874,7 +874,28 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
      what goes on the payment, the receipt and the SMS — never the typed label. */
   const registered = await registeredName(recipient.phone, recipient.country).catch(() => null);
   const toMerchant = !!(reqBody ?? {}).merchantLinkCode || !!(reqBody ?? {}).merchantCode;
-  if (registered) {
+  // A merchant checkout: the payer knows the BUSINESS, not the person whose Mobile Money
+  // number settles it. Resolve the merchant now (the same match the attribution below
+  // uses) so the business name is what goes on the payment, the pay screen, the receipt
+  // and the SMS — the registered name stayed on all of them, so every customer of "Buea
+  // Coffee House" was shown the owner's personal name and number at the moment of paying.
+  const checkoutMerchant = ((): MerchantAccount | undefined => {
+    if (!toMerchant) return undefined;
+    const b = reqBody as { merchantLinkCode?: string; merchantCode?: string };
+    const link = typeof b.merchantLinkCode === "string" ? getLink(b.merchantLinkCode) : undefined;
+    const m = link && !link.disabledAt ? merchantById(link.merchantId) : typeof b.merchantCode === "string" ? merchantByCode(b.merchantCode) : undefined;
+    return m && m.status === "active" && samePhone(m.settlementPhone, recipient.phone, recipient.country) ? m : undefined;
+  })();
+  if (checkoutMerchant) {
+    // One invoice, one payment — refused here, before a quote is claimed or an address minted.
+    const lc = (reqBody as { merchantLinkCode?: string }).merchantLinkCode;
+    const link = typeof lc === "string" ? getLink(lc) : undefined;
+    if (link?.kind === "invoice" && (await salesFor(checkoutMerchant)).some((p) => p.displayStatus === "Completed" && p.merchantLinkCode === link.code)) {
+      return { status: 409, body: { error: "invoice_paid", message: "This invoice has already been paid." } };
+    }
+    recipient.name = checkoutMerchant.businessName;
+    recipient.nameSource = "internal";
+  } else if (registered) {
     if (!toMerchant && isRealName(cleanName, recipient.phone) && !namesMatch(cleanName, registered.name)) {
       const ack = (reqBody ?? {}).riskToken;
       const acknowledged = typeof ack === "string"
@@ -1642,7 +1663,16 @@ api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), a
   if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number before accepting payments." });
   const b = (req.body ?? {}) as { amountXaf?: number; label?: string; kind?: MerchantLinkKind; clientName?: string; dueDate?: string };
   if (b.kind === "invoice" && !getSettings().features.invoices) return res.status(403).json({ error: "feature_off", message: "Invoices aren't available right now." });
-  const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.min(Math.round(b.amountXaf), MAX_XAF) : undefined;
+  // A fixed amount must be one a customer can actually pay: the quote refuses anything
+  // outside MIN–MAX, and the payout rail caps what this operator can receive. A 200 XAF
+  // link used to be created happily and then failed for every customer who opened it.
+  const amountXaf = typeof b.amountXaf === "number" && b.amountXaf > 0 ? Math.round(b.amountXaf) : undefined;
+  if (amountXaf !== undefined) {
+    const cap = Math.min(MAX_XAF, PROVIDER_PAYOUT_MAX[m.provider]);
+    if (amountXaf < MIN_XAF || amountXaf > cap) {
+      return res.status(400).json({ error: "bad_amount", message: `A payment link amount must be between ${MIN_XAF.toLocaleString("en")} and ${cap.toLocaleString("en")} XAF (the maximum a ${m.provider} Mobile Money account can receive in one payment).` });
+    }
+  }
   res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind, clientName: b.clientName, dueDate: b.dueDate }) });
 });
 api.delete("/merchant/links/:code", async (req, res) => {
@@ -1659,8 +1689,14 @@ api.get("/merchant/pay/:code", rateLimitDurableMiddleware("merchant_pay", 120, 6
   if (!link || link.disabledAt) return res.status(404).json({ error: "not_found", message: "This payment link isn't active." });
   const m = merchantById(link.merchantId);
   if (!m || m.status !== "active") return res.status(404).json({ error: "not_found", message: "This merchant isn't active." });
+  // An invoice is one bill: once a completed payment carries its code, the page must say
+  // "paid" rather than let the next person (or the same one, twice) pay it again.
+  const settled = link.kind === "invoice"
+    ? (await salesFor(m)).find((p) => p.displayStatus === "Completed" && p.merchantLinkCode === link.code)
+    : undefined;
   const pub: MerchantLinkPublic = {
     code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind, clientName: link.clientName, dueDate: link.dueDate,
+    ...(settled ? { paid: { at: settled.createdAt, xaf: settled.xaf } } : {}),
     merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
   };
   res.json(pub);

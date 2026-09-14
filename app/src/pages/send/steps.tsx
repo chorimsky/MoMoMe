@@ -9,7 +9,7 @@ import { useFeatures } from "../../lib/features.js";
 import { api } from "../../api/client.js";
 import { track } from "../../lib/analytics.js";
 import { pollMs } from "../../lib/net.js";
-import { FlowCard, Label, Stepper, Row, useExpiry, FixedFlow } from "./ui.js";
+import { FlowCard, Label, Stepper, Row, useExpiry, FixedFlow, MerchantFlow } from "./ui.js";
 import type { Draft } from "./SendApp.js";
 
 const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MANUAL_REVIEW"];
@@ -167,13 +167,17 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: 
   const nameOk = verified || isRealName(s.recipientName, s.phone);
   const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving;
 
+  // A business checkout with an open amount: the copy names the business and the
+  // presets are till-sized, not remittance-sized.
+  const biz = useContext(MerchantFlow);
+  const presets = biz ? [1000, 2500, 5000, 10000] : AMOUNT_PRESETS;
   return (
     <FlowCard>
       <Stepper i={0} />
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginTop: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <h2 style={{ fontSize: 20 }}>{t("pay_title")}</h2>
-          <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{t("details_sub")}</p>
+          <h2 style={{ fontSize: 20 }}>{biz ? fill(t("mrc_pay_biz_title"), { n: biz.businessName }) : t("pay_title")}</h2>
+          <p style={{ color: "var(--ink-2)", fontSize: 13.5, margin: "3px 0 12px", lineHeight: 1.4 }}>{biz ? t("mrc_pay_biz_sub") : t("details_sub")}</p>
         </div>
         {!lockRecipient && features.scanToPay && (
           <Link to="/scan" aria-label={t("scan_cta")} title={t("scan_cta")}
@@ -291,14 +295,14 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient }: 
       </>)}
 
       <div style={{ marginTop: 14 }}>
-        <Label>{t("amount_q")}</Label>
+        <Label>{biz ? t("mrc_amount_q") : t("amount_q")}</Label>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
           <input className="num" value={s.xaf ? fmt(s.xaf) : ""} placeholder="0" aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
             style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 27, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
           <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-3)" }}>XAF</span>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          {AMOUNT_PRESETS.map((v) => (
+          {presets.map((v) => (
             <button key={v} onClick={() => set({ xaf: v })} aria-pressed={s.xaf === v}
               style={{ flex: 1, cursor: "pointer", padding: "10px 0", minHeight: 44, borderRadius: 9, fontWeight: 600, fontSize: 13, fontFamily: "var(--font-mono)", border: `1px solid ${s.xaf === v ? "var(--accent)" : "var(--line)"}`, background: s.xaf === v ? "var(--accent-wash)" : "var(--surface)", color: s.xaf === v ? "var(--ink)" : "var(--ink-2)" }}>
               {fmt(v)}
@@ -465,7 +469,9 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo }: { s: D
 export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; quote: import("@shared/types.js").Quote; back: () => void; next: () => void; refresh: () => void; busy: boolean }) {
   const { t, ml } = useI18n();
   const c = COUNTRIES[s.country];
-  const verified = s.nameSource === "provider" || s.nameSource === "internal";
+  // A business checkout: the payer sees the business, not the owner's number.
+  const biz = useContext(MerchantFlow);
+  const verified = biz ? !!biz.verified : s.nameSource === "provider" || s.nameSource === "internal";
   const { label, expired } = useExpiry(quote.expiresAt);
   // Wrong-number is the #1 (irreversible) error on Mobile Money. When the name
   // isn't provider/history-verified, require an explicit "I checked the number" tick.
@@ -481,15 +487,16 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             {/* The name is what the payer is checking — on a phone it wraps to a second line
                 rather than being cut to "MANGA SER…" beside the operator chip. */}
-            <span style={{ fontWeight: 700, fontSize: 15, overflowWrap: "anywhere", lineHeight: 1.25 }}>{s.recipientName || c.name}</span>
+            <span style={{ fontWeight: 700, fontSize: 15, overflowWrap: "anywhere", lineHeight: 1.25 }}>{biz ? biz.businessName : s.recipientName || c.name}</span>
             {verified && <span style={{ width: 15, height: 15, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, flex: "none" }}>✓</span>}
           </div>
-          <div className="num" style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{c.dial} {s.phone}</div>
+          <div className="num" style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{biz ? `${t("mrc_merchant_code")} · ${biz.code ?? ""}` : `${c.dial} ${s.phone}`}</div>
         </div>
         <ProviderChip id={s.provider} />
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: verified ? "var(--recv)" : "var(--ink-3)", margin: "10px 0 0" }}>
-        {s.nameSource === "provider" ? "✓ " + t("verified_mm") : s.nameSource === "internal" ? "✓ " + t("sent_before") : t("name_manual")}
+        {biz ? (verified ? "✓ " + t("mrc_biz_verified") : t("mrc_biz_unverified"))
+          : s.nameSource === "provider" ? "✓ " + t("verified_mm") : s.nameSource === "internal" ? "✓ " + t("sent_before") : t("name_manual")}
       </div>
 
       <div style={{ padding: "22px 0 18px", textAlign: "center", borderBottom: "1px solid var(--line-2)" }}>
@@ -559,6 +566,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   // The name attached to the number. When no real name is on file the backend
   // stores the number itself as the name — show a neutral label instead of
   // repeating the digits, so "Paying to" always reads as a recipient.
+  const biz = useContext(MerchantFlow);
   const recDigits = payment.recipient.phone.replace(/\D/g, "");
   const recName = payment.recipient.name && payment.recipient.name.replace(/\D/g, "") !== recDigits && payment.recipient.name.trim().length >= 2
     ? payment.recipient.name.trim()
@@ -605,9 +613,9 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
         <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>{initials(recName)}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 750, color: "var(--ink-3)" }}>{t("pay_to")}</div>
-          <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{recName}</div>
-          <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {COUNTRIES[payment.recipient.country]?.dial} {payment.recipient.phone}</div>
-          {method === "LIGHTNING" && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {lightningAddress(payment.recipient.phone, payment.recipient.country)}</div>}
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{biz ? biz.businessName : recName}</div>
+          <div className="num" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider} · {biz ? biz.code ?? "" : `${COUNTRIES[payment.recipient.country]?.dial} ${payment.recipient.phone}`}</div>
+          {method === "LIGHTNING" && !biz && <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>⚡ {lightningAddress(payment.recipient.phone, payment.recipient.country)}</div>}
           <div className="num" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{t("reference")} · {payment.ref}</div>
         </div>
       </div>

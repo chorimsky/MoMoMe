@@ -36,3 +36,6 @@ mobile/.cfgerr.txt
 # FCM service-account key + Firebase app config (push credentials)
 mobile/.secrets/
 mobile/google-services.json
+
+# The server DB folder is `data/`; source folders that happen to be named data must not be swallowed.
+!app/src/capital/data/

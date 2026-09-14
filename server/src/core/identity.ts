@@ -191,12 +191,14 @@ export function requestClaim(phone: string, country: Recipient["country"] = "CM"
   }
   const id = getIdentityByDigits(phone, country);
   if (!id) return { found: false };
-  if (id.claimed) return { found: true, alreadyClaimed: true };
+  // A claimed number can be claimed AGAIN — the OTP is the proof, and a person with a
+  // new phone (or the app after the web) must be able to reach their own account. The
+  // flag is informational; it used to refuse, which locked people out of what they own.
   // Cryptographically random 6-digit code; only its hash is stored.
   const code = String(crypto.randomInt(100000, 1000000));
   otps.set(id.phone, { hash: hashCode(code), expiresAt: Date.now() + 5 * 60_000, attempts: 0 });
   touch("identity");
-  return { found: true, code };
+  return { found: true, code, alreadyClaimed: id.claimed };
 }
 
 export function verifyClaim(phone: string, code: string, country: Recipient["country"] = "CM"): { ok: boolean; identity?: Identity; reason?: string } {

@@ -785,9 +785,6 @@ api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6,
   if (!r.found) {
     return res.status(404).json({ error: "no_account", message: "No account for this number yet. You'll have one the moment you receive a Mobile Money payment." });
   }
-  if (r.alreadyClaimed) {
-    return res.status(409).json({ error: "already_claimed", message: "This account is already claimed." });
-  }
   // devCode is sandbox-only; in production the code is sent by SMS — it USED to be
   // generated and never sent, which made the claim flow impossible to complete live.
   const sent = liveMoney() ? await sendOtp(`${COUNTRIES.CM.dial}${phoneRaw.replace(/\D/g, "").slice(-9)}`, r.code!, "claim your account", otpPrefs(req.body)) : { sent: false as const };

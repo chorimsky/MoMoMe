@@ -137,8 +137,13 @@ export function Receive() {
           <div style={{ padding: 18, border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_your_link")}</div>
             {/* Whose number this pays — the one thing to check before sharing it. */}
-            <div className="num" style={{ fontSize: 14, color: "var(--ink-2)", marginTop: -8 }}>{t("rcv_who")} <b style={{ color: "var(--ink)" }}>{who}</b></div>
-            {amountXaf > 0 && <div className="num" style={{ fontSize: 22, fontWeight: 750, color: "var(--ink)" }}>{new Intl.NumberFormat("fr-FR").format(amountXaf)} <span style={{ fontSize: 13, color: "var(--ink-3)" }}>XAF</span></div>}
+            <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: -8 }}>{t("rcv_who")} <b className="num" style={{ color: "var(--ink)" }}>{who}</b></div>
+            {amountXaf > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_amount_requested")}</div>
+                <div className="num" style={{ fontSize: 24, fontWeight: 750, color: "var(--ink)", marginTop: 2 }}>{new Intl.NumberFormat("fr-FR").format(amountXaf)} <span style={{ fontSize: 13, color: "var(--ink-3)" }}>XAF</span></div>
+              </div>
+            )}
             {/* The QR is the web link: a phone camera opens it with no app installed, the
                 MoMo›Me app's scanner routes it to Send, and it carries the amount. */}
             <div role="img" aria-label={`${t("rcv_your_link")}: ${link}`}

@@ -138,7 +138,8 @@ export function KV({ k, v, tone }: { k: ReactNode; v: ReactNode; tone?: Tone }) 
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--line-2)" }}>
       <span style={{ fontSize: 13, color: "var(--ink-3)", whiteSpace: "nowrap" }}>{k}</span>
-      <span className="num" style={{ fontSize: 13.5, fontWeight: 650, textAlign: "right", color: tone ? toneColor(tone) : "var(--ink)", whiteSpace: "nowrap" }}>{v}</span>
+      {/* The value wraps on a phone rather than pushing past the card edge. */}
+      <span className="num" style={{ fontSize: 13.5, fontWeight: 650, textAlign: "right", color: tone ? toneColor(tone) : "var(--ink)", minWidth: 0, overflowWrap: "anywhere", lineHeight: 1.35 }}>{v}</span>
     </div>
   );
 }

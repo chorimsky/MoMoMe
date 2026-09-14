@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import type { RegulatoryBody, RegulatoryObligation, RegulatoryReport } from "@shared/types.js";
 import { api } from "../../../api/client.js";
 import { fmt } from "../../../lib/format.js";
-import { Card, Grid, Pill } from "../AdminUI.js";
+import { Card, Grid, Pill, toneColor, toneWash, type Tone } from "../AdminUI.js";
 
 const BODY_LABEL: Record<RegulatoryBody, string> = {
   BEAC: "BEAC — Banque des États de l'Afrique Centrale",
@@ -26,6 +26,9 @@ const STATUS: Record<RegulatoryObligation["status"], { label: string; c: string 
   nothing_to_file: { label: "Nothing to file", c: "var(--ink-3)" },
 };
 const monthLabel = (p: string) => new Date(`${p}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+const BODY_TONE: Record<RegulatoryBody, Tone> = { BEAC: "accent", ANIF: "bad", COBAC: "info", DGI: "warn" };
+const BODY_ORDER: RegulatoryBody[] = ["BEAC", "ANIF", "DGI", "COBAC"];
+const dueLabel = (o: RegulatoryObligation) => o.dueAt ? new Date(`${o.dueAt}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : o.periodicity === "event" ? "sans délai" : "once a year";
 
 export function RegulatoryFilings({ canFile }: { canFile: boolean }) {
   const [period, setPeriod] = useState<string>(() => new Date().toISOString().slice(0, 7));
@@ -57,16 +60,18 @@ export function RegulatoryFilings({ canFile }: { canFile: boolean }) {
           </span>
           <span style={{ fontSize: 11.5, color: "var(--ink-3)", marginLeft: "auto" }}>Reporting entity: <b>{rep.reportingEntity}</b>{rep.officer ? ` · officer ${rep.officer}` : ""}</span>
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table className="tbl" style={{ width: "100%", fontSize: 12.5 }}>
-            <thead><tr><th>Body</th><th>Report</th><th>Due</th><th>Status</th><th>Contents</th><th /></tr></thead>
-            <tbody>
-              {rep.obligations.map((o) => (
-                <ObligationRow key={`${o.body}:${o.kind}`} o={o} canFile={canFile} busy={busy} onExport={() => exportCsv(o.body)} onFiled={() => load()} setBusy={setBusy} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {BODY_ORDER.filter((b) => rep.obligations.some((o) => o.body === b)).map((body) => (
+          <div key={body} style={{ border: "1px solid var(--line-2)", borderRadius: "var(--r)", marginTop: 10, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", background: "var(--surface-2)", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".06em", color: toneColor(BODY_TONE[body]), background: toneWash(BODY_TONE[body]), padding: "3px 8px", borderRadius: 6 }}>{body}</span>
+              <span style={{ fontSize: 12.5, color: "var(--ink-2)", flex: 1, minWidth: 160 }}>{BODY_LABEL[body].split(" — ")[1]}</span>
+              <button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} disabled={busy !== null} onClick={() => exportCsv(body)}>{busy === `x:${body}` ? "…" : `Export ${body} CSV`}</button>
+            </div>
+            {rep.obligations.filter((o) => o.body === body).map((o) => (
+              <ObligationRow key={`${o.body}:${o.kind}`} o={o} canFile={canFile} busy={busy} onFiled={() => load()} setBusy={setBusy} />
+            ))}
+          </div>
+        ))}
       </Card>
 
       <Grid cols={2} style={{ marginBottom: 16 }}>
@@ -139,15 +144,16 @@ export function RegulatoryFilings({ canFile }: { canFile: boolean }) {
 
 function Kv({ k, v, tone, muted }: { k: string; v: string; tone?: "accent" | "warn" | "bad"; muted?: boolean }) {
   const c = tone === "accent" ? "var(--accent)" : tone === "warn" ? "var(--warn)" : tone === "bad" ? "var(--bad)" : muted ? "var(--ink-3)" : "var(--ink)";
+  const sub = k.startsWith("  ");
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", fontSize: muted ? 12 : 12.5, borderTop: "1px solid var(--line-2)" }}>
-      <span style={{ color: muted ? "var(--ink-3)" : "var(--ink-2)", whiteSpace: "pre" }}>{k}</span>
-      <span className="num" style={{ fontWeight: muted ? 500 : 700, color: c, textAlign: "right" }}>{v}</span>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) minmax(0, 1.4fr)", gap: 12, padding: sub ? "3px 0 3px 12px" : "6px 0", fontSize: muted ? 12 : 12.5, borderTop: sub ? "none" : "1px solid var(--line-2)", alignItems: "baseline" }}>
+      <span style={{ color: muted ? "var(--ink-3)" : "var(--ink-2)" }}>{k.trim()}</span>
+      <span className="num" style={{ fontWeight: muted ? 500 : 700, color: c, textAlign: "right", overflowWrap: "anywhere", lineHeight: 1.4 }}>{v}</span>
     </div>
   );
 }
 
-function ObligationRow({ o, canFile, busy, onExport, onFiled, setBusy }: { o: RegulatoryObligation; canFile: boolean; busy: string | null; onExport: () => Promise<void>; onFiled: () => Promise<void>; setBusy: (s: string | null) => void }) {
+function ObligationRow({ o, canFile, busy, onFiled, setBusy }: { o: RegulatoryObligation; canFile: boolean; busy: string | null; onFiled: () => Promise<void>; setBusy: (s: string | null) => void }) {
   const [mode, setMode] = useState(false);
   const [ref, setRef] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -159,35 +165,32 @@ function ObligationRow({ o, canFile, busy, onExport, onFiled, setBusy }: { o: Re
     finally { setBusy(null); }
   };
   const st = STATUS[o.status];
+  const actionable = o.status === "due" || o.status === "overdue";
   return (
-    <tr>
-      <td style={{ fontWeight: 700, whiteSpace: "nowrap" }} title={BODY_LABEL[o.body]}>{o.body}</td>
-      <td>
-        <div style={{ fontWeight: 650 }}>{o.title}</div>
-        <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{o.basis}</div>
-      </td>
-      <td className="num" style={{ whiteSpace: "nowrap" }}>{o.dueAt ?? (o.periodicity === "event" ? "sans délai" : "annual")}</td>
-      <td><Pill status={st.label} tone={o.status === "filed" ? "recv" : o.status === "overdue" ? "bad" : o.status === "due" ? "warn" : "ink"} /></td>
-      <td style={{ fontSize: 12, color: "var(--ink-2)", minWidth: 220 }}>
-        {o.summary}
-        {o.filing && <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3 }}>Filed {new Date(o.filing.filedAt).toLocaleDateString("en-GB")} by {o.filing.filedBy}{o.filing.reference ? ` · ref ${o.filing.reference}` : ""}</div>}
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "6px 16px", padding: "12px 14px", borderTop: "1px solid var(--line-2)", alignItems: "start" }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700 }}>{o.title}</span>
+          <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>· {o.periodicity === "annual" ? "annual" : o.periodicity === "event" ? "as it happens" : "monthly"} · due <b className="num" style={{ color: o.status === "overdue" ? "var(--bad)" : "var(--ink-2)", fontWeight: 700 }}>{dueLabel(o)}</b></span>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.5 }}>{o.summary}</div>
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.4 }}>{o.basis}</div>
+        {o.filing && <div style={{ fontSize: 11.5, color: "var(--recv)", marginTop: 4, fontWeight: 600 }}>Filed {new Date(o.filing.filedAt).toLocaleDateString("en-GB")} by {o.filing.filedBy}{o.filing.reference ? ` · ref ${o.filing.reference}` : ""} · chain event #{o.filing.eventSeq}</div>}
         {mode && (
-          <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Receipt / acknowledgement reference (optional)" style={{ flex: 1, minWidth: 180, padding: "6px 9px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 7, background: "var(--surface-2)", color: "var(--ink)" }} />
-            <button type="button" className="btn btn-primary" style={{ fontSize: 11.5, padding: "5px 11px" }} disabled={busy !== null} onClick={file}>{busy === `f:${key}` ? "Recording…" : "Confirm filed"}</button>
-            <button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 9px" }} onClick={() => { setMode(false); setErr(null); }}>Cancel</button>
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Receipt / acknowledgement reference (optional)" style={{ flex: 1, minWidth: 200, padding: "7px 10px", fontSize: 12.5, border: "1px solid var(--line)", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)" }} />
+            <button type="button" className="btn btn-primary" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy !== null} onClick={file}>{busy === `f:${key}` ? "Recording…" : "Confirm filed"}</button>
+            <button type="button" className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 10px" }} onClick={() => { setMode(false); setErr(null); }}>Cancel</button>
             {err && <div style={{ fontSize: 11.5, color: "var(--bad)", width: "100%" }}>{err}</div>}
           </div>
         )}
-      </td>
-      <td style={{ whiteSpace: "nowrap" }}>
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} disabled={busy !== null} onClick={onExport}>{busy === `x:${o.body}` ? "…" : "Export CSV"}</button>
-          {canFile && o.status !== "filed" && !mode && (
-            <button type="button" className="btn btn-quiet" style={{ fontSize: 11.5, padding: "5px 10px" }} onClick={() => setMode(true)}>Mark filed</button>
-          )}
-        </div>
-      </td>
-    </tr>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flex: "none" }}>
+        <Pill status={st.label} tone={o.status === "filed" ? "recv" : o.status === "overdue" ? "bad" : o.status === "due" ? "warn" : "ink"} />
+        {canFile && o.status !== "filed" && !mode && (
+          <button type="button" className={actionable ? "btn btn-primary" : "btn btn-quiet"} style={{ fontSize: 11.5, padding: "5px 10px", whiteSpace: "nowrap" }} onClick={() => setMode(true)}>{actionable ? "Mark filed" : "Record a filing"}</button>
+        )}
+      </div>
+    </div>
   );
 }

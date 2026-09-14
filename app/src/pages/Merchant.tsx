@@ -252,6 +252,9 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
   const toggleListed = async () => { const next = !listed; setListed(next); try { await api.setMerchantListing(next); } catch { setListed(!next); } };
   // Who pays the fee: the customer (on top of the price) or the business (absorbed).
   const [feeMode, setFeeMode] = useState<"customer" | "merchant">(merchant.feeMode ?? "customer");
+  const [feePct, setFeePct] = useState(0.025);
+  const [minFee, setMinFee] = useState(100);
+  useEffect(() => { api.getConfig().then((c) => { setFeePct(c.feePct); setMinFee(c.minFeeXaf ?? 0); }).catch(() => {}); }, []);
   const [feeErr, setFeeErr] = useState<string | null>(null);
   const chooseFeeMode = async (mode: "customer" | "merchant") => {
     const prev = feeMode; setFeeMode(mode); setFeeErr(null);
@@ -339,12 +342,26 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t("mrc_feemode_title")}</div>
           <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px", lineHeight: 1.4 }}>{t("mrc_feemode_hint")}</div>
           <div style={{ display: "grid", gap: 8 }}>
-            {(["customer", "merchant"] as const).map((mode) => (
-              <label key={mode} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 12px", borderRadius: "var(--r)", border: `1px solid ${feeMode === mode ? "var(--accent)" : "var(--line)"}`, background: feeMode === mode ? "var(--accent-wash)" : "var(--surface)", cursor: "pointer", fontSize: 13 }}>
-                <input type="radio" name="feeMode" checked={feeMode === mode} onChange={() => void chooseFeeMode(mode)} style={{ marginTop: 3 }} />
-                <span>{t(mode === "customer" ? "mrc_feemode_customer" : "mrc_feemode_merchant")}</span>
-              </label>
-            ))}
+            {(["customer", "merchant"] as const).map((mode) => {
+              const on = feeMode === mode;
+              // A worked example at a typical ticket, with the live public fee.
+              const p = 10_000, fee = Math.max(Math.round(p * feePct), Math.min(minFee, p));
+              const pays = mode === "customer" ? p + fee : p, gets = mode === "customer" ? p : p - fee;
+              return (
+                <button key={mode} type="button" role="radio" aria-checked={on} onClick={() => void chooseFeeMode(mode)}
+                  style={{ display: "flex", gap: 12, alignItems: "flex-start", textAlign: "left", padding: "11px 12px", borderRadius: "var(--r)", border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: on ? "var(--accent-wash)" : "var(--surface)", cursor: "pointer", font: "inherit", color: "var(--ink)" }}>
+                  <span aria-hidden style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${on ? "var(--accent)" : "var(--line)"}`, display: "grid", placeItems: "center", flex: "none", marginTop: 1 }}>
+                    {on && <span style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--accent)" }} />}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 650 }}>{t(mode === "customer" ? "mrc_feemode_customer" : "mrc_feemode_merchant")}</span>
+                    <span className="num" style={{ display: "block", fontSize: 12, color: "var(--ink-3)", marginTop: 3 }}>
+                      {fill(t("mrc_feemode_ex"), { p: fmt(p) })}: {t("mrc_feemode_ex_pays")} <b style={{ color: "var(--ink)" }}>{fmt(pays)}</b> · {t("mrc_feemode_ex_gets")} <b style={{ color: "var(--ink)" }}>{fmt(gets)}</b>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           {feeErr && <div role="alert" style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{feeErr}</div>}
         </div>

@@ -145,7 +145,7 @@ export function PricingView() {
         <AKpi label="Gross revenue" value={r ? money(r.grossRevenueXaf) : "—"} unit="XAF" />
         <AKpi label="Net profit" value={r ? money(r.netRevenueXaf) : "—"} unit="XAF" tone={r ? marginTone(r.netMarginPct) : undefined} />
         <AKpi label="Net margin" value={r ? r.netMarginPct.toFixed(1) : "—"} unit="% of volume" tone={r ? marginTone(r.netMarginPct) : undefined} />
-        <AKpi label="Levers, no price change" value={r ? `+${money(totalOpp)}` : "—"} unit="XAF / month" tone={totalOpp > 0 ? "recv" : undefined} />
+        <AKpi label="Untapped levers" value={r ? `+${money(totalOpp)}` : "—"} unit="XAF / month, no price change" tone={totalOpp > 0 ? "recv" : undefined} />
       </Grid>
 
       {/* ---- the levers ---- */}
@@ -194,7 +194,8 @@ export function PricingView() {
                 );
               })()}
               <KV k="Consumer send fees" v={`${money(r.streams.consumerFeeXaf)} XAF`} />
-              <KV k="Business-checkout fees" v={<span>{money(r.streams.merchantFeeXaf)} XAF{r.streams.merchantAbsorbedXaf > 0 && <span style={{ color: "var(--ink-3)", fontWeight: 500 }}> · {money(r.streams.merchantAbsorbedXaf)} paid by merchants</span>}</span>} />
+              <KV k="Business-checkout fees" v={`${money(r.streams.merchantFeeXaf)} XAF`} />
+              {r.streams.merchantAbsorbedXaf > 0 && <KV k="  of which paid by the business" v={<span style={{ color: "var(--ink-3)", fontWeight: 500 }}>{money(r.streams.merchantAbsorbedXaf)} XAF</span>} />}
               <KV k="Partner API fees" v={`${money(r.streams.partnerFeeXaf)} XAF`} />
               {r.streams.momoTransferFeeXaf > 0 && <KV k="Mobile Money → Mobile Money" v={`${money(r.streams.momoTransferFeeXaf)} XAF`} />}
               <KV k="Of which the minimum-fee floor" v={<span style={{ color: "var(--ink-3)" }}>{money(r.streams.floorUpliftXaf)} XAF</span>} />

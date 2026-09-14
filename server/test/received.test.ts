@@ -65,6 +65,15 @@ async function main() {
     ok("the recipient's view carries no payer identity", !("senderId" in item) && !("recipient" in item) && !("senderLocation" in item), Object.keys(item).join(","));
     ok("…but does carry what matters: amount, state, when, reference", item.ref && item.xaf && item.displayStatus === "Completed" && item.createdAt);
 
+    // The same number from a SECOND device (a new phone, or the app after the web): the
+    // OTP is the proof, so the claim must be repeatable — it used to answer 409.
+    const second = "second-device";
+    const req2 = await (await post("/api/identities/claim/request", { phone: RECIPIENT }, second)).json();
+    ok("a claimed number can be claimed again from another device", !!req2.devCode, JSON.stringify(req2));
+    const ver2 = await post("/api/identities/claim/verify", { phone: RECIPIENT, code: req2.devCode }, second);
+    const mine2 = await (await get("/api/me/received", second)).json();
+    ok("…and that device sees the same received payments", ver2.status === 200 && mine2.items?.length === 2, `${ver2.status} items=${mine2.items?.length}`);
+
     // Own-your-number (anchor) is the other proof and works the same.
     const other = "other-device";
     const a = await (await post("/api/me/anchor/request", { phone: "699000155" }, other)).json();

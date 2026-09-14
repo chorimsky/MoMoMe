@@ -360,6 +360,7 @@ function Dashboard({
       ) : null}
 
       <ListingToggle merchant={merchant} onChange={onChange} setError={setError} />
+      {merchant.verifiedPhone ? <FeeModeToggle merchant={merchant} onChange={onChange} setError={setError} /> : null}
 
       <Poster merchant={merchant} />
 
@@ -491,6 +492,37 @@ function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
       <View style={{ flex: 1 }}>
         <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('list_in_discover')}</Body>
         <Body muted style={{ fontSize: 12.5 }}>{tr('list_sub')}</Body>
+      </View>
+      <View style={[styles.switch, { backgroundColor: on ? t.recv : t.line }]}>
+        <View style={[styles.knob, { alignSelf: on ? 'flex-end' : 'flex-start' }]} />
+      </View>
+    </Pressable>
+  );
+}
+
+/** Who pays the fee on this business's checkouts — the customer (on top) or the business
+ *  (absorbed: customers pay the exact price, the business receives price − fee). */
+function FeeModeToggle({ merchant, onChange, setError }: { merchant: MerchantAccount; onChange: () => void; setError: (s: string | null) => void }) {
+  const t = useTheme();
+  const { t: tr } = useI18n();
+  const [on, setOn] = useState(merchant.feeMode === 'merchant');
+  const toggle = async () => {
+    const next = !on;
+    setOn(next);
+    try {
+      await api.setMerchantFeeMode(next ? 'merchant' : 'customer');
+      onChange();
+    } catch (e) {
+      setOn(!next);
+      setError(errMessage(e));
+    }
+  };
+  return (
+    <Pressable onPress={toggle} style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
+      <Ionicons name="pricetag" size={20} color={t.accent} />
+      <View style={{ flex: 1 }}>
+        <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('feemode_title')}</Body>
+        <Body muted style={{ fontSize: 12.5 }}>{on ? tr('feemode_on') : tr('feemode_off')}</Body>
       </View>
       <View style={[styles.switch, { backgroundColor: on ? t.recv : t.line }]}>
         <View style={[styles.knob, { alignSelf: on ? 'flex-end' : 'flex-start' }]} />

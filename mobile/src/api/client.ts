@@ -313,6 +313,8 @@ export const api = {
   }) => req<{ link: MerchantLink }>('/merchant/links', { method: 'POST', body: JSON.stringify(body) }),
   disableMerchantLink: (code: string) =>
     req<{ ok: boolean }>(`/merchant/links/${code}`, { method: 'DELETE' }),
+  setMerchantFeeMode: (mode: 'customer' | 'merchant') =>
+    req<{ merchant: MerchantAccount }>('/merchant/fee-mode', { method: 'POST', body: JSON.stringify({ mode }) }),
   setMerchantListing: (listed: boolean) =>
     req<{ merchant: MerchantAccount }>('/merchant/listing', { method: 'POST', body: JSON.stringify({ listed }) }),
 

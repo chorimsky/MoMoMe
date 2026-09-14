@@ -250,6 +250,13 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
   const reloadLinks = () => api.merchantLinks().then((r) => setLinks(r.links)).catch(() => {});
   useEffect(() => { void reloadSummary(); void reloadLinks(); }, []);
   const toggleListed = async () => { const next = !listed; setListed(next); try { await api.setMerchantListing(next); } catch { setListed(!next); } };
+  // Who pays the fee: the customer (on top of the price) or the business (absorbed).
+  const [feeMode, setFeeMode] = useState<"customer" | "merchant">(merchant.feeMode ?? "customer");
+  const [feeErr, setFeeErr] = useState<string | null>(null);
+  const chooseFeeMode = async (mode: "customer" | "merchant") => {
+    const prev = feeMode; setFeeMode(mode); setFeeErr(null);
+    try { await api.setMerchantFeeMode(mode); } catch (e) { setFeeMode(prev); setFeeErr(e instanceof ApiError ? e.message : t("error_generic")); }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -327,6 +334,21 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
           </button>
         </div>
       </div>
+      {merchant.verifiedPhone && (
+        <div style={cardStyle}>
+          <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t("mrc_feemode_title")}</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px", lineHeight: 1.4 }}>{t("mrc_feemode_hint")}</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {(["customer", "merchant"] as const).map((mode) => (
+              <label key={mode} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 12px", borderRadius: "var(--r)", border: `1px solid ${feeMode === mode ? "var(--accent)" : "var(--line)"}`, background: feeMode === mode ? "var(--accent-wash)" : "var(--surface)", cursor: "pointer", fontSize: 13 }}>
+                <input type="radio" name="feeMode" checked={feeMode === mode} onChange={() => void chooseFeeMode(mode)} style={{ marginTop: 3 }} />
+                <span>{t(mode === "customer" ? "mrc_feemode_customer" : "mrc_feemode_merchant")}</span>
+              </label>
+            ))}
+          </div>
+          {feeErr && <div role="alert" style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 8 }}>{feeErr}</div>}
+        </div>
+      )}
       {poster && <Poster merchant={merchant} onClose={() => setPoster(false)} />}
     </div>
   );

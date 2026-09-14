@@ -90,6 +90,11 @@ async function main() {
     ok("a second mark is refused", !(await treasury.markSold("tw_test1", 1, "cfo")).ok);
     r = await j("/admin/revenue?period=30d", { headers: A });
     ok("the revenue report carries the realized block", r.status === 200 && r.body.realized?.sweeps === 1 && r.body.realized.pnlXaf === 3_400);
+    ok("…and the v2 blocks: streams, operators, spread capture, opportunities", r.body.streams && Array.isArray(r.body.byOperator) && Array.isArray(r.body.spreadByAsset) && Array.isArray(r.body.opportunities), Object.keys(r.body).join(","));
+    ok("streams add up to fee revenue", r.body.streams.consumerFeeXaf + r.body.streams.merchantFeeXaf + r.body.streams.partnerFeeXaf === r.body.feeRevenueXaf, JSON.stringify(r.body.streams));
+    ok("BTC spread capture reads the sold sweep", r.body.spreadByAsset.some((a: { asset: string; sweeps: number; realizedXaf: number }) => a.asset === "BTC" && a.sweeps === 1 && a.realizedXaf === 3_400), JSON.stringify(r.body.spreadByAsset));
+    const pinfo = await j("/admin/pricing", { headers: A });
+    ok("pricing carries every method's mid and customer rate, and the customer's schedule", pinfo.status === 200 && pinfo.body.methods?.length === 4 && pinfo.body.methods.every((m: { midXafPerUnit: number; customerXafPerUnit: number }) => m.customerXafPerUnit < m.midXafPerUnit) && pinfo.body.samples?.length === 6 && pinfo.body.samples[0].floorApplied === true, JSON.stringify(pinfo.body.samples?.[0]));
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

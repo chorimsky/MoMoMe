@@ -52,6 +52,9 @@ export interface QuoteRequest {
   xaf: number;
   method: Method;
   country: CountryCode;
+  /** A business checkout: lets the quote honour the merchant's fee mode (a merchant that
+   *  absorbs the fee → the customer pays exactly `xaf`, the merchant receives xaf − fee). */
+  merchantCode?: string;
 }
 
 export interface Quote {
@@ -71,6 +74,12 @@ export interface Quote {
   expiresAt: string; // ISO
   /** On-chain quotes are estimates re-priced at confirmation (see BACKEND_DESIGN §3). */
   estimateOnly: boolean;
+  /** Who carries the platform fee. "customer" (default): total = xaf + fee. "merchant": the
+   *  business absorbs it — the customer pays `requestedXaf` (= total), the business receives
+   *  `xaf` = requested − fee. Same fee revenue, no fee on the customer's screen. */
+  feeBy?: "customer" | "merchant";
+  /** The price the business asked for, when the merchant absorbs the fee. */
+  requestedXaf?: number;
 }
 
 /* ---------- payments ---------- */
@@ -188,6 +197,9 @@ export interface Payment {
   feeXaf: number;
   totalXaf: number;
   usd: number;
+  /** Who carried the fee (see Quote.feeBy). "merchant": the customer paid `totalXaf` as the
+   *  price and the business received `xaf` — receipts and success screens show it that way. */
+  feeBy?: "customer" | "merchant";
   /** FX spread (bps) locked at quote time — carried for revenue attribution. */
   spreadBps?: number;
   /** The real inbound payment instruction (address / invoice) for this payment. */
@@ -545,6 +557,10 @@ export interface MerchantAccount {
   status: MerchantAccountStatus;
   verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
   listed?: boolean;           // opted into the public "Pay with MoMo›Me" directory
+  /** Who pays the platform fee on this merchant's checkouts. "customer" (default) adds the
+   *  fee on top of the price; "merchant" absorbs it — customers pay the exact price and the
+   *  merchant receives price − fee (a merchant discount rate, like card acceptance). */
+  feeMode?: "customer" | "merchant";
   createdAt: string;
   updatedAt: string;
 }
@@ -595,7 +611,7 @@ export interface MerchantLinkPublic {
    *  second payment for the same bill. Links stay open by design (a counter QR is paid
    *  many times); invoices are paid once. */
   paid?: { at: string; xaf: number };
-  merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean };
+  merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean; feeMode?: "customer" | "merchant" };
 }
 
 /** Merchant dashboard read-model. */
@@ -863,6 +879,21 @@ export interface PricingInfo {
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */
   feed: { source: string; updatedAt: string | null; btcUsd: number; usdtUsd: number; eurUsd: number; usdXaf: number };
+  /** Every method: the mid-market rate, the rate the customer is actually quoted after the
+   *  spread, and whether the method is on offer. */
+  methods: Array<{ method: Method; asset: string; midXafPerUnit: number; customerXafPerUnit: number; spreadBps: number; offered: boolean }>;
+  /** What a customer pays at typical tickets, and what the platform keeps — the fee
+   *  schedule read the way a customer reads it. */
+  samples: Array<{ xaf: number; feeXaf: number; totalXaf: number; feePct: number; floorApplied: boolean }>;
+  /** The payout rail's own fee schedule when it publishes one (Peexit: mtn_fees /
+   *  orange_fees), as fractions — null when unknown. The real "payout cost". */
+  railFees: { source: string; mtn: number | null; orange: number | null } | null;
+  /** Freshness: quoting refuses when the feed is stale or the two BTC sources diverge. */
+  fresh: boolean;
+  divergent: boolean;
+  /** Real money moves on this deployment (a stale feed then REFUSES quotes; in the sandbox it
+   *  only means the displayed rate is old). */
+  live: boolean;
 }
 
 /* ---------- revenue intelligence ---------- */
@@ -899,6 +930,24 @@ export interface RevenueReport {
   /** The spread that actually survived turning swept crypto back into XAF — measured from
    *  treasury sweeps the operator has marked as sold, never assumed. */
   realized: { sweeps: number; pendingSweeps: number; btcSold: number; customerXaf: number; referenceXaf: number; realizedXaf: number; pnlXaf: number; pnlPct: number | null };
+  /** Where the money comes from, stream by stream. */
+  streams: {
+    consumerFeeXaf: number;    // fees on ordinary sends
+    merchantFeeXaf: number;    // fees on business checkouts (link / QR / code)
+    merchantAbsorbedXaf: number; // of which carried by the merchant, not the customer
+    partnerFeeXaf: number;     // fees on payments created through partner API keys
+    momoTransferFeeXaf: number; // Mobile Money → Mobile Money transfer fees
+    floorUpliftXaf: number;    // what the minimum-fee floor added over the pure percentage
+    spreadXaf: number;         // FX spread booked at quote
+  };
+  /** Profit by destination operator and payout rail — the payout cost is the rail's own
+   *  fee when it publishes one, the configured assumption otherwise. */
+  byOperator: Array<{ provider: ProviderId; aggregator: string; payments: number; volumeXaf: number; payoutCostPct: number; costSource: "rail" | "assumed"; payoutCostXaf: number; grossXaf: number; netXaf: number; netMarginPct: number }>;
+  /** Quoted spread vs what selling the swept crypto actually returned, per asset. */
+  spreadByAsset: Array<{ asset: string; quotedBps: number; quotedXaf: number; volumeXaf: number; realizedPct: number | null; realizedXaf: number | null; sweeps: number }>;
+  /** Revenue levers that do not raise the customer's price — each with a monthly estimate
+   *  from this period's data (normalised to 30 days) and the action that captures it. */
+  opportunities: Array<{ key: string; title: string; estimateXafPerMonth: number | null; tone: "good" | "warn" | "info"; detail: string; action: string }>;
 }
 
 /* ---------- delivery ---------- */

@@ -212,7 +212,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     retryRef.current = toReview;
     setBusy(true); setErr(null);
     try {
-      setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country }));
+      setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) }));
       go("review");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -222,7 +222,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     retryRef.current = refreshQuote;
     setBusy(true); setErr(null);
     try {
-      setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country }));
+      setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) }));
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
@@ -253,7 +253,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
       if (orphan) { setPayment(orphan); go("pay"); return; }
       if (isExpiry(e)) {
         // Genuinely expired/unused — no payment exists for it. Re-price, stay on review.
-        try { setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country })); setErr(t("rate_refreshed")); } catch (e2) { fail(e2); }
+        try { setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) })); setErr(t("rate_refreshed")); } catch (e2) { fail(e2); }
       } else { fail(e); }
     } finally { setBusy(false); }
   }
@@ -271,7 +271,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         const cur = await api.getPayment(payment.id).catch(() => null);
         if (cur && cur.state !== "AWAITING_INBOUND") { setPayment(cur); go("processing"); return; }
       }
-      const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country });
+      const q = await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) });
       setQuote(q);
       // Same recipient, same amount → the acknowledgement already given still applies. This
       // path used to drop it, so a sender who had confirmed "yes, this new number is right"

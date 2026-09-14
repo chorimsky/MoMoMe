@@ -293,7 +293,7 @@ export default function SendScreen() {
       setBusy(true);
       setError(null);
       try {
-        const q = await api.createQuote({ xaf: xafNum, method: m, country });
+        const q = await api.createQuote({ xaf: xafNum, method: m, country, ...(merchantCode ? { merchantCode } : {}) });
         setQuote(q);
         setQuoteExpired(false);
         setStep('review');
@@ -441,7 +441,7 @@ export default function SendScreen() {
     try {
       const cur = await api.getPayment(payment.id).catch(() => null);
       if (cur && cur.state !== 'AWAITING_INBOUND') { setPayment(cur); return; }
-      const q = await api.createQuote({ xaf: xafNum, method, country });
+      const q = await api.createQuote({ xaf: xafNum, method, country, ...(merchantCode ? { merchantCode } : {}) });
       setQuote(q);
       const p = await api.createPayment({
         quoteId: q.id,
@@ -824,8 +824,8 @@ export default function SendScreen() {
       {step === 'review' && quote && (
         <View style={{ gap: Spacing.four }}>
           <View style={styles.receiveHero}>
-            <Label>{tr('they_receive')}</Label>
-            <Text style={[styles.receiveBig, { color: t.text }]}>{xaf(quote.xaf)}</Text>
+            <Label>{quote.feeBy === 'merchant' ? tr('price_label') : tr('they_receive')}</Label>
+            <Text style={[styles.receiveBig, { color: t.text }]}>{xaf(quote.feeBy === 'merchant' ? quote.requestedXaf ?? quote.totalXaf : quote.xaf)}</Text>
             <View style={styles.recipInline}>
               <Text style={styles.flag}>{FLAG[country]}</Text>
               <Body style={{ color: t.textSecondary }}>{recipientName || phone}</Body>
@@ -842,10 +842,11 @@ export default function SendScreen() {
           </View>
 
           <Card padded>
-            <Row label={tr('amount')} value={xaf(quote.xaf)} />
-            <Row label={tr('fee')} value={xaf(quote.feeXaf)} />
+            <Row label={tr('amount')} value={xaf(quote.feeBy === 'merchant' ? quote.requestedXaf ?? quote.totalXaf : quote.xaf)} />
+            {/* A business that absorbs the fee: the customer sees no fee line. */}
+            <Row label={tr('fee')} value={quote.feeBy === 'merchant' ? tr('fee_by_merchant') : xaf(quote.feeXaf)} />
             <Divider />
-            <Row label={tr('total_to_pay')} value={xaf(quote.xaf + quote.feeXaf)} strong />
+            <Row label={tr('total_to_pay')} value={xaf(quote.totalXaf)} strong />
             <Divider />
             {/* What leaves the sender's wallet, and on which network — the two facts a
                 stablecoin payer must get right, shown before they commit rather than after. */}
@@ -982,7 +983,7 @@ function SuccessView({ payment, recipientLabel, onReset }: { payment: Payment; r
         style={{ alignItems: 'center', gap: Spacing.four, alignSelf: 'stretch', opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }}>
         <H1 style={{ textAlign: 'center' }}>{tr('sent_excl')}</H1>
         <Body center style={{ fontSize: 17 }}>
-          {tr('delivered_to', { n: xaf(payment.xaf) })}{'\n'}
+          {tr('delivered_to', { n: xaf(payment.feeBy === 'merchant' ? payment.totalXaf : payment.xaf) })}{'\n'}
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientLabel}</Text>
         </Body>
         {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (

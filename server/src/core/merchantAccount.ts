@@ -107,6 +107,15 @@ export function activateUnverified(id: string): StoredMerchant | undefined {
 }
 
 /** Opt a merchant into (or out of) the public "Pay with MoMo›Me" directory. */
+/** Who pays the fee on this merchant's checkouts. */
+export function setFeeMode(id: string, mode: "customer" | "merchant"): StoredMerchant | undefined {
+  const m = merchants.get(id);
+  if (!m) return undefined;
+  m.feeMode = mode; m.updatedAt = new Date().toISOString();
+  touch("merchants2");
+  return m;
+}
+
 export function setListed(id: string, listed: boolean): StoredMerchant | undefined {
   const m = merchants.get(id);
   if (!m) return undefined;

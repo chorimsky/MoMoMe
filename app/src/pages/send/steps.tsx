@@ -500,14 +500,17 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
       </div>
 
       <div style={{ padding: "22px 0 18px", textAlign: "center", borderBottom: "1px solid var(--line-2)" }}>
-        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("they_receive")}</div>
-        <div className="num" style={{ fontSize: 42, fontWeight: 750, color: "var(--ink)", letterSpacing: "-0.03em", marginTop: 6 }}>{fmt(quote.xaf)} <span style={{ fontSize: 20, color: "var(--ink-3)" }}>XAF</span></div>
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4, maxWidth: 320, margin: "9px auto 0" }}>{t("cashout_note")}</div>
+        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{quote.feeBy === "merchant" ? t("mrc_price_label") : t("they_receive")}</div>
+        <div className="num" style={{ fontSize: 42, fontWeight: 750, color: "var(--ink)", letterSpacing: "-0.03em", marginTop: 6 }}>{fmt(quote.feeBy === "merchant" ? quote.requestedXaf ?? quote.totalXaf : quote.xaf)} <span style={{ fontSize: 20, color: "var(--ink-3)" }}>XAF</span></div>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4, maxWidth: 320, margin: "9px auto 0" }}>{quote.feeBy === "merchant" ? t("mrc_price_note") : t("cashout_note")}</div>
         {quote.estimateOnly && <div style={{ fontSize: 11.5, color: "var(--warn)", fontWeight: 600, lineHeight: 1.4, maxWidth: 320, margin: "6px auto 0" }}>{t("onchain_estimate")}</div>}
       </div>
 
       <div style={{ marginTop: 4 }}>
-        <Row k={t("fee")} v={fmt(quote.feeXaf) + " XAF"} />
+        {/* A business that absorbs the fee: the customer sees the price and no fee line. */}
+        {quote.feeBy === "merchant"
+          ? <Row k={t("fee")} v={t("fee_by_merchant")} tone="recv" />
+          : <Row k={t("fee")} v={fmt(quote.feeXaf) + " XAF"} />}
         <Row k={t("total_to_pay")} v={fmt(quote.totalXaf) + " XAF"} sub={"≈ $" + fmt(quote.usd, 2)} strong />
         <hr className="hair" />
         <Row k={t("pay_with")} v={METHOD_META[s.method].name} />

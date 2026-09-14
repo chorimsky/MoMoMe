@@ -390,6 +390,7 @@ export const api = {
   disableMerchantLink: (code: string) => req<{ ok: boolean }>(`/merchant/links/${code}`, { method: "DELETE" }),
   resolvePayLink: (code: string) => req<MerchantLinkPublic>(`/merchant/pay/${encodeURIComponent(code)}`),
   resolveMerchantByCode: (code: string) => req<MerchantLinkPublic>(`/merchant/by-code/${encodeURIComponent(code)}`),
+  setMerchantFeeMode: (mode: "customer" | "merchant") => req<{ merchant: MerchantAccount }>("/merchant/fee-mode", { method: "POST", body: JSON.stringify({ mode }) }),
   setMerchantListing: (listed: boolean) => req<{ merchant: MerchantAccount }>("/merchant/listing", { method: "POST", body: JSON.stringify({ listed }) }),
   discover: (opts: { country?: string; category?: string; q?: string } = {}) => {
     const qs = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as [string, string][]).toString();

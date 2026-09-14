@@ -1,7 +1,7 @@
 import { Router, type Request as ExpressRequest } from "express";
 import type { ApiKeyUsage,
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
-  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail, RegulatoryBody,
+  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail, RegulatoryBody, PricingInfo,
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import { namesMatch,
@@ -52,7 +52,7 @@ import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, 
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
 import { platformFee } from "../core/pricing.js";
-import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
@@ -551,14 +551,25 @@ export async function buildQuote(input: QuoteRequest & { feePct?: number }): Pro
   if (liveMoney() && !ratesFresh()) {
     return { status: 503, body: { error: "rates_unavailable", message: "Live exchange rates are momentarily unavailable — please try again in a moment." } };
   }
+  // A business that absorbs the fee (merchant discount rate): the customer pays exactly the
+  // price asked, the business receives price − fee. Fee revenue is identical; the customer's
+  // screen shows no fee. Only a verified, active merchant's mode is honoured.
+  const mc = typeof input.merchantCode === "string" ? merchantByCode(input.merchantCode) : undefined;
+  const absorbed = !!mc && mc.status === "active" && mc.verifiedPhone && mc.feeMode === "merchant";
+  const requestedXaf = xaf;
   const feeXaf = platformFee(xaf, input.feePct);
-  const totalXaf = xaf + feeXaf;
+  const delivered = absorbed ? xaf - feeXaf : xaf;
+  if (absorbed && delivered < MIN_XAF) {
+    return { status: 400, body: { error: "bad_amount", message: `After the business's fee the payout would be below ${MIN_XAF} XAF.` } };
+  }
+  const totalXaf = absorbed ? requestedXaf : xaf + feeXaf;
   const rq = rateFor(method);
   const inAmt = inboundAmount(totalXaf, rq);
   const now = Date.now();
   const quote: Quote = {
     id: id("q"),
-    xaf, feeXaf, totalXaf,
+    xaf: delivered, feeXaf, totalXaf,
+    ...(absorbed ? { feeBy: "merchant" as const, requestedXaf } : {}),
     method,
     inboundAsset: rq.asset,
     inboundAmount: inAmt,
@@ -1061,6 +1072,7 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
     xaf: quote.xaf,
     feeXaf: quote.feeXaf,
     totalXaf: quote.totalXaf,
+    ...(quote.feeBy === "merchant" ? { feeBy: "merchant" as const } : {}),
     usd: quote.usd,
     spreadBps: quote.spreadBps, // locked spread → exact revenue attribution
     payInstruction: instruction,
@@ -1726,7 +1738,7 @@ api.get("/merchant/pay/:code", rateLimitDurableMiddleware("merchant_pay", 120, 6
   const pub: MerchantLinkPublic = {
     code: link.code, amountXaf: link.amountXaf, label: link.label, kind: link.kind, clientName: link.clientName, dueDate: link.dueDate,
     ...(settled ? { paid: { at: settled.createdAt, xaf: settled.xaf } } : {}),
-    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone, feeMode: m.feeMode ?? "customer" },
   };
   res.json(pub);
 });
@@ -1740,6 +1752,20 @@ api.post("/merchant/listing", rateLimitMiddleware("merchant_write", 30, 60_000),
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
   if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number first." });
   res.json({ merchant: publicMerchant(setListed(m.id, (req.body ?? {}).listed !== false)!) });
+});
+
+/** Who pays the fee on my checkouts — "customer" (added on top) or "merchant" (absorbed:
+ *  customers pay the exact price, I receive price − fee). A verified number is required,
+ *  since the mode changes what settles to it. */
+api.post("/merchant/fee-mode", rateLimitMiddleware("merchant_write", 30, 60_000), async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  if (!m.verifiedPhone) return res.status(403).json({ error: "not_verified", message: "Verify your settlement number first." });
+  const mode = (req.body ?? {}).mode;
+  if (mode !== "customer" && mode !== "merchant") return res.status(400).json({ error: "bad_mode", message: "mode must be customer or merchant." });
+  res.json({ merchant: publicMerchant(setFeeMode(m.id, mode)!) });
 });
 
 /** PUBLIC — browse accepting merchants (no settlement numbers exposed). */
@@ -1771,7 +1797,7 @@ api.get("/merchant/by-code/:code", rateLimitDurableMiddleware("merchant_pay", 12
   if (!m || m.status !== "active" || !m.verifiedPhone) return res.status(404).json({ error: "not_found", message: "Merchant not found." });
   const pub: MerchantLinkPublic = {
     code: m.code, kind: "link",
-    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone },
+    merchant: { code: m.code, businessName: m.businessName, category: m.category, country: m.country, settlementPhone: m.settlementPhone, provider: m.provider, verifiedPhone: m.verifiedPhone, feeMode: m.feeMode ?? "customer" },
   };
   res.json(pub);
 });
@@ -2283,6 +2309,12 @@ function momoErrMessage(e?: string): string {
 /* ---------- pricing / FX engine ---------- */
 api.get("/admin/pricing", async (_req, res) => {
   const s = getSettings().pricing;
+  const offered = offeredMethods();
+  const meta = ratesMeta();
+  // The rail's own fee schedule is the real payout cost; the configured assumption is the
+  // fallback. Best-effort — a slow rail must not stall the pricing page.
+  const sched = await Promise.race([peexit.feeSchedule().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
+  const asPct = (v: number | null | undefined) => (v != null && Number.isFinite(v) && v <= 20 ? v / 100 : null);
   res.json({
     feePct: s.feePct,
     minFeeXaf: s.minFeeXaf,
@@ -2293,8 +2325,14 @@ api.get("/admin/pricing", async (_req, res) => {
       { pair: "BTC/XAF", rate: Math.round(rateFor("LIGHTNING").midXafPerUnit), spreadBps: s.spreadBps.LIGHTNING },
       { pair: "USDT/XAF", rate: Math.round(rateFor("USDT").midXafPerUnit), spreadBps: s.spreadBps.USDT },
     ],
-    feed: ratesMeta(),
-  });
+    feed: meta,
+    methods: ALL_METHODS.map((m) => { const rq = rateFor(m); return { method: m, asset: rq.asset, midXafPerUnit: rq.midXafPerUnit, customerXafPerUnit: rq.customerXafPerUnit, spreadBps: rq.spreadBps, offered: offered[m] !== false }; }),
+    samples: [500, 2_500, 10_000, 50_000, 250_000, 1_000_000].map((xaf) => { const fee = platformFee(xaf); return { xaf, feeXaf: fee, totalXaf: xaf + fee, feePct: Math.round((fee / xaf) * 10000) / 100, floorApplied: fee > Math.round(xaf * s.feePct) }; }),
+    railFees: sched ? { source: "peexit", mtn: asPct(sched.disbMtn), orange: asPct(sched.disbOrange) } : null,
+    fresh: ratesFresh(),
+    divergent: meta.divergent,
+    live: liveMoney(),
+  } satisfies PricingInfo);
 });
 
 /* ---------- revenue intelligence ----------
@@ -2368,12 +2406,117 @@ api.get("/admin/revenue", async (req, res) => {
     insights.push({ tone: "info", text: `Net margin uses an estimated ${(costs.payoutPct * 100).toFixed(2)}% payout cost — set your real PawaPay/Peexit/MTN/Orange rate below for an exact figure.` });
   }
 
+  /* ---------- v2: streams, operators, spread capture, opportunities ---------- */
+  const daysSpan = Math.max(1, Math.min(days, completed.length ? (Date.now() - Math.min(...completed.map((p) => Date.parse(p.createdAt)))) / 86_400_000 : 1));
+  const perMonth = (x: number) => Math.round((x / daysSpan) * 30);
+  const partner = (p: Payment) => !!p.senderId?.startsWith("key:");
+  const merchantOf = (p: Payment) => (p.merchantId ? merchantById(p.merchantId) : undefined);
+  const streams: RevenueReport["streams"] = {
+    consumerFeeXaf: completed.filter((p) => !p.merchantId && !partner(p)).reduce((a, p) => a + p.feeXaf, 0),
+    merchantFeeXaf: completed.filter((p) => !!p.merchantId).reduce((a, p) => a + p.feeXaf, 0),
+    merchantAbsorbedXaf: completed.filter((p) => merchantOf(p)?.feeMode === "merchant").reduce((a, p) => a + p.feeXaf, 0),
+    partnerFeeXaf: completed.filter(partner).reduce((a, p) => a + p.feeXaf, 0),
+    momoTransferFeeXaf: momoTransfer.allTransfers(100_000).filter((t) => t.state === "DELIVERED" && Date.parse(t.createdAt) >= cutoff).reduce((a, t) => a + t.feeXaf, 0),
+    floorUpliftXaf: completed.reduce((a, p) => a + Math.max(0, p.feeXaf - Math.round(p.xaf * (feePctForOwner(p.senderId) ?? pr.feePct))), 0),
+    spreadXaf: spreadRevenueXaf,
+  };
+  // Per operator × rail, with the rail's own fee when it publishes one.
+  const sched = await Promise.race([peexit.feeSchedule().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
+  const railPct = (provider: ProviderId, agg: string): { pct: number; source: "rail" | "assumed" } => {
+    const v = agg === "peexit" ? (provider === "ORANGE" ? sched?.disbOrange : sched?.disbMtn) : null;
+    return v != null && Number.isFinite(v) && v <= 20 ? { pct: v / 100, source: "rail" } : { pct: costs.payoutPct, source: "assumed" };
+  };
+  const opMap = new Map<string, RevenueReport["byOperator"][number]>();
+  for (const p of completed) {
+    const agg = p.aggregator ?? "unknown";
+    const k = `${p.recipient.provider}:${agg}`;
+    const { pct: pc, source } = railPct(p.recipient.provider, agg);
+    const e = opMap.get(k) ?? { provider: p.recipient.provider, aggregator: agg, payments: 0, volumeXaf: 0, payoutCostPct: pc, costSource: source, payoutCostXaf: 0, grossXaf: 0, netXaf: 0, netMarginPct: 0 };
+    const g = p.feeXaf + spreadOf(p);
+    const c = Math.round(p.xaf * pc + p.totalXaf * costs.railPct + costs.fixedXaf);
+    e.payments++; e.volumeXaf += p.xaf; e.payoutCostXaf += Math.round(p.xaf * pc); e.grossXaf += g; e.netXaf += g - c;
+    opMap.set(k, e);
+  }
+  const byOperator = [...opMap.values()].map((e) => ({ ...e, netMarginPct: pct(e.netXaf, e.volumeXaf) })).sort((a, b) => b.volumeXaf - a.volumeXaf);
+  // Quoted spread vs realized, per asset (sweeps are per asset; BTC serves both BTC methods).
+  const assetOf = (m: Method) => (m === "USDT" ? "USDT" : m === "USDC" ? "USDC" : "BTC");
+  const sweeps = treasury.allWithdrawals().filter((w) => Date.parse(w.at) >= cutoff);
+  const spreadByAsset: RevenueReport["spreadByAsset"] = ["BTC", "USDT", "USDC"].map((asset) => {
+    const ps = completed.filter((p) => assetOf(p.method) === asset);
+    const volumeXaf = ps.reduce((a, p) => a + p.totalXaf, 0);
+    const quotedXaf = ps.reduce((a, p) => a + spreadOf(p), 0);
+    const quotedBps = volumeXaf ? Math.round((quotedXaf / volumeXaf) * 10000) : 0;
+    const sold = sweeps.filter((w) => w.asset === asset && typeof w.realizedXaf === "number" && typeof w.customerXaf === "number");
+    const cust = sold.reduce((a, w) => a + (w.customerXaf ?? 0), 0);
+    const real = sold.reduce((a, w) => a + ((w.realizedXaf ?? 0) - (w.customerXaf ?? 0)), 0);
+    return { asset, quotedBps, quotedXaf, volumeXaf, realizedPct: sold.length && cust ? Math.round((real / cust) * 10000) / 100 : null, realizedXaf: sold.length ? real : null, sweeps: sold.length };
+  }).filter((r) => r.volumeXaf > 0 || r.sweeps > 0);
+
+  // ----- opportunities: revenue that does not touch the customer's price -----
+  const opps: RevenueReport["opportunities"] = [];
+  const m = (v: number) => v.toLocaleString("en");
+  // 1. Spread capture: realized above quoted = headroom to LOWER the customer spread at the
+  //    same net; realized below quoted = leakage to close on the selling side.
+  for (const r of spreadByAsset) {
+    if (r.realizedPct == null || !r.sweeps) continue;
+    const quotedPct = r.quotedBps / 100;
+    const gapPct = r.realizedPct - quotedPct;
+    const xafMonth = perMonth(Math.abs(gapPct / 100) * r.volumeXaf);
+    if (gapPct > 0.15) opps.push({ key: `spread_headroom_${r.asset}`, title: `${r.asset}: selling returns ${r.realizedPct.toFixed(2)} % vs ${quotedPct.toFixed(2)} % quoted`, estimateXafPerMonth: xafMonth, tone: "good", detail: `The swept ${r.asset} sold ${gapPct.toFixed(2)} pt better than the spread the customer was quoted. Either keep it (≈ ${m(xafMonth)} XAF/month of unbooked margin) or hand part of it back as a tighter rate — a better price for the customer at the same net.`, action: `Lower the ${r.asset === "BTC" ? "Lightning / on-chain" : r.asset} spread by up to ${Math.floor(gapPct * 100)} bps, or keep the margin.` });
+    else if (gapPct < -0.15) opps.push({ key: `spread_leak_${r.asset}`, title: `${r.asset}: selling returns ${r.realizedPct.toFixed(2)} % vs ${quotedPct.toFixed(2)} % quoted`, estimateXafPerMonth: xafMonth, tone: "warn", detail: `The swept ${r.asset} sold ${Math.abs(gapPct).toFixed(2)} pt WORSE than the spread booked at quote — ≈ ${m(xafMonth)} XAF/month leaks on the selling side, not on the customer's.`, action: "Sell sweeps at a better venue or in larger batches; hedge the EUR/USD leg; sweep sooner." });
+  }
+  // 2. Method steering: a cheaper method with a thinner net → its spread can drop with no
+  //    margin loss, and volume moved onto it earns more.
+  const railNet = new Map(byRail.map((r) => [r.method, r]));
+  const ln = railNet.get("LIGHTNING"), oc = railNet.get("ONCHAIN");
+  if (ln && oc && oc.payments > 0 && ln.netMarginPct > oc.netMarginPct) {
+    const gain = perMonth(oc.volumeXaf * ((ln.netMarginPct - oc.netMarginPct) / 100));
+    opps.push({ key: "steer_lightning", title: `On-chain volume earns ${(ln.netMarginPct - oc.netMarginPct).toFixed(1)} pt less than Lightning`, estimateXafPerMonth: gain, tone: "info", detail: `${m(oc.volumeXaf)} XAF settled on-chain this period. The same volume over Lightning nets ≈ ${m(gain)} XAF/month more (no confirmation wait, no re-pricing exposure).`, action: "Keep Lightning 'Recommended' and first in the method list; show the on-chain wait time; do not raise the on-chain price." });
+  }
+  // 3. Payout cost: the assumption vs the rail's published fee.
+  const railRows = byOperator.filter((r) => r.costSource === "rail");
+  if (railRows.length) {
+    const assumedXaf = railRows.reduce((a, r) => a + Math.round(r.volumeXaf * costs.payoutPct), 0);
+    const realXaf = railRows.reduce((a, r) => a + r.payoutCostXaf, 0);
+    const diff = perMonth(assumedXaf - realXaf);
+    if (Math.abs(diff) > 0) opps.push({ key: "payout_cost_truth", title: diff > 0 ? `Payout cost is ${m(diff)} XAF/month lower than assumed` : `Payout cost is ${m(-diff)} XAF/month higher than assumed`, estimateXafPerMonth: diff > 0 ? diff : null, tone: diff > 0 ? "good" : "warn", detail: `The rail publishes its disbursement fee (${railRows.map((r) => `${r.provider} ${(r.payoutCostPct * 100).toFixed(2)} %`).join(", ")}); the console assumed ${(costs.payoutPct * 100).toFixed(2)} %. Net margin above uses the published figure per operator.`, action: `Set the payout-cost assumption to the published rate so what-if projections stop ${diff > 0 ? "under" : "over"}-stating margin.` });
+  }
+  // 4. Merchant-funded fee: the fee already comes from business checkouts; a business that
+  //    absorbs it lets the customer pay the exact price — same revenue, better conversion.
+  const merchantVol = completed.filter((p) => !!p.merchantId);
+  if (merchantVol.length) {
+    const absorbedShare = streams.merchantFeeXaf ? Math.round((streams.merchantAbsorbedXaf / streams.merchantFeeXaf) * 100) : 0;
+    opps.push({ key: "merchant_fee_mode", title: `${m(streams.merchantFeeXaf)} XAF of fees came from business checkouts (${absorbedShare} % merchant-paid)`, estimateXafPerMonth: perMonth(streams.merchantFeeXaf * 0.1), tone: "good", detail: `A merchant that absorbs the fee shows its customers a 0-fee price and receives price − fee — the platform earns the same ${(pr.feePct * 100).toFixed(1)} %. Card-style acceptance pricing; every 10 % of extra checkout volume it wins is ≈ ${m(perMonth(streams.merchantFeeXaf * 0.1))} XAF/month.`, action: "Offer 'I pay the fee' on the merchant dashboard (built — Merchant → fee mode) and pitch it to verified businesses." });
+  }
+  // 5. Fee floor: what the minimum fee earns on small tickets.
+  if (streams.floorUpliftXaf > 0) opps.push({ key: "fee_floor", title: `The ${m(pr.minFeeXaf)} XAF minimum fee added ${m(streams.floorUpliftXaf)} XAF this period`, estimateXafPerMonth: perMonth(streams.floorUpliftXaf), tone: "info", detail: "Small tickets used to be carried at a loss; the floor makes each one at least cover the rails. Already in force — keep it aligned with the rails' own minimums.", action: "Review the floor when a rail's fee schedule changes." });
+  // 6. Partner keys priced below the public rate.
+  const keys = listApiKeys();
+  const cheapKeys = keys.filter((k) => typeof k.feePct === "number" && k.feePct < pr.feePct);
+  if (cheapKeys.length) {
+    const partnerVol = completed.filter(partner).reduce((a, p) => a + p.xaf, 0);
+    const forgone = perMonth(partnerVol * (pr.feePct - Math.min(...cheapKeys.map((k) => k.feePct ?? pr.feePct))));
+    opps.push({ key: "partner_tiers", title: `${cheapKeys.length} partner key(s) priced below the public ${(pr.feePct * 100).toFixed(1)} %`, estimateXafPerMonth: forgone > 0 ? forgone : null, tone: "info", detail: `Partner volume this period: ${m(partnerVol)} XAF at ${cheapKeys.map((k) => `${((k.feePct ?? 0) * 100).toFixed(2)} %`).join(", ")}. A volume-tiered schedule (rate steps down as monthly volume steps up) keeps the discount tied to the volume that justifies it.`, action: "Set each key's rate from its monthly usage (Admin → API keys → usage); tie discounts to volume commitments." });
+  }
+  // 7. Idle float: XAF sitting in the payout float earns nothing.
+  try {
+    const floatXaf = await availableFloatXaf();
+    // Only a MEASURED rail balance can idle; the static exposure ceiling is a cap, not money.
+    if (!floatBasisNote().startsWith("live rail balance")) throw new Error("float not measured");
+    const dailyPayout = completed.length ? completed.reduce((a, p) => a + p.xaf, 0) / daysSpan : 0;
+    const idle = floatXaf - dailyPayout * 3; // three days of payouts is working float; the rest idles
+    if (idle > 500_000) opps.push({ key: "float_yield", title: `≈ ${m(Math.round(idle))} XAF of float sits beyond three days of payouts`, estimateXafPerMonth: Math.round(idle * 0.04 / 12), tone: "info", detail: `Float ${m(Math.round(floatXaf))} XAF vs ≈ ${m(Math.round(dailyPayout))} XAF paid out per day. Idle balance earns nothing at the rail; a placement at an indicative 4 % p.a. is ≈ ${m(Math.round(idle * 0.04 / 12))} XAF/month. Treasury decision, not a customer price.`, action: "Size the working float to a few days of payouts; place the rest with the bank / a money-market account; keep the payout-ready buffer rule in Liquidity." });
+  } catch { /* float unknown — no opportunity to state */ }
+  // 8. Mobile Money → Mobile Money transfers (admin-gated, off by default).
+  if (!getSettings().features.momoTransfer) opps.push({ key: "momo_transfers", title: "MTN ↔ Orange transfers are built but switched off", estimateXafPerMonth: null, tone: "info", detail: "The transfer product (collect from one network, pay out on the other) earns 1.5 % with the same floor and reuses the payout rails. It is a new market — people who today walk to an agent — not a price change on existing customers.", action: "Turn on features.momoTransfer for a pilot cohort once the collect callback is wired." });
+
   res.json({
     realized: treasury.realizedFx(cutoff),
     period, volumeXaf, payments: completed.length,
     feeRevenueXaf, spreadRevenueXaf, grossRevenueXaf, costsXaf, netRevenueXaf,
     effectiveTakePct, netMarginPct, avgRevenuePerTxXaf: completed.length ? Math.round(grossRevenueXaf / completed.length) : 0,
     byRail, daily, benchmarks, insights, costs,
+    streams, byOperator, spreadByAsset, opportunities: opps,
   } satisfies RevenueReport);
 });
 

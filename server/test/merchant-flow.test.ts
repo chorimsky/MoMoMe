@@ -162,6 +162,27 @@ async function main() {
     const open = await (await post("/api/merchant/links", { label: "Counter" })).json();
     const pubOpen = await (await fetch(`${base}/api/merchant/pay/${open.link.code}`)).json();
     ok("an open link never reports paid — it is meant to be paid many times", pubOpen.paid === undefined && pubOpen.amountXaf === undefined);
+
+    /* ---- merchant-paid fee: the customer pays the price, the business receives price − fee ---- */
+    console.log("\nMerchant-paid fee (merchant discount rate)\n");
+    const me = await (await get("/api/merchant/me")).json();
+    const mcode = me.merchant.code;
+    const qCust = await (await post("/api/quotes", { xaf: 10_000, method: "LIGHTNING", country: "CM", merchantCode: mcode }, buyer)).json();
+    ok("default: the fee is added on top of the price", qCust.feeBy === undefined && qCust.xaf === 10_000 && qCust.totalXaf === 10_000 + qCust.feeXaf, JSON.stringify({ xaf: qCust.xaf, total: qCust.totalXaf, fee: qCust.feeXaf }));
+    const fm = await post("/api/merchant/fee-mode", { mode: "merchant" });
+    ok("the business can choose to absorb the fee", fm.status === 200 && (await fm.json()).merchant.feeMode === "merchant", String(fm.status));
+    ok("…and the public link says so", (await (await fetch(`${base}/api/merchant/pay/${open.link.code}`)).json()).merchant.feeMode === "merchant");
+    const qMer = await (await post("/api/quotes", { xaf: 10_000, method: "LIGHTNING", country: "CM", merchantCode: mcode }, buyer)).json();
+    ok("absorbed: the customer pays exactly the price", qMer.feeBy === "merchant" && qMer.totalXaf === 10_000 && qMer.requestedXaf === 10_000, JSON.stringify({ xaf: qMer.xaf, total: qMer.totalXaf, fee: qMer.feeXaf }));
+    ok("…the business receives price − fee, and the fee revenue is unchanged", qMer.xaf === 10_000 - qMer.feeXaf && qMer.feeXaf === qCust.feeXaf);
+    ok("…the customer sends less crypto than for the fee-on-top quote", qMer.inboundAmount < qCust.inboundAmount, `${qMer.inboundAmount} < ${qCust.inboundAmount}`);
+    const pMer = await (await post("/api/payments", { quoteId: qMer.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Chez Alice" }, merchantLinkCode: open.link.code }, buyer)).json();
+    ok("the payment carries the absorbed amounts", pMer.xaf === qMer.xaf && pMer.feeXaf === qMer.feeXaf && pMer.totalXaf === 10_000, JSON.stringify({ xaf: pMer.xaf, fee: pMer.feeXaf, total: pMer.totalXaf }));
+    const qNo = await (await post("/api/quotes", { xaf: 10_000, method: "LIGHTNING", country: "CM" }, buyer)).json();
+    ok("a quote without the merchant code is untouched", qNo.feeBy === undefined && qNo.totalXaf === 10_000 + qNo.feeXaf);
+    const tooSmallQ = await post("/api/quotes", { xaf: 520, method: "LIGHTNING", country: "CM", merchantCode: mcode }, buyer);
+    ok("a price whose payout would fall under the minimum is refused", tooSmallQ.status === 400, String(tooSmallQ.status));
+    await post("/api/merchant/fee-mode", { mode: "customer" });
   } finally {
     server.close();
   }

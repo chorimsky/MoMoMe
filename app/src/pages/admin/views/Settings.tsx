@@ -69,6 +69,7 @@ export function SettingsView() {
   const [methods, setMethods] = useState<AdminSettings["methods"] | null>(null);
   const [features, setFeatures] = useState<AdminSettings["features"] | null>(null);
   const [compliance, setCompliance] = useState<AdminSettings["compliance"] | null>(null);
+  const [tax, setTax] = useState<AdminSettings["tax"] | null>(null);
   const [watchlistText, setWatchlistText] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,7 +95,7 @@ export function SettingsView() {
     api.adminSettings()
       .then(async (s) => {
         if (!alive) return;
-        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setFeatures(s.features); setCompliance(s.compliance);
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setFeatures(s.features); setCompliance(s.compliance); setTax(s.tax);
         setWatchlistText((s.compliance.sanctionsList ?? []).join("\n"));
         setLogoRaw(s.company.logo ?? null);
         // A logo on a solid background shows as a box in dark mode; a logo with
@@ -125,7 +126,7 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops || !methods || !features || !compliance) {
+  if (!company || !channels || !ops || !methods || !features || !compliance || !tax) {
     if (err) return <Failed t="Settings" msg={err} />;
     return <Loading t="Settings" s="General configuration and operational controls." />;
   }
@@ -161,6 +162,13 @@ export function SettingsView() {
   const toggle = (k: keyof AdminSettings["channels"], v: boolean) => { setChannels((c) => ({ ...c!, [k]: v })); setDirty(true); };
   const editOps = (patch: Partial<AdminSettings["ops"]>) => { setOps((o) => ({ ...o!, ...patch })); setDirty(true); };
   const editCompliance = (patch: Partial<AdminSettings["compliance"]>) => { setCompliance((c) => ({ ...c!, ...patch })); setDirty(true); };
+  const editTax = (patch: Partial<AdminSettings["tax"]>) => { setTax((c) => ({ ...c!, ...patch })); setDirty(true); };
+  const pct = (v: number, max: number) => Number.isFinite(v) && v >= 0 && v <= max;
+  const vatErr = pct(tax.vatRatePct, 50) ? undefined : "0–50 %.";
+  const advErr = pct(tax.turnoverAdvancePct, 20) ? undefined : "0–20 %.";
+  const isErr = pct(tax.corporateRatePct, 60) ? undefined : "0–60 %.";
+  const levyErr = pct(tax.momoLevyPct, 5) ? undefined : "0–5 %.";
+  const fdErr = Number.isInteger(tax.filingDay) && tax.filingDay >= 1 && tax.filingDay <= 28 ? undefined : "1–28.";
 
   // Validation — block save on bad input.
   const emailErr = EMAIL_RE.test(company.email) ? undefined : "Enter a valid email.";
@@ -175,7 +183,7 @@ export function SettingsView() {
   const structWinErr = Number.isFinite(compliance.structuringWindowH) && compliance.structuringWindowH >= 1 && compliance.structuringWindowH <= 720 ? undefined : "1–720 hours.";
   const retentionErr = Number.isFinite(compliance.retentionYears) && compliance.retentionYears >= 1 && compliance.retentionYears <= 30 ? undefined : "1–30 years.";
   const complianceErr = ctrErr || cddErr || structXafErr || structWinErr || retentionErr;
-  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr);
+  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr || vatErr || advErr || isErr || levyErr || fdErr);
 
   const save = async () => {
     if (invalid) return;
@@ -183,8 +191,8 @@ export function SettingsView() {
     try {
       // Newline/comma-separated watchlist → deduped array of trimmed entries.
       const sanctionsList = Array.from(new Set(watchlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))).slice(0, 500);
-      const next = await api.saveSettings({ company, channels, ops, methods, features, compliance: { ...compliance, sanctionsList } });
-      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setMethods(next.methods); setFeatures(next.features); setCompliance(next.compliance);
+      const next = await api.saveSettings({ company, channels, ops, methods, features, compliance: { ...compliance, sanctionsList }, tax });
+      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setMethods(next.methods); setFeatures(next.features); setCompliance(next.compliance); setTax(next.tax);
       setWatchlistText((next.compliance.sanctionsList ?? []).join("\n"));
       setDirty(false); setSaved(true);
       // Let the console shell refresh its brand logo without a reload.
@@ -415,6 +423,24 @@ export function SettingsView() {
               </div>
             </div>
           </Grid>
+        </Card>
+
+        <Card title="Tax (DGI)" sub="Rates the monthly tax position is computed with — Cameroon defaults; change when a Finance Law does.">
+          <Grid cols={2} gap={12} style={{ marginTop: 4 }}>
+            <LabeledInput label="VAT (TVA) on fees" type="number" suffix="%" mono error={vatErr} value={String(tax.vatRatePct)} onChange={(v) => editTax({ vatRatePct: Number(v) })} />
+            <LabeledInput label="Acompte IS on turnover" type="number" suffix="%" mono error={advErr} value={String(tax.turnoverAdvancePct)} onChange={(v) => editTax({ turnoverAdvancePct: Number(v) })} />
+            <LabeledInput label="Corporate income tax (IS)" type="number" suffix="%" mono error={isErr} value={String(tax.corporateRatePct)} onChange={(v) => editTax({ corporateRatePct: Number(v) })} />
+            <LabeledInput label="Mobile-money levy (operator-collected)" type="number" suffix="%" mono error={levyErr} value={String(tax.momoLevyPct)} onChange={(v) => editTax({ momoLevyPct: Number(v) })} />
+            <LabeledInput label="Monthly returns due by day" type="number" suffix="of next month" mono error={fdErr} value={String(tax.filingDay)} onChange={(v) => editTax({ filingDay: Number(v) })} />
+            <LabeledInput label="Tax identification number (NIU)" value={tax.taxId} onChange={(v) => editTax({ taxId: v })} />
+          </Grid>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, marginTop: 12, cursor: "pointer" }}>
+            <input type="checkbox" checked={tax.feeIncludesVat} onChange={(e) => editTax({ feeIncludesVat: e.target.checked })} />
+            The customer-facing fee already includes VAT (VAT is carved out of the fee; unticked = VAT is owed on top of it)
+          </label>
+          <p style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 0 0", lineHeight: 1.5 }}>
+            Defaults: VAT 17.5 % + 10 % CAC = 19.25 %; acompte IS 2 % + CAC = 2.2 % of turnover ex-VAT, monthly by the 15th; IS 30 % + CAC = 33 %; Finance-Law levy on mobile-money transfers 0.2 % (collected by the operators). The figures the console computes are estimates for the accountant — the operating entity's status decides what is actually due.
+          </p>
         </Card>
 
         <Card title="Security & session" sub="Admin access to this console.">

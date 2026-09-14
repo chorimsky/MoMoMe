@@ -725,6 +725,31 @@ export interface AdminSettings {
      *  per sender. Beyond the limit the payment is refused, not held. 0 = off. */
     velocity: { senderDayXaf: number; recipientDayXaf: number; senderHourCount: number };
   };
+  /** Tax parameters (Cameroon — DGI). Rates are CONFIGURABLE because they change with each
+   *  Finance Law and because the taxable base depends on the operating entity's status —
+   *  every figure computed from them is an estimate to confirm with the accountant. */
+  tax: {
+    /** VAT (TVA) on the platform fee, in percent. Cameroon: 17.5 % + 10 % additional
+     *  council centimes (CAC) = 19.25 %. */
+    vatRatePct: number;
+    /** Whether the customer-facing fee already contains VAT (true: VAT is carved out of
+     *  the fee; false: VAT is owed on top of it). */
+    feeIncludesVat: boolean;
+    /** Monthly corporate-income-tax advance (acompte IS) as a percent of turnover
+     *  excluding VAT. Cameroon general regime: 2 % + CAC = 2.2 %. */
+    turnoverAdvancePct: number;
+    /** Corporate income tax rate on annual profit, in percent (30 % + CAC = 33 %). Used
+     *  only for the year-to-date estimate. */
+    corporateRatePct: number;
+    /** Levy on mobile-money transfers/withdrawals (Finance Law 2022), in percent — collected
+     *  by the operators, NOT by the platform; reported as the amount the platform's payout
+     *  volume exposes recipients to. 0 = not shown. */
+    momoLevyPct: number;
+    /** Day of the following month by which monthly returns (VAT, acompte IS) are due. */
+    filingDay: number;
+    /** Tax identification number (NIU) printed on returns; empty until assigned. */
+    taxId: string;
+  };
   /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
    *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until
    *  its destination is set. Empty string = unset. */
@@ -990,6 +1015,116 @@ export interface ComplianceEvent {
   detail?: string;
   prevHash: string;       // hash of the previous event (genesis = "0")
   hash: string;           // sha256(prevHash + canonical(event without hash))
+}
+
+/* ---------- regulatory reporting: per-body periodic reports + filing register ---------- */
+export type RegulatoryBody = "ANIF" | "BEAC" | "COBAC" | "DGI";
+
+/** A report the platform is obliged to produce for a body, for a period. */
+export interface RegulatoryObligation {
+  body: RegulatoryBody;
+  /** Machine key of the report ("beac_annexes", "anif_str", "dgi_vat", …). */
+  kind: string;
+  title: string;
+  basis: string;                       // the instrument that requires it
+  period: string;                      // YYYY-MM the figures cover
+  periodicity: "monthly" | "annual" | "event";
+  dueAt: string | null;                // ISO date; null when the deadline is not fixed by a rule we can apply
+  /** Filed (from the register), due, overdue, or nothing to file for this period. */
+  status: "filed" | "due" | "overdue" | "nothing_to_file";
+  filing?: RegulatoryFiling;
+  /** What the report contains — a plain reading the officer can check before filing. */
+  summary: string;
+}
+
+export interface RegulatoryFiling {
+  id: string;
+  body: RegulatoryBody;
+  kind: string;
+  period: string;
+  filedAt: string;
+  filedBy: string;
+  /** The body's acknowledgement / receipt reference, when one exists. */
+  reference?: string;
+  note?: string;
+  /** Sequence of the compliance-chain event that recorded this filing (tamper evidence). */
+  eventSeq: number;
+}
+
+/** BEAC Instruction N°002/GR/2026 monthly declaration, Annexes I–III. */
+export interface BeacAnnexes {
+  /** Annex I — inbound funds received, by asset (the pre-financing leg). */
+  inbound: Array<{ asset: string; method: Method; count: number; assetAmount: number; usd: number; xaf: number }>;
+  /** Annex II — Mobile Money wallet credits, by operator / country / aggregator. */
+  credits: Array<{ provider: ProviderId; country: CountryCode; aggregator: string; count: number; xaf: number }>;
+  /** Annex III — technical partners in the processing chain. */
+  partners: Array<{ name: string; role: string; country: string; configured: boolean; active: boolean }>;
+  /** Repatriation evidence: sweeps of crypto inventory in the period and how many carry a
+   *  marked sale (the FX-repatriation proof the Instruction asks for). */
+  repatriation: { sweeps: number; sold: number; unsold: number; customerXaf: number; realizedXaf: number };
+  totals: { inboundCount: number; inboundXaf: number; inboundUsd: number; creditCount: number; creditXaf: number; refundedXaf: number; refundedCount: number };
+}
+
+export interface AnifSummary {
+  strsFiled: number;
+  strs: Array<{ id: string; at: string; amountXaf: number; ref?: string }>;
+  ctrCount: number;
+  ctrXaf: number;
+  sanctionsHits: number;
+  casesOpened: number;
+  casesOpen: number;
+  /** STRs are due "sans délai" — this is the longest an open escalated case has waited. */
+  oldestEscalatedDays: number | null;
+}
+
+export interface CobacSummary {
+  officer: string | null;
+  reportingEntity: string;
+  kyc: { verified: number; pending: number };
+  casesByType: Record<string, number>;
+  dispositions: { cleared: number; escalated: number; reported: number; open: number };
+  strsFiled: number;
+  integrityOk: boolean;
+  chainKeyed: boolean;
+  eventCount: number;
+  retentionYears: number;
+  velocityLimits: { senderDayXaf: number; recipientDayXaf: number; senderHourCount: number };
+  thresholds: { ctrXaf: number; cddXaf: number };
+  /** Year-to-date figures (the COBAC report is annual). */
+  ytd: { payments: number; volumeXaf: number; casesOpened: number; strsFiled: number };
+}
+
+/** DGI (Direction Générale des Impôts) — the month's tax position, computed from the
+ *  books. ESTIMATES: rates come from settings; the base assumes the platform fee is the
+ *  taxable service. Confirm with the accountant before filing. */
+export interface TaxSummary {
+  rates: AdminSettings["tax"];
+  payments: number;
+  volumeXaf: number;                   // gross Mobile Money delivered
+  feeRevenueXaf: number;               // platform fees collected (gross, as charged)
+  realizedFxXaf: number;               // realized FX P&L from sweeps marked sold in the period
+  turnoverExVatXaf: number;            // taxable turnover (fees net of VAT + realized FX)
+  vatXaf: number;                      // VAT collected/owed on fees
+  turnoverAdvanceXaf: number;          // monthly acompte IS
+  momoLevyXaf: number;                 // operator-collected levy exposure on payouts (informational)
+  /** Year-to-date: turnover and an indicative corporate income tax on it, less advances paid. */
+  ytd: { turnoverExVatXaf: number; advancesXaf: number; corporateTaxEstimateXaf: number };
+  byDay: Array<{ date: string; feeXaf: number; vatXaf: number }>;
+}
+
+export interface RegulatoryReport {
+  period: string;                      // YYYY-MM
+  generatedAt: string;
+  reportingEntity: string;
+  officer: string | null;
+  obligations: RegulatoryObligation[];
+  beac: BeacAnnexes;
+  anif: AnifSummary;
+  cobac: CobacSummary;
+  tax: TaxSummary;
+  filings: RegulatoryFiling[];         // every filing on record, newest first
+  /** Periods with any activity, for the picker. */
+  periods: string[];
 }
 
 /** The compliance console payload. */

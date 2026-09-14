@@ -13,7 +13,7 @@ export interface Observability {
   providers: Array<{ id: string; rail: string; health: string; successRate: number; avgLatencyMs: number }>;
   webhooks: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number };
 }
-import type { ApiKeyUsage, MomoTransfer,
+import type { RegulatoryReport, RegulatoryBody, RegulatoryFiling, ApiKeyUsage, MomoTransfer,
   UnattributedInbound, DeletionRequest,
   NotificationRecord,
   Quote, QuoteRequest, Payment, CreatePaymentRequest, ResolveResult,
@@ -471,6 +471,23 @@ export const api = {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `momome-compliance-${type}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return "ok";
+    } catch { return "fail"; }
+  },
+  /* Regulatory reporting — per-body periodic reports and the filing register. */
+  adminRegulatory: (period?: string) => req<RegulatoryReport>(`/admin/regulatory${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+  regulatoryFile: (body: RegulatoryBody, kind: string, period: string, reference?: string, note?: string) =>
+    req<{ ok: boolean; filing: RegulatoryFiling }>("/admin/regulatory/file", { method: "POST", body: JSON.stringify({ body, kind, period, reference, note }) }),
+  regulatoryExportCsv: async (body: RegulatoryBody, period: string): Promise<"ok" | "fail"> => {
+    try {
+      const res = await fetch(`${BASE}/admin/regulatory/export?body=${body}&period=${encodeURIComponent(period)}`, { headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {} });
+      if (!res.ok) return "fail";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `momome-${body.toLowerCase()}-${period}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1500);
       return "ok";

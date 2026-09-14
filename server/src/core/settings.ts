@@ -47,6 +47,11 @@ const DEFAULTS: AdminSettings = {
     sanctionsList: [], retentionYears: 10,
     velocity: { senderDayXaf: 2_000_000, recipientDayXaf: 2_000_000, senderHourCount: 20 },
   },
+  // Cameroon tax parameters (Finance Law figures as of 2026 — confirm with the accountant):
+  // VAT 17.5 % + 10 % CAC = 19.25 %, carved out of the fee; acompte IS 2 % + CAC = 2.2 % of
+  // turnover ex-VAT, monthly by the 15th; IS 30 % + CAC = 33 %; mobile-money levy 0.2 %
+  // (operator-collected, informational).
+  tax: { vatRatePct: 19.25, feeIncludesVat: true, turnoverAdvancePct: 2.2, corporateRatePct: 33, momoLevyPct: 0.2, filingDay: 15, taxId: "" },
 };
 
 let settings: AdminSettings = DEFAULTS;
@@ -70,6 +75,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     features: { ...DEFAULTS.features, ...(d.features ?? {}) },
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}), velocity: { ...DEFAULTS.compliance.velocity, ...(d.compliance?.velocity ?? {}) } },
+    tax: { ...DEFAULTS.tax, ...(d.tax ?? {}) },
   };
 });
 
@@ -111,6 +117,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     features: { ...settings.features, ...(patch.features ?? {}) },
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}), velocity: { ...settings.compliance.velocity, ...(patch.compliance?.velocity ?? {}) } },
+    tax: { ...settings.tax, ...(patch.tax ?? {}) },
   };
   touch("settings");
   return settings;

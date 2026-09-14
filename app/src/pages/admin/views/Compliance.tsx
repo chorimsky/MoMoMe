@@ -11,6 +11,7 @@ import { fmt } from "../../../lib/format.js";
 import { AKpi, Card, Grid, Pill, SectionTitle } from "../AdminUI.js";
 import { useAdminUser } from "../AdminGate.js";
 import { Failed, Loading } from "./Overview.js";
+import { RegulatoryFilings } from "./Regulatory.js";
 
 const CASE_LABEL: Record<ComplianceCase["type"], string> = {
   ctr_threshold: "Large transaction (CTR)", cdd_trigger: "CDD trigger", structuring: "Structuring",
@@ -43,7 +44,8 @@ const OBLIGATIONS: Array<{ area: string; basis: string; status: OblStatus; note:
   { area: "Tamper-evident audit trail", basis: "Evidentiary integrity", status: "built", note: "HMAC-keyed hash chain + signed high-water-mark anchor — detects insider edits, re-ordering and truncation; verified on every load." },
   { area: "Compliance officer & governance", basis: "COBAC R-2023/01 (responsable conformité)", status: "partial", note: "Designate the officer in Settings; board-approved policy, training and independent audit are organizational." },
   { area: "Repatriation-proof payout gate", basis: "★ BEAC Instruction N°002/GR/2026 (inbound remittance pre-financing)", status: "gap", note: "Your exact model: no wallet credit is meant to precede proof of FX repatriation (SWIFT). Highest legal exposure — build the evidence gate." },
-  { area: "Monthly BEAC declarations (Annexes I–III, by the 5th)", basis: "BEAC Instruction N°002/GR/2026", status: "partial", note: "CSV export exists; the Annex I–III format and submission are still manual." },
+  { area: "Monthly BEAC declarations (Annexes I–III, by the 5th)", basis: "BEAC Instruction N°002/GR/2026", status: "built", note: "Annexes I–III computed per month from the books (Regulatory filings above), sectioned CSV, deadline tracked, filing pinned to the audit chain. Submission to BEAC's portal is manual." },
+  { area: "Tax returns — VAT, acompte IS, mobile-money levy", basis: "CGI Cameroun / Finance Law (DGI) — monthly by the 15th", status: "partial", note: "Monthly position computed from fees + realized FX at the configured rates (Settings → Tax); the accountant confirms the base and files." },
   { area: "Technical-partner registry", basis: "BEAC Instruction N°002/GR/2026 (2-week disclosure)", status: "built", note: "Rails registry below (identity, country, role, status)." },
   { area: "Mobile-money limit pre-flight", basis: "BEAC payment-services (per-txn/daily/monthly/balance caps)", status: "partial", note: "Per-payout corridor cap enforced; daily/monthly cumulative caps per recipient not yet enforced." },
   { area: "Crypto / VASP authorization", basis: "COBAC Décision D-2022/071 (banks barred from crypto settlement)", status: "legal", note: "No code fix: obtain a licensed payment-institution partner for the XAF leg and local counsel. Structural risk." },
@@ -102,6 +104,9 @@ export function ComplianceView() {
         <AKpi label="STRs filed" value={fmt(m.strFiled)} tone="accent" />
         <AKpi label="KYC verified" value={fmt(data.kyc.verified)} tone="recv" />
       </Grid>
+
+      {/* per-body periodic reports, the filing calendar and the tax position */}
+      <RegulatoryFilings canFile={canFile} />
 
       {/* regulatory obligations — the stress-test made visible */}
       <Card title="Regulatory posture" sub="CEMAC / BEAC / ANIF obligations vs. what the platform enforces" style={{ marginBottom: 16 }}>

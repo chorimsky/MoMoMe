@@ -312,6 +312,18 @@ export function fileSTR(caseId: string, officer: string, reason: string, at: str
   return { ok: true, str };
 }
 
+/* ---------- read access for the regulatory reports (core/regulatory.ts) ---------- */
+export const listCases = (): readonly ComplianceCase[] => cases;
+export const listStrs = (): readonly SuspiciousTransactionReport[] => strs;
+export const chainMeta = () => ({ integrityOk: verifyIntegrity(), keyed: !!HMAC_KEY, eventCount: events.length });
+/** A regulatory filing (BEAC monthly declaration, DGI return, …) is a compliance act:
+ *  record it on the same tamper-evident chain as STRs, so "we filed on the 4th" is provable. */
+export function recordFiling(actor: string, detail: string, at: string = new Date().toISOString()): ComplianceEvent {
+  const ev = appendEvent(at, actor, "REPORT_FILED", { detail });
+  touch("compliance");
+  return ev;
+}
+
 /* ---------- reporting ---------- */
 export function report(): ComplianceReport {
   const s = getSettings().compliance;

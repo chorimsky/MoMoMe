@@ -32,6 +32,8 @@ const accountFor: Record<Asset, () => string> = {
 const withdrawals: TreasuryWithdrawal[] = [];
 register("treasury", () => withdrawals.slice(0, 200), (d: TreasuryWithdrawal[]) => { withdrawals.push(...d); });
 export function withdrawalHistory(): TreasuryWithdrawal[] { return withdrawals.slice(0, 50); }
+/** Every retained sweep — for the regulatory reports (repatriation evidence, realized FX). */
+export function allWithdrawals(): readonly TreasuryWithdrawal[] { return withdrawals; }
 /** Test seam: a sweep entry as withdraw() would have recorded it (no rail in sandbox). */
 export function seedWithdrawal(e: TreasuryWithdrawal): void { if (process.env.RAILS_MODE === "sandbox") withdrawals.unshift(e); }
 function record(e: TreasuryWithdrawal): void {

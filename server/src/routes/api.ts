@@ -1,7 +1,7 @@
 import { Router, type Request as ExpressRequest } from "express";
 import type { ApiKeyUsage,
   Quote, Payment, CreatePaymentRequest, QuoteRequest, AdminOverview,
-  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail,
+  AdminCustomer, OpsSnapshot, OpsTx, Method, PaymentState, AdminSettings, CountryCode, ProviderId, RevenueReport, TreasuryRail, RegulatoryBody,
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import { namesMatch,
@@ -68,6 +68,7 @@ import {
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
+import * as regulatory from "../core/regulatory.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
@@ -171,7 +172,7 @@ function sectionForPath(sub: string): Section | null {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
     "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
-    identities: "identities", compliance: "compliance", peex: "peex", reports: "reports",
+    identities: "identities", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
     notifications: "notifications", health: "health", settings: "settings",
@@ -1972,7 +1973,7 @@ api.put("/admin/settings", async (req, res) => {
   // Ops guardrails (kill-switch, payout-approval threshold) and AML/compliance controls
   // are Super-Admin-only risk settings; drop them from lesser roles so their legitimate
   // company/pricing/channel saves still succeed.
-  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; delete patch.features; }
+  if (!superAdmin) { delete patch.ops; delete patch.compliance; delete patch.methods; delete patch.features; delete patch.tax; }
   const pr = patch.pricing;
   if (pr) {
     const inRange = (n: unknown, lo: number, hi: number) => typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;
@@ -2033,6 +2034,17 @@ api.put("/admin/settings", async (req, res) => {
     if (typeof cp.officer === "string") cp.officer = cp.officer.slice(0, 120);
     if (typeof cp.reportingEntity === "string") cp.reportingEntity = cp.reportingEntity.slice(0, 200);
     if (Array.isArray(cp.sanctionsList)) cp.sanctionsList = cp.sanctionsList.map((x) => x.slice(0, 200));
+  }
+  const tx = patch.tax;
+  if (tx) {
+    const pct = (v: unknown, max: number) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max;
+    for (const [k, max] of [["vatRatePct", 50], ["turnoverAdvancePct", 20], ["corporateRatePct", 60], ["momoLevyPct", 5]] as const) {
+      if (tx[k] !== undefined && !pct(tx[k], max)) return res.status(400).json({ error: "bad_tax", message: `${k} must be a percentage between 0 and ${max}.` });
+    }
+    if (tx.filingDay !== undefined && !(Number.isInteger(tx.filingDay) && tx.filingDay >= 1 && tx.filingDay <= 28)) return res.status(400).json({ error: "bad_tax", message: "Filing day must be 1–28." });
+    if (tx.feeIncludesVat !== undefined && typeof tx.feeIncludesVat !== "boolean") return res.status(400).json({ error: "bad_tax", message: "feeIncludesVat must be true or false." });
+    if (tx.taxId !== undefined && typeof tx.taxId !== "string") return res.status(400).json({ error: "bad_tax", message: "Tax id must be text." });
+    if (typeof tx.taxId === "string") tx.taxId = tx.taxId.trim().slice(0, 40);
   }
   res.json(updateSettings(patch));
 });
@@ -2408,6 +2420,44 @@ api.get("/admin/compliance/export", async (req, res) => {
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="momome-compliance-${type}.csv"`);
   res.send(body);
+});
+
+/* ---------- regulatory reporting: per-body periodic reports, filing register ---------- */
+// One period, every body: BEAC Annexes I–III, ANIF summary, COBAC programme report, DGI
+// tax position — computed from the books, with the filing calendar for that period.
+api.get("/admin/regulatory", async (req, res) => {
+  const period = typeof req.query.period === "string" && regulatory.PERIOD_RE.test(req.query.period) ? req.query.period : new Date().toISOString().slice(0, 7);
+  await compliance.scanCompliance();
+  const rep = await regulatory.regulatoryReport(period);
+  // The STR register is officer-confidential: non-filing roles see counts, not the entries.
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (!role || !canFileReports(role)) rep.anif.strs = [];
+  res.json(rep);
+});
+
+// Sectioned CSV for one body — what gets attached to the submission.
+api.get("/admin/regulatory/export", async (req, res) => {
+  const period = typeof req.query.period === "string" && regulatory.PERIOD_RE.test(req.query.period) ? req.query.period : new Date().toISOString().slice(0, 7);
+  const body = String(req.query.body ?? "");
+  if (!["ANIF", "BEAC", "COBAC", "DGI"].includes(body)) return res.status(400).json({ error: "bad_body", message: "body must be ANIF, BEAC, COBAC or DGI." });
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (body === "ANIF" && (!role || !canFileReports(role))) return res.status(403).json({ error: "forbidden", message: "The ANIF register is restricted to the compliance officer." });
+  const rep = await regulatory.regulatoryReport(period);
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="momome-${body.toLowerCase()}-${period}.csv"`);
+  res.send(regulatory.exportBody(rep, body as RegulatoryBody));
+});
+
+// Record a filing (with the body's receipt reference when there is one). Pinned to the
+// compliance chain; officer / super-admin only, like an STR.
+api.post("/admin/regulatory/file", async (req, res) => {
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (!role || !canFileReports(role)) return res.status(403).json({ error: "forbidden", message: "Only the compliance officer or a super admin can record a filing." });
+  const b = (req.body ?? {}) as { body?: string; kind?: string; period?: string; reference?: string; note?: string };
+  const by = getUser(sessionOf(req)!.uid)?.username ?? "officer";
+  const r = regulatory.markFiled({ body: String(b.body ?? "") as RegulatoryBody, kind: String(b.kind ?? ""), period: String(b.period ?? ""), by, reference: typeof b.reference === "string" ? b.reference : undefined, note: typeof b.note === "string" ? b.note : undefined });
+  if (!r.ok) return res.status(r.error === "already_filed" ? 409 : 400).json({ error: r.error, message: r.error === "already_filed" ? "This report is already on record for that period." : "Invalid filing." });
+  res.json({ ok: true, filing: r.filing });
 });
 
 /* ---------- delivery management ---------- */

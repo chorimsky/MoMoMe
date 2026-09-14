@@ -219,21 +219,23 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
     // No response at all — offline / DNS / dropped connection / timeout (common on
     // patchy mobile data). Surface as a typed network error (status 0) so the UI shows
     // a friendly "you're offline, retry" instead of a raw "Failed to fetch" or a hang.
-    if (path.startsWith("/admin/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: false } })); } catch { /* non-browser */ } }
+    if (path.startsWith("/admin/") || path.startsWith("/capital/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: false } })); } catch { /* non-browser */ } }
     throw new ApiError("network", 0);
   } finally {
     clearTimeout(timer);
   }
   // A gateway answering for a server that is not there (502/503/504 from the edge or a
   // dev proxy) is the same thing as no answer, for the operator looking at the console.
-  if (path.startsWith("/admin/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: ![502, 503, 504].includes(res.status) } })); } catch { /* non-browser */ } }
+  if (path.startsWith("/admin/") || path.startsWith("/capital/")) { try { window.dispatchEvent(new CustomEvent("mm-admin-connectivity", { detail: { online: ![502, 503, 504].includes(res.status) } })); } catch { /* non-browser */ } }
   if (!res.ok) {
     // An expired/invalid session on a protected admin call → drop the token and
     // signal the console to fall back to the login gate.
     // A wrong password typed into the step-up prompt or the change-password form is a 401
     // on THOSE routes — not an expired session. Dropping the token there logged the
     // operator out for a typo.
-    if (res.status === 401 && path.startsWith("/admin/") && !["/admin/login", "/admin/elevate", "/admin/password", "/admin/forgot"].includes(path)) {
+    // The capital platform (/capital/*) uses the same session, so an expired token there
+    // falls back to its own sign-in the same way.
+    if (res.status === 401 && (path.startsWith("/admin/") || path.startsWith("/capital/")) && !["/admin/login", "/admin/elevate", "/admin/password", "/admin/forgot"].includes(path)) {
       setAdminToken(null);
       try { window.dispatchEvent(new Event("mm-admin-unauthorized")); } catch { /* non-browser */ }
     }
@@ -262,6 +264,10 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
   }
   return res.json() as Promise<T>;
 }
+
+/** The raw request function, for feature modules that keep their own typed service layer
+ *  (capital/data/apiAdapter.ts). Same auth, signing, timeout and error mapping as `api`. */
+export function request<T>(path: string, init?: RequestInit): Promise<T> { return req<T>(path, init); }
 
 export class ApiError extends Error {
   // `code` is the server's stable error slug (e.g. "quote_expired") — map it to a

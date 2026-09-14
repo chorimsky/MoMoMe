@@ -70,6 +70,7 @@ import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReport
 import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
 import { adminNetwork } from "./network.js";
+import { capital, capitalGuard } from "./capital.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
@@ -337,6 +338,10 @@ api.use("/admin", (req, res, next) => {
   }
   next();
 });
+
+/* ---------- Capital Intelligence + Investor OS — a SEPARATE platform on /api/capital ----------
+   Same session token as the console (that is the link), its own guard (routes/capital.ts). */
+api.use("/capital", capitalGuard, capital);
 
 /* ---------- the interoperability network's admin surface (behind the guard above) ---------- */
 api.use("/admin", adminNetwork);

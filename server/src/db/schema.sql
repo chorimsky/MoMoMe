@@ -157,3 +157,14 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   expires_at  TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rate_limits_expires ON rate_limits (expires_at);
+
+-- Capital Intelligence / Investor OS records — one row per record so concurrent serverless
+-- instances never clobber each other's investor, proposal, ledger or recommendation writes
+-- (the coarse snapshot stays as a fallback for cold reads). body is the whole record.
+CREATE TABLE IF NOT EXISTS capital_rows (
+  collection  TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  body        JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (collection, id)
+);

@@ -257,6 +257,25 @@ export async function allMomoOps(limit = 5000): Promise<unknown[]> {
   return rows.map((r) => r.body);
 }
 
+/* ---------------- capital_rows (Capital Intelligence / Investor OS — one row per record) ----------------
+   The capital modules keep their working set in memory and call these after every mutation so
+   a concurrent instance's write to a DIFFERENT record is never lost (the snapshot is whole-
+   collection, last-writer-wins). Reads at boot restore the complete cross-instance set. */
+export async function upsertCapitalRow(collection: string, id: string, body: unknown): Promise<void> {
+  await q(
+    `INSERT INTO capital_rows(collection, id, body, updated_at) VALUES($1, $2, $3::jsonb, now())
+     ON CONFLICT(collection, id) DO UPDATE SET body = excluded.body, updated_at = now()`,
+    [collection, id, JSON.stringify(body)],
+  );
+}
+export async function deleteCapitalRow(collection: string, id: string): Promise<void> {
+  await q(`DELETE FROM capital_rows WHERE collection = $1 AND id = $2`, [collection, id]);
+}
+export async function allCapitalRows(collection: string): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM capital_rows WHERE collection = $1 ORDER BY updated_at ASC`, [collection]);
+  return rows.map((r) => r.body);
+}
+
 /* ---------------- rate limits (durable fixed-window counters, shared across instances) ----------------
    Atomic bump in a single statement so concurrent serverless instances share one counter —
    the in-memory limiter is per-instance and lets an attacker spread brute-force across them. */

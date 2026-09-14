@@ -45,6 +45,14 @@ const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan
 const Testing = lazy(() => import("./pages/Testing.js").then((m) => ({ default: m.Testing })));
 const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m) => ({ default: m.AdminConsole })));
 const OpsDashboard = lazy(() => import("./pages/ops/OpsDashboard.js").then((m) => ({ default: m.OpsDashboard })));
+// Capital Intelligence + Investor OS — a separate, heavy management surface behind
+// the same admin session gate; one chunk, loaded only when one of its areas opens.
+const CapitalApp = lazy(() => import("./capital/CapitalApp.js").then((m) => ({ default: m.CapitalApp })));
+const InvestorPortal = lazy(() => import("./capital/CapitalApp.js").then((m) => ({ default: m.InvestorPortal })));
+// Capital Intelligence is a separate surface: its own sign-in name, menu and API namespace
+// (/api/capital). It shares only the session token with the console.
+const CAPITAL_BRAND = { title: "Capital Intelligence", sub: "Sign in to the capital and investor platform.", back: { to: "/", label: "Back to MoMo›Me" } };
+const PORTAL_BRAND = { title: "Investor Portal", sub: "Sign in to your private investment room.", back: { to: "/", label: "Back to MoMo›Me" } };
 
 /** Minimal, theme-aware fallback while a lazy operator chunk loads. */
 function ChunkFallback() {
@@ -74,6 +82,15 @@ export function App() {
       {/* Ops exposes the live tx feed, treasury float and rail health — operator-only,
           so it sits behind the same session gate as /admin (was previously ungated). */}
       <Route path="/ops" element={<AdminGate><Suspense fallback={<ChunkFallback />}><OpsDashboard /></Suspense></AdminGate>} />
+      {/* Capital Intelligence / Investor OS / Capital / Reports / AI Copilot — management
+          decision surface. Investor portal is the investor-facing room on the same gate. */}
+      <Route path="/capital-intelligence/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="ci" /></Suspense></AdminGate>} />
+      <Route path="/investors/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="investors" /></Suspense></AdminGate>} />
+      <Route path="/investments/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="investments" /></Suspense></AdminGate>} />
+      <Route path="/capital/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="capital" /></Suspense></AdminGate>} />
+      <Route path="/reports/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="reports" /></Suspense></AdminGate>} />
+      <Route path="/ai-copilot/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="copilot" /></Suspense></AdminGate>} />
+      <Route path="/investor/*" element={<AdminGate brand={PORTAL_BRAND}><Suspense fallback={<ChunkFallback />}><InvestorPortal /></Suspense></AdminGate>} />
       <Route path="/developers" element={<Developers />} />
       <Route path="/merchant" element={<Merchant />} />
       <Route path="/ambassador" element={<Ambassador />} />

@@ -27,7 +27,10 @@ const inputStyle = (bad?: boolean): React.CSSProperties => ({
 });
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 11.5, fontWeight: 650, color: "var(--ink-3)", marginBottom: 6 };
 
-export function AdminGate({ children }: { children: ReactNode }) {
+/** A sign-in surface other than the console can wear its own name and back-link while
+ *  using the same server session (Capital Intelligence, the investor portal). */
+export interface GateBrand { title: string; sub?: string; back?: { to: string; label: string } }
+export function AdminGate({ children, brand }: { children: ReactNode; brand?: GateBrand }) {
   const [phase, setPhase] = useState<Phase>("checking");
   const [user, setUser] = useState<AdminSessionUser | null>(null);
   const [mode, setMode] = useState<"signin" | "forgot">("signin");
@@ -107,9 +110,9 @@ export function AdminGate({ children }: { children: ReactNode }) {
       <div style={{ position: "absolute", top: 18, right: 18 }}><ThemeToggle size={38} /></div>
       <div className="card" style={{ width: "100%", maxWidth: 380, padding: 28 }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}><Logo size={40} /></div>
-        <h1 style={{ fontSize: 19, fontWeight: 750, textAlign: "center", margin: "0 0 4px" }}>Admin console</h1>
+        <h1 style={{ fontSize: 19, fontWeight: 750, textAlign: "center", margin: "0 0 4px" }}>{brand?.title ?? "Admin console"}</h1>
         <p style={{ fontSize: 13, color: "var(--ink-3)", textAlign: "center", margin: "0 0 22px" }}>
-          {phase === "checking" ? "Checking session…" : mode === "forgot" ? "Reset your password with the recovery key." : "Sign in to continue."}
+          {phase === "checking" ? "Checking session…" : mode === "forgot" ? "Reset your password with the recovery key." : brand?.sub ?? "Sign in to continue."}
         </p>
 
         {notice && <div style={{ fontSize: 12.5, color: "var(--recv)", fontWeight: 600, marginBottom: 12, textAlign: "center" }}>{notice}</div>}
@@ -173,7 +176,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
           </p>
         )}
         <div style={{ textAlign: "center", marginTop: 18 }}>
-          <Link to="/send" style={{ fontSize: 12.5, color: "var(--ink-3)", textDecoration: "none" }}>← Back to customer app</Link>
+          <Link to={brand?.back?.to ?? "/send"} style={{ fontSize: 12.5, color: "var(--ink-3)", textDecoration: "none" }}>← {brand?.back?.label ?? "Back to customer app"}</Link>
         </div>
       </div>
     </div>

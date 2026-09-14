@@ -62,6 +62,10 @@ export interface Store {
   // read the COMPLETE cross-instance set (leg-2 fires + full screening). No-op on memory.
   upsertMomoOp(op: { id: string; kind: string; status: string; transferId?: string; at: string }): Promise<void>;
   allMomoOps(): Promise<unknown[]>;
+  // Capital Intelligence / Investor OS — per-row durable records (Postgres capital_rows table).
+  upsertCapitalRow(collection: string, id: string, body: unknown): Promise<void>;
+  deleteCapitalRow(collection: string, id: string): Promise<void>;
+  allCapitalRows(collection: string): Promise<unknown[]>;
   /** Next payment-ref number. Postgres: a shared SEQUENCE, atomic across instances.
    *  Memory: the in-process counter, correct when there IS one process. Must NOT come
    *  from module state — payments.ref is UNIQUE and doubles as the payout idempotency
@@ -109,6 +113,9 @@ const memoryStore: Store = {
   allComplianceEvents: async () => [],
   upsertMomoOp: async () => {}, // memory keeps ops in-process (array + snapshot)
   allMomoOps: async () => [],
+  upsertCapitalRow: async () => {}, // memory keeps capital records in-process (maps + snapshot)
+  deleteCapitalRow: async () => {},
+  allCapitalRows: async () => [],
   nextRefNumber: async () => mem.nextRefCounter(),
   pruneRateLimits: async () => {}, // in-memory limiter self-sweeps
 };
@@ -147,6 +154,9 @@ const pgStore: Store = {
   allComplianceEvents: pg.allComplianceEvents,
   upsertMomoOp: pg.upsertMomoOp,
   allMomoOps: pg.allMomoOps,
+  upsertCapitalRow: pg.upsertCapitalRow,
+  deleteCapitalRow: pg.deleteCapitalRow,
+  allCapitalRows: pg.allCapitalRows,
   nextRefNumber: pg.nextRefNumber,
   pruneRateLimits: pg.pruneRateLimits,
 };

@@ -69,7 +69,9 @@ export function track(name: string, props?: Props): void { push({ type: "action"
 export function routeClass(pathname: string): string {
   return pathname
     .replace(/^\/pay\/[^/]+/, "/pay/:code").replace(/^\/m\/[^/]+/, "/m/:code").replace(/^\/legal\/[^/]+/, "/legal/:doc")
-    .replace(/\/[0-9a-f]{12,}(?=\/|$)/gi, "/:id") || "/";
+    .replace(/\/[0-9a-f]{12,}(?=\/|$)/gi, "/:id")
+    // Capital module records (CR-0001, REC-0001, inv_…, rep_…) → one class per page.
+    .replace(/\/(CR|REC)-\d+(?=\/|$)/g, "/:id").replace(/\/(inv|rep|doc|ivt)_[a-z0-9]+(?=\/|$)/gi, "/:id") || "/";
 }
 
 let wired = false;

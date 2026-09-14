@@ -7,7 +7,8 @@ import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from
 import { Link } from "react-router-dom";
 import { Logo, ThemeToggle } from "../../components/atoms.js";
 import { api, setElevationPrompt } from "../../api/client.js";
-import { canAccess as roleCanAccess, isSuperAdmin, type AdminRole, type Section } from "@shared/roles.js";
+import { canAccess as roleCanAccess, isSuperAdmin, isInvestor, type AdminRole, type Section } from "@shared/roles.js";
+import { Navigate } from "react-router-dom";
 import { useAdminUser } from "./AdminGate.js";
 import { AdminContext, type AdminKey, type Notif } from "./context.js";
 import { OverviewView } from "./views/Overview.js";
@@ -188,6 +189,10 @@ export function AdminConsole() {
 
   const View = VIEWS[active] ?? OverviewView;
 
+  // An investor's portal login has no console section at all — send it to its room.
+  if (isInvestor(role)) return <Navigate to="/investor/dashboard" replace />;
+  const capitalHome = roleCanAccess(role, "intelligence") ? "/capital-intelligence" : roleCanAccess(role, "investors") ? "/investors" : roleCanAccess(role, "capital") ? "/capital" : roleCanAccess(role, "copilot") ? "/ai-copilot" : null;
+
   return (
     <>
       {/* Step-up prompt — shown only when a guarded action demands re-authentication. */}
@@ -257,6 +262,12 @@ export function AdminConsole() {
         </nav>
         {/* Exit-to-customer-app lives in the sidebar footer so it stays reachable
             in the mobile drawer (the header shortcut is hidden < 560px). */}
+        {capitalHome && (
+          <Link to={capitalHome} onClick={() => setNavOpen(false)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44, margin: "0 12px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--brand-wash)", color: "var(--ink)", fontSize: 13, fontWeight: 650, textDecoration: "none" }}>
+            Capital Intelligence <span aria-hidden="true">↗</span>
+          </Link>
+        )}
         <Link to="/send" onClick={() => setNavOpen(false)}
           style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44, margin: "0 12px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
           Customer app <span aria-hidden="true">↗</span>

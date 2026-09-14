@@ -9,26 +9,41 @@ export type AdminRole =
   | "Finance Manager"
   | "Compliance Officer"
   | "Support Agent"
-  | "Read Only";
+  | "Read Only"
+  /* Capital Intelligence / Investor OS roles (added with the capital module; the
+     six above keep exactly the access they had). */
+  | "Investment Manager"
+  | "Legal"
+  | "Relationship Manager"
+  /* An investor's own portal login: sees ONLY the portal, never the console. */
+  | "Investor";
 
 export const ADMIN_ROLES: AdminRole[] = [
   "Super Admin", "Operations Manager", "Finance Manager", "Compliance Officer", "Support Agent", "Read Only",
+  "Investment Manager", "Legal", "Relationship Manager", "Investor",
 ];
 
 /** Console sections (≈ nav items / endpoint groups). */
 export type Section =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex"
-  | "reports" | "audience" | "notifications" | "health" | "settings" | "administration" | "testing";
+  | "reports" | "audience" | "notifications" | "health" | "settings" | "administration" | "testing"
+  /* Capital module: engine intelligence, the investor CRM, capital products/ledgers,
+     the copilot, and the investor-facing portal. */
+  | "intelligence" | "investors" | "capital" | "copilot" | "portal";
 
 /** What each role may access. "all" = every section. */
 export const ROLE_SECTIONS: Record<AdminRole, Section[] | "all"> = {
   "Super Admin": "all",
   "Read Only": "all", // sees everything — but never mutates (enforced separately)
-  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "interop", "merchants", "health", "peex", "notifications", "testing", "audience"],
-  "Finance Manager": ["overview", "pricing", "liquidity", "reports", "audience", "settings", "health"],
-  "Compliance Officer": ["overview", "compliance", "customers", "identities", "merchants", "health", "peex", "notifications"],
+  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "interop", "merchants", "health", "peex", "notifications", "testing", "audience", "intelligence"],
+  "Finance Manager": ["overview", "pricing", "liquidity", "reports", "audience", "settings", "health", "intelligence", "investors", "capital", "copilot"],
+  "Compliance Officer": ["overview", "compliance", "customers", "identities", "merchants", "health", "peex", "notifications", "investors"],
   "Support Agent": ["overview", "customers", "payments", "delivery", "merchants", "testing"],
+  "Investment Manager": ["overview", "liquidity", "reports", "intelligence", "investors", "capital", "copilot", "notifications"],
+  "Legal": ["investors", "capital"],
+  "Relationship Manager": ["investors", "copilot", "notifications"],
+  "Investor": ["portal"],
 };
 
 /** Short human label of a role's access (shown in the console). */
@@ -39,6 +54,10 @@ export const ROLE_ACCESS_LABEL: Record<AdminRole, string> = {
   "Compliance Officer": "Compliance · Customers · Identities",
   "Support Agent": "Customers · Payments · Delivery",
   "Read Only": "View-only everywhere",
+  "Investment Manager": "Capital Intelligence · Investors · Capital · Copilot",
+  "Legal": "Investor documents · Term sheets · Capital ledgers",
+  "Relationship Manager": "Investors · Communications · Copilot",
+  "Investor": "Investor portal only",
 };
 
 export function canAccess(role: AdminRole, section: Section): boolean {
@@ -80,3 +99,23 @@ export interface AdminUserView {
   createdAt: string;
   lastLogin?: string;
 }
+
+/* ---------- Capital Intelligence / Investor OS capabilities ----------
+   Sensitive operations are four-eyes (initiator ≠ approver, enforced in the core) and
+   role-gated here. The console uses the same functions to show/hide actions; the server
+   enforces them, so UI and API never disagree. */
+export const KYC_APPROVER_ROLES: AdminRole[] = ["Super Admin", "Compliance Officer"];
+export const canApproveKyc = (role: AdminRole): boolean => KYC_APPROVER_ROLES.includes(role);
+export const FUNDING_VERIFIER_ROLES: AdminRole[] = ["Super Admin", "Finance Manager"];
+export const canVerifyFunding = (role: AdminRole): boolean => FUNDING_VERIFIER_ROLES.includes(role);
+export const CAPITAL_ALLOCATOR_ROLES: AdminRole[] = ["Super Admin", "Finance Manager", "Investment Manager"];
+export const canAllocateCapital = (role: AdminRole): boolean => CAPITAL_ALLOCATOR_ROLES.includes(role);
+export const LEDGER_ADJUSTER_ROLES: AdminRole[] = ["Super Admin", "Finance Manager"];
+export const canAdjustLedger = (role: AdminRole): boolean => LEDGER_ADJUSTER_ROLES.includes(role);
+export const RECOMMENDATION_APPROVER_ROLES: AdminRole[] = ["Super Admin", "Finance Manager", "Investment Manager"];
+export const canApproveRecommendation = (role: AdminRole): boolean => RECOMMENDATION_APPROVER_ROLES.includes(role);
+export const INVESTOR_EDITOR_ROLES: AdminRole[] = ["Super Admin", "Investment Manager", "Relationship Manager", "Finance Manager"];
+export const canEditInvestors = (role: AdminRole): boolean => INVESTOR_EDITOR_ROLES.includes(role);
+export const LEGAL_ROLES: AdminRole[] = ["Super Admin", "Legal"];
+export const canLegalReview = (role: AdminRole): boolean => LEGAL_ROLES.includes(role);
+export const isInvestor = (role: AdminRole): boolean => role === "Investor";

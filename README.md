@@ -35,6 +35,11 @@ Build for production: `pnpm build`. Typecheck everything: `pnpm typecheck`.
 | `/send` | The pay app — send flow, Activity, Help (EN/FR) |
 | `/admin` | Partner/admin console — overview, payments, customers, rails, settings |
 | `/ops` | Live operations dashboard (polls every 2s) |
+| `/capital-intelligence/*` | Capital Intelligence — executive overview, capital health, transactions, liquidity + stress tests, revenue, routes, forecasts, scenarios, capital requirements, fundraising, investor matching, efficiency, concentration, risk, recommendations (human approval workflow) |
+| `/investors` `/investments/*` | Investor OS — CRM, qualification, KYC (four-eyes), opportunities → proposals → term sheets → investments → funding (four-eyes), documents, communications |
+| `/capital/*` | Capital products — OWN / POWER / SCALE / STRATEGIC, one ledger each; allocations (propose → approve → execute) |
+| `/reports` `/ai-copilot/*` | Reports; AI Capital Copilot (structured engine, source + calculation trace, AI audit) |
+| `/investor/*` | Investor portal — an investor's own room (role `Investor`) |
 | `/terms` `/privacy` `/contact` | Legal & contact |
 
 ## How it works end-to-end
@@ -50,6 +55,12 @@ The send flow is wired to the real settlement engine:
    (`AWAITING_INBOUND → INBOUND_CONFIRMED → FX_LOCKED → PAYOUT_REQUESTED → DELIVERED`),
    writing **balanced double-entry ledger** entries and paying out **exactly once**
    (idempotent on the payment ref). The UI polls `/api/payments/:id` to render progress.
+
+The Capital Intelligence module lives in [`app/src/capital/`](app/src/capital/) (lazy chunk behind the
+admin session gate) and [`server/src/core/capital/`](server/src/core/capital/) (engine over the real
+payments/ledger/float, Investor OS records persisted through the snapshot seam, copilot, reports).
+Set `VITE_CAPITAL_DATA_SOURCE=mock` on the app to develop the UI against the isolated fixture
+adapter — the shell paints a permanent MOCK banner; the default (`api`) is the live backend.
 
 See [`server/src/core/`](server/src/core/) for the ledger, FX engine, and state machine,
 and [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md) for the architecture rationale.

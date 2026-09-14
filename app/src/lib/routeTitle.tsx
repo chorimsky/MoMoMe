@@ -47,6 +47,10 @@ function titleFor(pathname: string, fr: boolean): string {
   if (pathname.startsWith("/pay/") || pathname.startsWith("/m/")) {
     return fr ? "Payer · MoMo›Me" : "Pay · MoMo›Me";
   }
+  // Capital Intelligence / Investor OS / portal: the module shell owns the precise title
+  // (per page) — this is the generic that stops the 404 name from wearing the tab.
+  if (/^\/(capital-intelligence|investors|investments|capital|reports|ai-copilot)(\/|$)/.test(pathname)) return fr ? "Capital · MoMo›Me" : "Capital · MoMo›Me";
+  if (pathname.startsWith("/investor/")) return fr ? "Espace investisseur · MoMo›Me" : "Investor portal · MoMo›Me";
   // Every real route is listed above (the router has no other dynamic paths), so anything
   // left really is the catch-all 404 — and naming it as such is what stops an unknown URL
   // from wearing the site title in the tab and in history.

@@ -11,6 +11,7 @@ import { reconcileDeposits } from "./core/depositReconcile.js";
 import { reconciliationSweep } from "./core/interop/reconcile.js";
 import { reconcileTransfers } from "./core/momoTransfer.js";
 import { flush as flushOutbound } from "./core/interop/outbound.js";
+import { shadowTick } from "./core/network/shadow.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
 import { rate as ibexRate, registerAccountWebhook } from "./adapters/ibex.js";
@@ -44,6 +45,8 @@ export async function reconcileTick(): Promise<void> {
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }
+  // Shadow routing of production settlements (never moves funds; no-op unless SHADOW_ROUTING).
+  try { await shadowTick(); } catch (e) { console.error("network shadow", e); }
   try { await store().pruneExpiredQuotes(); } catch (e) { console.error("prune quotes", e); }
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
 }

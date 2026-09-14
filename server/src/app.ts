@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cors from "cors";
 import { api } from "./routes/api.js";
 import { v1 } from "./routes/v1.js";
+import { network } from "./routes/network.js";
 import { latencyMiddleware } from "./core/interop/metrics.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
@@ -127,6 +128,9 @@ export function createApp() {
   // Interoperability API — mounted BEFORE /api so its paths are not swallowed by the
   // legacy router's catch-all. /api/* is unchanged and remains supported.
   app.use("/api/v1", v1);
+  // The interoperability network (docs/interop-v2): its own surface beside the live one,
+  // 404 unless INTEROPERABILITY_V2 is on (always reachable in the sandbox for rehearsal).
+  app.use("/api/network", network);
   app.use("/api", api);
 
   // Unmatched route → JSON 404 (not Express's default HTML).

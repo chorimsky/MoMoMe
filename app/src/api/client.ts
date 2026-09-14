@@ -290,6 +290,7 @@ export interface AnalyticsReport {
   durations: Array<{ bucket: string; sessions: number }>;
 }
 
+import type { NetworkOverview, NetworkSettings } from "@shared/network.js";
 export type OtpVia = "whatsapp" | "sms";
 export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
 
@@ -494,6 +495,11 @@ export const api = {
       return "ok";
     } catch { return "fail"; }
   },
+  /* The Pan-African network (shared/network.ts). */
+  adminNetwork: () => req<NetworkOverview>("/admin/network"),
+  networkSettings: (patch: { [K in keyof NetworkSettings]?: Partial<NetworkSettings[K]> }) => req<{ network: NetworkSettings }>("/admin/network/settings", { method: "PUT", body: JSON.stringify(patch) }),
+  networkShadowRun: () => req<{ compared: number }>("/admin/network/shadow/run", { method: "POST", body: "{}" }),
+  networkRecover: (id: string, action: "retry" | "alternate_provider" | "manual" | "refund") => req<{ transaction: unknown }>(`/admin/network/tx/${id}/recover`, { method: "POST", body: JSON.stringify({ action }) }),
   adminDelivery: () => req<DeliverySnapshot>("/admin/delivery"),
   adminMobileMoney: () => req<MobileMoneyInfo>("/admin/mobile-money"),
   momoQuote: (xaf: number) => req<{ xaf: number; feeXaf: number; collectXaf: number; feePct: number }>(`/momo/transfers/quote?xaf=${xaf}`),

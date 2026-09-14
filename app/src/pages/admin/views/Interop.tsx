@@ -12,6 +12,7 @@ import { Card, Grid, KV, Pill, SectionTitle } from "../AdminUI.js";
 import { api } from "../../../api/client.js";
 import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress } from "@shared/interop.js";
 import type { Observability } from "../../../api/client.js";
+import { NetworkPanel } from "./Network.js";
 
 const healthTone: Record<ProviderInfo["health"], Tone> = { OPERATIONAL: "recv", DEGRADED: "warn", DOWN: "bad", NOT_CONFIGURED: "ink", SANDBOX: "info" };
 const eventTone: Record<PaymentEvent["status"], Tone> = { received: "info", verified: "info", processed: "recv", duplicate: "warn", rejected: "bad" };
@@ -46,6 +47,7 @@ export function InteropView() {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <SectionTitle t="Interoperability" s="What MoMo›Me connects right now, what providers told us, and whether the books agree." />
+      <NetworkPanel />
       {err && <Card><div style={{ color: "var(--bad)" }}>{err}</div></Card>}
 
       <Grid cols={4}>

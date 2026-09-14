@@ -69,6 +69,7 @@ import {
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
+import { adminNetwork } from "./network.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
 export const api = Router();
@@ -171,7 +172,7 @@ function sectionForPath(sub: string): Section | null {
   const map: Record<string, Section> = {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
-    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", merchants: "merchants", customers: "customers",
+    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", network: "rails", merchants: "merchants", customers: "customers",
     identities: "identities", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
@@ -336,6 +337,9 @@ api.use("/admin", (req, res, next) => {
   }
   next();
 });
+
+/* ---------- the interoperability network's admin surface (behind the guard above) ---------- */
+api.use("/admin", adminNetwork);
 
 /* ---------- change own password ---------- */
 api.post("/admin/password", async (req, res) => {

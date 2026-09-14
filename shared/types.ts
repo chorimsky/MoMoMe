@@ -766,6 +766,9 @@ export interface AdminSettings {
     /** Tax identification number (NIU) printed on returns; empty until assigned. */
     taxId: string;
   };
+  /** The Pan-African interoperability network (shared/network.ts): flags, corridors,
+   *  emergency controls, route weights, FX table. Additive — the live engine ignores it. */
+  network: import("./network.js").NetworkSettings;
   /** Pre-configured treasury withdrawal destinations — where the admin sweeps the
    *  platform's crypto inventory. Each is optional; a rail can't be withdrawn until
    *  its destination is set. Empty string = unset. */

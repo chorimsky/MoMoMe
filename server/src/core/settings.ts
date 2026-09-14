@@ -52,7 +52,38 @@ const DEFAULTS: AdminSettings = {
   // turnover ex-VAT, monthly by the 15th; IS 30 % + CAC = 33 %; mobile-money levy 0.2 %
   // (operator-collected, informational).
   tax: { vatRatePct: 19.25, feeIncludesVat: true, turnoverAdvancePct: 2.2, corporateRatePct: 33, momoLevyPct: 0.2, filingDay: 15, taxId: "" },
+  // The interoperability network: EVERYTHING off. Shadow routing may be switched on
+  // first (it never moves funds); corridors are switched on one by one (§43–§46).
+  network: {
+    flags: { INTEROPERABILITY_V2: false, ROUTING_ENGINE: false, LIQUIDITY_ENGINE: false, LIGHTNING_SETTLEMENT_V2: false, CROSS_BORDER_PAYMENTS: false, MULTI_PROVIDER_ROUTING: false, SHADOW_ROUTING: false },
+    corridors: {},
+    disabled: { markets: [], providers: [], aggregators: [], pools: [], lightningRoutes: [], partners: [] },
+    weights: { liquidity: 25, providerHealth: 20, reliability: 20, fxQuality: 10, speed: 10, cost: 10, risk: 5 },
+    // USD rates for currencies the live feed does not carry — CONFIGURED figures the
+    // operator maintains until a feed is wired per market (§32). Confirm before a corridor goes live.
+    fxUsd: { KES: 129, GHS: 15.6, NGN: 1_560, UGX: 3_700, TZS: 2_650, RWF: 1_390, XOF: 600 },
+    fxSpreadBps: 150,
+    simulatedLiquidity: {},
+    liquidityFloor: {},
+    partners: [],
+  },
 };
+
+/** Deep-ish merge for the network section: every sub-object keeps its defaults. */
+function mergeNetwork(base: AdminSettings["network"], p?: Partial<AdminSettings["network"]>): AdminSettings["network"] {
+  if (!p) return base;
+  return {
+    flags: { ...base.flags, ...(p.flags ?? {}) },
+    corridors: { ...base.corridors, ...(p.corridors ?? {}) },
+    disabled: { ...base.disabled, ...(p.disabled ?? {}) },
+    weights: { ...base.weights, ...(p.weights ?? {}) },
+    fxUsd: { ...base.fxUsd, ...(p.fxUsd ?? {}) },
+    fxSpreadBps: p.fxSpreadBps ?? base.fxSpreadBps,
+    simulatedLiquidity: { ...base.simulatedLiquidity, ...(p.simulatedLiquidity ?? {}) },
+    liquidityFloor: { ...base.liquidityFloor, ...(p.liquidityFloor ?? {}) },
+    partners: p.partners ?? base.partners,
+  };
+}
 
 let settings: AdminSettings = DEFAULTS;
 
@@ -76,6 +107,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}), velocity: { ...DEFAULTS.compliance.velocity, ...(d.compliance?.velocity ?? {}) } },
     tax: { ...DEFAULTS.tax, ...(d.tax ?? {}) },
+    network: mergeNetwork(DEFAULTS.network, d.network),
   };
 });
 
@@ -118,6 +150,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}), velocity: { ...settings.compliance.velocity, ...(patch.compliance?.velocity ?? {}) } },
     tax: { ...settings.tax, ...(patch.tax ?? {}) },
+    network: mergeNetwork(settings.network, patch.network),
   };
   touch("settings");
   return settings;

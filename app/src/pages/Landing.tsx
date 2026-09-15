@@ -1,3 +1,4 @@
+import { Icon as UiIcon } from "../components/icons.js";
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
@@ -150,7 +151,7 @@ export function Landing() {
           </div>
 
           <div className="hero-visual">
-            <span className="momo-hint" aria-hidden="true">poke me 👆</span>
+            <span className="momo-hint" aria-hidden="true">poke me <UiIcon name="point-up" size={14} style={{ marginLeft: 2 }} /></span>
             <Momo size={sm ? 112 : 144} className="hero-momo" />
             <div className="hero-card" aria-hidden="true">
               <div className="pc-check">✓</div>

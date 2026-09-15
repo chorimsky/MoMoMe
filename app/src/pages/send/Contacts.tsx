@@ -5,6 +5,7 @@
    server as opaque ciphertext. This screen manages them: add, edit,
    favorite, delete, and (optionally) pick one to pay.
    ============================================================ */
+import { Icon } from "../../components/icons.js";
 import { useEffect, useRef, useState } from "react";
 import type { Contact } from "@shared/types.js";
 import { COUNTRIES, checkPhone, isRealName, namesMatch } from "@shared/domain.js";
@@ -170,7 +171,7 @@ export function Contacts({ onPick }: { onPick?: (c: Contact) => void }) {
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 4px", borderBottom: i < contacts.length - 1 ? "1px solid var(--line-2)" : "none" }}>
               <button onClick={() => toggleFav(c)} aria-label={t("contacts_favorite")} aria-pressed={c.favorite}
                 style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", padding: 0, color: c.favorite ? "var(--brand)" : "var(--ink-3)", fontSize: 18, lineHeight: 1 }}>
-                {c.favorite ? "★" : "☆"}
+                <Icon name={c.favorite ? "star-fill" : "star"} size={18} />
               </button>
               <span style={{ width: 34, height: 34, borderRadius: "50%", flex: "none", background: "var(--accent-wash)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 12 }}>{initials(c.name)}</span>
               <button onClick={() => setMode({ kind: "form", isNew: false, draft: c })} style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, font: "inherit" }}>

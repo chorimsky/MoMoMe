@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { api } from '@/api/client';
-import { Body, Button, Card, Field, H2, Label, Mono } from '@/components/ui';
+import { Body, Button, Card, Field, H2, IconCircle, Label, Mono } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { track } from '@/lib/analytics';
@@ -53,7 +53,7 @@ export function MomoStep({ country, toPhone, toProvider, toName, xaf, back, done
     const desc = st === 'AWAITING_PAYER' ? tr('mt_approve_desc').replace('{amount}', fmt(transfer.collectXaf)).replace('{op}', PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === 'DELIVERED' ? tr('mt_done_desc').replace('{amount}', fmt(transfer.xaf)).replace('{to}', to) : st === 'HELD' ? tr('mt_held_desc') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_desc') : st === 'REFUND_PENDING' ? tr('mt_refund_pending_desc') : st === 'REFUNDED' ? tr('mt_refunded_desc') : st === 'EXPIRED' ? tr('mt_expired_desc') : st === 'CANCELLED' ? tr('mt_cancelled_desc') : tr('mt_failed_desc');
     return (
       <Card padded elevated style={{ alignItems: 'center', gap: Spacing.three }}>
-        <Text style={{ fontSize: 40 }}>{st === 'DELIVERED' ? '✅' : st === 'AWAITING_PAYER' ? '📲' : st === 'HELD' ? '🕒' : st === 'COLLECTED' || st === 'PAYING_OUT' ? '⏳' : '⚠️'}</Text>
+        <IconCircle size={64} name={st === 'DELIVERED' ? 'checkmark' : st === 'AWAITING_PAYER' ? 'phone-portrait-outline' : st === 'HELD' ? 'time-outline' : st === 'COLLECTED' || st === 'PAYING_OUT' ? 'hourglass-outline' : 'alert-circle-outline'} color={st === 'DELIVERED' ? t.recv : st === 'HELD' || st === 'FAILED' || st === 'EXPIRED' || st === 'CANCELLED' ? t.warn : t.text} bg={st === 'DELIVERED' ? t.recvWash : t.surface2} />
         <H2 style={{ textAlign: 'center' }}>{title}</H2>
         <Body center muted>{desc}</Body>
         <Mono style={{ color: t.muted, fontSize: 12 }}>{tr('reference')} · {transfer.ref}</Mono>

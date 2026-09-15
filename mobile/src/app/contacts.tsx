@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
-import { Body, Button, Card, Field, IconCircle, Label, Screen } from '@/components/ui';
+import { Body, Button, Card, Field, Flag, IconCircle, Label, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
@@ -40,7 +40,6 @@ function bestPhoneBookNumber(numbers: string[], fallback: CountryCode): { countr
   return parsed.find((p) => checkPhone(p.national, p.country).ok) ?? parsed[0] ?? null;
 }
 
-const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
 export default function ContactsScreen() {
   const t = useTheme();
@@ -137,7 +136,7 @@ export default function ContactsScreen() {
                 onPress={() => pay(c)}>
                 <Body numberOfLines={1} style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{c.name}</Body>
                 <Body muted numberOfLines={1} style={{ fontSize: 12.5 }}>
-                  {FLAG[c.country]} {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
+                  {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
                   {paidAgo(c.lastPaidAt, tr) ? ` · ${paidAgo(c.lastPaidAt, tr)}` : ''}
                 </Body>
               </Pressable>
@@ -339,7 +338,7 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
           <Label style={{ marginTop: Spacing.three }}>{tr('c_number')}</Label>
           <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
             <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
-              <Body style={{ fontSize: 18 }}>{FLAG[country]}</Body>
+              <Flag country={country} size={18} />
               <Body style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>{COUNTRIES[country].dial}</Body>
               <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
             </Pressable>
@@ -395,7 +394,7 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
                     styles.countryChip,
                     { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
                   ]}>
-                  <Body style={{ fontSize: 15 }}>{FLAG[c]}</Body>
+                  <Flag country={c} size={14} />
                   <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 12 }}>{COUNTRIES[c].dial}</Body>
                 </Pressable>
               ))}

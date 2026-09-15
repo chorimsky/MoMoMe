@@ -3,6 +3,7 @@
    FR-first surface for the diaspora "pay a shop / rent / family back home" unit,
    funnelling to the directory (pay a business) and the send flow (pay a number).
    ============================================================ */
+import { Icon } from "../components/icons.js";
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
@@ -30,7 +31,7 @@ export function Diaspora() {
         <SiteHeader />
 
         <section style={{ padding: "8px 0 8px" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: "var(--brand-ink)", background: "var(--brand-wash)", border: "1.5px solid var(--brand)", padding: "6px 14px", borderRadius: 999 }}>🌍 {t("dia_eyebrow")}</div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: "var(--brand-ink)", background: "var(--brand-wash)", border: "1.5px solid var(--brand)", padding: "6px 14px", borderRadius: 999 }}><Icon name="globe" size={16} /> {t("dia_eyebrow")}</div>
           <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: "clamp(30px,6vw,48px)", letterSpacing: "-0.02em", lineHeight: 1.05, marginTop: 18, textWrap: "balance" }}>{t("dia_h1")}</h1>
           <p style={{ color: "var(--ink-2)", fontSize: 16, marginTop: 14, lineHeight: 1.6, maxWidth: "58ch" }}>{t("dia_lede")}</p>
           <div style={{ display: "flex", gap: 10, marginTop: 22, flexWrap: "wrap" }}>

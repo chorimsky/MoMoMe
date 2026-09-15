@@ -16,7 +16,7 @@ import { Link } from "react-router-dom";
 import { COUNTRIES, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
 import { downloadPayCard, sharePayCard, type PayCard } from "../lib/paycard";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
-import { QR, CopyField } from "../components/atoms.js";
+import { QR, CopyField, Flag } from "../components/atoms.js";
 import { useI18n } from "../lib/i18n.js";
 import { useFeatures } from "../lib/features.js";
 import { track } from "../lib/analytics.js";
@@ -93,7 +93,7 @@ export function Receive() {
               {t("rcv_your_number")}
             </label>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 18 }} aria-hidden>🇨🇲</span>
+              <Flag country="CM" size={18} />
               <input
                 className="num"
                 inputMode="tel"

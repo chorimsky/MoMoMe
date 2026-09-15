@@ -1,3 +1,4 @@
+import { Icon } from "../../components/icons.js";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../../lib/i18n.js";
@@ -34,7 +35,7 @@ export function Contact() {
           rel="noopener noreferrer"
           aria-label="WhatsApp"
         >
-          <div className="ic" aria-hidden="true">💬</div>
+          <div className="ic" aria-hidden="true"><Icon name="chat" size={22} /></div>
           <h3>WhatsApp</h3>
           <p>{t("c_wa_desc")}</p>
           <span className="val">{t("c_wa_cta")} <span aria-hidden="true">→</span></span>
@@ -44,7 +45,7 @@ export function Contact() {
           href={`mailto:${c.email}`}
           aria-label={`${t("c_email")}: ${c.email}`}
         >
-          <div className="ic" aria-hidden="true">✉️</div>
+          <div className="ic" aria-hidden="true"><Icon name="mail" size={22} /></div>
           <h3>{t("c_email")}</h3>
           <p>{t("c_email_desc")}</p>
           <span className="val">{c.email} <span aria-hidden="true">→</span></span>
@@ -54,13 +55,13 @@ export function Contact() {
           href={telLink(c.phone)}
           aria-label={`${t("c_call")}: ${c.phone}`}
         >
-          <div className="ic" aria-hidden="true">📞</div>
+          <div className="ic" aria-hidden="true"><Icon name="call" size={22} /></div>
           <h3>{t("c_call")}</h3>
           <p>{t("c_call_desc")}</p>
           <span className="val">{c.phone} <span aria-hidden="true">→</span></span>
         </a>
         <Link className="contact-card" to="/send?tab=help" aria-label={t("c_help_faq")}>
-          <div className="ic" aria-hidden="true">❓</div>
+          <div className="ic" aria-hidden="true"><Icon name="help" size={22} /></div>
           <h3>{t("c_help_faq")}</h3>
           <p>{t("c_help_desc")}</p>
           <span className="val">{t("c_open_help")} <span aria-hidden="true">→</span></span>

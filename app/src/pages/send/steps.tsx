@@ -1,4 +1,5 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { Icon, IconTile } from "../../components/icons.js";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Method, Payment, PaymentState } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, METHOD_META, lightningAddress, lnAddressNumber, localDigits, AMOUNT_PRESETS, detectProvider, checkPhone, isRealName, namesMatch, erc20PaymentUri, ADDRESS_METHODS, satsLabel } from "@shared/domain.js";
@@ -19,7 +20,9 @@ const FAIL_STATES: PaymentState[] = ["FAILED", "REFUND_PENDING", "REFUNDED", "MA
 // off in Settings removes it here immediately — the client never decides availability on
 // its own.
 const METHODS: Method[] = ["LIGHTNING", "ONCHAIN", "USDT", "USDC"];
-const METHOD_GLYPH: Record<Method, string> = { LIGHTNING: "⚡", ONCHAIN: "₿", USDT: "₮", USDC: "$" };
+// Currency glyphs are typographic (₿ ₮ $) and render the same everywhere; the bolt is an SVG
+// because "⚡" is an emoji — a colour picture on iOS and Android, not a glyph.
+const METHOD_GLYPH: Record<Method, ReactNode> = { LIGHTNING: <Icon name="bolt" size={22} />, ONCHAIN: "₿", USDT: "₮", USDC: "$" };
 const METHOD_COLOR: Record<Method, string> = { LIGHTNING: "var(--lightning)", ONCHAIN: "var(--lightning)", USDT: "oklch(0.62 0.13 162)", USDC: "oklch(0.58 0.14 250)" };
 // The network is the irreversible mistake for a stablecoin — both resolve to a 0x address,
 // and funds sent on another chain are gone. So it is named on the row, on the review and
@@ -321,7 +324,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
         )}
         {s.xaf >= 1_000_000 && !overCap && (
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "var(--brand-wash)", border: "1px solid var(--line)" }}>
-            <span aria-hidden style={{ color: "var(--warn-ink)", fontWeight: 800 }}>🛡</span>
+            <Icon name="shield" size={18} style={{ color: "var(--warn-ink)", marginTop: 1 }} />
             <span style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>{t("kyc_hint")}</span>
           </div>
         )}
@@ -412,7 +415,7 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
           /* Admin-gated: pay from the payer's OWN Mobile Money, any network to any network. */
           <button onClick={() => { track("method_chosen", { method: "MOMO" }); onMomo(); }}
             style={{ cursor: "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: "1.5px solid var(--line)", background: "var(--surface)" }}>
-            <span style={{ width: 42, height: 42, borderRadius: 11, flex: "none", display: "grid", placeItems: "center", background: "var(--recv)", color: "#fff", fontWeight: 800, fontSize: 19 }}>📱</span>
+            <IconTile name="phone" bg="var(--recv)" />
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontWeight: 700, fontSize: 16 }}>{t("mt_tile_name")}</span>
               <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: "var(--recv)", marginTop: 2 }}>{t("mt_tile_net")}</span>
@@ -424,7 +427,7 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
           /* The network: Mobile Money to another country. Shown only while a corridor is open. */
           <button onClick={() => { track("method_chosen", { method: "ABROAD" }); onAbroad(); }}
             style={{ cursor: "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: "1.5px solid var(--line)", background: "var(--surface)" }}>
-            <span style={{ width: 42, height: 42, borderRadius: 11, flex: "none", display: "grid", placeItems: "center", background: "var(--accent, var(--recv))", color: "#fff", fontWeight: 800, fontSize: 19 }}>🌍</span>
+            <IconTile name="globe" bg="var(--accent, var(--recv))" />
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontWeight: 700, fontSize: 16 }}>{t("ab_title")}</span>
               <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: "var(--recv)", marginTop: 2 }}>{t("ab_tile_net")}</span>
@@ -638,7 +641,7 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "6px 0 16px" }}>
         {demoMode ? (
           <div style={{ width: 210, padding: "22px 16px", borderRadius: 14, border: "1px dashed var(--warn)", background: "var(--send-wash)", textAlign: "center" }}>
-            <div style={{ fontSize: 26 }}>🧪</div>
+            <div style={{ color: "var(--warn-ink)" }}><Icon name="flask" size={28} /></div>
             <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", marginTop: 6 }}>{t("sandbox_title")}</div>
             <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4, lineHeight: 1.45 }}>{t("sandbox_desc")}</div>
           </div>

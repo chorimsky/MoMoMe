@@ -8,6 +8,7 @@
    collected before the recipient can be paid (the server checks liquidity first), and a
    payout that fails is returned to the payer's number.
    ============================================================ */
+import { Icon } from "../../components/icons.js";
 import { useEffect, useState } from "react";
 import type { MomoTransfer } from "@shared/types.js";
 import { COUNTRIES, PROVIDERS, checkPhone } from "@shared/domain.js";
@@ -58,7 +59,7 @@ export function MomoStep({ s, back, done }: { s: Draft; back: () => void; done: 
       <FlowCard>
         <Stepper i={3} />
         <div style={{ textAlign: "center", padding: "18px 0 8px" }}>
-          <div style={{ fontSize: 40 }}>{st === "DELIVERED" ? "✅" : st === "AWAITING_PAYER" ? "📲" : st === "HELD" ? "🕒" : st === "COLLECTED" || st === "PAYING_OUT" ? <Spinner size={28} /> : "⚠️"}</div>
+          <div style={{ display: "grid", placeItems: "center", color: st === "DELIVERED" ? "var(--recv)" : st === "HELD" || st === "FAILED" ? "var(--warn-ink)" : "var(--ink-2)" }}>{st === "DELIVERED" ? <Icon name="check" size={40} strokeWidth={2.4} /> : st === "AWAITING_PAYER" ? <Icon name="phone" size={40} /> : st === "HELD" ? <Icon name="clock" size={40} /> : st === "COLLECTED" || st === "PAYING_OUT" ? <Spinner size={28} /> : <Icon name="warn" size={40} />}</div>
           <h2 style={{ fontSize: 20, marginTop: 10 }}>{title}</h2>
           <p style={{ color: "var(--ink-2)", fontSize: 14, lineHeight: 1.5, margin: "8px 0 14px" }}>{desc}</p>
           <div className="num" style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("reference")} · {transfer.ref}</div>

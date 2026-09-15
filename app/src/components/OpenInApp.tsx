@@ -7,6 +7,7 @@
    URL to the installed app through an intent URL, falling back to the download when the
    app is not there. iOS offers no such handoff from a page, so there the Smart App Banner
    (index.html) and the store badge do the inviting. Hidden inside the app's own WebView. */
+import { Icon } from "./icons.js";
 import { useEffect, useMemo } from "react";
 import { appLinkFor, platformOf } from "@shared/apps.js";
 import { useI18n } from "../lib/i18n.js";
@@ -33,7 +34,7 @@ export function OpenInApp() {
   if (!href) return null;
   return (
     <a href={href} className="btn btn-quiet btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 8, alignSelf: "flex-start", marginBottom: 10, textDecoration: "none" }}>
-      <span aria-hidden>📲</span> {t("open_in_app")}
+      <Icon name="phone" size={16} /> {t("open_in_app")}
     </a>
   );
 }

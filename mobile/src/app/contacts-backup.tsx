@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { api, errMessage } from '@/api/client';
-import { Body, Button, Card, Field, H2, IconCircle, Label, Mono, Screen } from '@/components/ui';
+import { Body, Button, Card, Field, Flag, H2, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
@@ -20,7 +20,6 @@ import { adoptVaultFromRecovery, exportVaultForRecovery, generateRecoveryCode } 
 import { COUNTRIES, localDigits } from '@shared/domain';
 import type { CountryCode } from '@shared/types';
 
-const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 type Mode = 'choose' | 'backup' | 'restore';
 type Step = 'number' | 'otp' | 'code' | 'done';
 
@@ -261,7 +260,7 @@ function PhoneStep({
         <Label>{tr('your_mm_number')}</Label>
         <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
           <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
-            <Body style={{ fontSize: 18 }}>{FLAG[country]}</Body>
+            <Flag country={country} size={18} />
             <Body style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>{COUNTRIES[country].dial}</Body>
             <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
           </Pressable>
@@ -287,7 +286,7 @@ function PhoneStep({
                   styles.countryChip,
                   { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
                 ]}>
-                <Body style={{ fontSize: 15 }}>{FLAG[c]}</Body>
+                <Flag country={c} size={14} />
                 <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 12 }}>{COUNTRIES[c].dial}</Body>
               </Pressable>
             ))}

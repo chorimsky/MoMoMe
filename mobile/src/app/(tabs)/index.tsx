@@ -15,6 +15,7 @@ import {
   Chip,
   Countdown,
   Divider,
+  Flag,
   H1,
   H2,
   IconCircle,
@@ -76,7 +77,6 @@ const QUICK = [...AMOUNT_PRESETS];
 // must be able to identify the customer (Règlement 02/24). We surface it as an
 // up-front notice rather than a silent post-hoc flag.
 const CDD_XAF = 1_000_000;
-const FLAG: Record<CountryCode, string> = { CM: '🇨🇲', GA: '🇬🇦', TD: '🇹🇩', CG: '🇨🇬', CF: '🇨🇫' };
 
 // USDT and USDC were the SAME icon in the SAME colour, so the rows differed only by the
 // ticker buried in the label — and both resolve to a 0x address on the same chain, where
@@ -568,9 +568,10 @@ export default function SendScreen() {
                     <Text numberOfLines={1} style={[styles.recentName, { color: t.text }]}>
                       {r.name || r.phone}
                     </Text>
-                    <Text numberOfLines={1} style={[styles.recentSub, { color: t.muted }]}>
-                      {FLAG[r.country]} {PROVIDERS[r.provider].short}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Flag country={r.country} size={11} />
+                      <Text numberOfLines={1} style={[styles.recentSub, { color: t.muted }]}>{PROVIDERS[r.provider].short}</Text>
+                    </View>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -604,7 +605,7 @@ export default function SendScreen() {
             </View>
             <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
               <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
-                <Text style={styles.flag}>{FLAG[country]}</Text>
+                <Flag country={country} size={18} />
                 <Text style={[styles.dial, { color: t.muted }]}>{COUNTRIES[country].dial}</Text>
                 <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
               </Pressable>
@@ -635,7 +636,7 @@ export default function SendScreen() {
                       styles.countryChip,
                       { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
                     ]}>
-                    <Text style={{ fontSize: 16 }}>{FLAG[c]}</Text>
+                    <Flag country={c} size={14} />
                     <Text style={[styles.countryChipText, { color: t.text }]}>{COUNTRIES[c].dial}</Text>
                   </Pressable>
                 ))}
@@ -841,7 +842,7 @@ export default function SendScreen() {
             <Label>{quote.feeBy === 'merchant' ? tr('price_label') : tr('they_receive')}</Label>
             <Text style={[styles.receiveBig, { color: t.text }]}>{xaf(quote.feeBy === 'merchant' ? quote.requestedXaf ?? quote.totalXaf : quote.xaf)}</Text>
             <View style={styles.recipInline}>
-              <Text style={styles.flag}>{FLAG[country]}</Text>
+              <Flag country={country} size={18} />
               <Body style={{ color: t.textSecondary }}>{recipientName || phone}</Body>
               {provider ? <Pill label={PROVIDERS[provider].short} tone={providerTone(provider)} /> : null}
             </View>
@@ -1105,7 +1106,7 @@ function PayStep({
           the app did not, and shipped a payable-looking code for a fake destination. */}
       {demoMode ? (
         <View style={[styles.sandboxCard, { borderColor: t.accent, backgroundColor: t.surface2 }]}>
-          <Text style={{ fontSize: 26 }}>🧪</Text>
+          <IconCircle name="flask-outline" color={t.accent} bg={t.accentWash} size={44} />
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>{tr('sandbox_title')}</Text>
           <Body muted center>{tr('sandbox_desc')}</Body>
         </View>
@@ -1378,7 +1379,6 @@ const styles = StyleSheet.create({
     minHeight: 56,
     gap: Spacing.two,
   },
-  flag: { fontSize: 20 },
   dial: { fontFamily: Fonts.bodyBold, fontSize: 16 },
   countryBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.half },
   countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },

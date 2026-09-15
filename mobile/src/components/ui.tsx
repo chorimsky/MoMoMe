@@ -592,3 +592,29 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
   countdown: { fontFamily: Fonts.bodyBold, fontSize: 13 },
 });
+
+/* ---------- country flag ----------
+   Drawn bands, not the flag emoji: an emoji flag is a different picture on every OS (and
+   two letters on some Android builds), and cannot be sized by the layout. Mirrors the web
+   `Flag` in app/src/components/atoms.tsx — one source of truth for the band colours. */
+const FLAG_BANDS: Record<string, string[]> = {
+  CM: ['#007a5e', '#ce1126', '#fcd116'],
+  GA: ['#009e60', '#fcd116', '#3a75c4'],
+  TD: ['#002664', '#fecb00', '#c60c30'],
+  CG: ['#009543', '#fbde4a', '#dc241f'],
+  CF: ['#003082', '#ffffff', '#289728'],
+  KE: ['#000000', '#bb0000', '#006600'],
+  GH: ['#ce1126', '#fcd116', '#006b3f'],
+  NG: ['#008751', '#ffffff', '#008751'],
+  SN: ['#00853f', '#fdef42', '#e31b23'],
+  CI: ['#f77f00', '#ffffff', '#009e60'],
+};
+export function Flag({ country, size = 16 }: { country: string; size?: number }) {
+  const bands = FLAG_BANDS[country] ?? FLAG_BANDS.CM;
+  const horizontal = country === 'GA' || country === 'KE' || country === 'GH' || country === 'CF';
+  return (
+    <View style={{ width: Math.round(size * 1.4), height: size, borderRadius: 3, overflow: 'hidden', flexDirection: horizontal ? 'column' : 'row', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(0,0,0,0.15)' }}>
+      {bands.map((b, i) => <View key={i} style={{ flex: 1, backgroundColor: b }} />)}
+    </View>
+  );
+}

@@ -1,3 +1,4 @@
+import { Icon } from "../../components/icons.js";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
@@ -376,7 +377,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
         {demo?.demoMode && tab === "pay" && step === "details" && (
           <div style={{ margin: "0 0 12px", padding: "10px 13px", borderRadius: "var(--r)", border: "1px dashed var(--line)", background: "var(--surface-2)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45 }}>
-            <span style={{ fontWeight: 700, color: "var(--ink)" }}>🧪 {t("demo_label")}</span> · {demo.demoHint}
+            <span style={{ fontWeight: 700, color: "var(--ink)", display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="flask" size={14} /> {t("demo_label")}</span> · {demo.demoHint}
           </div>
         )}
 

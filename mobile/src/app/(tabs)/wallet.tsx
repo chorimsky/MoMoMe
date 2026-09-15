@@ -10,7 +10,7 @@ import QRCode from 'react-native-qrcode-svg';
 const BRAND_MARK = require('../../../assets/images/icon.png') as number;
 
 import { getMyNumber, setMyNumber } from '@/api/client';
-import { Body, Button, Card, Field, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
+import { Body, Button, Card, Field, Flag, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { track } from '@/lib/analytics';
@@ -131,7 +131,7 @@ export default function ReceiveScreen() {
             keyboardType="phone-pad"
             value={draft}
             onChangeText={setDraft}
-            left={<Text style={{ fontSize: 18 }}>🇨🇲</Text>}
+            left={<Flag country="CM" size={18} />}
           />
           {problem ? <Body style={{ color: t.bad, fontSize: 13 }}>{problem}</Body> : null}
           {valid && check.provider ? (

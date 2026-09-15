@@ -3,7 +3,8 @@
    QR is now a REAL, scannable code via the `qrcode` lib — the
    prototype drew random pixels (BACKEND/FRONTEND review finding).
    ============================================================ */
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Icon } from "./icons.js";
+import { type ReactNode, useEffect, useRef, useState, type CSSProperties } from "react";
 import QRCode from "qrcode";
 import type { CountryCode, ProviderId, Method } from "@shared/types.js";
 import { PROVIDERS } from "@shared/domain.js";
@@ -46,6 +47,22 @@ export function useBrandLogo(): string | null {
 
 /* ---------- brand mark ---------- */
 /** The MoMoMe lightning bolt — green, sits between "MoMo" and "Me". */
+/** The Momo mark on its rounded tile — mirrors brand/momo-mark.svg and the mobile MomoMark. */
+export function MomoMark({ size = 32, mono = false, tile = true }: { size?: number; mono?: boolean; tile?: boolean }) {
+  const ink = mono ? "currentColor" : "#1c1813";
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden style={{ flex: "none", display: "inline-block", verticalAlign: "middle" }}>
+      {tile && <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill={mono ? "transparent" : "#FFC92E"} stroke={ink} strokeWidth="1.5" />}
+      <circle cx="16" cy="14" r="9" fill={ink} />
+      {!mono && <circle cx="16" cy="14" r="7" fill="#e9edf3" />}
+      <circle cx="16" cy="14" r="5.2" fill={mono ? "var(--paper, #fff)" : "#ffffff"} />
+      <circle cx="16" cy="14" r="2.6" fill={ink} />
+      {!mono && <circle cx="17.1" cy="12.9" r="1" fill="#ffffff" />}
+      <path d="M11 23.5 q5 4 10 0" fill="none" stroke={ink} strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function Bolt({ h, color }: { h: number; color: string }) {
   return (
     <svg height={h} width={h * 0.46} viewBox="0 0 23 50" aria-hidden="true" style={{ flex: "none", margin: `0 ${h * -0.04}px` }}>
@@ -68,14 +85,10 @@ export function Logo({ size = 26, withWord = true, mono = false, src = null }: {
   const orange = mono ? "currentColor" : "var(--accent)";
   const green = mono ? "currentColor" : "var(--recv)";
 
-  // Compact square app-icon (favicons / tight tiles): bolt on a rounded tile.
-  if (!withWord) {
-    return (
-      <span style={{ display: "inline-grid", placeItems: "center", width: size, height: size, borderRadius: size * 0.28, background: mono ? "transparent" : yellow, flex: "none" }}>
-        <Bolt h={size * 0.74} color={mono ? "currentColor" : "var(--brand-ink)"} />
-      </span>
-    );
-  }
+  // Compact square (favicons / tight tiles): the Momo mark on its tile — the SAME lockup as
+  // the app icon and favicon.svg, so the brand is one face everywhere, not a bolt here and
+  // a goggle eye there.
+  if (!withWord) return <MomoMark size={size} mono={mono} />;
 
   const f = size * 1.42; // Bagel Fat One cap-height ≈ 0.7em → wordmark height ≈ size
   const letter = (text: string, color: string) => <span style={{ color }}>{text}</span>;
@@ -293,8 +306,8 @@ export function QR({ value, size = 188, brand = true }: { value: string; size?: 
 // Rail-NEUTRAL by method — which crypto rail issued the payment is an internal detail, so the
 // badge no longer hardcodes "IBEX". Pass `provider` (payInstruction.provider) to show
 // the actual rail that issued the payment, e.g. "IBEX · Lightning".
-const RAIL_MAP: Record<string, { label: string; color: string; glyph: string }> = {
-  LIGHTNING: { label: "Lightning", color: "var(--lightning)", glyph: "⚡" },
+const RAIL_MAP: Record<string, { label: string; color: string; glyph: ReactNode }> = {
+  LIGHTNING: { label: "Lightning", color: "var(--lightning)", glyph: <Icon name="bolt" size={13} /> },
   // Ethereum, not Tron. Both stablecoins are minted as ERC-20 receive addresses on
   // IBEX (`network: "ethereum"`), and every pay screen tells the customer to send on
   // ERC-20 — a badge naming the wrong chain is how a deposit gets sent somewhere
@@ -317,7 +330,7 @@ export function RailBadge({ rail, provider }: { rail: string; provider?: string 
   const label = p && (rail === "LIGHTNING" || rail === "ONCHAIN" || rail === "USDT" || rail === "USDC") ? `${p} · ${m.label}` : m.label;
   return (
     <span className="pill" style={{ background: "var(--surface)" }}>
-      <span style={{ color: m.color, fontSize: 13, lineHeight: 1 }}>{m.glyph}</span>
+      <span style={{ color: m.color, fontSize: 13, lineHeight: 1, display: "inline-flex" }}>{m.glyph}</span>
       <span className="mono" style={{ fontSize: 11, letterSpacing: 0, whiteSpace: "nowrap" }}>{label}</span>
     </span>
   );

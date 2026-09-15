@@ -1,0 +1,13 @@
+<!-- The Momo mark, bare: the single goggle eye and the smile, on the 32-unit grid every
+     brand surface uses (app/public/favicon.svg, mobile/src/components/brand.tsx). Every
+     app icon is composed from this file by scripts/brand-icons.mjs — edit here, regenerate. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <g id="momo">
+    <circle cx="16" cy="14" r="9" fill="#1c1813"/>
+    <circle cx="16" cy="14" r="7" fill="#e9edf3"/>
+    <circle cx="16" cy="14" r="5.2" fill="#ffffff"/>
+    <circle cx="16" cy="14" r="2.6" fill="#1c1813"/>
+    <circle cx="17.1" cy="12.9" r="1" fill="#ffffff"/>
+    <path d="M11 23.5 q5 4 10 0" fill="none" stroke="#1c1813" stroke-width="2.2" stroke-linecap="round"/>
+  </g>
+</svg>

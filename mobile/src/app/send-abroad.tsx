@@ -15,7 +15,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, errMessage, type NetworkMarkets } from '@/api/client';
 import { track } from '@/lib/analytics';
 import { Body, Button, Card, Chip, Countdown, ErrorBar, Field, H2, Label, Mono, Screen } from '@/components/ui';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
 import { useNetworkOpen } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n, type StringKey } from '@/lib/i18n';
@@ -85,7 +85,7 @@ export default function SendAbroadScreen() {
   }, [stage, tx]);
   const reset = () => { setStage('form'); setQuote(null); setTx(null); setErr(null); setReasons([]); setAmount(''); setDstPhone(''); setDstName(''); };
 
-  const feeRows: Array<[string, number]> = quote ? [
+  const feeRows: [string, number][] = quote ? [
     [tr('ab_fee_collect'), quote.quote.fees.providerCollect], [tr('ab_fee_payout'), quote.quote.fees.providerPayout], [tr('ab_fee_fx'), quote.quote.fees.fxSpread],
     [tr('ab_fee_network'), quote.quote.fees.lightning + quote.quote.fees.liquidity], [tr('ab_fee_momome'), quote.quote.fees.momome],
   ] : [];

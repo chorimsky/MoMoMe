@@ -15,6 +15,7 @@ import type { NetworkQuote, NetworkRoute, NetworkTransaction } from "@shared/net
 import { checkPhone } from "@shared/domain.js";
 import { api, type NetworkMarkets } from "../api/client.js";
 import { SiteHeader, SiteFooter } from "../components/nav.js";
+import { Flag } from "../components/atoms.js";
 import { useI18n, errMessage } from "../lib/i18n.js";
 import { track } from "../lib/analytics.js";
 
@@ -135,7 +136,7 @@ export function SendAbroad() {
                 <input className="num" inputMode="numeric" value={amount ? nf.format(xaf) : ""} onChange={(e) => setAmount(digits(e.target.value))} placeholder={`${nf.format(dest.minPerTx)} – ${nf.format(dest.maxPerTx)}`} aria-label={t("ab_amount")} style={input} />
                 <label style={label}>{t("ab_your_number")}</label>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span aria-hidden style={{ fontSize: 18 }}>🇨🇲</span>
+                  <Flag country="CM" size={18} />
                   <input className="num" inputMode="tel" autoComplete="tel-national" value={srcPhone} onChange={(e) => setSrcPhone(e.target.value)} placeholder="6 7X XX XX XX" aria-label={t("ab_your_number")} style={input} />
                 </div>
                 {src.ok && src.provider && <p style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 8 }}>{t("rcv_on_network").replace("{op}", src.provider === "ORANGE" ? "Orange" : "MTN")}</p>}

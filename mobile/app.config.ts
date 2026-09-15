@@ -54,6 +54,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: 'com.momome.app',
     supportsTablet: true,
+    // iOS 18 appearance variants, all generated from brand/momo-mark.svg (scripts/brand-icons.mjs):
+    // light = full-bleed yellow; dark = Momo in yellow on the system's dark ground;
+    // tinted = a white silhouette iOS recolours with the user's tint.
+    icon: {
+      light: './assets/images/icon.png',
+      dark: './assets/images/ios-icon-dark.png',
+      tinted: './assets/images/ios-icon-tinted.png',
+    },
     // Universal Links: tapping a momome.xyz/pay/... link opens the app.
     // Requires the AASA file hosted at https://momome.xyz/.well-known/apple-app-site-association
     associatedDomains: WEB_HOSTS.map((h) => `applinks:${h}`),
@@ -116,6 +124,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         backgroundColor: '#FFC92E',
         image: './assets/images/splash-icon.png',
         imageWidth: 120,
+        // The app follows the system appearance; so does the first frame.
+        dark: { backgroundColor: '#1C1813', image: './assets/images/splash-icon-dark.png' },
       },
     ],
     [

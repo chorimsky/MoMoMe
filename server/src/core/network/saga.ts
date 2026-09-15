@@ -22,6 +22,7 @@ import * as liquidity from "./liquidity.js";
 import { settle as lightningSettle } from "./settlement.js";
 import { fxExpired } from "./fx.js";
 import { corridorId, MARKETS } from "./markets.js";
+import * as notifyNet from "./notify.js";
 
 /* ---------- durable state ---------- */
 const intents = new Map<string, NetworkIntent>();
@@ -182,6 +183,7 @@ export async function onCollectionEvent(txId: string, eventId: string, status: "
     ]);
     move(t, "COLLECTION_CONFIRMED", `${t.source.amount} ${t.source.currency} collected after expiry`, eventId);
     t.recovery = "refund"; bookRefundOwed(t); move(t, "REFUND_PENDING", "collected after expiry — refund the payer");
+    void notifyNet.networkRefunding(t, "the payer approved after the request had expired");
     return;
   }
   if (t.state !== "COLLECTION_PENDING") { touch("network_txs"); return; } // late/duplicate after a transition
@@ -219,6 +221,7 @@ export async function advance(t: NetworkTransaction): Promise<void> {
         move(t, "LIGHTNING_FAILED", s.error ?? "settlement failed");
         if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
         t.recovery = "refund"; bookRefundOwed(t); move(t, "REFUND_PENDING", "refund the payer — nothing reached the destination");
+        void notifyNet.networkRefunding(t, s.error ?? "the settlement leg failed");
         return;
       }
       t.refs.lightningPaymentId = s.settlementId; t.refs.settlementId = s.settlementId;
@@ -244,7 +247,7 @@ export async function advance(t: NetworkTransaction): Promise<void> {
     if (t.refs.liquidityReservationId) liquidity.commit(t.refs.liquidityReservationId);
     move(t, "PAYOUT_INITIATED", `${t.destination.amount} ${t.destination.currency} to ${t.destination.provider} via ${pay.aggregator}`);
     const r = await pay.createPayout({ idempotencyKey: `${t.id}:payout`, market: t.destination.market, provider: t.destination.provider, phone: t.destination.phone, amount: t.destination.amount, currency: t.destination.currency, name: t.destination.name }).catch((e) => ({ accepted: false, providerRef: "", simulated: false, error: e instanceof Error ? e.message : "payout failed" }));
-    if (!r.accepted) { move(t, "DESTINATION_SETTLEMENT_FAILED", r.error ?? "payout refused"); t.recovery = "retry"; touch("network_txs"); return; }
+    if (!r.accepted) { move(t, "DESTINATION_SETTLEMENT_FAILED", r.error ?? "payout refused"); t.recovery = "retry"; touch("network_txs"); void notifyNet.networkNeedsPerson(t, r.error ?? "the destination payout was refused"); return; }
     t.refs.destinationPayoutId = `${t.id}:payout`; t.refs.destinationProviderRef = r.providerRef; touch("network_txs");
     if (r.simulated) await onPayoutEvent(t.id, `${r.providerRef}:sim`, (await pay.getPayoutStatus(`${t.id}:payout`)) ?? "PENDING");
   }
@@ -260,6 +263,7 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
   if (status === "FAILED") {
     move(t, "DESTINATION_SETTLEMENT_FAILED", "payout failed after settlement — funds are on the ledger", eventId);
     t.recovery = "retry"; touch("network_txs");
+    void notifyNet.networkNeedsPerson(t, "the destination payout failed after settlement");
     return;
   }
   const domestic = t.source.market === t.destination.market;
@@ -283,6 +287,7 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
   if (t.refs.liquidityReservationId) liquidity.settle(t.refs.liquidityReservationId);
   move(t, "PAYOUT_CONFIRMED", `${t.destination.amount} ${t.destination.currency} delivered`, eventId);
   move(t, "COMPLETED", "source confirmed · settlement confirmed · payout confirmed · ledger balanced");
+  void notifyNet.networkDelivered(t);
 }
 
 /* ---------- recovery (§29) ---------- */
@@ -291,11 +296,12 @@ export async function recover(txId: string, action: "retry" | "alternate_provide
   if (!t) return { ok: false, error: "not_found" };
   if (t.state !== "DESTINATION_SETTLEMENT_FAILED" && t.state !== "LIGHTNING_FAILED") return { ok: false, error: "not_recoverable" };
   t.recovery = action;
-  if (action === "manual") { move(t, "MANUAL_REVIEW", `held for an operator by ${by}`); return { ok: true }; }
+  if (action === "manual") { move(t, "MANUAL_REVIEW", `held for an operator by ${by}`); void notifyNet.networkNeedsPerson(t, `held by ${by}`); return { ok: true }; }
   if (action === "refund") {
     if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
     bookRefundOwed(t);
     move(t, "REFUND_PENDING", `refund of ${t.source.amount} ${t.source.currency} to the payer, by ${by}`);
+    void notifyNet.networkRefunding(t, `refund chosen by ${by}`);
     return { ok: true };
   }
   // retry / alternate provider: re-enter the payout step with a NEW idempotency key so the
@@ -339,6 +345,7 @@ export function onRefundFailed(t: NetworkTransaction, why: string): void {
   if (t.state !== "REFUND_PENDING") return;
   t.refs.refundPayoutId = undefined; t.refs.refundProviderRef = undefined; t.recovery = "manual";
   t.events.push({ at: now(), state: t.state, note: `refund failed: ${why} — for an operator` }); touch("network_txs");
+  void notifyNet.networkNeedsPerson(t, `the automatic refund failed: ${why}`);
 }
 export function markRefunded(txId: string, refundRef: string, by: string): boolean {
   const t = txs.get(txId); if (!t || t.state !== "REFUND_PENDING") return false;
@@ -348,6 +355,7 @@ export function markRefunded(txId: string, refundRef: string, by: string): boole
     { account: "src_collection_clearing", direction: "credit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: `returned to payer (${refundRef})` },
   ]);
   move(t, "REFUNDED", `refunded by ${by} · ${refundRef}`);
+  void notifyNet.networkRefunded(t);
   return true;
 }
 

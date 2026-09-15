@@ -15,6 +15,8 @@ import type { NetworkTransaction } from "../../../../shared/network.js";
 import { getSettings } from "../settings.js";
 import { adapterById } from "./adapters.js";
 import * as saga from "./saga.js";
+import { lowLiquidity } from "./liquidity.js";
+import { networkLowLiquidity } from "./notify.js";
 
 const poll = (t: NetworkTransaction, key: string, status: string) => `poll:${key}:${status}`;
 
@@ -55,9 +57,10 @@ async function tickOne(t: NetworkTransaction, now: number): Promise<void> {
   }
 }
 
-/** Advance every in-flight transaction. Returns how many were looked at. */
+/** Advance every in-flight transaction; raise the liquidity alarm. Returns how many were looked at. */
 export async function networkTick(now = Date.now()): Promise<number> {
   let n = 0;
+  try { const low = await lowLiquidity(); if (low.length) await networkLowLiquidity(low); } catch (e) { console.error("[network] liquidity alarm", e); }
   for (const t of saga.allTx(2000)) {
     if (t.shadow || !["COLLECTION_PENDING", "PAYOUT_INITIATED", "REFUND_PENDING"].includes(t.state)) continue;
     n++;

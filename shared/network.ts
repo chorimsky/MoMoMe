@@ -396,4 +396,4 @@ export interface ChecklistItem { key: string; label: string; ok: boolean; detail
 export interface CorridorChecklist { corridor: string; ready: boolean; stage: "not_configured" | "rehearsal" | "canary" | "live"; items: ChecklistItem[] }
 
 /* ---------- FX feed status ---------- */
-export interface FxFeedStatus { source: string; at: string | null; fresh: boolean; currencies: string[]; rates: Record<string, { rate: number; source: string }> }
+export interface FxFeedStatus { source: string; at: string | null; fresh: boolean; currencies: string[]; rates: Record<string, { rate: number; source: string }>; divergent: string[] }

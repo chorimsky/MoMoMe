@@ -91,7 +91,7 @@ export function NetworkPanel() {
         <div style={{ display: "grid", gap: 16 }}>
           <Card title="FX feed" sub="Every corridor crosses through USD. A currency priced on the configured table cannot carry real money — the checklist says which." action={<button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} disabled={busy !== null} onClick={refreshFx}>{busy === "fx" ? "…" : "Refresh"}</button>}>
             <KV k="Public table" v={`${ov.fx.source} · ${ov.fx.at ? new Date(ov.fx.at).toLocaleString() : "never pulled"}`} tone={ov.fx.fresh ? "recv" : "warn"} />
-            {Object.entries(ov.fx.rates).map(([c, r]) => <KV key={c} k={`${c} per USD`} v={`${c === "BTC" ? r.rate.toExponential(3) : r.rate.toLocaleString(undefined, { maximumFractionDigits: 2 })} · ${r.source}`} tone={r.source === "configured" || r.source === "stale" || r.source === "fallback" ? "warn" : undefined} />)}
+            {Object.entries(ov.fx.rates).map(([c, r]) => <KV key={c} k={`${c} per USD`} v={`${c === "BTC" ? r.rate.toExponential(3) : r.rate.toLocaleString(undefined, { maximumFractionDigits: 2 })} · ${r.source}`} tone={r.source === "divergent" ? "bad" : r.source === "configured" || r.source === "stale" || r.source === "fallback" ? "warn" : undefined} />)}
           </Card>
           <CanaryCard ov={ov} busy={busy} onSave={setCanary} />
         </div>

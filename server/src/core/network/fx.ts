@@ -22,7 +22,9 @@ export const PUBLIC_FX_MAX_AGE_MS = 6 * 60 * 60_000;
 /** Currencies the network needs a USD rate for beyond what the production feed carries. */
 export const NETWORK_CURRENCIES = ["KES", "GHS", "NGN", "UGX", "TZS", "RWF", "XOF"] as const;
 
-let publicTable: { rates: Record<string, number>; source: string; at: number } | null = null;
+let publicTable: { rates: Record<string, number>; source: string; at: number; divergent?: string[] } | null = null;
+/** Two independent venues that disagree by more than this do not price real money. */
+export const FX_DIVERGENCE_MAX = 0.02;
 register("network_fx", () => publicTable, (d: typeof publicTable) => { if (d && d.rates) publicTable = d; });
 
 const num = (v: unknown): number | null => { const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN; return Number.isFinite(n) && n > 0 ? n : null; };
@@ -38,18 +40,32 @@ export function parseUsdTable(rates: Record<string, unknown> | undefined): Recor
 
 /** Pull the public USD table. Only a pull that returned at least one real figure re-stamps
  *  the table; a dead feed leaves the last one to age out (same rule as core/rates.ts). */
-export async function refreshPublicFx(): Promise<{ ok: boolean; source: string; count: number }> {
-  const cb = await getJson<{ data?: { rates?: Record<string, string> } }>("https://api.coinbase.com/v2/exchange-rates?currency=USD");
-  let rates = parseUsdTable(cb?.data?.rates), source = "coinbase";
-  if (!Object.keys(rates).length) {
-    const er = await getJson<{ result?: string; rates?: Record<string, number> }>("https://open.er-api.com/v6/latest/USD");
-    if (er?.result === "success") { rates = parseUsdTable(er.rates); source = "open.er-api"; }
-  }
+export async function refreshPublicFx(): Promise<{ ok: boolean; source: string; count: number; divergent: string[] }> {
+  // Two INDEPENDENT venues (different operators), as BTC/USD has. Coinbase is primary;
+  // open.er-api is the check — and the fallback when Coinbase says nothing.
+  const [cb, er] = await Promise.all([
+    getJson<{ data?: { rates?: Record<string, string> } }>("https://api.coinbase.com/v2/exchange-rates?currency=USD"),
+    getJson<{ result?: string; rates?: Record<string, number> }>("https://open.er-api.com/v6/latest/USD"),
+  ]);
+  const a = parseUsdTable(cb?.data?.rates), b = er?.result === "success" ? parseUsdTable(er.rates) : {};
+  const { rates, divergent, source } = mergeVenues(a, b);
   const count = Object.keys(rates).length;
-  if (!count) return { ok: false, source: "none", count: 0 };
-  publicTable = { rates: { ...(publicTable?.rates ?? {}), ...rates }, source, at: Date.now() };
+  if (!count) return { ok: false, source: "none", count: 0, divergent: [] };
+  publicTable = { rates: { ...(publicTable?.rates ?? {}), ...rates }, source, at: Date.now(), divergent };
   touch("network_fx");
-  return { ok: true, source, count };
+  return { ok: true, source, count, divergent };
+}
+/** PURE: the primary's figure per currency, flagged divergent when the check venue is more
+ *  than FX_DIVERGENCE_MAX away; the check venue supplies what the primary lacks. */
+export function mergeVenues(primary: Record<string, number>, check: Record<string, number>): { rates: Record<string, number>; divergent: string[]; source: string } {
+  const rates: Record<string, number> = {}; const divergent: string[] = [];
+  for (const c of NETWORK_CURRENCIES) {
+    const p = primary[c], q = check[c];
+    if (p && q) { rates[c] = p; if (Math.abs(p - q) / p > FX_DIVERGENCE_MAX) divergent.push(c); }
+    else if (p) rates[c] = p; else if (q) rates[c] = q;
+  }
+  const source = Object.keys(primary).length && Object.keys(check).length ? "coinbase+open.er-api" : Object.keys(primary).length ? "coinbase" : "open.er-api";
+  return { rates, divergent, source };
 }
 export const publicFxFresh = (maxAge = PUBLIC_FX_MAX_AGE_MS): boolean => !!publicTable && Date.now() - publicTable.at < maxAge;
 
@@ -60,7 +76,7 @@ export function usdRate(ccy: NetworkCurrency): { rate: number; source: string } 
   if (ccy === "XOF") return { rate: usdXaf(), source: "peg (XOF = XAF vs EUR)" }; // both CFA francs are pegged at 655.957/EUR
   if (ccy === "BTC") return { rate: 1 / btcUsd(), source: ratesMeta().source };
   const pub = publicTable?.rates[ccy];
-  if (pub && publicTable) return { rate: pub, source: publicFxFresh() ? `public:${publicTable.source}` : "stale" };
+  if (pub && publicTable) return { rate: pub, source: publicTable.divergent?.includes(ccy) ? "divergent" : publicFxFresh() ? `public:${publicTable.source}` : "stale" };
   const t = getSettings().network.fxUsd[ccy];
   return typeof t === "number" && t > 0 ? { rate: t, source: "configured" } : null;
 }
@@ -69,7 +85,7 @@ export function usdRate(ccy: NetworkCurrency): { rate: number; source: string } 
 export function fxFeedStatus(): FxFeedStatus {
   const rates: FxFeedStatus["rates"] = {};
   for (const c of ["XAF", "XOF", "BTC", ...NETWORK_CURRENCIES]) { const r = usdRate(c); if (r) rates[c] = r; }
-  return { source: publicTable?.source ?? "none", at: publicTable ? new Date(publicTable.at).toISOString() : null, fresh: publicFxFresh(), currencies: Object.keys(publicTable?.rates ?? {}), rates };
+  return { source: publicTable?.source ?? "none", at: publicTable ? new Date(publicTable.at).toISOString() : null, fresh: publicFxFresh(), currencies: Object.keys(publicTable?.rates ?? {}), rates, divergent: publicTable?.divergent ?? [] };
 }
 
 /** A quote from → to after the network spread. null when either leg is unpriced. */
@@ -99,6 +115,7 @@ export function fxLive(from: NetworkCurrency, to: NetworkCurrency): { live: bool
     if (!r) reasons.push(`${c} has no USD rate`);
     else if (r.source === "configured") reasons.push(`${c}/USD is a configured figure, not a feed`);
     else if (r.source === "stale") reasons.push(`${c}/USD public rate is stale`);
+    else if (r.source === "divergent") reasons.push(`${c}/USD: the two public venues disagree by more than ${FX_DIVERGENCE_MAX * 100} %`);
     else if (r.source === "fallback") reasons.push(`${c}/USD is on the fallback rate`);
   }
   if (!ratesFresh()) reasons.push("the FX feed is stale");

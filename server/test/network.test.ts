@@ -23,6 +23,7 @@ globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
   const J = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
   if (url.includes("coinbase.com") && url.includes("BTC-USD")) return J({ data: { amount: "65000.00" } });
   if (url.includes("coinbase.com") && url.includes("currency=USD")) return J({ data: { rates: { KES: "129.40", GHS: "15.55", NGN: "1580.2", XOF: "600", EUR: "0.93" } } });
+  if (url.includes("open.er-api.com")) return J({ result: "success", rates: { KES: 129.9, GHS: 15.5, NGN: 1575, UGX: 3700 } });
   if (url.includes("coinbase.com")) return J({ data: { rates: { USD: "1.08" } } });
   if (url.includes("kraken.com")) return J({ result: { XXBTZUSD: { c: ["65010.0", "0.01"] } } });
   return realFetch(input as RequestInfo, init);
@@ -94,7 +95,11 @@ async function main() {
     const { market } = await import("../src/core/network/markets.js");
     ok("the market table reflects the override without a deploy", market("KE")!.enabled && market("KE")!.providers.find((p) => p.id === "MPESA")!.payout === true);
     const fxr = await j("/admin/network/fx/refresh", { method: "POST", headers: A, body: "{}" });
-    ok("the public USD table prices KES from a feed (Coinbase), not the configured figure", fxr.status === 200 && fxr.body.feed.rates.KES?.source === "public:coinbase" && Math.abs(fxr.body.feed.rates.KES.rate - 129.4) < 1e-9, JSON.stringify(fxr.body.feed.rates.KES));
+    ok("the public USD table prices KES from two independent venues (Coinbase, checked by open.er-api), not the configured figure", fxr.status === 200 && fxr.body.feed.rates.KES?.source === "public:coinbase+open.er-api" && Math.abs(fxr.body.feed.rates.KES.rate - 129.4) < 1e-9 && fxr.body.divergent.length === 0, JSON.stringify(fxr.body.feed.rates.KES));
+    ok("…a currency only the check venue carries is still priced", fxr.body.feed.rates.UGX?.rate === 3700);
+    const { mergeVenues } = await import("../src/core/network/fx.js");
+    const mv = mergeVenues({ KES: 129.4, GHS: 15.5 }, { KES: 135, GHS: 15.6 });
+    ok("two venues more than 2 % apart flag the currency as divergent — it cannot price real money", mv.divergent.join() === "KES" && mv.rates.KES === 129.4 && mv.rates.GHS === 15.5, JSON.stringify(mv));
     const cfgOn = await j("/config");
     ok("/config tells the customer surfaces the network is open", cfgOn.body.network?.enabled === true, JSON.stringify(cfgOn.body.network));
     const mkts = await j("/network/markets");
@@ -274,6 +279,14 @@ async function main() {
     await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ autoRefund: false }) });
     const tk = await j("/admin/network/tick", { method: "POST", headers: A, body: "{}" });
     ok("an operator can run the monitor now", tk.status === 200 && typeof tk.body.examined === "number");
+    const { listNotifications } = await import("../src/core/notifications.js");
+    const notes = listNotifications(500);
+    const forT1 = notes.filter((n) => n.paymentRef === t.ref);
+    ok("the sender is told when it is delivered (push, once)", new Set(forT1.filter((n) => n.kind === "transfer_delivered" && n.audience === "sender").map((n) => n.body)).size === 1, JSON.stringify(forT1.map((n) => [n.kind, n.audience])));
+    const forT2 = notes.filter((n) => n.paymentRef === saga.getTx(t2id)!.ref);
+    ok("a payout failure after settlement alerts the operator and tells the sender it is being checked", forT2.some((n) => n.kind === "manual_review" && n.audience === "operator") && forT2.some((n) => n.kind === "manual_review" && n.audience === "sender"));
+    const forT6 = notes.filter((n) => n.paymentRef === t6r.ref);
+    ok("a refund is announced to the operator, then confirmed to the sender", forT6.some((n) => n.kind === "transfer_failed" && n.audience === "operator") && new Set(forT6.filter((n) => n.audience === "sender" && n.kind === "transfer_failed").map((n) => n.body)).size === 2, JSON.stringify(forT6.map((n) => [n.kind, n.audience])));
 
     console.log("\n5. Shadow mode never moves funds; flags off never executes\n");
     r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000007" }) });

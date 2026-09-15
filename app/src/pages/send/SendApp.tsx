@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { CountryCode, ProviderId, Method, NameSource, Quote, Payment, PaymentState } from "@shared/types.js";
 import { splitDialed, COUNTRIES, detectProvider, ADDRESS_METHODS, MAX_XAF } from "@shared/domain.js";
 import { SiteHeader } from "../../components/nav.js";
@@ -14,7 +14,7 @@ import { MomoStep } from "./MomoStep.js";
 import { Activity } from "./Activity.js";
 import { Help } from "./Help.js";
 import { Contacts } from "./Contacts.js";
-import { useFeatures } from "../../lib/features.js";
+import { useFeatures, useNetworkOpen } from "../../lib/features.js";
 import { rememberPaidContact } from "../../lib/vault.js";
 
 export interface Draft {
@@ -97,6 +97,8 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
   const amountParam = Math.min(Number((params.get("amount") ?? "").replace(/\D/g, "")) || 0, MAX_XAF);
   const [tab, setTab] = useState<Tab>(initialTab);
   const features = useFeatures();
+  const networkOpen = useNetworkOpen();
+  const navigate = useNavigate();
   // A business link with a fixed amount has nothing to ask on Details: straight to "how to pay".
   const [step, setStep] = useState<Step>(merchant?.amountXaf && merchant.amountXaf > 0 ? "method" : "details");
   const [busy, setBusy] = useState(false);
@@ -401,7 +403,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         ) : (
           <div className="flow-col" ref={flowRef} tabIndex={-1} style={{ display: "flex", flexDirection: "column", gap: 14, outline: "none" }}>
             {step === "details" && <DetailsStep s={s} set={set} next={() => go("method")} feePct={demo?.feePct} minFeeXaf={demo?.minFeeXaf} lockRecipient={!!merchant} hideRecents={!!toParam} />}
-            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} onMomo={features.momoTransfer ? () => go("momo") : undefined} />}
+            {step === "method" && <MethodStep s={s} set={set} back={() => go("details")} next={toReview} busy={busy} methods={demo?.methods} onMomo={features.momoTransfer ? () => go("momo") : undefined} onAbroad={networkOpen ? () => navigate("/send-abroad") : undefined} />}
             {step === "momo" && <MomoStep s={s} back={() => go("method")} done={() => { setS((p) => ({ ...p, xaf: 0 })); go("details"); }} />}
             {/* "Is this who you meant?" — shown INSTEAD of proceeding when the server spots a
                 number one digit away from someone this sender pays regularly. Mobile Money

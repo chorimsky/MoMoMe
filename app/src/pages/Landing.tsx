@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import { useNarrow } from "../lib/useNarrow.js";
 import { useI18n } from "../lib/i18n.js";
-import { useFeatures } from "../lib/features.js";
+import { useFeatures, useNetworkOpen } from "../lib/features.js";
 import { AppBanner, StoreBadges } from "../components/StoreBadges.js";
 import "./Landing.css";
 
@@ -108,6 +108,7 @@ export function Landing() {
   const sm = useNarrow();
   const { t, lang, setLang } = useI18n();
   const features = useFeatures();
+  const networkOpen = useNetworkOpen();
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="lp">
@@ -133,6 +134,7 @@ export function Landing() {
             <div className="cta-row" style={{ marginTop: 14, alignItems: "center", gap: 12 }}>
               <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("lp_or_web")}</span>
               <Link className="btn btn-ghost" to="/send" style={{ textDecoration: "none" }}>{t("lp_cta_send")}</Link>
+              {networkOpen && <Link className="btn btn-ghost" to="/send-abroad" style={{ textDecoration: "none" }}>{t("ab_title")}</Link>}
               {features.scanToPay && (
                 <Link className="btn btn-ghost" to="/scan" style={{ gap: 8, textDecoration: "none" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>

@@ -25,6 +25,7 @@ const TITLES: Record<string, [en: string, fr: string]> = {
   "/": [SITE, SITE_FR],
   "/send": ["Send Mobile Money · MoMo›Me", "Envoyer du Mobile Money · MoMo›Me"],
   "/receive": ["Get paid in Mobile Money · MoMo›Me", "Être payé en Mobile Money · MoMo›Me"],
+  "/send-abroad": ["Send Mobile Money abroad · MoMo›Me", "Envoyer Mobile Money à l'étranger · MoMo›Me"],
   "/claim": ["Claim your account · MoMo›Me", "Activez votre compte · MoMo›Me"],
   "/scan": ["Scan to pay · MoMo›Me", "Scanner pour payer · MoMo›Me"],
   "/discover": ["Find businesses · MoMo›Me", "Trouver des commerces · MoMo›Me"],

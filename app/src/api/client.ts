@@ -296,7 +296,8 @@ export interface AnalyticsReport {
   durations: Array<{ bucket: string; sessions: number }>;
 }
 
-import type { CorridorChecklist, NetworkOverview, NetworkSettings } from "@shared/network.js";
+import type { CorridorChecklist, NetworkOverview, NetworkSettings, NetworkIntent, NetworkRoute, NetworkQuote, NetworkTransaction } from "@shared/network.js";
+export interface NetworkMarkets { source: { code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }> }; destinations: Array<{ code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }>; minPerTx: number; maxPerTx: number }> }
 export type OtpVia = "whatsapp" | "sms";
 export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, boolean>; devCode?: string };
 
@@ -304,7 +305,13 @@ export type ReceivedItem = { ref: string; xaf: number; state: string; displaySta
 export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
 
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures> }>("/config"),
+  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean } }>("/config"),
+  /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
+  networkMarkets: () => req<NetworkMarkets>("/network/markets"),
+  networkIntent: (body: { sourceProvider: string; sourcePhone: string; destinationMarket: string; destinationProvider: string; destinationPhone: string; destinationName?: string; sourceAmount: number }) =>
+    req<{ intent: NetworkIntent; routes: NetworkRoute[]; quotes: NetworkQuote[]; best: { route: NetworkRoute; quote: NetworkQuote } | null; unavailable: string[] }>("/network/intents", { method: "POST", body: JSON.stringify({ sourceMarket: "CM", ...body }) }),
+  networkConfirm: (id: string) => req<{ transaction: NetworkTransaction }>(`/network/intents/${encodeURIComponent(id)}/confirm`, { method: "POST", body: "{}" }),
+  networkTransaction: (id: string) => req<{ transaction: NetworkTransaction }>(`/network/transactions/${encodeURIComponent(id)}`),
 
 
   // Admin auth. login stores the session token; session checks the current one.

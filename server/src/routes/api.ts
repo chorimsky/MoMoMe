@@ -69,7 +69,7 @@ import {
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
-import { adminNetwork, setOwnerResolver } from "./network.js";
+import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { capital, capitalGuard } from "./capital.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
@@ -685,6 +685,9 @@ api.get("/config", async (_req, res) => {
     features: getSettings().features,
     // Brand logo (data URL) so any surface — admin or customer — can show it.
     brandLogo: getSettings().company.logo ?? null,
+    // The Pan-African network: true only when a corridor out of Cameroon is switched on
+    // and the surface is exposed — the "Send abroad" entry points hide otherwise.
+    network: { enabled: networkOpen() },
     // Public support contact (admin-managed in Settings → Company) so the Help
     // and Contact surfaces always show the live email/phone, never a hardcoded
     // placeholder. Phone is also used to derive the WhatsApp (wa.me) and tel link.

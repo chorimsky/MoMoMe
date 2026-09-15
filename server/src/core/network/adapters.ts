@@ -14,7 +14,7 @@ import type { MarketCode, NetworkProviderId } from "../../../../shared/network.j
 import type { CountryCode, ProviderId } from "../../../../shared/types.js";
 import { PAYOUTS, payoutByName } from "../../adapters/payouts.js";
 import * as peexit from "../../adapters/peexit.js";
-import { peexitLive } from "../../config.js";
+import { config, peexitLive } from "../../config.js";
 import { payoutHealth } from "../routing.js";
 import { MARKETS } from "./markets.js";
 import { pawapayMarketAdapter, pawapayMarkets } from "./pawapayMarkets.js";
@@ -91,7 +91,7 @@ export function simulateCallback(idempotencyKey: string, status: OpStatus): void
 
 function simulatedAdapter(marketCode: MarketCode): MobileMoneyProviderAdapter {
   const m = MARKETS[marketCode];
-  const sandbox = () => process.env.RAILS_MODE === "sandbox";
+  const sandbox = () => config.railsMode === "sandbox";
   // A collection waits for the payer (the test/sandbox drives its callback); a payout
   // settles at once unless a failure was scheduled — like a real aggregator's happy path.
   const run = (req: { idempotencyKey: string }, kind: "collection" | "payout"): OpResult => {

@@ -20,7 +20,7 @@ import { getSettings } from "../settings.js";
 import { register, touch } from "../persist.js";
 import { id } from "../ids.js";
 import { treasuryPools } from "../treasury.js";
-import { ibexConfigured } from "../../config.js";
+import { config, ibexConfigured } from "../../config.js";
 import { MARKETS } from "./markets.js";
 import { adaptersFor } from "./adapters.js";
 
@@ -51,7 +51,7 @@ export function sources(): LiquiditySource[] {
       out.push({ id: sid, market: code, currency: m.currency, kind: "partner", name: p.name, settlementMethod: "lightning", lightningCapable: true, paysOut: p.paysOut, status: !p.enabled || n.disabled.partners.includes(p.id) || n.disabled.pools.includes(sid) ? "DISABLED" : "ACTIVE", limits: { maxPerTx: p.maxPerTx, maxPerDay: p.maxPerTx * 20 }, feePct: p.feePct });
     }
   }
-  out.push({ id: "lightning:ibex", market: "*", currency: "BTC", kind: "lightning", name: "Lightning position (IBEX)", settlementMethod: "lightning", lightningCapable: true, paysOut: [], status: n.disabled.lightningRoutes.includes("ibex") ? "DISABLED" : ibexConfigured() ? "ACTIVE" : process.env.RAILS_MODE === "sandbox" ? "ACTIVE" : "DEGRADED", limits: { maxPerTx: 1, maxPerDay: 10 }, feePct: 0.001 });
+  out.push({ id: "lightning:ibex", market: "*", currency: "BTC", kind: "lightning", name: "Lightning position (IBEX)", settlementMethod: "lightning", lightningCapable: true, paysOut: [], status: n.disabled.lightningRoutes.includes("ibex") ? "DISABLED" : ibexConfigured() ? "ACTIVE" : config.railsMode === "sandbox" ? "ACTIVE" : "DEGRADED", limits: { maxPerTx: 1, maxPerDay: 10 }, feePct: 0.001 });
   return out;
 }
 export const sourceById = (sid: string): LiquiditySource | undefined => sources().find((s) => s.id === sid);
@@ -62,7 +62,7 @@ const reservedFor = (sid: string, state: LiquidityReservation["state"]) => [...r
 async function rawBalance(s: LiquiditySource): Promise<{ balance: number | null; note?: string }> {
   const n = getSettings().network;
   if (s.kind === "lightning") {
-    if (!ibexConfigured()) return { balance: n.simulatedLiquidity[s.id] ?? (process.env.RAILS_MODE === "sandbox" ? 0.05 : null), note: "sandbox figure" };
+    if (!ibexConfigured()) return { balance: n.simulatedLiquidity[s.id] ?? (config.railsMode === "sandbox" ? 0.05 : null), note: "sandbox figure" };
     const pools = await treasuryPools().catch(() => []);
     const btc = pools.find((p) => p.asset === "BTC");
     return btc?.balanceKnown ? { balance: btc.withdrawable, note: "IBEX BTC withdrawable (balance − owed to senders)" } : { balance: null, note: "IBEX balance unknown" };

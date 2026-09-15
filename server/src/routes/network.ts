@@ -19,6 +19,7 @@
 import { Router, type Request, type Response } from "express";
 import type { NetworkIntent, NetworkOverview, NetworkSettings } from "../../../shared/network.js";
 import { getSettings, updateSettings } from "../core/settings.js";
+import { config } from "../config.js";
 import { id } from "../core/ids.js";
 import { MARKETS, market, corridorId } from "../core/network/markets.js";
 import { discover, corridorStatus } from "../core/network/router.js";
@@ -33,7 +34,7 @@ import { rateLimitDurableMiddleware } from "../core/ratelimit.js";
 export const network = Router();
 export const adminNetwork = Router();
 
-const sandbox = () => process.env.RAILS_MODE === "sandbox";
+const sandbox = () => config.railsMode === "sandbox"; // the same rule every rail uses (config.ts): anything but "live" is the sandbox
 const digits = (s: unknown) => String(s ?? "").replace(/\D/g, "");
 
 /* ---------- device authentication (RISK_REGISTER #9) ----------
@@ -58,6 +59,23 @@ function gate(_req: Request, res: Response, next: () => void): void {
   res.status(404).json({ error: "not_found", message: "Not available." });
 }
 network.use(gate);
+
+/* ---------- public: what a customer can send where (§41) ---------- */
+/** Destinations reachable from Cameroon today: corridor switched on, both markets enabled,
+ *  cross-border flag on (or the domestic row). Configuration only — no liquidity call, so
+ *  /config can carry the yes/no cheaply and the page asks here for the list. */
+export function publicDestinations(): Array<{ code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }>; minPerTx: number; maxPerTx: number }> {
+  const n = getSettings().network;
+  const src = market("CM")!;
+  if (!src.enabled) return [];
+  return Object.keys(MARKETS).map((c) => market(c)!).filter((m) => m.code !== "CM" && m.enabled && n.corridors[corridorId("CM", m.code)] && n.flags.CROSS_BORDER_PAYMENTS && m.providers.some((p) => p.payout))
+    .map((m) => ({ code: m.code, name: m.name, currency: m.currency, dial: m.dial, providers: m.providers.filter((p) => p.payout).map((p) => ({ id: p.id, name: p.name })), minPerTx: src.limits.minPerTx, maxPerTx: Math.min(src.limits.maxPerTx, n.canary.maxPerTx[corridorId("CM", m.code)] || src.limits.maxPerTx) }));
+}
+export const networkOpen = (): boolean => getSettings().network.flags.INTEROPERABILITY_V2 && publicDestinations().length > 0;
+network.get("/markets", (_req, res) => {
+  const src = market("CM")!;
+  res.json({ source: { code: src.code, name: src.name, currency: src.currency, dial: src.dial, providers: src.providers.filter((p) => p.collect).map((p) => ({ id: p.id, name: p.name })) }, destinations: publicDestinations() });
+});
 
 /* ---------- intents (§20, §21) ---------- */
 network.post("/intents", rateLimitDurableMiddleware("network_intents", 30, 60_000), async (req, res) => {

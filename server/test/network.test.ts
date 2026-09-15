@@ -72,6 +72,9 @@ async function main() {
     ok("no corridor is switched on", Object.keys(getSettings().network.corridors).length === 0);
     const v1 = await j("/quotes", { method: "POST", headers: H(dev), body: JSON.stringify({ xaf: 10_000, method: "LIGHTNING", country: "CM" }) });
     ok("the production quote engine is untouched", v1.status === 200 && v1.body.xaf === 10_000, String(v1.status));
+    const cfg0 = await j("/config");
+    ok("/config says the network is closed to customers", cfg0.body.network?.enabled === false, JSON.stringify(cfg0.body.network));
+    ok("…and the public market list has no destination", (await j("/network/markets")).body.destinations?.length === 0);
 
     console.log("\n1. Routing (shadow): no corridor, no route — and the reasons say why\n");
     const bare = await fetch(`${base}/network/intents`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": "nobody-enrolled" }, body: JSON.stringify(intentBody) });
@@ -92,6 +95,10 @@ async function main() {
     ok("the market table reflects the override without a deploy", market("KE")!.enabled && market("KE")!.providers.find((p) => p.id === "MPESA")!.payout === true);
     const fxr = await j("/admin/network/fx/refresh", { method: "POST", headers: A, body: "{}" });
     ok("the public USD table prices KES from a feed (Coinbase), not the configured figure", fxr.status === 200 && fxr.body.feed.rates.KES?.source === "public:coinbase" && Math.abs(fxr.body.feed.rates.KES.rate - 129.4) < 1e-9, JSON.stringify(fxr.body.feed.rates.KES));
+    const cfgOn = await j("/config");
+    ok("/config tells the customer surfaces the network is open", cfgOn.body.network?.enabled === true, JSON.stringify(cfgOn.body.network));
+    const mkts = await j("/network/markets");
+    ok("the public market list carries Kenya · M-Pesa with the corridor's amount bounds", mkts.status === 200 && mkts.body.destinations.length === 1 && mkts.body.destinations[0].code === "KE" && mkts.body.destinations[0].providers.map((p: any) => p.id).join() === "MPESA" && mkts.body.source.providers.length === 2, JSON.stringify(mkts.body.destinations));
     const ov = await j("/admin/network", { headers: A });
     const ke = ov.body.corridors.find((c: any) => c.id === "CM-KE");
     ok("the corridor registry shows CM→KE", !!ke && ke.enabled, JSON.stringify(ke?.reasons));

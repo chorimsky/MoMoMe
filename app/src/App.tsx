@@ -41,6 +41,7 @@ function useReferralCapture() {
 // poor, metered mobile networks our senders are on.
 // Scan pulls in the jsQR software decoder (~130 KB) — only load it when the user
 // actually opens the scanner, keeping it out of the initial bundle.
+const SendAbroad = lazy(() => import("./pages/SendAbroad.js").then((m) => ({ default: m.SendAbroad })));
 const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan })));
 const Testing = lazy(() => import("./pages/Testing.js").then((m) => ({ default: m.Testing })));
 const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m) => ({ default: m.AdminConsole })));
@@ -78,6 +79,7 @@ export function App() {
       <Route path="/send" element={<SendApp />} />
       <Route path="/claim" element={<Claim />} />
       <Route path="/receive" element={<Receive />} />
+      <Route path="/send-abroad" element={<Suspense fallback={<ChunkFallback />}><SendAbroad /></Suspense>} />
       <Route path="/admin" element={<AdminGate><Suspense fallback={<ChunkFallback />}><AdminConsole /></Suspense></AdminGate>} />
       {/* Ops exposes the live tx feed, treasury float and rail health — operator-only,
           so it sits behind the same session gate as /admin (was previously ungated). */}

@@ -333,7 +333,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
 }
 
 /* ============================================================ 2 — METHOD */
-export function MethodStep({ s, set, back, next, busy, methods, onMomo }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean; methods?: Partial<Record<Method, boolean>>; onMomo?: () => void }) {
+export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad }: { s: Draft; set: (p: Partial<Draft>) => void; back: () => void; next: () => void; busy: boolean; methods?: Partial<Record<Method, boolean>>; onMomo?: () => void; onAbroad?: () => void }) {
   const { t, ml } = useI18n();
   const fixed = useContext(FixedFlow);
   // Only show crypto rails the operator has enabled; if the current pick was
@@ -417,6 +417,18 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo }: { s: D
               <span style={{ fontWeight: 700, fontSize: 16 }}>{t("mt_tile_name")}</span>
               <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: "var(--recv)", marginTop: 2 }}>{t("mt_tile_net")}</span>
               <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{t("mt_tile_sub")}</span>
+            </span>
+          </button>
+        )}
+        {onAbroad && (
+          /* The network: Mobile Money to another country. Shown only while a corridor is open. */
+          <button onClick={() => { track("method_chosen", { method: "ABROAD" }); onAbroad(); }}
+            style={{ cursor: "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: "1.5px solid var(--line)", background: "var(--surface)" }}>
+            <span style={{ width: 42, height: 42, borderRadius: 11, flex: "none", display: "grid", placeItems: "center", background: "var(--accent, var(--recv))", color: "#fff", fontWeight: 800, fontSize: 19 }}>🌍</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: 16 }}>{t("ab_title")}</span>
+              <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: "var(--recv)", marginTop: 2 }}>{t("ab_tile_net")}</span>
+              <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{t("ab_tile_sub")}</span>
             </span>
           </button>
         )}

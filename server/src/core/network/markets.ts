@@ -6,7 +6,10 @@
    disagree; every other market is data that stays `enabled: false` until its rails,
    liquidity and FX exist (§ PHASE 6: "do not activate a corridor because the API exists").
 
-   Adding a market = a row here (or, later, a settings entry). Nothing else changes.
+   Adding a market = a row here. SWITCHING one on is configuration: settings.network.markets
+   overlays `enabled` and each provider's collect/payout role on the base table, so a
+   corridor is activated from the admin console (and rolled back the same way) without a
+   deploy. Cameroon's row cannot be switched off here — that is the live engine.
    ============================================================ */
 import type { Corridor, MarketCode, MarketConfig, NetworkProviderId } from "../../../../shared/network.js";
 import { COUNTRIES } from "../../../../shared/domain.js";
@@ -36,13 +39,25 @@ export const MARKETS: Record<MarketCode, MarketConfig> = {
   CI: { code: "CI", name: "Côte d'Ivoire", currency: "XOF", dial: "+225", providers: [{ id: "ORANGE", name: "Orange Money", collect: false, payout: false }, { id: "MTN", name: "MTN MoMo", collect: false, payout: false }, { id: "WAVE", name: "Wave", collect: false, payout: false }], aggregators: [], limits: { minPerTx: 500, maxPerTx: 2_000_000 }, compliance: ["BCEAO Instruction 008-05-2015"], enabled: false },
 };
 
-export const market = (code: string): MarketConfig | undefined => MARKETS[code];
+/** The base row with the operator's overrides applied (settings.network.markets). */
+export function market(code: string): MarketConfig | undefined {
+  const base = MARKETS[code];
+  if (!base) return undefined;
+  const o = getSettings().network.markets?.[code];
+  if (!o) return base;
+  return {
+    ...base,
+    enabled: code === "CM" ? base.enabled : (o.enabled ?? base.enabled),
+    providers: base.providers.map((p) => ({ ...p, ...(o.providers?.[p.id] ? { collect: o.providers[p.id].collect ?? p.collect, payout: o.providers[p.id].payout ?? p.payout } : {}) })),
+  };
+}
+export const markets = (): MarketConfig[] => Object.keys(MARKETS).map((c) => market(c)!);
 export const corridorId = (src: MarketCode, dst: MarketCode) => `${src}-${dst}`;
 export const currencyOf = (code: MarketCode): string => MARKETS[code]?.currency ?? "";
 
 /** A provider that can play a role in a market, honouring the emergency controls (§46). */
 export function providerAvailable(code: MarketCode, provider: NetworkProviderId, role: "collect" | "payout"): { ok: boolean; reason?: string } {
-  const m = MARKETS[code];
+  const m = market(code);
   if (!m) return { ok: false, reason: `unknown market ${code}` };
   const n = getSettings().network;
   if (!m.enabled) return { ok: false, reason: `${m.name} is not enabled` };
@@ -61,7 +76,7 @@ export function corridors(readiness: (c: Corridor) => { status: Corridor["status
   const out: Corridor[] = [];
   const codes = Object.keys(MARKETS);
   for (const src of codes) for (const dst of codes) {
-    const s = MARKETS[src], d = MARKETS[dst];
+    const s = market(src)!, d = market(dst)!;
     const idc = corridorId(src, dst);
     const c: Corridor = {
       id: idc, source: src, destination: dst, sourceCurrency: s.currency, destinationCurrency: d.currency,
@@ -74,5 +89,5 @@ export function corridors(readiness: (c: Corridor) => { status: Corridor["status
     out.push(c);
   }
   // Only corridors that could ever exist: both markets enabled, or the operator switched it on.
-  return out.filter((c) => (MARKETS[c.source].enabled && MARKETS[c.destination].enabled) || c.enabled);
+  return out.filter((c) => (market(c.source)!.enabled && market(c.destination)!.enabled) || c.enabled);
 }

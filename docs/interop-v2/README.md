@@ -17,14 +17,17 @@ that are all OFF, proven in shadow mode and in the sandbox, and moved into only 
 | 3 Router in shadow | done | `core/network/router.ts` + `shadow.ts`; `SHADOW_ROUTING` flag; Admin → Interoperability → Shadow routing |
 | 4 Liquidity engine | done | `core/network/liquidity.ts` — sources, positions (AVAILABLE/RESERVED/COMMITTED/…), reserve/commit/release, floors + alerts |
 | 5 Lightning settlement abstraction | done | `core/network/settlement.ts` — partner Lightning Address (via production IBEX adapter), network pool position, simulated; open standards only |
-| 6 First corridor | **needs partners** | CM→KE rehearsed end to end on simulated rails (`test/network.test.ts`); a real corridor needs a KE payout rail, KE liquidity and a KES feed — see RISK_REGISTER |
-| 7 Canary | not started | `corridors` switch per corridor; `disabled.*` emergency controls |
+| 6 First corridor | **ready to rehearse with a PawaPay key** | Activation is configuration: `settings.network.markets` switches a market / provider role on (Admin → Interoperability → Markets & providers); `core/network/pawapayMarkets.ts` is the multi-market payout+collection rail (MPESA_KEN, MTN_MOMO_GHA … over PawaPay v2, own idempotency map, never touches the CM adapter); `core/network/fx.ts` pulls a public USD table (Coinbase, open.er-api fallback) so KES/GHS/NGN are priced on a feed; the per-corridor **activation checklist** (`core/network/activation.ts`, `GET /api/admin/network/corridors/:id/checklist`) lists every must-have — a simulated rail can never make a corridor READY. Still needed: a PawaPay contract for the market, KE float, legal review (RISK_REGISTER #7) |
+| 7 Canary | controls built | `settings.network.canary` — device allowlist, rollout share (stable hash bucket), per-corridor `maxPerTx` / rolling-24 h `maxPerDay` in source currency — enforced in `saga.executionGate` (`canary_refused`, 403); `/api/network` now authenticates devices with the same signed-device gate as `/api` (RISK #9 closed); `corridors` switch + `disabled.*` emergency controls |
 | 8 Expansion | configuration | `core/network/markets.ts` rows + adapters |
 
 **Surface.** `POST /api/network/intents` → routes/quotes · `POST /api/network/intents/:id/confirm` →
 reserve + collect · `GET /api/network/transactions/:id` · sandbox: `POST /api/network/sim/:txId/{collection,payout}`
 · admin: `GET /api/admin/network`, `PUT /api/admin/network/settings`, `POST /api/admin/network/shadow/run`,
-`POST /api/admin/network/tx/:id/{recover,refunded}`. The whole `/api/network` surface answers 404
+`POST /api/admin/network/tx/:id/{recover,refunded}`, `GET /api/admin/network/corridors/:id/checklist`,
+`POST /api/admin/network/fx/refresh`. Customer calls are device-authenticated exactly like `/api/*`
+(partner API key, or an enrolled device's per-request signature over the path relative to `/api`,
+e.g. `/network/intents`). The whole `/api/network` surface answers 404
 unless `INTEROPERABILITY_V2` is on (always reachable in the sandbox).
 
 **Flags** (`settings.network.flags`, all default false): SHADOW_ROUTING, INTEROPERABILITY_V2,

@@ -66,6 +66,10 @@ const DEFAULTS: AdminSettings = {
     simulatedLiquidity: {},
     liquidityFloor: {},
     partners: [],
+    markets: {},
+    // Canary defaults: nobody is admitted until the operator names devices or raises the
+    // rollout; caps are set per corridor as it is activated.
+    canary: { allowlist: [], rolloutPct: 0, maxPerTx: {}, maxPerDay: {} },
   },
 };
 
@@ -82,6 +86,8 @@ function mergeNetwork(base: AdminSettings["network"], p?: Partial<AdminSettings[
     simulatedLiquidity: { ...base.simulatedLiquidity, ...(p.simulatedLiquidity ?? {}) },
     liquidityFloor: { ...base.liquidityFloor, ...(p.liquidityFloor ?? {}) },
     partners: p.partners ?? base.partners,
+    markets: { ...base.markets, ...(p.markets ?? {}) },
+    canary: { ...base.canary, ...(p.canary ?? {}), maxPerTx: { ...base.canary.maxPerTx, ...(p.canary?.maxPerTx ?? {}) }, maxPerDay: { ...base.canary.maxPerDay, ...(p.canary?.maxPerDay ?? {}) } },
   };
 }
 

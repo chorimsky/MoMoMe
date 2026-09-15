@@ -322,6 +322,10 @@ export interface NetworkOverview {
     liquidity: { lowAlerts: Array<{ sourceId: string; available: number; floor: number }> };
   };
   weights: RouteWeights;
+  checklists: CorridorChecklist[];
+  fx: FxFeedStatus;
+  canary: CanaryControls;
+  marketOverrides: Record<string, MarketOverride>;
 }
 
 /* ---------- flags & operator controls (§45, §46) ---------- */
@@ -354,4 +358,31 @@ export interface NetworkSettings {
   liquidityFloor: Record<string, number>;
   /** Partner liquidity sources (Model B/C) declared by the operator. */
   partners: Array<{ id: string; market: MarketCode; name: string; lightningAddress: string; paysOut: NetworkProviderId[]; feePct: number; maxPerTx: number; enabled: boolean }>;
+  /** Operator overrides on the market table — a market or a provider role is switched on
+   *  here, not in code (PHASE 6: "corridor activation = configuration"). */
+  markets: Record<string, MarketOverride>;
+  /** Canary controls — who may execute, how much, per corridor (PHASE 7). */
+  canary: CanaryControls;
 }
+export interface MarketOverride {
+  enabled?: boolean;
+  providers?: Record<string, { collect?: boolean; payout?: boolean }>;
+}
+export interface CanaryControls {
+  /** Owner ids (device / account ids) allowed to execute while the network is in canary.
+   *  Empty = no allowlist (the rollout percentage alone decides). */
+  allowlist: string[];
+  /** Share of owners (0–100) admitted by a stable hash of their id. 100 = everyone. */
+  rolloutPct: number;
+  /** Per-transaction cap per corridor, in SOURCE currency. Absent = the market limit. */
+  maxPerTx: Record<string, number>;
+  /** Rolling 24 h cap per corridor (sum of non-shadow executions), in source currency. */
+  maxPerDay: Record<string, number>;
+}
+
+/* ---------- corridor activation checklist (PHASE 6/7) ---------- */
+export interface ChecklistItem { key: string; label: string; ok: boolean; detail: string; /** A missing must-have blocks activation; a warn is advisory. */ severity: "must" | "warn" }
+export interface CorridorChecklist { corridor: string; ready: boolean; stage: "not_configured" | "rehearsal" | "canary" | "live"; items: ChecklistItem[] }
+
+/* ---------- FX feed status ---------- */
+export interface FxFeedStatus { source: string; at: string | null; fresh: boolean; currencies: string[]; rates: Record<string, { rate: number; source: string }> }

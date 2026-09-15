@@ -10,6 +10,9 @@
 process.env.DB_PATH = ":memory:";
 process.env.RAILS_MODE = "sandbox";
 import type { AddressInfo } from "node:net";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+process.env.LEGACY_SENDER_UNTIL = "2000-01-01T00:00:00Z"; // the migration window is OVER: a bare device id proves nothing
 
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}${d ? `  (${d})` : ""}`); pass++; } else { console.log(`  ✗ ${n}${d ? `  (${d})` : ""}`); fail++; } };
@@ -19,6 +22,7 @@ globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
   const url = String((input as { url?: string })?.url ?? input);
   const J = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
   if (url.includes("coinbase.com") && url.includes("BTC-USD")) return J({ data: { amount: "65000.00" } });
+  if (url.includes("coinbase.com") && url.includes("currency=USD")) return J({ data: { rates: { KES: "129.40", GHS: "15.55", NGN: "1580.2", XOF: "600", EUR: "0.93" } } });
   if (url.includes("coinbase.com")) return J({ data: { rates: { USD: "1.08" } } });
   if (url.includes("kraken.com")) return J({ result: { XXBTZUSD: { c: ["65010.0", "0.01"] } } });
   return realFetch(input as RequestInfo, init);
@@ -36,11 +40,28 @@ async function main() {
   const server = createApp().listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+  // Devices: enrolled P-256 keys, every request signed the way the apps sign (device-signing.test).
+  const b64 = (u8: Uint8Array) => Buffer.from(u8).toString("base64");
+  const b64url = (u8: Uint8Array) => b64(u8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const jwk = (priv: Uint8Array) => { const pub = p256.getPublicKey(priv, false); return { kty: "EC", crv: "P-256", x: b64url(pub.slice(1, 33)), y: b64url(pub.slice(33, 65)) }; };
+  const keys = new Map<string, Uint8Array>();
+  const enroll = async (dev: string) => { const k = p256.utils.randomSecretKey(); keys.set(dev, k); const r = await fetch(`${base}/me/devices`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": dev }, body: JSON.stringify({ authPub: jwk(k), wrapPub: jwk(p256.utils.randomSecretKey()) }) }); if (r.status !== 200) throw new Error(`enrol ${dev}: ${r.status}`); };
   const H = (dev: string) => ({ "content-type": "application/json", "x-mm-sender": dev });
-  const j = async (p: string, init?: RequestInit) => { const r = await fetch(`${base}${p}`, init); return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> }; };
+  const j = async (p: string, init?: RequestInit) => {
+    const headers = { ...((init?.headers as Record<string, string>) ?? {}) };
+    const priv = headers["x-mm-sender"] ? keys.get(headers["x-mm-sender"]) : undefined;
+    if (priv) {
+      const ts = String(Date.now()), body = typeof init?.body === "string" ? init.body : "";
+      const msg = new TextEncoder().encode(`${(init?.method ?? "GET").toUpperCase()}\n${p}\n${ts}\n${b64(sha256(new TextEncoder().encode(body)))}`);
+      headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true }));
+    }
+    const r = await fetch(`${base}${p}`, { ...init, headers });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };
+  };
   const admin = createUser("net-admin", "Str0ng-Passw0rd!x", "Super Admin" as never);
   const A = { "x-admin-token": issueToken({ uid: admin.id, role: "Super Admin" as never }).token, "content-type": "application/json" };
-  const dev = "sender-device";
+  const dev = "sender-device", other = "other-device";
+  await enroll(dev); await enroll(other);
   const intentBody = { sourceMarket: "CM", sourceProvider: "MTN", sourcePhone: "677000111", destinationMarket: "KE", destinationProvider: "MPESA", destinationPhone: "712345678", destinationName: "Wanjiru", sourceAmount: 10_000 };
   const balances = (txId: string) => { const by = new Map<string, number>(); for (const e of saga.ledgerFor(txId)) by.set(`${e.account}:${e.currency}`, (by.get(`${e.account}:${e.currency}`) ?? 0) + (e.direction === "debit" ? e.amount : -e.amount)); return by; };
 
@@ -53,16 +74,24 @@ async function main() {
     ok("the production quote engine is untouched", v1.status === 200 && v1.body.xaf === 10_000, String(v1.status));
 
     console.log("\n1. Routing (shadow): no corridor, no route — and the reasons say why\n");
+    const bare = await fetch(`${base}/network/intents`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": "nobody-enrolled" }, body: JSON.stringify(intentBody) });
+    ok("the network surface refuses an unsigned device id (same gate as /api)", bare.status === 401, String(bare.status));
     let r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify(intentBody) });
     ok("an intent is created with routes and quotes", r.status === 201 && Array.isArray(r.body.routes), String(r.status));
     ok("…but nothing is available while the corridor and flags are off", r.body.best === null && r.body.unavailable.some((x: string) => /CM-KE|CROSS_BORDER|not enabled|cannot payout/.test(x)), JSON.stringify(r.body.unavailable));
 
     console.log("\n2. Switch the CM→KE corridor on (sandbox rails, simulated Kenyan liquidity)\n");
-    // Kenya: enable the market's M-Pesa payout for the rehearsal, give it liquidity.
-    const { MARKETS } = await import("../src/core/network/markets.js");
-    MARKETS.KE.enabled = true; MARKETS.KE.providers[0].payout = true;
-    let s = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ flags: { INTEROPERABILITY_V2: true, ROUTING_ENGINE: true, LIQUIDITY_ENGINE: true, CROSS_BORDER_PAYMENTS: true, SHADOW_ROUTING: true }, corridors: { "CM-KE": true }, simulatedLiquidity: { "ke:sim": 2_000_000, "cm:sim": 5_000_000, "lightning:ibex": 0.5 } }) });
-    ok("the operator switches flags and the corridor on", s.status === 200 && s.body.network.corridors["CM-KE"] === true, String(s.status));
+    // Kenya: the operator enables the market and M-Pesa payout — configuration, no code.
+    const badM = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ markets: { KE: { providers: { SAFARICOM: { payout: true } } } } }) });
+    ok("an unknown provider id is refused", badM.status === 400 && badM.body.error === "bad_provider", String(badM.status));
+    const badCM = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ markets: { CM: { enabled: false } } }) });
+    ok("Cameroon (the live engine) cannot be switched off as a market", badCM.status === 400, String(badCM.status));
+    let s = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ flags: { INTEROPERABILITY_V2: true, ROUTING_ENGINE: true, LIQUIDITY_ENGINE: true, CROSS_BORDER_PAYMENTS: true, SHADOW_ROUTING: true }, corridors: { "CM-KE": true }, markets: { KE: { enabled: true, providers: { MPESA: { payout: true } } } }, canary: { allowlist: [dev], rolloutPct: 0 }, simulatedLiquidity: { "ke:sim": 2_000_000, "cm:sim": 5_000_000, "lightning:ibex": 0.5 } }) });
+    ok("the operator switches flags, the market, the corridor and the canary device on", s.status === 200 && s.body.network.corridors["CM-KE"] === true && s.body.network.markets.KE.enabled === true && s.body.network.markets.KE.providers.MPESA.payout === true, String(s.status));
+    const { market } = await import("../src/core/network/markets.js");
+    ok("the market table reflects the override without a deploy", market("KE")!.enabled && market("KE")!.providers.find((p) => p.id === "MPESA")!.payout === true);
+    const fxr = await j("/admin/network/fx/refresh", { method: "POST", headers: A, body: "{}" });
+    ok("the public USD table prices KES from a feed (Coinbase), not the configured figure", fxr.status === 200 && fxr.body.feed.rates.KES?.source === "public:coinbase" && Math.abs(fxr.body.feed.rates.KES.rate - 129.4) < 1e-9, JSON.stringify(fxr.body.feed.rates.KES));
     const ov = await j("/admin/network", { headers: A });
     const ke = ov.body.corridors.find((c: any) => c.id === "CM-KE");
     ok("the corridor registry shows CM→KE", !!ke && ke.enabled, JSON.stringify(ke?.reasons));
@@ -113,6 +142,8 @@ async function main() {
     ok("reconciliation: settled — source, Lightning, payout confirmed, ledger balanced", rec.items.find((i: any) => i.txId === t.id)?.verdict === "settled", JSON.stringify(rec.items[0]));
     const got = await j(`/network/transactions/${t.ref}`, { headers: H(dev) });
     ok("support can search one ref and see the whole lifecycle + ledger", got.status === 200 && got.body.ledger.length >= 6, String(got.body.ledger?.length));
+    const notMine = await j(`/network/transactions/${t.ref}`, { headers: H(other) });
+    ok("another enrolled device cannot see it", notMine.status === 404, String(notMine.status));
 
     console.log("\n4. Failure drills\n");
     // Payout fails after Lightning settled.
@@ -177,6 +208,35 @@ async function main() {
     await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ disabled: { providers: [] } }) });
     const dom = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationMarket: "CM", destinationProvider: "ORANGE", destinationPhone: "699000155", sourceAmount: 5_000 }) });
     ok("…while a domestic CM→CM route (today's flow) is still found", !!dom.body.best && dom.body.best.route.type === "AGGREGATOR_SETTLEMENT", JSON.stringify(dom.body.unavailable));
+
+    console.log("\n4b. Canary controls and the activation checklist\n");
+    r = await j("/network/intents", { method: "POST", headers: H(other), body: JSON.stringify({ ...intentBody, destinationPhone: "712000010" }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(other), body: JSON.stringify({}) });
+    ok("a device outside the allowlist with 0 % rollout is refused at execution", c.status === 403 && c.body.error === "canary_refused", `${c.status} ${c.body.message}`);
+    await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { maxPerTx: { "CM-KE": 5_000 } } }) });
+    r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000011" }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    ok("above the per-transaction cap is refused even for an allowlisted device", c.status === 403 && /per-transaction cap/.test(c.body.message), `${c.status} ${c.body.message}`);
+    const vol = saga.corridorVolume24h("CM-KE");
+    await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { maxPerTx: { "CM-KE": 0 }, maxPerDay: { "CM-KE": vol + 5_000 } } }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    ok("the rolling daily cap counts what already executed (refunds and declines excluded)", c.status === 403 && /daily cap/.test(c.body.message) && vol === 30_000, `${c.status} ${c.body.message} · volume ${vol}`);
+    await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { maxPerDay: { "CM-KE": 1_000_000 }, maxPerTx: { "CM-KE": 50_000 } } }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    ok("within the caps the same intent executes", c.status === 200 && c.body.transaction.state === "COLLECTION_PENDING", `${c.status} ${c.body.message ?? ""}`);
+    const badC = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { rolloutPct: 250 } }) });
+    ok("a rollout share outside 0–100 is refused", badC.status === 400);
+    const { rolloutBucket } = saga;
+    ok("the rollout bucket is stable per device and spans 0–99", rolloutBucket(dev) === rolloutBucket(dev) && rolloutBucket(dev) >= 0 && rolloutBucket(dev) < 100);
+    const cl = await j("/admin/network/corridors/CM-KE/checklist", { headers: A });
+    const it = (k: string) => cl.body.items.find((x: any) => x.key === k);
+    ok("the activation checklist is computed from the same facts the router uses", cl.status === 200 && Array.isArray(cl.body.items) && cl.body.items.length >= 15, String(cl.body.items?.length));
+    ok("…market, provider, corridor, FX, caps and flags pass", ["market_src", "market_dst", "providers_dst", "corridor_on", "fx_live", "cap_tx", "cap_day", "canary_who", "flag_CROSS_BORDER_PAYMENTS"].every((k) => it(k)?.ok === true), JSON.stringify(cl.body.items.filter((x: any) => !x.ok).map((x: any) => x.key)));
+    ok("…but a simulated rail can never make a corridor READY", it("rail_payout")?.ok === false && it("rail_payout")?.severity === "must" && cl.body.ready === false && cl.body.stage === "not_configured", `${cl.body.stage} · ${it("rail_payout")?.detail}`);
+    const ov2 = await j("/admin/network", { headers: A });
+    ok("the overview carries the checklists, the FX feed and the canary controls", ov2.body.checklists.some((x: any) => x.corridor === "CM-KE") && ov2.body.fx.fresh === true && ov2.body.canary.allowlist.includes(dev) && ov2.body.marketOverrides.KE.enabled === true);
+    const bad404 = await j("/admin/network/corridors/CM-ZZ/checklist", { headers: A });
+    ok("an unknown corridor is a 404", bad404.status === 404);
 
     console.log("\n5. Shadow mode never moves funds; flags off never executes\n");
     r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000007" }) });

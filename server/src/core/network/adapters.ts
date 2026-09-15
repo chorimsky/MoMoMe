@@ -17,6 +17,7 @@ import * as peexit from "../../adapters/peexit.js";
 import { peexitLive } from "../../config.js";
 import { payoutHealth } from "../routing.js";
 import { MARKETS } from "./markets.js";
+import { pawapayMarketAdapter, pawapayMarkets } from "./pawapayMarkets.js";
 
 export type OpStatus = "PENDING" | "COMPLETED" | "FAILED";
 export interface CollectionRequest { idempotencyKey: string; market: MarketCode; provider: NetworkProviderId; phone: string; amount: number; currency: string; name?: string }
@@ -124,6 +125,8 @@ const registry: MobileMoneyProviderAdapter[] = [];
 export function adaptersFor(marketCode: MarketCode): MobileMoneyProviderAdapter[] {
   if (!registry.length) {
     registry.push(wrapProductionPayout("peexit"), wrapProductionPayout("pawapay"));
+    // PawaPay's other markets: one adapter each over the same v2 contract (PHASE 6).
+    for (const code of pawapayMarkets()) if (MARKETS[code]) registry.push(pawapayMarketAdapter(code));
     // Every market gets a simulated rail for the sandbox; Cameroon's is used only when no
     // production rail is configured (a sandbox deployment), never beside a real one.
     for (const code of Object.keys(MARKETS)) registry.push(simulatedAdapter(code));

@@ -69,7 +69,7 @@ import {
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
 import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
-import { adminNetwork } from "./network.js";
+import { adminNetwork, setOwnerResolver } from "./network.js";
 import { capital, capitalGuard } from "./capital.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
@@ -482,6 +482,9 @@ export async function ownerOf(req: ReqLike): Promise<string | undefined> {
   if (!dev) return legacyBearerAllowed() ? id : undefined;
   return (await verifyDeviceSig(req, dev.authPub)) ? id : undefined;
 }
+
+// The network surface (/api/network) authenticates devices with this same gate.
+setOwnerResolver(ownerOf);
 
 /** The vault scope for a request: the anchored ACCOUNT id if the device has one,
  *  else its (authenticated) device id — so every device on the same phone shares

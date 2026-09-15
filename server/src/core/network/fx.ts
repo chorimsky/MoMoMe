@@ -2,15 +2,56 @@
    FX engine — every corridor crosses through USD and, for settlement, through sats (§32).
 
    XAF/USD comes from the production feed (EUR peg ÷ live EUR/USD — the same number the
-   live quote engine uses). Currencies the feed does not carry come from the operator's
-   configured table (settings.network.fxUsd) and are labelled as such: a corridor must not
-   go live on a configured rate. BTC/USD is the production feed's.
+   live quote engine uses). BTC/USD is the production feed's. Every other currency
+   (KES, GHS, NGN, UGX …) comes from the PUBLIC USD table pulled here — Coinbase's
+   exchange-rates first, open.er-api.com as the independent fallback — refreshed by the
+   job loop and persisted so a fresh instance starts primed. When the public table has no
+   fresh figure the operator's configured table (settings.network.fxUsd) is used and
+   labelled as such: a corridor must not go live on a configured rate (fxLive refuses).
    ============================================================ */
-import type { FxQuote, NetworkCurrency } from "../../../../shared/network.js";
+import type { FxFeedStatus, FxQuote, NetworkCurrency } from "../../../../shared/network.js";
+import { fetchT } from "../../adapters/http.js";
 import { btcUsd, usdXaf, ratesFresh, ratesMeta } from "../rates.js";
 import { getSettings } from "../settings.js";
+import { register, touch } from "../persist.js";
 
 export const FX_TTL_MS = 10 * 60_000;
+/** A public table older than this no longer prices real money (feeds are daily-ish; we
+ *  refresh every 30 min and allow two missed windows). */
+export const PUBLIC_FX_MAX_AGE_MS = 6 * 60 * 60_000;
+/** Currencies the network needs a USD rate for beyond what the production feed carries. */
+export const NETWORK_CURRENCIES = ["KES", "GHS", "NGN", "UGX", "TZS", "RWF", "XOF"] as const;
+
+let publicTable: { rates: Record<string, number>; source: string; at: number } | null = null;
+register("network_fx", () => publicTable, (d: typeof publicTable) => { if (d && d.rates) publicTable = d; });
+
+const num = (v: unknown): number | null => { const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN; return Number.isFinite(n) && n > 0 ? n : null; };
+async function getJson<T>(url: string): Promise<T | null> {
+  try { const r = await fetchT(url, { headers: { accept: "application/json" } }); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
+}
+/** PURE: pick the network currencies out of a USD-based rate table. Exported for tests. */
+export function parseUsdTable(rates: Record<string, unknown> | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of NETWORK_CURRENCIES) { const n = num(rates?.[c]); if (n) out[c] = n; }
+  return out;
+}
+
+/** Pull the public USD table. Only a pull that returned at least one real figure re-stamps
+ *  the table; a dead feed leaves the last one to age out (same rule as core/rates.ts). */
+export async function refreshPublicFx(): Promise<{ ok: boolean; source: string; count: number }> {
+  const cb = await getJson<{ data?: { rates?: Record<string, string> } }>("https://api.coinbase.com/v2/exchange-rates?currency=USD");
+  let rates = parseUsdTable(cb?.data?.rates), source = "coinbase";
+  if (!Object.keys(rates).length) {
+    const er = await getJson<{ result?: string; rates?: Record<string, number> }>("https://open.er-api.com/v6/latest/USD");
+    if (er?.result === "success") { rates = parseUsdTable(er.rates); source = "open.er-api"; }
+  }
+  const count = Object.keys(rates).length;
+  if (!count) return { ok: false, source: "none", count: 0 };
+  publicTable = { rates: { ...(publicTable?.rates ?? {}), ...rates }, source, at: Date.now() };
+  touch("network_fx");
+  return { ok: true, source, count };
+}
+export const publicFxFresh = (maxAge = PUBLIC_FX_MAX_AGE_MS): boolean => !!publicTable && Date.now() - publicTable.at < maxAge;
 
 /** Units of `ccy` per 1 USD, with the source of the figure. */
 export function usdRate(ccy: NetworkCurrency): { rate: number; source: string } | null {
@@ -18,8 +59,17 @@ export function usdRate(ccy: NetworkCurrency): { rate: number; source: string } 
   if (ccy === "XAF") return { rate: usdXaf(), source: ratesMeta().source === "fallback" ? "fallback" : `${ratesMeta().source}+peg` };
   if (ccy === "XOF") return { rate: usdXaf(), source: "peg (XOF = XAF vs EUR)" }; // both CFA francs are pegged at 655.957/EUR
   if (ccy === "BTC") return { rate: 1 / btcUsd(), source: ratesMeta().source };
+  const pub = publicTable?.rates[ccy];
+  if (pub && publicTable) return { rate: pub, source: publicFxFresh() ? `public:${publicTable.source}` : "stale" };
   const t = getSettings().network.fxUsd[ccy];
   return typeof t === "number" && t > 0 ? { rate: t, source: "configured" } : null;
+}
+
+/** The feed as the admin panel shows it. */
+export function fxFeedStatus(): FxFeedStatus {
+  const rates: FxFeedStatus["rates"] = {};
+  for (const c of ["XAF", "XOF", "BTC", ...NETWORK_CURRENCIES]) { const r = usdRate(c); if (r) rates[c] = r; }
+  return { source: publicTable?.source ?? "none", at: publicTable ? new Date(publicTable.at).toISOString() : null, fresh: publicFxFresh(), currencies: Object.keys(publicTable?.rates ?? {}), rates };
 }
 
 /** A quote from → to after the network spread. null when either leg is unpriced. */
@@ -48,6 +98,7 @@ export function fxLive(from: NetworkCurrency, to: NetworkCurrency): { live: bool
     const r = usdRate(c);
     if (!r) reasons.push(`${c} has no USD rate`);
     else if (r.source === "configured") reasons.push(`${c}/USD is a configured figure, not a feed`);
+    else if (r.source === "stale") reasons.push(`${c}/USD public rate is stale`);
     else if (r.source === "fallback") reasons.push(`${c}/USD is on the fallback rate`);
   }
   if (!ratesFresh()) reasons.push("the FX feed is stale");

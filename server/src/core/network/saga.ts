@@ -67,14 +67,48 @@ function book(t: NetworkTransaction, legs: Array<{ account: NetworkAccount; dire
   touch("network_ledger");
 }
 
-/* ---------- gates (§43, §45) ---------- */
-export function executionGate(corridor: string, domestic: boolean): { ok: boolean; reason?: string } {
+/* ---------- gates (§43, §45) + canary controls (PHASE 7) ---------- */
+/** Stable 0–99 bucket for an owner id, so a rollout percentage admits the same devices
+ *  every time (a device is either in the canary or not — never flapping). */
+export function rolloutBucket(owner: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < owner.length; i++) { h ^= owner.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h % 100;
+}
+/** Source-currency volume executed (non-shadow, not failed before money moved) on a
+ *  corridor in the last 24 h — what the daily canary cap counts. */
+export function corridorVolume24h(corridor: string, now = Date.now()): number {
+  const since = now - 24 * 60 * 60_000;
+  let sum = 0;
+  for (const t of txs.values()) {
+    if (t.shadow || t.corridor !== corridor || Date.parse(t.createdAt) < since) continue;
+    if (t.state === "COLLECTION_FAILED" || t.state === "REFUNDED") continue;
+    sum += t.source.amount;
+  }
+  return sum;
+}
+export function executionGate(corridor: string, domestic: boolean, ctx: { owner?: string; amount?: number } = {}): { ok: boolean; reason?: string } {
   const n = getSettings().network;
   if (!n.flags.INTEROPERABILITY_V2) return { ok: false, reason: "INTEROPERABILITY_V2 is off" };
   if (!n.flags.ROUTING_ENGINE) return { ok: false, reason: "ROUTING_ENGINE is off" };
   if (!n.flags.LIQUIDITY_ENGINE) return { ok: false, reason: "LIQUIDITY_ENGINE is off" };
   if (!domestic && !n.flags.CROSS_BORDER_PAYMENTS) return { ok: false, reason: "CROSS_BORDER_PAYMENTS is off" };
   if (!domestic && !n.corridors[corridor]) return { ok: false, reason: `corridor ${corridor} is not switched on` };
+  // Canary: who may execute (allowlist, then the rollout share) and how much (per
+  // transaction, per rolling day) — per corridor, in source currency. The domestic
+  // corridor is today's production flow and is not canaried by these controls.
+  if (!domestic) {
+    const c = n.canary;
+    const owner = ctx.owner ?? "";
+    const listed = c.allowlist.includes(owner);
+    if (!listed && c.rolloutPct <= 0) return { ok: false, reason: "canary: no rollout yet — add the device to the allowlist or raise the rollout share" };
+    if (!listed && c.rolloutPct < 100 && rolloutBucket(owner) >= c.rolloutPct) return { ok: false, reason: `canary: this device is outside the ${c.rolloutPct} % rollout` };
+    const amount = ctx.amount ?? 0;
+    const perTx = c.maxPerTx[corridor];
+    if (typeof perTx === "number" && perTx > 0 && amount > perTx) return { ok: false, reason: `canary: above the ${corridor} per-transaction cap (${perTx})` };
+    const perDay = c.maxPerDay[corridor];
+    if (typeof perDay === "number" && perDay > 0 && corridorVolume24h(corridor) + amount > perDay) return { ok: false, reason: `canary: the ${corridor} daily cap (${perDay}) would be exceeded` };
+  }
   return { ok: true };
 }
 
@@ -90,7 +124,7 @@ export async function begin(intent: NetworkIntent, quote: NetworkQuote, route: N
   if (!route.available) return { ok: false, error: "route_unavailable", message: route.reasons.join("; ") || "No route can complete this payment right now." };
   const shadow = !!opts.shadow;
   const domestic = intent.sourceMarket === intent.destinationMarket;
-  if (!shadow) { const g = executionGate(route.corridor, domestic); if (!g.ok) return { ok: false, error: "network_off", message: g.reason! }; }
+  if (!shadow) { const g = executionGate(route.corridor, domestic, { owner: intent.owner, amount: intent.sourceAmount }); if (!g.ok) return { ok: false, error: g.reason?.startsWith("canary") ? "canary_refused" : "network_off", message: g.reason! }; }
   const t: NetworkTransaction = {
     id: id("ntx"), ref: refOf(), intentId: intent.id, quoteId: quote.id, routeId: route.id, corridor: route.corridor, routeType: route.type, state: "CREATED",
     source: { market: intent.sourceMarket, provider: intent.sourceProvider, currency: intent.sourceCurrency, phone: intent.sourcePhone, amount: intent.sourceAmount },

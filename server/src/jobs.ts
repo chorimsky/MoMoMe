@@ -12,6 +12,7 @@ import { reconciliationSweep } from "./core/interop/reconcile.js";
 import { reconcileTransfers } from "./core/momoTransfer.js";
 import { flush as flushOutbound } from "./core/interop/outbound.js";
 import { shadowTick } from "./core/network/shadow.js";
+import { refreshPublicFx, publicFxFresh } from "./core/network/fx.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
 import { rate as ibexRate, registerAccountWebhook } from "./adapters/ibex.js";
@@ -47,6 +48,8 @@ export async function reconcileTick(): Promise<void> {
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }
   // Shadow routing of production settlements (never moves funds; no-op unless SHADOW_ROUTING).
   try { await shadowTick(); } catch (e) { console.error("network shadow", e); }
+  // The network's public USD table (KES, GHS, NGN …): refresh when older than 30 min.
+  try { if (!publicFxFresh(30 * 60_000)) await refreshPublicFx(); } catch (e) { console.error("network fx", e); }
   try { await store().pruneExpiredQuotes(); } catch (e) { console.error("prune quotes", e); }
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
 }

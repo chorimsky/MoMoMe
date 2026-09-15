@@ -57,7 +57,7 @@ function msisdn(phone: string, country: CountryCode): string {
 /** Deterministic UUID from the payment ref, formatted as v4 (PawaPay validates
  *  payoutId is a v4 UUID). Derived from a hash, so it's stable per ref →
  *  idempotent (PawaPay dedupes on payoutId); the v4 bits just satisfy format. */
-function payoutIdFor(ref: string): string {
+export function payoutIdFor(ref: string): string {
   const NS = Buffer.from("6ba7b8109dad11d180b400c04fd430c8", "hex");
   const h = crypto.createHash("sha1").update(Buffer.concat([NS, Buffer.from(ref)])).digest();
   const b = h.subarray(0, 16);

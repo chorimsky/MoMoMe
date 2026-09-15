@@ -24,6 +24,8 @@ const DEFAULTS: AppFeatures = {
 };
 
 let features: AppFeatures = DEFAULTS;
+// "Send abroad" entry points: OFF until /config says a corridor is open (never flickers on).
+let networkOpen = false;
 let loaded = false; // true only after a SUCCESSFUL load
 let inflight = false;
 const listeners = new Set<() => void>();
@@ -36,10 +38,9 @@ function load() {
     .getConfig()
     .then((c) => {
       loaded = true;
-      if (c.features) {
-        features = { ...DEFAULTS, ...c.features };
-        emit();
-      }
+      if (c.features) features = { ...DEFAULTS, ...c.features };
+      networkOpen = !!c.network?.enabled;
+      emit();
     })
     .catch(() => {
       /* keep defaults; a later mount retries */
@@ -61,4 +62,10 @@ const getSnapshot = () => features;
 /** Reactive feature switches — all-on until /config resolves. */
 export function useFeatures(): AppFeatures {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+const getNetwork = () => networkOpen;
+/** Is sending abroad open for customers? False until /config resolves. */
+export function useNetworkOpen(): boolean {
+  return useSyncExternalStore(subscribe, getNetwork, getNetwork);
 }

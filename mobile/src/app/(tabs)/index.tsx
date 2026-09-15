@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
@@ -25,7 +25,7 @@ import {
   StepHeader,
 } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
-import { useFeatures } from '@/hooks/use-features';
+import { useFeatures, useNetworkOpen } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { MomoStep } from '@/components/momo-step';
 import { track } from '@/lib/analytics';
@@ -100,6 +100,7 @@ export default function SendScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const features = useFeatures();
+  const networkOpen = useNetworkOpen();
   const params = useLocalSearchParams<{ scanned?: string; amount?: string; merchantCode?: string; merchantLinkCode?: string; country?: string; name?: string; t?: string }>();
 
   const [step, setStep] = useState<Step>('details');
@@ -750,6 +751,19 @@ export default function SendScreen() {
             <Body muted>{tr('method_sub', { n: group(String(xafNum)) })}</Body>
           </View>
           <View style={{ gap: Spacing.three }}>
+            {networkOpen ? (
+              /* The network: Mobile Money to another country. Only while a corridor is open. */
+              <Pressable disabled={busy} onPress={() => { track('method_chosen', { method: 'ABROAD' }); router.push('/send-abroad' as Href); }}
+                style={({ pressed }) => [styles.methodCard, { backgroundColor: t.surface, borderColor: t.line, opacity: pressed ? 0.9 : 1 }, Shadow.sm]}>
+                <IconCircle name="earth-outline" color={t.accent} bg={t.accentWash} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.methodName, { color: t.text }]}>{tr('ab_title')}</Text>
+                  <Text style={{ color: t.recv, fontFamily: Fonts.bodyMedium, fontSize: 12.5, marginTop: 1 }}>{tr('ab_tile_net')}</Text>
+                  <Body muted>{tr('ab_tile_sub')}</Body>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={t.muted} />
+              </Pressable>
+            ) : null}
             {features.momoTransfer && detected ? (
               /* Admin-gated: pay from the payer's OWN Mobile Money, any network to any network. */
               <Pressable disabled={busy} onPress={() => { track('method_chosen', { method: 'MOMO' }); setStep('momo'); }}

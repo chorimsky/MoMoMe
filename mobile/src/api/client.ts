@@ -11,6 +11,7 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { devicePublicKeys, enrolledFor, forgetDeviceKeys, markEnrolled, signRequest } from '@/lib/deviceSign';
 import { currentLang, STRINGS, translate, type StringKey } from '@/lib/i18n';
+import type { NetworkIntent, NetworkQuote, NetworkRoute, NetworkTransaction } from '@shared/network';
 
 import type { MomoTransfer,
   AmbassadorSummary,
@@ -197,7 +198,10 @@ export interface AppConfig {
   support: { email: string; phone: string };
   methods?: Partial<Record<Method, boolean>>;
   features?: Partial<AppFeatures>;
+  /** The Pan-African network: true only while a corridor out of Cameroon is open. */
+  network?: { enabled: boolean };
 }
+export interface NetworkMarkets { source: { code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }> }; destinations: Array<{ code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }>; minPerTx: number; maxPerTx: number }> }
 
 /* ---------- the public surface the app uses ---------- */
 export type OtpVia = 'whatsapp' | 'sms';
@@ -208,6 +212,13 @@ export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { cou
 
 export const api = {
   getConfig: () => req<AppConfig>('/config'),
+
+  /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
+  networkMarkets: () => req<NetworkMarkets>('/network/markets'),
+  networkIntent: (body: { sourceProvider: string; sourcePhone: string; destinationMarket: string; destinationProvider: string; destinationPhone: string; destinationName?: string; sourceAmount: number }) =>
+    req<{ intent: NetworkIntent; routes: NetworkRoute[]; quotes: NetworkQuote[]; best: { route: NetworkRoute; quote: NetworkQuote } | null; unavailable: string[] }>('/network/intents', { method: 'POST', body: JSON.stringify({ sourceMarket: 'CM', ...body }) }),
+  networkConfirm: (id: string) => req<{ transaction: NetworkTransaction }>(`/network/intents/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: '{}' }),
+  networkTransaction: (id: string) => req<{ transaction: NetworkTransaction }>(`/network/transactions/${encodeURIComponent(id)}`),
 
   /** Payment alerts: register this device's Expo push token (one per device id). */
   registerPushToken: (token: string, platform: 'ios' | 'android' | 'unknown', lang: 'en' | 'fr' = 'en') =>

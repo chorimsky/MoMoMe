@@ -178,7 +178,7 @@ export function SendAbroad() {
             <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
               {dedupe(tx.events.map((e) => e.state), (st) => t(`ab_st_${st}`)).map((st, i, arr) => (
                 <li key={st} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 14, color: i === arr.length - 1 ? "var(--ink)" : "var(--ink-3)" }}>
-                  <span aria-hidden style={{ width: 10, height: 10, borderRadius: 999, background: st.endsWith("FAILED") ? "var(--warn-ink)" : i === arr.length - 1 && !FINAL.has(st) ? "var(--warn)" : "var(--recv)" }} />
+                  <span aria-hidden style={{ width: 10, height: 10, borderRadius: 999, background: st.endsWith("FAILED") ? "var(--warn-ink)" : i === arr.length - 1 && !FINAL.has(tx.state) ? "var(--warn)" : "var(--recv)" }} />
                   {t(`ab_st_${st}`)}
                 </li>
               ))}

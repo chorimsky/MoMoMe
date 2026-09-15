@@ -141,7 +141,7 @@ export function NetworkPanel() {
       <Grid cols={2} gap={16} style={{ marginTop: 16 }}>
         <Card title="Shadow routing" sub="The router's decision for real settlements, compared to what production did. Earns the right to execute." action={<button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} disabled={busy !== null} onClick={runShadow}>{busy === "shadow" ? "…" : "Run now"}</button>}>
           <KV k="Comparisons" v={fmt(ov.shadow.comparisons)} />
-          <KV k="Agreeing (same rail, amount within 1 %)" v={fmt(ov.shadow.agreeing)} tone={ov.shadow.comparisons && ov.shadow.agreeing === ov.shadow.comparisons ? "recv" : undefined} />
+          <KV k="Agreeing (the same payout rail, route available)" v={fmt(ov.shadow.agreeing)} tone={ov.shadow.comparisons && ov.shadow.agreeing === ov.shadow.comparisons ? "recv" : undefined} />
           <KV k="Disagreeing" v={fmt(ov.shadow.disagreeing)} tone={ov.shadow.disagreeing ? "warn" : undefined} />
           {ov.shadow.recent.slice(0, 6).map((c) => (
             <div key={c.id} style={{ fontSize: 12, padding: "6px 0", borderTop: "1px solid var(--line-2)", color: "var(--ink-2)" }}>
@@ -163,7 +163,7 @@ export function NetworkPanel() {
 
       <Card title="Transactions" sub="Every stage durable; a failure after money moved lands in a named state with a recovery." pad={false} style={{ marginTop: 16 }}>
         {ov.transactions.length === 0 ? <div style={{ padding: "14px 16px", fontSize: 13, color: "var(--ink-3)" }}>No network transactions yet.</div> : ov.transactions.slice(0, 30).map((t, i) => {
-          const recoverable = t.state === "DESTINATION_SETTLEMENT_FAILED" || t.state === "LIGHTNING_FAILED";
+          const recoverable = t.state === "DESTINATION_SETTLEMENT_FAILED" || t.state === "MANUAL_REVIEW";
           return (
             <div key={t.id} style={{ padding: "10px 16px", borderTop: i ? "1px solid var(--line-2)" : "none", display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 220 }}>

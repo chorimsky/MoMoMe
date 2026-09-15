@@ -17,6 +17,8 @@ export async function feeBreakdown(input: {
   sourceAmount: number; sourceCurrency: string;
   collection: MobileMoneyProviderAdapter; payout: MobileMoneyProviderAdapter; payoutProvider: string;
   destinationSource: LiquiditySource; lightningSource: LiquiditySource; fx: FxQuote; settlementSats: number;
+  /** No Lightning leg (same-market aggregator settlement): no routing fee, no spread. */
+  domestic?: boolean;
 }): Promise<FeeBreakdown> {
   const { sourceAmount: amt } = input;
   // Collection: Peexit collect ≈ 1.0 % (aggregator schedule); simulated markets 1 %.
@@ -26,8 +28,8 @@ export async function feeBreakdown(input: {
   const providerPayout = round(amt * payoutPct);
   const fxSpread = input.fx.from === input.fx.to ? 0 : round(amt * (input.fx.spreadBps / 10_000));
   // Lightning: routing fees are a few ppm; the source's feePct is the ceiling it charges.
-  const lightning = round(amt * Math.max(0.0005, input.lightningSource.feePct));
-  const liquidity = round(amt * input.destinationSource.feePct);
+  const lightning = input.domestic ? 0 : round(amt * Math.max(0.0005, input.lightningSource.feePct));
+  const liquidity = input.domestic ? 0 : round(amt * input.destinationSource.feePct);
   // The platform fee: the production percentage with its floor — XAF-denominated floor
   // applies to XAF; other currencies use the percentage only until per-market floors exist.
   const momome = input.sourceCurrency === "XAF" ? platformFee(amt) : Math.round(amt * 0.025);

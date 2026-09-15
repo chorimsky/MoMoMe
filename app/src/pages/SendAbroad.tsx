@@ -27,6 +27,7 @@ const input = { width: "100%", padding: "11px 12px", borderRadius: 10, border: "
 const box = { padding: 18, border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface)" };
 
 type Stage = "form" | "quoting" | "quote" | "sending" | "track";
+const TRACK_KEY = "mm_abroad_tx";
 const FINAL = new Set(["COMPLETED", "COLLECTION_FAILED", "REFUNDED", "MANUAL_REVIEW", "DESTINATION_SETTLEMENT_FAILED"]);
 
 export function SendAbroad() {
@@ -36,6 +37,12 @@ export function SendAbroad() {
   useEffect(() => {
     api.getConfig().then((c) => setOpen(!!c.network?.enabled)).catch(() => setOpen(false));
     api.networkMarkets().then(setMk).catch(() => setMk({ source: { code: "CM", name: "Cameroon", currency: "XAF", dial: "+237", providers: [] }, destinations: [] }));
+    // A refresh while "approve on your phone" is showing must not lose the transaction:
+    // resume tracking the one this browser last confirmed, unless it already ended.
+    try {
+      const last = sessionStorage.getItem(TRACK_KEY);
+      if (last) api.networkTransaction(last).then((r) => { if (!FINAL.has(r.transaction.state)) { setTx(r.transaction); setStage("track"); } else sessionStorage.removeItem(TRACK_KEY); }).catch(() => sessionStorage.removeItem(TRACK_KEY));
+    } catch { /* storage unavailable */ }
   }, []);
 
   const [dst, setDst] = useState(""), [dstProvider, setDstProvider] = useState(""), [dstPhone, setDstPhone] = useState(""), [dstName, setDstName] = useState("");
@@ -78,6 +85,7 @@ export function SendAbroad() {
     try {
       const r = await api.networkConfirm(quote.intentId);
       setTx(r.transaction); setStage("track"); track("abroad_confirmed", { to: dst });
+      try { sessionStorage.setItem(TRACK_KEY, r.transaction.id); } catch { /* fine */ }
     } catch (e) { setErr(errMessage(e, t)); setStage("quote"); }
   };
   useEffect(() => {
@@ -85,7 +93,7 @@ export function SendAbroad() {
     pollRef.current = window.setInterval(() => { api.networkTransaction(tx.id).then((r) => setTx(r.transaction)).catch(() => {}); }, 3000);
     return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
   }, [stage, tx]);
-  const reset = () => { setStage("form"); setQuote(null); setTx(null); setErr(null); setReasons([]); setAmount(""); setDstPhone(""); setDstName(""); };
+  const reset = () => { try { sessionStorage.removeItem(TRACK_KEY); } catch { /* fine */ } setStage("form"); setQuote(null); setTx(null); setErr(null); setReasons([]); setAmount(""); setDstPhone(""); setDstName(""); };
 
   const feeRows = useMemo(() => quote ? [
     [t("ab_fee_collect"), quote.quote.fees.providerCollect], [t("ab_fee_payout"), quote.quote.fees.providerPayout], [t("ab_fee_fx"), quote.quote.fees.fxSpread],
@@ -154,7 +162,7 @@ export function SendAbroad() {
             <div className="num" style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, margin: "4px 0 2px" }}>{fmtCcy(quote.quote.destinationAmount, quote.quote.destinationCurrency)}</div>
             <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{dest.providers.find((p) => p.id === dstProvider)?.name} · {dest.dial} {digits(dstPhone)}{dstName ? ` · ${dstName}` : ""}</div>
             <div style={{ borderTop: "1px solid var(--line)", margin: "14px 0" }} />
-            <Row k={t("ab_rate")} v={`1 XAF = ${quote.quote.fx.rate.toFixed(4)} ${quote.quote.destinationCurrency}`} />
+            <Row k={t("ab_rate")} v={`1 XAF = ${quote.quote.fx.mid.toFixed(4)} ${quote.quote.destinationCurrency}`} />
             <Row k={t("ab_fees")} v={fmtCcy(quote.quote.fees.total, "XAF")} strong />
             {feeRows.filter(([, v]) => v > 0).map(([k, v]) => <Row key={k} k={k} v={fmtCcy(v, "XAF")} sub />)}
             <Row k={t("ab_eta").replace("{min}", String(Math.max(1, Math.ceil(quote.route.estimatedSeconds / 60))))} v="" />

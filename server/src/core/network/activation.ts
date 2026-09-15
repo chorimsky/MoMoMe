@@ -65,7 +65,7 @@ export async function corridorChecklist(corridor: string): Promise<CorridorCheck
   const okDst = settle.some((r) => r.ok);
   items.push(item("liquidity_dst", "Destination liquidity can fund a payout", okDst, dsts.length ? dsts.map((s, i) => `${s.id}: ${settle[i].available == null ? "unknown" : Math.round(settle[i].available!)} ${dst.currency}`).join(" · ") : "no destination source"));
   const floor = dsts.map((s) => n.liquidityFloor[s.id] ?? 0);
-  items.push(item("liquidity_floor", "Destination liquidity above the alert floor", dsts.every((_, i) => (settle[i].available ?? 0) > floor[i]), floor.some(Boolean) ? `floors ${floor.join("/")}` : "no floor set — set one under liquidity floors", floor.some(Boolean) ? "warn" : "warn"));
+  items.push(item("liquidity_floor", "Destination liquidity above the alert floor", dsts.every((_, i) => (settle[i].available ?? 0) > floor[i]), floor.some(Boolean) ? `floors ${floor.join("/")}` : "no floor set — set one under liquidity floors", "warn"));
   const srcPool = sourceSideSource(srcCode);
   items.push(item("pool_src", "Source-side pool present", !!srcPool, srcPool?.id ?? "none"));
 

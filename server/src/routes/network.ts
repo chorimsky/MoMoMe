@@ -19,6 +19,7 @@
 import { Router, type Request, type Response } from "express";
 import type { NetworkIntent, NetworkOverview, NetworkSettings } from "../../../shared/network.js";
 import { getSettings, updateSettings } from "../core/settings.js";
+import { checkPhone } from "../../../shared/domain.js";
 import { config } from "../config.js";
 import { id } from "../core/ids.js";
 import { MARKETS, market, corridorId } from "../core/network/markets.js";
@@ -88,9 +89,19 @@ network.post("/intents", rateLimitDurableMiddleware("network_intents", 30, 60_00
   if (!Number.isFinite(amount) || amount < src.limits.minPerTx || amount > src.limits.maxPerTx) return res.status(400).json({ error: "bad_amount", message: `Amount must be ${src.limits.minPerTx}–${src.limits.maxPerTx} ${src.currency}.` });
   const sourcePhone = digits(b.sourcePhone), destinationPhone = digits(b.destinationPhone);
   if (destinationPhone.length < 8) return res.status(400).json({ error: "bad_recipient", message: "Enter the recipient's Mobile Money number." });
+  // The payer's number decides the collecting provider: in Cameroon the prefix names the
+  // operator (the same rule the live send flow uses), so a stated provider that contradicts
+  // the number is refused rather than sending an MTN collection to an Orange line.
+  let sourceProvider = String(b.sourceProvider ?? src.providers[0]?.id ?? "");
+  if (src.code === "CM" && sourcePhone) {
+    const chk = checkPhone(sourcePhone, "CM");
+    if (!chk.ok || !chk.provider) return res.status(400).json({ error: "bad_phone", message: "Enter a valid MTN or Orange Money number." });
+    if (b.sourceProvider && String(b.sourceProvider) !== chk.provider) return res.status(400).json({ error: "bad_phone", message: `That number is on ${chk.provider === "ORANGE" ? "Orange Money" : "MTN MoMo"}.` });
+    sourceProvider = chk.provider;
+  }
   const intent: NetworkIntent = {
     id: id("nin"), owner,
-    sourceMarket: src.code, sourceProvider: String(b.sourceProvider ?? src.providers[0]?.id ?? ""), sourceCurrency: src.currency, sourcePhone,
+    sourceMarket: src.code, sourceProvider, sourceCurrency: src.currency, sourcePhone,
     destinationMarket: dst.code, destinationProvider: String(b.destinationProvider ?? dst.providers[0]?.id ?? ""), destinationCurrency: dst.currency, destinationPhone,
     destinationName: typeof b.destinationName === "string" ? b.destinationName.slice(0, 80) : undefined,
     sourceAmount: Math.round(amount), status: "OPEN", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

@@ -103,10 +103,15 @@ export async function discover(intent: NetworkIntent): Promise<{ routes: Network
   const cid = corridorId(intent.sourceMarket, intent.destinationMarket);
   for (const c of cands) {
     const rs: string[] = [];
-    const sats = toSats(intent.sourceAmount, intent.sourceCurrency) ?? 0;
-    const fees = await feeBreakdown({ sourceAmount: intent.sourceAmount, sourceCurrency: intent.sourceCurrency, collection: c.collection, payout: c.payout, payoutProvider: intent.destinationProvider, destinationSource: c.dst, lightningSource: c.ln, fx, settlementSats: sats });
+    const fees = await feeBreakdown({ sourceAmount: intent.sourceAmount, sourceCurrency: intent.sourceCurrency, collection: c.collection, payout: c.payout, payoutProvider: intent.destinationProvider, destinationSource: c.dst, lightningSource: c.ln, fx, settlementSats: 0, domestic: c.type === "AGGREGATOR_SETTLEMENT" });
+    // The spread is one of the itemised fees, so the conversion is at MID — charging it in
+    // the rate as well would take it twice.
     const netSource = intent.sourceAmount - fees.total;
-    const destinationAmount = Math.floor(netSource * fx.rate);
+    const destinationAmount = Math.floor(netSource * fx.mid);
+    // What crosses: the recipient's amount plus the payout aggregator's fee (charged to the
+    // destination pool). Every other fee is retained on the source side as revenue.
+    const settlementSource = netSource + fees.providerPayout;
+    const sats = c.type === "AGGREGATOR_SETTLEMENT" ? 0 : (toSats(settlementSource, intent.sourceCurrency) ?? 0);
     // Liquidity: the destination must be able to pay the recipient; the Lightning position
     // must carry the settlement value (BTC).
     const dl = await canSettle(c.dst.id, destinationAmount);
@@ -137,7 +142,7 @@ export async function discover(intent: NetworkIntent): Promise<{ routes: Network
     };
     routes.push(route);
     const at = Date.now();
-    quotes.push({ id: id("nq"), intentId: intent.id, corridor: cid, sourceAmount: intent.sourceAmount, sourceCurrency: intent.sourceCurrency, destinationAmount, destinationCurrency: intent.destinationCurrency, fx, fees, totalSource: intent.sourceAmount, settlementSats: sats, routeId: route.id, createdAt: new Date(at).toISOString(), expiresAt: fx.expiresAt });
+    quotes.push({ id: id("nq"), intentId: intent.id, corridor: cid, sourceAmount: intent.sourceAmount, sourceCurrency: intent.sourceCurrency, destinationAmount, destinationCurrency: intent.destinationCurrency, fx, fees, totalSource: intent.sourceAmount, settlementSats: sats, settlementSource, routeId: route.id, createdAt: new Date(at).toISOString(), expiresAt: fx.expiresAt });
   }
   routes.sort((a, b) => Number(b.available) - Number(a.available) || b.score.total - a.score.total);
   return { routes, quotes, reasons };

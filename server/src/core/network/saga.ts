@@ -59,7 +59,7 @@ export const getQuote = (i: string) => quotes.get(i);
 export const getRoute = (i: string) => routes.get(i);
 export const getTx = (i: string) => txs.get(i);
 export const txByRef = (ref: string) => [...txs.values()].find((t) => t.ref === ref);
-export const txOfIntent = (intentId: string) => [...txs.values()].find((t) => t.intentId === intentId);
+export const txOfIntent = (intentId: string) => [...txs.values()].filter((t) => t.intentId === intentId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 export const allTx = (limit = 200) => [...txs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 export const ledgerFor = (txId: string) => ledger.filter((e) => e.txId === txId);
 export const ledgerAll = () => ledger;
@@ -87,6 +87,11 @@ function book(t: NetworkTransaction, legs: Array<{ account: NetworkAccount; dire
   }
   touch("network_ledger");
 }
+
+/** The payout aggregator's fee in destination currency — the pool pays it beside the recipient. */
+const payoutFeeDst = (t: NetworkTransaction): number => (t.source.market === t.destination.market ? t.fees.providerPayout : Math.ceil(t.fees.providerPayout * t.fx.mid));
+/** What the source side keeps: every fee except the payout aggregator's. */
+const retainedAtSource = (t: NetworkTransaction): number => t.fees.total - t.fees.providerPayout;
 
 /* ---------- gates (§43, §45) + canary controls (PHASE 7) ---------- */
 /** Stable 0–99 bucket for an owner id, so a rollout percentage admits the same devices
@@ -140,7 +145,9 @@ const refOf = () => `MMX-${new Date().getFullYear()}-${String(Math.floor(Math.ra
  *  collection. Returns the transaction in COLLECTION_PENDING, or the reason it was refused. */
 export async function begin(intent: NetworkIntent, quote: NetworkQuote, route: NetworkRoute, opts: { shadow?: boolean } = {}): Promise<{ ok: true; tx: NetworkTransaction } | { ok: false; error: string; message: string }> {
   const existing = txOfIntent(intent.id);
-  if (existing) return { ok: true, tx: existing }; // idempotent on the intent
+  // Idempotent on the intent — except an attempt that failed before any money moved
+  // (collection refused / expired): the same intent may try again with a new transaction.
+  if (existing && !(existing.state === "COLLECTION_FAILED" && !existing.events.some((e) => e.state === "COLLECTION_CONFIRMED"))) return { ok: true, tx: existing };
   if (Date.parse(quote.expiresAt) < Date.now() || fxExpired(quote.fx)) return { ok: false, error: "quote_expired", message: "This quote has expired — please re-quote." };
   if (!route.available) return { ok: false, error: "route_unavailable", message: route.reasons.join("; ") || "No route can complete this payment right now." };
   const shadow = !!opts.shadow;
@@ -150,14 +157,14 @@ export async function begin(intent: NetworkIntent, quote: NetworkQuote, route: N
     id: id("ntx"), ref: refOf(), intentId: intent.id, quoteId: quote.id, routeId: route.id, corridor: route.corridor, routeType: route.type, state: "CREATED",
     source: { market: intent.sourceMarket, provider: intent.sourceProvider, currency: intent.sourceCurrency, phone: intent.sourcePhone, amount: intent.sourceAmount },
     destination: { market: intent.destinationMarket, provider: intent.destinationProvider, currency: intent.destinationCurrency, phone: intent.destinationPhone, name: intent.destinationName, amount: quote.destinationAmount },
-    fees: quote.fees, fx: quote.fx, settlementSats: quote.settlementSats, refs: {}, appliedEvents: [], shadow, events: [], createdAt: now(), updatedAt: now(),
+    fees: quote.fees, fx: quote.fx, settlementSats: quote.settlementSats, settlementSource: quote.settlementSource ?? (intent.sourceAmount - quote.fees.total + quote.fees.providerPayout), refs: {}, appliedEvents: [], shadow, events: [], createdAt: now(), updatedAt: now(),
   };
   txs.set(t.id, t); move(t, "CREATED", shadow ? "shadow — no funds move" : `route ${route.type}`);
   intent.status = "CONFIRMED"; intent.txId = t.id; intent.routeId = route.id; intent.quoteId = quote.id; saveIntent(intent);
   if (shadow) return { ok: true, tx: t };
 
   // 1. Destination liquidity reservation — never accept what cannot be fulfilled (§11).
-  const r = await liquidity.reserve(route.destinationSourceId, t.id, t.destination.amount);
+  const r = await liquidity.reserve(route.destinationSourceId, t.id, t.destination.amount + payoutFeeDst(t));
   if (!r.ok) { move(t, "COLLECTION_FAILED", `liquidity not reservable: ${r.reason}`); return { ok: false, error: "liquidity_unavailable", message: "This corridor is temporarily unavailable — the destination cannot be funded right now." }; }
   t.refs.liquidityReservationId = r.reservation.id;
   move(t, "LIQUIDITY_RESERVED", `${t.destination.amount} ${t.destination.currency} reserved at ${route.destinationSourceId}`);
@@ -246,17 +253,23 @@ export async function advance(t: NetworkTransaction): Promise<void> {
       }
       t.refs.lightningPaymentId = s.settlementId; t.refs.settlementId = s.settlementId;
       const btc = t.settlementSats / 1e8;
-      // Source pool buys the settlement value (fiat → sats); the network's Lightning position
-      // carries it; the destination pool absorbs it (sats → destination fiat).
+      // Source pool converts ONLY the settlement value (recipient + payout fee) to sats; the
+      // rest of what was collected stays at source as fee revenue. The Lightning position
+      // carries the sats; the destination pool absorbs them (sats → destination fiat).
       book(t, [
-        { account: "src_pool", direction: "debit", amount: t.source.amount - t.fees.momome, currency: t.source.currency, market: t.source.market, memo: "converted to settlement value" },
-        { account: "fx_pnl", direction: "credit", amount: t.source.amount - t.fees.momome, currency: t.source.currency, market: t.source.market, memo: "fiat leg of the conversion" },
-        { account: "fee_revenue", direction: "credit", amount: t.fees.momome, currency: t.source.currency, market: t.source.market, memo: "platform fee" },
-        { account: "src_pool", direction: "debit", amount: t.fees.momome, currency: t.source.currency, market: t.source.market, memo: "platform fee" },
+        { account: "src_pool", direction: "debit", amount: t.settlementSource, currency: t.source.currency, market: t.source.market, memo: "converted to settlement value" },
+        { account: "fx_pnl", direction: "credit", amount: t.settlementSource, currency: t.source.currency, market: t.source.market, memo: "fiat leg of the conversion" },
+        { account: "src_pool", direction: "debit", amount: retainedAtSource(t), currency: t.source.currency, market: t.source.market, memo: "fees retained (platform, collection, spread, liquidity, Lightning)" },
+        { account: "fee_revenue", direction: "credit", amount: retainedAtSource(t), currency: t.source.currency, market: t.source.market, memo: "fees retained" },
       ]);
       book(t, [
         { account: "fx_pnl", direction: "debit", amount: btc, currency: "BTC", memo: "settlement value acquired" },
         { account: "lightning_position", direction: "credit", amount: btc, currency: "BTC", memo: "sent over Lightning" },
+      ]);
+      // The routing fee the leg actually cost, out of the position (an expense, in sats).
+      if (s.feesSats > 0) book(t, [
+        { account: "lightning_fees", direction: "debit", amount: s.feesSats / 1e8, currency: "BTC", memo: "Lightning routing fee" },
+        { account: "lightning_position", direction: "credit", amount: s.feesSats / 1e8, currency: "BTC", memo: "routing fee paid" },
       ]);
       move(t, "LIGHTNING_CONFIRMED", `${s.method} · ${s.settlementId} · fee ${s.feesSats} sats · ${s.latencyMs} ms`, s.settlementId);
     }
@@ -287,11 +300,13 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
     return;
   }
   const domestic = t.source.market === t.destination.market;
+  const feeDst = payoutFeeDst(t);
   if (domestic) {
     book(t, [
       { account: "src_pool", direction: "debit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: "paid out + fees" },
       { account: "dst_recipient", direction: "credit", amount: t.destination.amount, currency: t.destination.currency, market: t.destination.market, memo: "delivered" },
-      { account: "fee_revenue", direction: "credit", amount: t.source.amount - t.destination.amount, currency: t.source.currency, market: t.source.market, memo: "fees + spread" },
+      { account: "provider_fees", direction: "credit", amount: feeDst, currency: t.source.currency, market: t.source.market, memo: "payout aggregator fee" },
+      { account: "fee_revenue", direction: "credit", amount: t.source.amount - t.destination.amount - feeDst, currency: t.source.currency, market: t.source.market, memo: "fees retained" },
     ]);
   } else {
     const btc = t.settlementSats / 1e8;
@@ -300,8 +315,9 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
       { account: "dst_pool", direction: "credit", amount: btc, currency: "BTC", market: t.destination.market, memo: "settlement value received" },
     ]);
     book(t, [
-      { account: "dst_pool", direction: "debit", amount: t.destination.amount, currency: t.destination.currency, market: t.destination.market, memo: "paid from local liquidity" },
+      { account: "dst_pool", direction: "debit", amount: t.destination.amount + feeDst, currency: t.destination.currency, market: t.destination.market, memo: "paid from local liquidity (+ aggregator fee)" },
       { account: "dst_recipient", direction: "credit", amount: t.destination.amount, currency: t.destination.currency, market: t.destination.market, memo: "delivered" },
+      { account: "provider_fees", direction: "credit", amount: feeDst, currency: t.destination.currency, market: t.destination.market, memo: "payout aggregator fee" },
     ]);
   }
   if (t.refs.liquidityReservationId) liquidity.settle(t.refs.liquidityReservationId);
@@ -314,11 +330,24 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
 export async function recover(txId: string, action: "retry" | "alternate_provider" | "manual" | "refund", by: string): Promise<{ ok: boolean; error?: string }> {
   const t = txs.get(txId);
   if (!t) return { ok: false, error: "not_found" };
-  if (t.state !== "DESTINATION_SETTLEMENT_FAILED" && t.state !== "LIGHTNING_FAILED") return { ok: false, error: "not_recoverable" };
+  // Recoverable: the payout leg failed after settlement, or an operator parked it. (A
+  // Lightning failure goes straight to REFUND_PENDING — there is nothing to retry.)
+  if (t.state !== "DESTINATION_SETTLEMENT_FAILED" && t.state !== "MANUAL_REVIEW") return { ok: false, error: "not_recoverable" };
+  if (t.state === "MANUAL_REVIEW" && action === "manual") return { ok: true };
   t.recovery = action;
   if (action === "manual") { move(t, "MANUAL_REVIEW", `held for an operator by ${by}`); void notifyNet.networkNeedsPerson(t, `held by ${by}`); return { ok: true }; }
   if (action === "refund") {
     if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
+    // The settlement leg DID land in the destination pool (that is why the payout was
+    // attempted): show it there, so the pools can be rebalanced later, and owe the payer
+    // their money from the source side.
+    if (!isDomestic(t) && t.events.some((e) => e.state === "LIGHTNING_CONFIRMED") && !t.events.some((e) => e.state === "PAYOUT_CONFIRMED")) {
+      const btc = t.settlementSats / 1e8;
+      book(t, [
+        { account: "lightning_position", direction: "debit", amount: btc, currency: "BTC", memo: "absorbed by destination pool (payout not delivered)" },
+        { account: "dst_pool", direction: "credit", amount: btc, currency: "BTC", market: t.destination.market, memo: "settlement value held — rebalance" },
+      ]);
+    }
     bookRefundOwed(t);
     move(t, "REFUND_PENDING", `refund of ${t.source.amount} ${t.source.currency} to the payer, by ${by}`);
     void notifyNet.networkRefunding(t, `refund chosen by ${by}`);

@@ -35,7 +35,10 @@ export async function shadowTick(limit = 25): Promise<number> {
       id: id("shd"), at: new Date().toISOString(), productionRef: p.ref, productionKind: "payment", corridor: "CM-CM",
       production: { aggregator: p.aggregator, feeXaf: p.feeXaf, deliveredXaf: p.xaf, seconds },
       v2: { routeType: best?.type ?? null, payoutAdapter: best?.payoutAdapter, fees: q?.fees.total ?? 0, destinationAmount: q?.destinationAmount ?? 0, estimatedSeconds: best?.estimatedSeconds ?? 0, available: !!best?.available, reasons: best ? best.reasons : reasons },
-      agrees: !!best && best.available && (best.payoutAdapter.endsWith(`:${p.aggregator ?? ""}`)) && Math.abs((q?.destinationAmount ?? 0) - p.xaf) / p.xaf <= 0.01,
+      // A crypto-funded payment has v1's fee schedule, not the network's (there is no
+      // collection leg to price) — so "agrees" is about the DECISION: the same payout rail,
+      // and a route that was available. The amount delta stays on the record for the eye.
+      agrees: !!best && best.available && (!p.aggregator || best.payoutAdapter.endsWith(`:${p.aggregator}`)),
     };
     comparisons.set(p.ref, c); n++;
   }
@@ -48,7 +51,8 @@ export async function shadowTick(limit = 25): Promise<number> {
       id: id("shd"), at: new Date().toISOString(), productionRef: t.ref, productionKind: "momo_transfer", corridor: "CM-CM",
       production: { feeXaf: t.feeXaf, deliveredXaf: t.xaf, seconds: Math.round((Date.parse(t.updatedAt) - Date.parse(t.createdAt)) / 1000) },
       v2: { routeType: best?.type ?? null, payoutAdapter: best?.payoutAdapter, fees: q?.fees.total ?? 0, destinationAmount: q?.destinationAmount ?? 0, estimatedSeconds: best?.estimatedSeconds ?? 0, available: !!best?.available, reasons: best ? best.reasons : reasons },
-      agrees: !!best && best.available && Math.abs((q?.destinationAmount ?? 0) - t.xaf) / t.xaf <= 0.01,
+      // Same rail as production when it is known; amounts within 5 % (fee schedules differ).
+      agrees: !!best && best.available && (!t.payoutRail || best.payoutAdapter.endsWith(`:${t.payoutRail}`)) && Math.abs((q?.destinationAmount ?? 0) - t.xaf) / t.xaf <= 0.05,
     };
     comparisons.set(t.ref, c); n++;
   }

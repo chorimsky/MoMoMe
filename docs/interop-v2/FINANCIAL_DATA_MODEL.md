@@ -24,3 +24,18 @@ events[]), `Quote`, `LedgerEntry` (currency ∈ XAF/BTC/USDT/USDC), `TreasuryWit
   fees, destination amount, availability, reasons), `agrees`.
 - `NetworkReconciliation` — per transaction: source/Lightning/payout confirmed, ledger
   balanced, liquidity released → settled / in_flight / stuck / unmatched / manual.
+
+## Network ledger — the money model (reviewed 2026-09-15)
+
+Per cross-border transaction, in order (A = source amount, F = fee breakdown, D = recipient
+amount, V = settlement value):
+
+| Step | Legs | Note |
+|---|---|---|
+| Collection confirmed | `src_collection_clearing` Dr A · `src_pool` Cr A | local money is in |
+| Lightning confirmed | `src_pool` Dr V · `fx_pnl` Cr V (source ccy) · `fx_pnl` Dr sats · `lightning_position` Cr sats · `src_pool` Dr R · `fee_revenue` Cr R · `lightning_fees` Dr fee · `lightning_position` Cr fee (sats) | V = A − F.total + F.providerPayout (what the destination needs); R = F.total − F.providerPayout (retained at source) |
+| Payout confirmed | `lightning_position` Dr sats · `dst_pool` Cr sats · `dst_pool` Dr D + fee · `dst_recipient` Cr D · `provider_fees` Cr fee | fee = the payout aggregator's, in destination currency |
+| Refund (after settlement) | `lightning_position` Dr sats · `dst_pool` Cr sats · `src_pool` Dr A · `refund_payable` Cr A → on confirmation `refund_payable` Dr A · `src_collection_clearing` Cr A | the value sits in the destination pool until rebalanced |
+
+Conversion is at **mid**; the spread is one of the itemised fees (never in the rate as well).
+The source pool nets to zero per transaction; every currency balances per transaction.

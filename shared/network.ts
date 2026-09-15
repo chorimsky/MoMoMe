@@ -165,8 +165,11 @@ export interface NetworkQuote {
   fees: FeeBreakdown;
   /** What the customer pays, in source currency (= sourceAmount; fees are inside it). */
   totalSource: number;
-  /** The settlement leg, in sats, that carries the value across. */
+  /** The settlement leg, in sats, that carries the value across: what the destination pool
+   *  must receive to pay the recipient AND the payout aggregator's fee — never the gross. */
   settlementSats: number;
+  /** The same settlement value in source currency (source amount − fees retained at source). */
+  settlementSource: number;
   routeId: string;
   createdAt: string;
   expiresAt: string;
@@ -232,6 +235,8 @@ export interface NetworkTransaction {
   fees: FeeBreakdown;
   fx: FxQuote;
   settlementSats: number;
+  /** Settlement value in source currency (see NetworkQuote.settlementSource). */
+  settlementSource: number;
   /** Provider / rail references, one per leg. */
   refs: {
     liquidityReservationId?: string;
@@ -270,7 +275,9 @@ export type NetworkAccount =
   | "fee_revenue"                  // the platform fee
   | "fx_pnl"                       // FX result between legs
   | "partner_settlement"           // owed to / by a settlement partner
-  | "refund_payable";              // money to give back
+  | "refund_payable"               // money to give back
+  | "provider_fees"                // what the payout aggregator charged the destination pool (expense)
+  | "lightning_fees";              // routing fees actually paid on the settlement leg (expense)
 export interface NetworkLedgerEntry {
   id: string;
   txId: string;

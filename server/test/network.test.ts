@@ -118,8 +118,9 @@ async function main() {
     const q = best.quote;
     ok("the quote carries FX, a fee breakdown and a destination amount in KES", q.fx.from === "XAF" && q.fx.to === "KES" && q.destinationCurrency === "KES" && q.destinationAmount > 0 && q.fees.total > 0, `${q.destinationAmount} KES · fees ${q.fees.total} XAF`);
     ok("fees are itemised: collect, payout, FX spread, Lightning, liquidity, MoMo›Me", ["providerCollect", "providerPayout", "fxSpread", "lightning", "liquidity", "momome"].every((k) => typeof q.fees[k] === "number") && Math.abs(q.fees.providerCollect + q.fees.providerPayout + q.fees.fxSpread + q.fees.lightning + q.fees.liquidity + q.fees.momome - q.fees.total) < 0.01);
-    const expectedKes = Math.floor((10_000 - q.fees.total) * q.fx.rate);
-    ok("destination = (source − fees) × rate", q.destinationAmount === expectedKes, `${q.destinationAmount} vs ${expectedKes}`);
+    const expectedKes = Math.floor((10_000 - q.fees.total) * q.fx.mid);
+    ok("destination = (source − fees) × MID rate — the spread is itemised, never taken twice", q.destinationAmount === expectedKes && q.fx.mid > q.fx.rate, `${q.destinationAmount} vs ${expectedKes}`);
+    ok("only recipient + payout fee cross the border; every other fee stays at source", q.settlementSource === 10_000 - q.fees.total + q.fees.providerPayout, String(q.settlementSource));
     ok("the customer pays exactly what they typed (fees inside)", q.totalSource === 10_000);
     ok("the settlement leg is sized in sats", q.settlementSats > 0, `${q.settlementSats} sats`);
     ok("the route's score is a weighted sum of the seven factors", best.route.score.total > 0 && best.route.score.total <= 100, String(best.route.score.total));
@@ -130,7 +131,8 @@ async function main() {
     ok("confirming reserves destination liquidity and sends the collection request", c.status === 200 && c.body.transaction.state === "COLLECTION_PENDING", `${c.status} ${c.body.transaction?.state ?? c.body.message}`);
     const tx = c.body.transaction;
     const pos1 = (await liquidity.positions()).find((p) => p.sourceId === "ke:sim")!;
-    ok("Kenya liquidity shows the reservation", pos1.reserved === q.destinationAmount && pos1.available === 2_000_000 - q.destinationAmount, JSON.stringify({ r: pos1.reserved, a: pos1.available }));
+    const reserveKes = q.destinationAmount + Math.ceil(q.fees.providerPayout * q.fx.mid);
+    ok("Kenya liquidity reserves the recipient's amount PLUS the aggregator's payout fee", pos1.reserved === reserveKes && pos1.available === 2_000_000 - reserveKes, JSON.stringify({ r: pos1.reserved, a: pos1.available, expected: reserveKes }));
     const dup = await j(`/network/intents/${intentId}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
     ok("confirming twice returns the same transaction, not a second one", dup.status === 200 && dup.body.transaction.id === tx.id);
     // Provider says: collected. Twice.
@@ -145,9 +147,11 @@ async function main() {
     const b = balances(t.id);
     ok("the ledger balances in every currency", saga.ledgerBalanced(t.id));
     ok("Cameroon debit = 10,000 XAF collected", b.get("src_collection_clearing:XAF") === 10_000);
-    ok("the platform fee is booked as revenue", -(b.get("fee_revenue:XAF") ?? 0) === t.fees.momome, String(b.get("fee_revenue:XAF")));
+    ok("fees retained at source are booked as revenue (platform, collection, spread, liquidity, Lightning)", Math.abs(-(b.get("fee_revenue:XAF") ?? 0) - (t.fees.total - t.fees.providerPayout)) < 0.01, String(b.get("fee_revenue:XAF")));
+    ok("the source pool nets to zero: collected = settled + retained", Math.abs(b.get("src_pool:XAF") ?? 0) < 0.01, String(b.get("src_pool:XAF")));
+    ok("the destination pool paid the recipient AND the aggregator's fee out of the sats it absorbed", (b.get("dst_pool:KES") ?? 0) === t.destination.amount + Math.ceil(t.fees.providerPayout * t.fx.mid) && -(b.get("provider_fees:KES") ?? 0) === Math.ceil(t.fees.providerPayout * t.fx.mid), JSON.stringify([b.get("dst_pool:KES"), b.get("provider_fees:KES")]));
     const btc = t.settlementSats / 1e8;
-    ok("the Lightning position sent exactly the settlement value and the Kenya pool absorbed it", Math.abs((b.get("lightning_position:BTC") ?? 0)) < 1e-9 && Math.abs((b.get("dst_pool:BTC") ?? 0) + btc) < 1e-9, JSON.stringify([b.get("lightning_position:BTC"), b.get("dst_pool:BTC")]));
+    ok("the Lightning position sent exactly the settlement value (plus its routing fee) and the Kenya pool absorbed it", Math.abs((b.get("lightning_position:BTC") ?? 0) + (b.get("lightning_fees:BTC") ?? 0)) < 1e-9 && Math.abs((b.get("dst_pool:BTC") ?? 0) + btc) < 1e-9, JSON.stringify([b.get("lightning_position:BTC"), b.get("lightning_fees:BTC"), b.get("dst_pool:BTC")]));
     ok("M-Pesa credit = the quoted KES", -(b.get("dst_recipient:KES") ?? 0) === q.destinationAmount, String(b.get("dst_recipient:KES")));
     ok("the reservation was released on payout confirmation", !liquidity.reservationOf(t.id));
     const rec = (await j("/admin/network", { headers: A })).body.reconciliation;
@@ -202,6 +206,9 @@ async function main() {
     const t5id = c.body.transaction.id;
     await j(`/network/sim/${t5id}/collection`, { method: "POST", headers: H(dev), body: JSON.stringify({ status: "FAILED", eventId: "col-5" }) });
     ok("a declined collection releases the reservation and books nothing", saga.getTx(t5id)!.state === "COLLECTION_FAILED" && saga.ledgerFor(t5id).length === 0 && !liquidity.reservationOf(t5id));
+    const again5 = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    ok("…and the same intent can be tried again with a NEW transaction (no money moved)", again5.status === 200 && again5.body.transaction.id !== t5id && again5.body.transaction.state === "COLLECTION_PENDING", `${again5.status} ${again5.body.transaction?.id}`);
+    await j(`/network/sim/${again5.body.transaction.id}/collection`, { method: "POST", headers: H(dev), body: JSON.stringify({ status: "FAILED", eventId: "col-5b" }) });
 
     // Liquidity shortage.
     r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, sourceAmount: 4_000_000 }) });
@@ -221,6 +228,22 @@ async function main() {
     const dom = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationMarket: "CM", destinationProvider: "ORANGE", destinationPhone: "699000155", sourceAmount: 5_000 }) });
     ok("…while a domestic CM→CM route (today's flow) is still found", !!dom.body.best && dom.body.best.route.type === "AGGREGATOR_SETTLEMENT", JSON.stringify(dom.body.unavailable));
 
+    // Payer number vs stated provider.
+    const mism = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, sourceProvider: "ORANGE" }) });
+    ok("a payer number on MTN cannot be collected as Orange", mism.status === 400 && mism.body.error === "bad_phone", `${mism.status} ${mism.body.message}`);
+    const derived = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, sourceProvider: undefined }) });
+    ok("…and the provider is derived from the number when not stated", derived.status === 201 && derived.body.intent.sourceProvider === "MTN");
+    // Parked, then recovered.
+    r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000009" }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    const t7id = c.body.transaction.id;
+    simulateFailure(`${t7id}:payout`);
+    await j(`/network/sim/${t7id}/collection`, { method: "POST", headers: H(dev), body: JSON.stringify({ status: "COMPLETED", eventId: "col-7" }) });
+    await j(`/admin/network/tx/${t7id}/recover`, { method: "POST", headers: A, body: JSON.stringify({ action: "manual" }) });
+    ok("an operator can park a failed payout for review", saga.getTx(t7id)!.state === "MANUAL_REVIEW");
+    const rt7 = await j(`/admin/network/tx/${t7id}/recover`, { method: "POST", headers: A, body: JSON.stringify({ action: "retry" }) });
+    ok("…and retry it from review — it is not a dead end", rt7.status === 200 && saga.getTx(t7id)!.state === "COMPLETED" && saga.ledgerBalanced(t7id), saga.getTx(t7id)!.state);
+
     console.log("\n4b. Canary controls and the activation checklist\n");
     r = await j("/network/intents", { method: "POST", headers: H(other), body: JSON.stringify({ ...intentBody, destinationPhone: "712000010" }) });
     c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(other), body: JSON.stringify({}) });
@@ -232,7 +255,7 @@ async function main() {
     const vol = saga.corridorVolume24h("CM-KE");
     await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { maxPerTx: { "CM-KE": 0 }, maxPerDay: { "CM-KE": vol + 5_000 } } }) });
     c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
-    ok("the rolling daily cap counts what already executed (refunds and declines excluded)", c.status === 403 && /daily cap/.test(c.body.message) && vol === 30_000, `${c.status} ${c.body.message} · volume ${vol}`);
+    ok("the rolling daily cap counts what already executed (refunds and declines excluded)", c.status === 403 && /daily cap/.test(c.body.message) && vol === 40_000, `${c.status} ${c.body.message} · volume ${vol}`);
     await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ canary: { maxPerDay: { "CM-KE": 1_000_000 }, maxPerTx: { "CM-KE": 50_000 } } }) });
     c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
     ok("within the caps the same intent executes", c.status === 200 && c.body.transaction.state === "COLLECTION_PENDING", `${c.status} ${c.body.message ?? ""}`);

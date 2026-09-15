@@ -104,7 +104,7 @@ export async function canSettle(sourceId: string, amount: number): Promise<{ ok:
 
 /* ---------- reservations (§11) ---------- */
 export async function reserve(sourceId: string, txId: string, amount: number): Promise<{ ok: true; reservation: LiquidityReservation } | { ok: false; reason: string }> {
-  if (!getSettings().network.flags.LIQUIDITY_ENGINE && process.env.RAILS_MODE !== "sandbox") return { ok: false, reason: "LIQUIDITY_ENGINE is off" };
+  if (!getSettings().network.flags.LIQUIDITY_ENGINE && config.railsMode !== "sandbox") return { ok: false, reason: "LIQUIDITY_ENGINE is off" };
   const existing = [...reservations.values()].find((r) => r.txId === txId && r.sourceId === sourceId && r.state !== "RELEASED");
   if (existing) return { ok: true, reservation: existing }; // idempotent
   const c = await canSettle(sourceId, amount);

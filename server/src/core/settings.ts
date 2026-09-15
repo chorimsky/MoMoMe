@@ -70,6 +70,8 @@ const DEFAULTS: AdminSettings = {
     // Canary defaults: nobody is admitted until the operator names devices or raises the
     // rollout; caps are set per corridor as it is activated.
     canary: { allowlist: [], rolloutPct: 0, maxPerTx: {}, maxPerDay: {} },
+    collectionTimeoutMin: 30,
+    autoRefund: false,
   },
 };
 
@@ -88,6 +90,8 @@ function mergeNetwork(base: AdminSettings["network"], p?: Partial<AdminSettings[
     partners: p.partners ?? base.partners,
     markets: { ...base.markets, ...(p.markets ?? {}) },
     canary: { ...base.canary, ...(p.canary ?? {}), maxPerTx: { ...base.canary.maxPerTx, ...(p.canary?.maxPerTx ?? {}) }, maxPerDay: { ...base.canary.maxPerDay, ...(p.canary?.maxPerDay ?? {}) } },
+    collectionTimeoutMin: p.collectionTimeoutMin ?? base.collectionTimeoutMin,
+    autoRefund: p.autoRefund ?? base.autoRefund,
   };
 }
 

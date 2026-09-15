@@ -242,6 +242,9 @@ export interface NetworkTransaction {
     destinationProviderRef?: string;
     settlementId?: string;
     refundRef?: string;
+    /** Automated refund (payout back to the payer on the collection rail). */
+    refundPayoutId?: string;
+    refundProviderRef?: string;
   };
   /** Recovery chosen after DESTINATION_SETTLEMENT_FAILED (§29). */
   recovery?: "retry" | "alternate_provider" | "manual" | "refund";
@@ -326,6 +329,8 @@ export interface NetworkOverview {
   fx: FxFeedStatus;
   canary: CanaryControls;
   marketOverrides: Record<string, MarketOverride>;
+  collectionTimeoutMin: number;
+  autoRefund: boolean;
 }
 
 /* ---------- flags & operator controls (§45, §46) ---------- */
@@ -363,6 +368,12 @@ export interface NetworkSettings {
   markets: Record<string, MarketOverride>;
   /** Canary controls — who may execute, how much, per corridor (PHASE 7). */
   canary: CanaryControls;
+  /** A collection the payer has not approved within this many minutes is expired (its
+   *  reservation released); a collection that lands after expiry is refunded. */
+  collectionTimeoutMin: number;
+  /** Execute refunds automatically: a payout back to the payer over the source market's
+   *  rail (idempotent on the transaction). Off = an operator refunds and marks it. */
+  autoRefund: boolean;
 }
 export interface MarketOverride {
   enabled?: boolean;

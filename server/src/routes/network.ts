@@ -26,6 +26,7 @@ import * as saga from "../core/network/saga.js";
 import * as liquidity from "../core/network/liquidity.js";
 import { shadowTick, shadowReport, reconcile, monitoring } from "../core/network/shadow.js";
 import { checklists, corridorChecklist } from "../core/network/activation.js";
+import { networkTick } from "../core/network/monitor.js";
 import { fxFeedStatus, refreshPublicFx } from "../core/network/fx.js";
 import { rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
@@ -143,7 +144,7 @@ export async function overview(): Promise<NetworkOverview> {
     reconciliation: reconcile(), shadow: shadowReport(),
     monitoring: { payments: mon.payments, lightning: mon.lightning, liquidity: { lowAlerts: low } },
     weights: s.weights,
-    checklists: lists, fx: fxFeedStatus(), canary: s.canary, marketOverrides: s.markets,
+    checklists: lists, fx: fxFeedStatus(), canary: s.canary, marketOverrides: s.markets, collectionTimeoutMin: s.collectionTimeoutMin, autoRefund: s.autoRefund,
   };
 }
 adminNetwork.get("/network", async (_req, res) => res.json(await overview()));
@@ -166,6 +167,8 @@ adminNetwork.put("/network/settings", (req, res) => {
       for (const r of ["collect", "payout"] as const) if (roles?.[r] !== undefined && typeof roles[r] !== "boolean") return res.status(400).json({ error: "bad_provider", message: `${code}.${pid}.${r} must be true or false.` });
     }
   }
+  if (b.collectionTimeoutMin !== undefined && !(typeof b.collectionTimeoutMin === "number" && b.collectionTimeoutMin >= 5 && b.collectionTimeoutMin <= 24 * 60)) return res.status(400).json({ error: "bad_timeout", message: "collectionTimeoutMin must be 5–1440." });
+  if (b.autoRefund !== undefined && typeof b.autoRefund !== "boolean") return res.status(400).json({ error: "bad_flag", message: "autoRefund must be true or false." });
   // Canary: a list of owner ids, a 0–100 share, positive caps keyed by known corridor.
   if (b.canary) {
     const c = b.canary;
@@ -198,6 +201,7 @@ adminNetwork.get("/network/corridors/:id/checklist", async (req, res) => {
   if (!c) return res.status(404).json({ error: "not_found", message: "Unknown corridor." });
   res.json(c);
 });
+adminNetwork.post("/network/tick", async (_req, res) => res.json({ examined: await networkTick() }));
 adminNetwork.post("/network/fx/refresh", async (_req, res) => res.json({ ...(await refreshPublicFx()), feed: fxFeedStatus() }));
 adminNetwork.post("/network/shadow/run", async (_req, res) => res.json({ compared: await shadowTick(200), report: shadowReport() }));
 adminNetwork.post("/network/tx/:id/recover", async (req, res) => {

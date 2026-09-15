@@ -238,6 +238,36 @@ async function main() {
     const bad404 = await j("/admin/network/corridors/CM-ZZ/checklist", { headers: A });
     ok("an unknown corridor is a 404", bad404.status === 404);
 
+    console.log("\n4c. Time-driven saga: expiry, late collection, automated refunds\n");
+    const { networkTick } = await import("../src/core/network/monitor.js");
+    ok("a Lightning failure books the refund liability the moment it lands", (balances(t4id).get("refund_payable:XAF") ?? 0) === -10_000 && saga.ledgerBalanced(t4id), String(balances(t4id).get("refund_payable:XAF")));
+    // Expiry: the payer never approves; 31 minutes pass.
+    r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000020" }) });
+    c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({}) });
+    const t6id = c.body.transaction.id;
+    ok("a pending collection is left alone before the timeout", (await networkTick()) >= 1 && saga.getTx(t6id)!.state === "COLLECTION_PENDING", saga.getTx(t6id)!.state);
+    const t6 = saga.getTx(t6id)!; const pendingEv = t6.events.find((e) => e.state === "COLLECTION_PENDING")!; pendingEv.at = new Date(Date.now() - 31 * 60_000).toISOString();
+    await networkTick();
+    ok("after collectionTimeoutMin the collection expires and the reservation is released", saga.getTx(t6id)!.state === "COLLECTION_FAILED" && !liquidity.reservationOf(t6id) && saga.ledgerFor(t6id).length === 0, saga.getTx(t6id)!.state);
+    // …then the provider says the money was collected after all.
+    await j(`/network/sim/${t6id}/collection`, { method: "POST", headers: H(dev), body: JSON.stringify({ status: "COMPLETED", eventId: "col-late" }) });
+    ok("a collection that lands after expiry is booked and routed to a refund, never lost", saga.getTx(t6id)!.state === "REFUND_PENDING" && (balances(t6id).get("src_collection_clearing:XAF") ?? 0) === 10_000 && (balances(t6id).get("refund_payable:XAF") ?? 0) === -10_000, saga.getTx(t6id)!.state);
+    await networkTick();
+    ok("with autoRefund OFF the refund waits for an operator", saga.getTx(t6id)!.state === "REFUND_PENDING" && !saga.getTx(t6id)!.refs.refundPayoutId);
+    const badT = await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ collectionTimeoutMin: 2 }) });
+    ok("a collection timeout under 5 min is refused", badT.status === 400);
+    await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ autoRefund: true }) });
+    await networkTick();
+    const t6r = saga.getTx(t6id)!, t4r = saga.getTx(t4id)!;
+    ok("with autoRefund ON the payer is paid back on the source rail and the transaction is REFUNDED", t6r.state === "REFUNDED" && t6r.refs.refundPayoutId === `${t6id}:refund` && !!t6r.refs.refundRef && saga.ledgerBalanced(t6id), `${t6r.state} ${t6r.refs.refundPayoutId}`);
+    ok("…every open liability is closed: refund_payable and the clearing account are zero", (balances(t6id).get("refund_payable:XAF") ?? 0) === 0 && (balances(t6id).get("src_collection_clearing:XAF") ?? 0) === 0);
+    ok("…the earlier Lightning-failure refund was paid the same way", t4r.state === "REFUNDED" && t4r.refs.refundPayoutId === `${t4id}:refund` && saga.ledgerBalanced(t4id), t4r.state);
+    const again = await saga.submitRefund(t6r);
+    ok("a second submit for the same transaction is a no-op (idempotent key)", again.ok === false && again.error === "not_refund_pending");
+    await j("/admin/network/settings", { method: "PUT", headers: A, body: JSON.stringify({ autoRefund: false }) });
+    const tk = await j("/admin/network/tick", { method: "POST", headers: A, body: "{}" });
+    ok("an operator can run the monitor now", tk.status === 200 && typeof tk.body.examined === "number");
+
     console.log("\n5. Shadow mode never moves funds; flags off never executes\n");
     r = await j("/network/intents", { method: "POST", headers: H(dev), body: JSON.stringify({ ...intentBody, destinationPhone: "712000007" }) });
     c = await j(`/network/intents/${r.body.intent.id}/confirm`, { method: "POST", headers: H(dev), body: JSON.stringify({ shadow: true }) });

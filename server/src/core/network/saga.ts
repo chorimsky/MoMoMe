@@ -17,7 +17,7 @@ import type { NetworkIntent, NetworkLedgerEntry, NetworkQuote, NetworkRoute, Net
 import { getSettings } from "../settings.js";
 import { register, touch } from "../persist.js";
 import { id } from "../ids.js";
-import { adapterById } from "./adapters.js";
+import { adapterById, adaptersFor } from "./adapters.js";
 import * as liquidity from "./liquidity.js";
 import { settle as lightningSettle } from "./settlement.js";
 import { fxExpired } from "./fx.js";
@@ -151,11 +151,39 @@ export async function begin(intent: NetworkIntent, quote: NetworkQuote, route: N
   return { ok: true, tx: t };
 }
 
+/** The source pool owes the payer their money back (refund liability). */
+function bookRefundOwed(t: NetworkTransaction): void {
+  book(t, [
+    { account: "src_pool", direction: "debit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: "refund owed" },
+    { account: "refund_payable", direction: "credit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: `refund to +${t.source.phone}` },
+  ]);
+}
+
+/** The payer did not approve in time: release the destination reservation and close the
+ *  attempt. If the provider later reports the money collected anyway, onCollectionEvent
+ *  books it and routes it to a refund — it is never left unaccounted. */
+export function expireCollection(t: NetworkTransaction, minutes: number): void {
+  if (t.shadow || t.state !== "COLLECTION_PENDING") return;
+  if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
+  t.refs.liquidityReservationId = undefined;
+  move(t, "COLLECTION_FAILED", `expired — the payer did not approve within ${minutes} min`);
+}
+
 /** Provider event for the collection leg (webhook or status poll). Deduplicated by event id. */
 export async function onCollectionEvent(txId: string, eventId: string, status: "COMPLETED" | "FAILED" | "PENDING"): Promise<void> {
   const t = txs.get(txId); if (!t || t.shadow) return;
   if (t.appliedEvents.includes(eventId)) return; // duplicate webhook (§31)
   t.appliedEvents.push(eventId);
+  if (t.state === "COLLECTION_FAILED" && status === "COMPLETED" && t.refs.sourceCollectionId && !t.events.some((e) => e.state === "COLLECTION_CONFIRMED")) {
+    // Late collection after expiry: the money is IN with no leg in flight — owe it back.
+    book(t, [
+      { account: "src_collection_clearing", direction: "debit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: "collected from payer (late)" },
+      { account: "src_pool", direction: "credit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: "owed onward" },
+    ]);
+    move(t, "COLLECTION_CONFIRMED", `${t.source.amount} ${t.source.currency} collected after expiry`, eventId);
+    t.recovery = "refund"; bookRefundOwed(t); move(t, "REFUND_PENDING", "collected after expiry — refund the payer");
+    return;
+  }
   if (t.state !== "COLLECTION_PENDING") { touch("network_txs"); return; } // late/duplicate after a transition
   if (status === "PENDING") { touch("network_txs"); return; }
   if (status === "FAILED") {
@@ -190,7 +218,7 @@ export async function advance(t: NetworkTransaction): Promise<void> {
         // The source money is in; nothing left the network. Refund path (§29).
         move(t, "LIGHTNING_FAILED", s.error ?? "settlement failed");
         if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
-        t.recovery = "refund"; move(t, "REFUND_PENDING", "refund the payer — nothing reached the destination");
+        t.recovery = "refund"; bookRefundOwed(t); move(t, "REFUND_PENDING", "refund the payer — nothing reached the destination");
         return;
       }
       t.refs.lightningPaymentId = s.settlementId; t.refs.settlementId = s.settlementId;
@@ -266,10 +294,7 @@ export async function recover(txId: string, action: "retry" | "alternate_provide
   if (action === "manual") { move(t, "MANUAL_REVIEW", `held for an operator by ${by}`); return { ok: true }; }
   if (action === "refund") {
     if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
-    book(t, [
-      { account: "src_pool", direction: "debit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: "refund owed" },
-      { account: "refund_payable", direction: "credit", amount: t.source.amount, currency: t.source.currency, market: t.source.market, memo: `refund to +${t.source.phone}` },
-    ]);
+    bookRefundOwed(t);
     move(t, "REFUND_PENDING", `refund of ${t.source.amount} ${t.source.currency} to the payer, by ${by}`);
     return { ok: true };
   }
@@ -277,7 +302,7 @@ export async function recover(txId: string, action: "retry" | "alternate_provide
   // provider does not return the failed attempt, but the same transaction and ledger.
   const route = routes.get(t.routeId)!;
   if (action === "alternate_provider") {
-    const alt = (await import("./adapters.js")).adaptersFor(t.destination.market).find((a) => a.id !== route.payoutAdapter && a.supports(t.destination.provider, "payout"));
+    const alt = adaptersFor(t.destination.market).find((a) => a.id !== route.payoutAdapter && a.supports(t.destination.provider, "payout"));
     if (!alt) return { ok: false, error: "no_alternate" };
     route.payoutAdapter = alt.id; saveRoute(route);
   }
@@ -292,6 +317,28 @@ export async function recover(txId: string, action: "retry" | "alternate_provide
   t.refs.destinationPayoutId = `${t.id}:payout:${attempt}`; t.refs.destinationProviderRef = r.providerRef; touch("network_txs");
   if (r.simulated) await onPayoutEvent(t.id, `${r.providerRef}:sim`, (await pay.getPayoutStatus(`${t.id}:payout:${attempt}`)) ?? "PENDING");
   return { ok: true };
+}
+/** Refund the payer over the source market's payout rail — idempotent on the transaction
+ *  (one key, `${id}:refund`), so a tick that runs twice can never refund twice. The
+ *  liability stays on the books until the rail confirms; markRefunded closes it. */
+export async function submitRefund(t: NetworkTransaction): Promise<{ ok: boolean; error?: string }> {
+  if (t.shadow || t.state !== "REFUND_PENDING") return { ok: false, error: "not_refund_pending" };
+  if (t.refs.refundPayoutId) return { ok: true }; // already submitted — poll it
+  const rail = adaptersFor(t.source.market).find((a) => a.supports(t.source.provider, "payout"));
+  if (!rail) return { ok: false, error: `no payout rail for ${t.source.provider} in ${t.source.market}` };
+  const key = `${t.id}:refund`;
+  const r = await rail.createPayout({ idempotencyKey: key, market: t.source.market, provider: t.source.provider, phone: t.source.phone, amount: t.source.amount, currency: t.source.currency }).catch((e) => ({ accepted: false, providerRef: "", simulated: false, error: e instanceof Error ? e.message : "refund failed" }));
+  if (!r.accepted) { t.events.push({ at: now(), state: t.state, note: `refund not accepted: ${r.error ?? "refused"}` }); touch("network_txs"); return { ok: false, error: r.error ?? "refused" }; }
+  t.refs.refundPayoutId = key; t.refs.refundProviderRef = r.providerRef;
+  t.events.push({ at: now(), state: t.state, note: `refund ${r.providerRef} sent to +${t.source.phone} via ${rail.aggregator}`, ref: r.providerRef });
+  touch("network_txs");
+  if (r.simulated) { const st = await rail.getPayoutStatus(key); if (st === "COMPLETED") markRefunded(t.id, r.providerRef, "auto"); else if (st === "FAILED") onRefundFailed(t, "simulated failure"); }
+  return { ok: true };
+}
+export function onRefundFailed(t: NetworkTransaction, why: string): void {
+  if (t.state !== "REFUND_PENDING") return;
+  t.refs.refundPayoutId = undefined; t.refs.refundProviderRef = undefined; t.recovery = "manual";
+  t.events.push({ at: now(), state: t.state, note: `refund failed: ${why} — for an operator` }); touch("network_txs");
 }
 export function markRefunded(txId: string, refundRef: string, by: string): boolean {
   const t = txs.get(txId); if (!t || t.state !== "REFUND_PENDING") return false;

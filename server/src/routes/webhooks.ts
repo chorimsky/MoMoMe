@@ -6,6 +6,7 @@
 import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
+import { hint as networkHint } from "../core/network/monitor.js";
 import { store } from "../db/store.js";
 import { markDetected, confirmInbound, recordUnattributedInbound } from "../core/stateMachine.js";
 import * as peex from "../integrations/peex/service.js";
@@ -51,6 +52,11 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   const rec = recordEvent({ provider: name, eventType: "callback.received", rawBody: raw, providerReference: events[0]?.providerRef ?? events[0]?.ref ?? null, status: "verified" });
   res.json({ ok: true, ...(rec.duplicate ? { duplicate: true } : {}) }); // ack fast; settle in background
   if (rec.duplicate) return; // the same bytes again: already handled, never twice
+  if (events.length === 0) {
+    // Not a v1 payout: a network transaction may own this provider id — poll it now (the
+    // poll, not the callback body, is what settles it).
+    try { const pid = (JSON.parse(raw) as { payoutId?: string; depositId?: string }); const ref = pid.payoutId ?? pid.depositId; if (ref) background(networkHint(ref).then(() => {})); } catch { /* already rejected above */ }
+  }
   for (const ev of events) {
     if (!adapter.statusByKey(ev.ref)) continue; // not one of ours
     background((async () => {

@@ -36,6 +36,8 @@ export function NetworkPanel() {
   const setFlag = async (k: keyof NetworkFlags, v: boolean) => { setBusy(k); try { await api.networkSettings({ flags: { [k]: v } }); await load(); } finally { setBusy(null); } };
   const setCorridor = async (idc: string, v: boolean) => { setBusy(idc); try { await api.networkSettings({ corridors: { [idc]: v } }); await load(); } finally { setBusy(null); } };
   const runShadow = async () => { setBusy("shadow"); try { await api.networkShadowRun(); await load(); } finally { setBusy(null); } };
+  const runTick = async () => { setBusy("tick"); try { await api.networkTick(); await load(); } finally { setBusy(null); } };
+  const setScalar = async (patch: { collectionTimeoutMin?: number; autoRefund?: boolean }) => { setBusy("scalar"); try { await api.networkSettings(patch as never); await load(); } finally { setBusy(null); } };
   const refreshFx = async () => { setBusy("fx"); try { await api.networkFxRefresh(); await load(); } finally { setBusy(null); } };
   const setMarket = async (code: string, enabled: boolean) => { setBusy(code); try { await api.networkSettings({ markets: { [code]: { enabled } } }); await load(); } finally { setBusy(null); } };
   const setRole = async (code: string, pid: string, role: "collect" | "payout", v: boolean) => { setBusy(`${code}:${pid}`); try { await api.networkSettings({ markets: { [code]: { providers: { [pid]: { [role]: v } } } } }); await load(); } finally { setBusy(null); } };
@@ -148,7 +150,9 @@ export function NetworkPanel() {
             </div>
           ))}
         </Card>
-        <Card title="Monitoring & reconciliation" sub="A transaction is settled only when source, Lightning and payout are confirmed and the ledger balances.">
+        <Card title="Monitoring & reconciliation" sub="A transaction is settled only when source, Lightning and payout are confirmed and the ledger balances. The monitor polls real rails every 30 s, expires stale collections and (when switched on) refunds the payer itself." action={<button type="button" className="btn btn-ghost" style={{ fontSize: 11.5, padding: "5px 10px" }} disabled={busy !== null} onClick={runTick}>{busy === "tick" ? "…" : "Run monitor"}</button>}>
+          <KV k="Collection timeout" v={<span>payer must approve within <input type="number" min={5} max={1440} defaultValue={ov.collectionTimeoutMin} key={ov.collectionTimeoutMin} onBlur={(e) => { const v = Number(e.target.value); if (v >= 5 && v <= 1440 && v !== ov.collectionTimeoutMin) void setScalar({ collectionTimeoutMin: v }); }} style={{ width: 64, fontSize: 12.5, padding: "2px 6px", borderRadius: "var(--r)", border: "1px solid var(--line-2)", background: "var(--surface)", color: "var(--ink)" }} /> min</span>} />
+          <KV k="Automatic refunds" v={<label style={{ cursor: "pointer", display: "inline-flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={ov.autoRefund} disabled={busy !== null} onChange={(e) => void setScalar({ autoRefund: e.target.checked })} />{ov.autoRefund ? "on — paid back on the source rail, idempotent" : "off — an operator refunds and marks it"}</label>} tone={ov.autoRefund ? "recv" : undefined} />
           <KV k="Network payments" v={`${fmt(m.payments.success)} settled · ${fmt(m.payments.pending)} in flight · ${fmt(m.payments.failed)} failed`} />
           <KV k="Avg settlement" v={m.payments.avgSettlementSec == null ? "—" : `${m.payments.avgSettlementSec} s`} />
           <KV k="Lightning legs" v={`${fmt(m.lightning.success)} ok · ${fmt(m.lightning.failed)} failed · ${fmt(m.lightning.feesSats)} sats fees${m.lightning.avgLatencyMs != null ? ` · ${m.lightning.avgLatencyMs} ms` : ""}`} />

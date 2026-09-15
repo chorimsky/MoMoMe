@@ -62,6 +62,13 @@ export interface Store {
   // read the COMPLETE cross-instance set (leg-2 fires + full screening). No-op on memory.
   upsertMomoOp(op: { id: string; kind: string; status: string; transferId?: string; at: string }): Promise<void>;
   allMomoOps(): Promise<unknown[]>;
+  // The interoperability network's money data — one row per ledger leg (append-only) and
+  // per transaction (upsert). Authoritative over the bounded snapshot on Postgres; no-op on
+  // memory (the single process holds it). RISK_REGISTER #10.
+  appendNetworkLedger(e: { id: string; txId: string; at: string; account: string; market?: string; direction: string; amount: number; currency: string; memo?: string }): Promise<void>;
+  allNetworkLedger(): Promise<unknown[]>;
+  upsertNetworkTx(t: { id: string; ref: string; intentId: string; corridor: string; state: string; shadow: boolean; createdAt: string; updatedAt: string }): Promise<void>;
+  allNetworkTxs(limit?: number): Promise<unknown[]>;
   // Capital Intelligence / Investor OS — per-row durable records (Postgres capital_rows table).
   upsertCapitalRow(collection: string, id: string, body: unknown): Promise<void>;
   deleteCapitalRow(collection: string, id: string): Promise<void>;
@@ -113,6 +120,10 @@ const memoryStore: Store = {
   allComplianceEvents: async () => [],
   upsertMomoOp: async () => {}, // memory keeps ops in-process (array + snapshot)
   allMomoOps: async () => [],
+  appendNetworkLedger: async () => {}, // memory: the saga's array + snapshot
+  allNetworkLedger: async () => [],
+  upsertNetworkTx: async () => {},
+  allNetworkTxs: async () => [],
   upsertCapitalRow: async () => {}, // memory keeps capital records in-process (maps + snapshot)
   deleteCapitalRow: async () => {},
   allCapitalRows: async () => [],
@@ -154,6 +165,10 @@ const pgStore: Store = {
   allComplianceEvents: pg.allComplianceEvents,
   upsertMomoOp: pg.upsertMomoOp,
   allMomoOps: pg.allMomoOps,
+  appendNetworkLedger: pg.appendNetworkLedger,
+  allNetworkLedger: pg.allNetworkLedger,
+  upsertNetworkTx: pg.upsertNetworkTx,
+  allNetworkTxs: pg.allNetworkTxs,
   upsertCapitalRow: pg.upsertCapitalRow,
   deleteCapitalRow: pg.deleteCapitalRow,
   allCapitalRows: pg.allCapitalRows,

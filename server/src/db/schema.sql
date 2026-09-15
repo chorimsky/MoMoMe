@@ -122,6 +122,40 @@ CREATE TABLE IF NOT EXISTS compliance_chain (
 -- Append-only + ordered by seq; the prev_hash/hash chain is verified on read. Enforce
 -- no-mutation at the app layer (and optionally a REVOKE UPDATE,DELETE grant in prod).
 
+-- ---- The interoperability network (docs/interop-v2): money data, one row per record ----
+-- network_ledger is APPEND-ONLY (no UPDATE/DELETE; a refund posts its own legs); balances
+-- are derived. network_txs is upserted on every state change so a concurrent instance's
+-- transaction is never clobbered by the coarse snapshot. Both hydrate the in-memory saga at
+-- boot (core/network/saga hydrateNetwork) and are authoritative over the snapshot on Postgres.
+CREATE TABLE IF NOT EXISTS network_ledger (
+  seq        BIGSERIAL PRIMARY KEY,
+  id         TEXT NOT NULL UNIQUE,
+  tx_id      TEXT NOT NULL,
+  at         TIMESTAMPTZ NOT NULL,
+  account    TEXT NOT NULL,
+  market     TEXT,
+  direction  TEXT NOT NULL,
+  amount     NUMERIC(24, 10) NOT NULL,
+  currency   TEXT NOT NULL,
+  memo       TEXT,
+  body       JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS network_ledger_tx ON network_ledger (tx_id);
+CREATE INDEX IF NOT EXISTS network_ledger_account ON network_ledger (account, currency);
+CREATE TABLE IF NOT EXISTS network_txs (
+  id          TEXT PRIMARY KEY,
+  ref         TEXT NOT NULL UNIQUE,
+  intent_id   TEXT NOT NULL,
+  corridor    TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  shadow      BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL,
+  body        JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS network_txs_state ON network_txs (state);
+CREATE INDEX IF NOT EXISTS network_txs_corridor ON network_txs (corridor, created_at DESC);
+
 -- ---- Snapshots: coarse key→JSON for the non-money collections ----
 -- settings, routing health, merchant directory, identities, devices, contact vault,
 -- referrals. `version` supports optimistic concurrency: writers pass the version they

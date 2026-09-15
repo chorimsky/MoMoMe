@@ -113,6 +113,40 @@ CREATE TABLE IF NOT EXISTS momo_ops (
 CREATE INDEX IF NOT EXISTS momo_ops_status ON momo_ops (status);
 CREATE INDEX IF NOT EXISTS momo_ops_transfer ON momo_ops (transfer_id) WHERE transfer_id IS NOT NULL;
 
+-- ---- The interoperability network (docs/interop-v2): money data, one row per record ----
+-- network_ledger is APPEND-ONLY (no UPDATE/DELETE; a refund posts its own legs); balances
+-- are derived. network_txs is upserted on every state change so a concurrent instance's
+-- transaction is never clobbered by the coarse snapshot. Both hydrate the in-memory saga at
+-- boot (core/network/saga hydrateNetwork) and are authoritative over the snapshot on Postgres.
+CREATE TABLE IF NOT EXISTS network_ledger (
+  seq        BIGSERIAL PRIMARY KEY,
+  id         TEXT NOT NULL UNIQUE,
+  tx_id      TEXT NOT NULL,
+  at         TIMESTAMPTZ NOT NULL,
+  account    TEXT NOT NULL,
+  market     TEXT,
+  direction  TEXT NOT NULL,
+  amount     NUMERIC(24, 10) NOT NULL,
+  currency   TEXT NOT NULL,
+  memo       TEXT,
+  body       JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS network_ledger_tx ON network_ledger (tx_id);
+CREATE INDEX IF NOT EXISTS network_ledger_account ON network_ledger (account, currency);
+CREATE TABLE IF NOT EXISTS network_txs (
+  id          TEXT PRIMARY KEY,
+  ref         TEXT NOT NULL UNIQUE,
+  intent_id   TEXT NOT NULL,
+  corridor    TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  shadow      BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL,
+  body        JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS network_txs_state ON network_txs (state);
+CREATE INDEX IF NOT EXISTS network_txs_corridor ON network_txs (corridor, created_at DESC);
+
 -- Durable fixed-window rate-limit counters (SHARED across serverless instances) — the
 -- in-memory limiter is per-instance, so brute-force throttles (admin login / recovery)
 -- were bypassable by spreading attempts across concurrent invocations. Atomic UPSERT.

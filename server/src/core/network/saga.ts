@@ -23,6 +23,8 @@ import { settle as lightningSettle } from "./settlement.js";
 import { fxExpired } from "./fx.js";
 import { corridorId, MARKETS } from "./markets.js";
 import * as notifyNet from "./notify.js";
+import { store, usingPostgres } from "../../db/store.js";
+import { background } from "../background.js";
 
 /* ---------- durable state ---------- */
 const intents = new Map<string, NetworkIntent>();
@@ -37,6 +39,18 @@ register("network_txs", () => [...txs.values()].slice(-20_000), (d: NetworkTrans
 register("network_ledger", () => ledger.slice(-200_000), (d: NetworkLedgerEntry[]) => { ledger.length = 0; ledger.push(...(d ?? [])); });
 
 const now = () => new Date().toISOString();
+
+/** Postgres: the per-row tables are authoritative over the bounded snapshot. Runs at boot
+ *  after hydrateSnapshots (index.ts / api/index.ts); no-op on memory. */
+export async function hydrateNetwork(): Promise<void> {
+  if (!usingPostgres()) return;
+  try {
+    const [rows, legs] = await Promise.all([store().allNetworkTxs(), store().allNetworkLedger()]);
+    if (rows.length) { txs.clear(); for (const t of rows as NetworkTransaction[]) txs.set(t.id, t); }
+    if (legs.length) { ledger.length = 0; ledger.push(...(legs as NetworkLedgerEntry[])); }
+    console.log(`[network] hydrated ${rows.length} transaction(s), ${legs.length} ledger leg(s) from Postgres`);
+  } catch (e) { console.error("network hydrate", e); }
+}
 export const saveIntent = (i: NetworkIntent) => { i.updatedAt = now(); intents.set(i.id, i); touch("network_intents"); };
 export const saveQuote = (q: NetworkQuote) => { quotes.set(q.id, q); touch("network_quotes"); };
 export const saveRoute = (r: NetworkRoute) => { routes.set(r.id, r); touch("network_routes"); };
@@ -50,10 +64,12 @@ export const allTx = (limit = 200) => [...txs.values()].sort((a, b) => b.created
 export const ledgerFor = (txId: string) => ledger.filter((e) => e.txId === txId);
 export const ledgerAll = () => ledger;
 
+/** Every mutation of a transaction goes through here: snapshot + per-row upsert (Postgres). */
+function persistTx(t: NetworkTransaction): void { txs.set(t.id, t); touch("network_txs"); background(store().upsertNetworkTx(t)); }
 function move(t: NetworkTransaction, state: NetworkTxState, note?: string, ref?: string): void {
   t.state = state; t.updatedAt = now();
   t.events.push({ at: t.updatedAt, state, ...(note ? { note } : {}), ...(ref ? { ref } : {}) });
-  txs.set(t.id, t); touch("network_txs");
+  persistTx(t);
   console.log(`[network] ${t.ref} → ${state}${note ? ` · ${note}` : ""}`);
 }
 
@@ -64,7 +80,11 @@ function book(t: NetworkTransaction, legs: Array<{ account: NetworkAccount; dire
   for (const l of legs) byCcy.set(l.currency, (byCcy.get(l.currency) ?? 0) + (l.direction === "debit" ? l.amount : -l.amount));
   for (const [c, v] of byCcy) if (Math.abs(v) > 1e-6) throw new Error(`network ledger unbalanced in ${c}: ${v}`);
   const at = now();
-  for (const l of legs) ledger.push({ id: id("nle"), txId: t.id, at, account: l.account, market: l.market, direction: l.direction, amount: l.amount, currency: l.currency, memo: l.memo });
+  for (const l of legs) {
+    const e: NetworkLedgerEntry = { id: id("nle"), txId: t.id, at, account: l.account, market: l.market, direction: l.direction, amount: l.amount, currency: l.currency, memo: l.memo };
+    ledger.push(e);
+    background(store().appendNetworkLedger(e)); // per-row, append-only, idempotent on id
+  }
   touch("network_ledger");
 }
 
@@ -186,8 +206,8 @@ export async function onCollectionEvent(txId: string, eventId: string, status: "
     void notifyNet.networkRefunding(t, "the payer approved after the request had expired");
     return;
   }
-  if (t.state !== "COLLECTION_PENDING") { touch("network_txs"); return; } // late/duplicate after a transition
-  if (status === "PENDING") { touch("network_txs"); return; }
+  if (t.state !== "COLLECTION_PENDING") { persistTx(t); return; } // late/duplicate after a transition
+  if (status === "PENDING") { persistTx(t); return; }
   if (status === "FAILED") {
     if (t.refs.liquidityReservationId) liquidity.release(t.refs.liquidityReservationId);
     move(t, "COLLECTION_FAILED", "payer did not approve / provider declined", eventId);
@@ -243,12 +263,12 @@ export async function advance(t: NetworkTransaction): Promise<void> {
   }
   if (t.state === "LIGHTNING_CONFIRMED") {
     const pay = adapterById(route.payoutAdapter);
-    if (!pay) { move(t, "DESTINATION_SETTLEMENT_FAILED", "payout adapter missing"); t.recovery = "manual"; touch("network_txs"); return; }
+    if (!pay) { move(t, "DESTINATION_SETTLEMENT_FAILED", "payout adapter missing"); t.recovery = "manual"; persistTx(t); return; }
     if (t.refs.liquidityReservationId) liquidity.commit(t.refs.liquidityReservationId);
     move(t, "PAYOUT_INITIATED", `${t.destination.amount} ${t.destination.currency} to ${t.destination.provider} via ${pay.aggregator}`);
     const r = await pay.createPayout({ idempotencyKey: `${t.id}:payout`, market: t.destination.market, provider: t.destination.provider, phone: t.destination.phone, amount: t.destination.amount, currency: t.destination.currency, name: t.destination.name }).catch((e) => ({ accepted: false, providerRef: "", simulated: false, error: e instanceof Error ? e.message : "payout failed" }));
-    if (!r.accepted) { move(t, "DESTINATION_SETTLEMENT_FAILED", r.error ?? "payout refused"); t.recovery = "retry"; touch("network_txs"); void notifyNet.networkNeedsPerson(t, r.error ?? "the destination payout was refused"); return; }
-    t.refs.destinationPayoutId = `${t.id}:payout`; t.refs.destinationProviderRef = r.providerRef; touch("network_txs");
+    if (!r.accepted) { move(t, "DESTINATION_SETTLEMENT_FAILED", r.error ?? "payout refused"); t.recovery = "retry"; persistTx(t); void notifyNet.networkNeedsPerson(t, r.error ?? "the destination payout was refused"); return; }
+    t.refs.destinationPayoutId = `${t.id}:payout`; t.refs.destinationProviderRef = r.providerRef; persistTx(t);
     if (r.simulated) await onPayoutEvent(t.id, `${r.providerRef}:sim`, (await pay.getPayoutStatus(`${t.id}:payout`)) ?? "PENDING");
   }
 }
@@ -258,11 +278,11 @@ export async function onPayoutEvent(txId: string, eventId: string, status: "COMP
   const t = txs.get(txId); if (!t || t.shadow) return;
   if (t.appliedEvents.includes(eventId)) return;
   t.appliedEvents.push(eventId);
-  if (t.state !== "PAYOUT_INITIATED") { touch("network_txs"); return; }
-  if (status === "PENDING") { touch("network_txs"); return; }
+  if (t.state !== "PAYOUT_INITIATED") { persistTx(t); return; }
+  if (status === "PENDING") { persistTx(t); return; }
   if (status === "FAILED") {
     move(t, "DESTINATION_SETTLEMENT_FAILED", "payout failed after settlement — funds are on the ledger", eventId);
-    t.recovery = "retry"; touch("network_txs");
+    t.recovery = "retry"; persistTx(t);
     void notifyNet.networkNeedsPerson(t, "the destination payout failed after settlement");
     return;
   }
@@ -320,7 +340,7 @@ export async function recover(txId: string, action: "retry" | "alternate_provide
   move(t, "PAYOUT_INITIATED", `attempt ${attempt}`);
   const r = await pay.createPayout({ idempotencyKey: `${t.id}:payout:${attempt}`, market: t.destination.market, provider: t.destination.provider, phone: t.destination.phone, amount: t.destination.amount, currency: t.destination.currency, name: t.destination.name }).catch((e) => ({ accepted: false, providerRef: "", simulated: false, error: e instanceof Error ? e.message : "payout failed" }));
   if (!r.accepted) { move(t, "DESTINATION_SETTLEMENT_FAILED", r.error ?? "payout refused"); return { ok: true }; }
-  t.refs.destinationPayoutId = `${t.id}:payout:${attempt}`; t.refs.destinationProviderRef = r.providerRef; touch("network_txs");
+  t.refs.destinationPayoutId = `${t.id}:payout:${attempt}`; t.refs.destinationProviderRef = r.providerRef; persistTx(t);
   if (r.simulated) await onPayoutEvent(t.id, `${r.providerRef}:sim`, (await pay.getPayoutStatus(`${t.id}:payout:${attempt}`)) ?? "PENDING");
   return { ok: true };
 }
@@ -334,17 +354,17 @@ export async function submitRefund(t: NetworkTransaction): Promise<{ ok: boolean
   if (!rail) return { ok: false, error: `no payout rail for ${t.source.provider} in ${t.source.market}` };
   const key = `${t.id}:refund`;
   const r = await rail.createPayout({ idempotencyKey: key, market: t.source.market, provider: t.source.provider, phone: t.source.phone, amount: t.source.amount, currency: t.source.currency }).catch((e) => ({ accepted: false, providerRef: "", simulated: false, error: e instanceof Error ? e.message : "refund failed" }));
-  if (!r.accepted) { t.events.push({ at: now(), state: t.state, note: `refund not accepted: ${r.error ?? "refused"}` }); touch("network_txs"); return { ok: false, error: r.error ?? "refused" }; }
+  if (!r.accepted) { t.events.push({ at: now(), state: t.state, note: `refund not accepted: ${r.error ?? "refused"}` }); persistTx(t); return { ok: false, error: r.error ?? "refused" }; }
   t.refs.refundPayoutId = key; t.refs.refundProviderRef = r.providerRef;
   t.events.push({ at: now(), state: t.state, note: `refund ${r.providerRef} sent to +${t.source.phone} via ${rail.aggregator}`, ref: r.providerRef });
-  touch("network_txs");
+  persistTx(t);
   if (r.simulated) { const st = await rail.getPayoutStatus(key); if (st === "COMPLETED") markRefunded(t.id, r.providerRef, "auto"); else if (st === "FAILED") onRefundFailed(t, "simulated failure"); }
   return { ok: true };
 }
 export function onRefundFailed(t: NetworkTransaction, why: string): void {
   if (t.state !== "REFUND_PENDING") return;
   t.refs.refundPayoutId = undefined; t.refs.refundProviderRef = undefined; t.recovery = "manual";
-  t.events.push({ at: now(), state: t.state, note: `refund failed: ${why} — for an operator` }); touch("network_txs");
+  t.events.push({ at: now(), state: t.state, note: `refund failed: ${why} — for an operator` }); persistTx(t);
   void notifyNet.networkNeedsPerson(t, `the automatic refund failed: ${why}`);
 }
 export function markRefunded(txId: string, refundRef: string, by: string): boolean {

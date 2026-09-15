@@ -9,6 +9,7 @@ import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
 import { hydrateCapitalRows } from "./core/capital/rows.js";
+import { hydrateNetwork } from "./core/network/saga.js";
 import { hydrateComplianceChain } from "./core/compliance.js";
 import { releaseStrandedEarmarks, reconcileEarmarkAccount } from "./core/stateMachine.js";
 import { store } from "./db/store.js";
@@ -31,7 +32,7 @@ try {
 // durable compliance chain before serving — parity with the Vercel handler (api/index.ts).
 // Without hydrateComplianceChain, the import-time anchor re-heal runs on an empty chain and
 // verifyIntegrity() reads as truncated/invalid on a Postgres-backed Railway deploy.
-if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); await hydrateCapitalRows(); await hydrateComplianceChain(); }
+if (usingPostgres()) { await applySchema(); await hydrateSnapshots(); await hydrateCapitalRows(); await hydrateComplianceChain(); await hydrateNetwork(); }
 const app = createApp();
 // createApp() seeds the first admin, so the boot-time check above ran before any account
 // existed on a fresh store. Re-run it now that one does.

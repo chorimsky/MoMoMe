@@ -33,7 +33,7 @@ const payment = (id: string, ref: string, providerRef?: string): Payment => ({
 
 async function main() {
   await applySchema();
-  await q("TRUNCATE quotes, payments, ledger, compliance_chain, snapshots");
+  await q("TRUNCATE quotes, payments, ledger, compliance_chain, snapshots, network_ledger, network_txs");
 
   console.log("\nQuotes — atomic single-winner claim");
   await repo.putQuote(quote("q1"));
@@ -84,6 +84,21 @@ async function main() {
   ok("unbalanced txn wrote NOTHING (rolled back)", (await repo.entriesFor("payX")).length === 0);
 
   await pgClose();
+
+  console.log("\nNetwork — per-row ledger (append-only) and transactions (upsert)");
+  const leg = { id: "nle_1", txId: "ntx_1", at: new Date().toISOString(), account: "src_pool", market: "CM", direction: "debit", amount: 10000, currency: "XAF", memo: "test" };
+  await repo.appendNetworkLedger(leg);
+  await repo.appendNetworkLedger(leg); // a retried write
+  ok("a ledger leg is written once, even when retried (idempotent on id)", (await q<{ n: string }>("SELECT count(*)::text n FROM network_ledger WHERE id=$1", ["nle_1"]))[0].n === "1");
+  await repo.appendNetworkLedger({ ...leg, id: "nle_2", direction: "credit", amount: 0.00025329, currency: "BTC" });
+  const legs = (await repo.allNetworkLedger()) as Array<{ id: string; amount: number }>;
+  ok("legs come back in append order with their full body", legs.map((l) => l.id).join() === "nle_1,nle_2" && legs[1].amount === 0.00025329);
+  const tx = { id: "ntx_1", ref: "MMX-2026-000001", intentId: "nin_1", corridor: "CM-KE", state: "COLLECTION_PENDING", shadow: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), events: [{ state: "CREATED" }] };
+  await repo.upsertNetworkTx(tx);
+  await repo.upsertNetworkTx({ ...tx, state: "COMPLETED", events: [{ state: "CREATED" }, { state: "COMPLETED" }] });
+  const txs = (await repo.allNetworkTxs()) as Array<{ id: string; state: string; events: unknown[] }>;
+  ok("a transaction upserts by id and the latest state/body wins", txs.length === 1 && txs[0].state === "COMPLETED" && txs[0].events.length === 2);
+  ok("the ref stays unique", (await q<{ n: string }>("SELECT count(*)::text n FROM network_txs WHERE ref=$1", ["MMX-2026-000001"]))[0].n === "1");
   console.log(`\n✅ ${passed} assertions passed`);
 }
 

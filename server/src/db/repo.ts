@@ -257,6 +257,35 @@ export async function allMomoOps(limit = 5000): Promise<unknown[]> {
   return rows.map((r) => r.body);
 }
 
+/* ---------------- the interoperability network (money data, one row per record) ----------------
+   network_ledger: append-only, idempotent on the leg id (a retried write is a no-op, never a
+   second leg). network_txs: upsert on every state change so two instances can each advance
+   their own transactions without clobbering the other's. */
+export async function appendNetworkLedger(e: { id: string; txId: string; at: string; account: string; market?: string; direction: string; amount: number; currency: string; memo?: string }): Promise<void> {
+  await q(
+    `INSERT INTO network_ledger(id, tx_id, at, account, market, direction, amount, currency, memo, body)
+     VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) ON CONFLICT(id) DO NOTHING`,
+    [e.id, e.txId, e.at, e.account, e.market ?? null, e.direction, e.amount, e.currency, e.memo ?? null, JSON.stringify(e)],
+  );
+}
+export async function allNetworkLedger(): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM network_ledger ORDER BY seq ASC`);
+  return rows.map((r) => r.body);
+}
+export async function upsertNetworkTx(t: { id: string; ref: string; intentId: string; corridor: string; state: string; shadow: boolean; createdAt: string; updatedAt: string }): Promise<void> {
+  await q(
+    `INSERT INTO network_txs(id, ref, intent_id, corridor, state, shadow, created_at, updated_at, body)
+     VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+     ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at, body = excluded.body`,
+    [t.id, t.ref, t.intentId, t.corridor, t.state, t.shadow, t.createdAt, t.updatedAt, JSON.stringify(t)],
+  );
+}
+/** Most-recent transactions, newest first — bounded like the in-memory slice. */
+export async function allNetworkTxs(limit = 20_000): Promise<unknown[]> {
+  const rows = await q<{ body: unknown }>(`SELECT body FROM network_txs ORDER BY created_at DESC LIMIT $1`, [limit]);
+  return rows.map((r) => r.body);
+}
+
 /* ---------------- capital_rows (Capital Intelligence / Investor OS — one row per record) ----------------
    The capital modules keep their working set in memory and call these after every mutation so
    a concurrent instance's write to a DIFFERENT record is never lost (the snapshot is whole-

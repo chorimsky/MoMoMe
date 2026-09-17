@@ -23,6 +23,13 @@ Code: `server/src/db/*` (schema, per-row repos, snapshots), `scripts/migrate-sql
    `/health/deep` reports `store.backend: postgres, durable: true` and Admin → Ops.
 5. Turn *Accept payments* back on. Keep the SQLite volume for 30 days, then remove it.
 
+Rehearsed end to end on 2026-09-17 against a local Postgres 15: sandbox SQLite migrated
+(65 snapshot keys, 7 payments) → server booted with `STORE_BACKEND=postgres` →
+`/health/deep` 200 → new quote → payment → simulated inbound → DELIVERED with 9 ledger
+legs as rows → restart → the payment survived → a second `PROCESS_ROLE=api` replica
+served it without running jobs → two `all` instances ticked under the advisory lock
+without overlapping.
+
 ## 2. Replicas and the worker
 
 Code: `PROCESS_ROLE` in `server/src/jobs.ts` / `index.ts`; Postgres advisory job lock.

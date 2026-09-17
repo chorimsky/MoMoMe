@@ -61,6 +61,7 @@ print(d[0]["id"] if d else "")' 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
         run: |
           mkdir -p /tmp/export && git archive "$GITHUB_SHA" | tar -x -C /tmp/export
           cd /tmp/export && railway link --environment "$TARGET" --service momome-api >/dev/null
+          railway variables --environment "$TARGET" --service momome-api --set "APP_VERSION=$GITHUB_SHA" --skip-deploys
           railway up --detach --environment "$TARGET" --service momome-api
       - name: Gate — deep health + synthetic quote
         run: scripts/deploy-gate.sh "${{ env.TARGET == 'production' && secrets.PRODUCTION_API_URL || secrets.STAGING_API_URL }}" "$GITHUB_SHA"

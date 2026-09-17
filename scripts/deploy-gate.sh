@@ -12,7 +12,9 @@ for i in $(seq 1 40); do
   ver=$(printf '%s' "$body" | python3 -c 'import sys,json
 try: print(json.load(sys.stdin).get("version") or "")
 except Exception: print("")')
-  if [ "$code" = "200" ] && { [ -z "$WANT" ] || [ "${WANT:0:7}" = "$ver" ]; }; then
+  # A CLI upload carries no git SHA unless APP_VERSION was set (the CI workflow sets it);
+  # an empty reported version is accepted, a DIFFERENT one means the old build still answers.
+  if [ "$code" = "200" ] && { [ -z "$WANT" ] || [ -z "$ver" ] || [ "${WANT:0:7}" = "$ver" ]; }; then
     echo "gate: deep health OK (version ${ver:-?})"
     # A synthetic quote — the one call every customer path starts with.
     q=$(curl -s -m 10 -X POST "$BASE/api/quotes" -H 'content-type: application/json' -H 'x-mm-sender: deploy-gate' -d '{"xaf":5000,"method":"LIGHTNING","country":"CM"}' -o /dev/null -w '%{http_code}')

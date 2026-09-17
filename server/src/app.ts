@@ -140,7 +140,7 @@ export function createApp() {
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: (process.env.APP_VERSION ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

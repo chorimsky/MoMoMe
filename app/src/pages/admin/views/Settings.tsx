@@ -320,6 +320,12 @@ export function SettingsView() {
               Payouts at or above this amount hold for manual review before disbursing. Set it low when moving real money.
             </p>
           </div>
+          <div style={{ padding: "10px 0 4px", borderTop: "1px solid var(--line-2)" }}>
+            <LabeledInput label="Page this phone" type="tel" value={ops.alertPhone ?? ""} onChange={(v) => editOps({ alertPhone: v.replace(/[^\d+]/g, "") })} mono />
+            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>
+              International number (e.g. 237 6XX XXX XXX). It is paged — WhatsApp first, SMS fallback — the moment a payout is stuck, a rail goes down, float runs low or the books do not balance, with an hourly reminder while it lasts and an all-clear after. Empty = alerts stay in the console. Uptime monitors should probe <span className="mono">/health/deep</span>.
+            </p>
+          </div>
         </Card>
 
         <Card title="Crypto pay-in methods" sub={canEditRestricted

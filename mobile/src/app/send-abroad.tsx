@@ -145,7 +145,7 @@ export default function SendAbroadScreen() {
             <Text style={[styles.big, { color: t.text }]}>{money(quote.quote.destinationAmount, quote.quote.destinationCurrency)}</Text>
             <Body muted>{`${dest.providers.find((p) => p.id === dstProvider)?.name ?? ''} · ${dest.dial} ${digits(dstPhone)}${dstName ? ` · ${dstName}` : ''}`}</Body>
             <View style={[styles.rule, { borderColor: t.line }]} />
-            <Row k={tr('ab_rate')} v={`1 XAF = ${quote.quote.fx.rate.toFixed(4)} ${quote.quote.destinationCurrency}`} />
+            <Row k={tr('ab_rate')} v={`1 XAF = ${quote.quote.fx.mid.toFixed(4)} ${quote.quote.destinationCurrency}`} />
             <Row k={tr('ab_fees')} v={money(quote.quote.fees.total, 'XAF')} strong />
             {feeRows.filter(([, v]) => v > 0).map(([k, v]) => <Row key={k} k={k} v={money(v, 'XAF')} sub />)}
             <Row k={tr('ab_eta', { min: Math.max(1, Math.ceil(quote.route.estimatedSeconds / 60)) })} v="" />

@@ -687,6 +687,9 @@ export interface AdminSettings {
     acceptingPayments: boolean;
     /** Payments at or above this XAF amount hold for MANUAL_REVIEW before payout. */
     payoutApprovalXaf: number;
+    /** The phone that is PAGED (WhatsApp first, SMS fallback) when money is stuck, a rail
+     *  is down, float is low or the books do not balance. Empty = alerts stay in the console. */
+    alertPhone?: string;
   };
   /** Egress-IP allowlist for rails that authenticate on the SOURCE IP (Peexit production
    *  403s any non-allowlisted source regardless of key). This is the address REGISTERED

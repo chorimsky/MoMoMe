@@ -22,7 +22,7 @@ const DEFAULTS: AdminSettings = {
   pricing: { feePct: FEE_PCT, minFeeXaf: 100, spreadBps: { ...RAIL_SPREAD_BPS }, costs: { payoutPct: 0.015, railPct: 0.001, fixedXaf: 0 } },
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
-  ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF },
+  ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF, alertPhone: "" },
   // The IP registered with an IP-allowlisting rail. Empty → fall back to
   // EGRESS_ALLOWLISTED_IP, then to "not recorded". See core/egress.ts.
   egress: { allowlistedIp: "" },

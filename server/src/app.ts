@@ -11,6 +11,14 @@ import { share } from "./routes/share.js";
 import { cron } from "./routes/cron.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
+import { jobsHealth } from "./jobs.js";
+import { ratesFresh, ratesMeta } from "./core/rates.js";
+import { usingPostgres } from "./db/store.js";
+import { persistDurable } from "./core/persist.js";
+import { PAYOUTS } from "./adapters/payouts.js";
+import { payoutHealth } from "./core/routing.js";
+import { activeAlerts } from "./core/alerts.js";
+import { captureError } from "./core/errorSink.js";
 import { store } from "./db/store.js";
 import { seedAdminUsers } from "./core/adminUsers.js";
 
@@ -117,6 +125,23 @@ export function createApp() {
   });
   app.use(responseDeadline(Number(process.env.RESPONSE_DEADLINE_MS ?? 30_000)));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "momome-settlement", railsMode: config.railsMode }));
+  // The probe an uptime monitor and the deploy gate should hit: 503 unless the store is
+  // durable, the money jobs have completed recently on a jobs instance, and the FX cache
+  // is fresh when real money is on. Cheap (no rail calls) so it can run every minute.
+  app.get("/health/deep", async (_req, res) => {
+    const jobs = jobsHealth();
+    const fx = { fresh: ratesFresh(), ...ratesMeta() };
+    const store = { backend: usingPostgres() ? "postgres" : "sqlite", durable: persistDurable() };
+    const rails = PAYOUTS.filter((p) => p.configured()).map((p) => ({ name: p.name, live: p.live(), ...payoutHealth(p.name) }));
+    const alerts = activeAlerts();
+    const problems: string[] = [];
+    if (!store.durable) problems.push("store is not durable");
+    if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");
+    if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
+    if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
+    if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null });
+  });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).
   app.use("/", lnurl);
@@ -139,8 +164,9 @@ export function createApp() {
   });
   // Terminal error handler — generic JSON, log server-side, never leak a stack
   // trace or internal path to the client. (4 args → Express treats as error mw.)
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     console.error("unhandled error", err);
+    captureError(err, { path: req.originalUrl, method: req.method });
     if (res.headersSent) return;
     res.status(500).json({ error: "server_error", message: "Something went wrong. Please try again." });
   });

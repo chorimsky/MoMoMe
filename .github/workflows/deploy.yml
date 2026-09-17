@@ -1,0 +1,71 @@
+# Continuous deployment for the settlement engine (Tier-1 item 3 of the infrastructure
+# audit): main → the Railway STAGING environment on every green run; a version tag
+# (v1.2.3) → PRODUCTION. Both are gated by scripts/deploy-gate.sh (deep health + a
+# synthetic quote) and roll back to the previous deployment when the gate fails.
+#
+# One-time setup (operator): a Railway staging environment cloned from production on
+# sandbox rails (RAILS_MODE=sandbox, sandbox keys), and repository secrets
+#   RAILWAY_TOKEN              — a Railway project token (Project → Settings → Tokens)
+#   STAGING_API_URL            — e.g. https://momome-api-staging.up.railway.app
+#   PRODUCTION_API_URL         — https://momome-api-production.up.railway.app
+# The workflow uploads a clean `git archive` of the commit from the repository ROOT (the
+# server build needs shared/ and railway.json) — never a working tree.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "staging or production"
+        required: true
+        default: staging
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm --filter @momome/server test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      TARGET: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production') && 'production' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g @railway/cli@4
+      - name: Record the deployment to roll back to
+        id: prev
+        run: |
+          railway link --environment "$TARGET" --service momome-api >/dev/null
+          echo "id=$(railway deployment list --json 2>/dev/null | python3 -c 'import sys,json
+d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]
+print(d[0]["id"] if d else "")' 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+      - name: Upload a clean export of this commit
+        run: |
+          mkdir -p /tmp/export && git archive "$GITHUB_SHA" | tar -x -C /tmp/export
+          cd /tmp/export && railway link --environment "$TARGET" --service momome-api >/dev/null
+          railway up --detach --environment "$TARGET" --service momome-api
+      - name: Gate — deep health + synthetic quote
+        run: scripts/deploy-gate.sh "${{ env.TARGET == 'production' && secrets.PRODUCTION_API_URL || secrets.STAGING_API_URL }}" "$GITHUB_SHA"
+      - name: Roll back on a failed gate
+        if: failure() && steps.prev.outputs.id != ''
+        run: |
+          echo "gate failed — rolling back to previous SUCCESS deployment ${{ steps.prev.outputs.id }}"
+          scripts/railway-rollback.sh "${{ steps.prev.outputs.id }}" || true

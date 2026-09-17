@@ -4,7 +4,11 @@ import { config, ibexConfigured, liveMoney, peexitLive } from "./config.js";
 import { flushAll } from "./core/persist.js";
 import { egressStatus } from "./core/egress.js";
 import { registerAccountWebhook, accountBalances } from "./adapters/ibex.js";
-import { reconcileTick, fxTick } from "./jobs.js";
+import { reconcileTick, fxTick, runsJobs, processRole } from "./jobs.js";
+import { initErrorSink, captureError } from "./core/errorSink.js";
+initErrorSink();
+process.on("unhandledRejection", (e) => captureError(e, { where: "unhandledRejection" }));
+process.on("uncaughtException", (e) => captureError(e, { where: "uncaughtException" }));
 import { usingPostgres } from "./db/store.js";
 import { applySchema } from "./db/pg.js";
 import { hydrateSnapshots } from "./core/persist.js";
@@ -116,10 +120,18 @@ if ((process.env.RESET_DEMO_TRUST ?? "").trim() === "1") {
 
 // Railway (long-lived process) drives the background jobs on timers; on Vercel the SAME
 // jobs run via /api/cron/* (routes/cron.ts) since serverless has no persistent process.
-setInterval(() => void reconcileTick(), 30_000).unref();
-if (ibexConfigured() || liveMoney()) {
-  void fxTick().catch((e) => console.error("fx rates", e)); // prime the cache at boot
-  setInterval(() => void fxTick().catch((e) => console.error("fx rates", e)), 30_000).unref();
+// PROCESS_ROLE=api serves requests only (a scaled-out replica); =worker runs the timers
+// only; the default `all` is the single-container deployment. See jobs.ts.
+if (runsJobs()) {
+  setInterval(() => void reconcileTick(), 30_000).unref();
+  if (ibexConfigured() || liveMoney()) {
+    void fxTick().catch((e) => console.error("fx rates", e)); // prime the cache at boot
+    setInterval(() => void fxTick().catch((e) => console.error("fx rates", e)), 30_000).unref();
+  }
+} else {
+  // An API replica still needs fresh rates to quote: pull them, but never run money jobs.
+  if (ibexConfigured() || liveMoney()) { void fxTick().catch(() => {}); setInterval(() => void fxTick().catch(() => {}), 30_000).unref(); }
+  console.log(`[boot] PROCESS_ROLE=${processRole()} — background money jobs are NOT run on this instance`);
 }
 
 // Register the IBEX account-level webhook so on-chain deposits (and all account

@@ -14,6 +14,9 @@ import { flush as flushOutbound } from "./core/interop/outbound.js";
 import { shadowTick } from "./core/network/shadow.js";
 import { refreshPublicFx, publicFxFresh } from "./core/network/fx.js";
 import { networkTick } from "./core/network/monitor.js";
+import { evaluateAlerts } from "./core/alerts.js";
+import { usingPostgres } from "./db/store.js";
+import { pgPool } from "./db/pg.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
 import { rate as ibexRate, registerAccountWebhook } from "./adapters/ibex.js";
@@ -33,7 +36,41 @@ async function keepWebhookRegistered(): Promise<void> {
   await registerAccountWebhook().catch((e) => console.error("[ibex] webhook re-register failed", e instanceof Error ? e.message : e));
 }
 
+/** Which duties this process has (PROCESS_ROLE): `api` serves requests only, `worker` runs
+ *  the timers only, `all` (default) does both — the single-container deployment. With two or
+ *  more API replicas, run exactly ONE worker, or let `all` instances contend for the job
+ *  lock below (Postgres advisory lock — SQLite deployments cannot run more than one). */
+export type ProcessRole = "api" | "worker" | "all";
+export const processRole = (): ProcessRole => { const r = (process.env.PROCESS_ROLE ?? "all").toLowerCase(); return r === "api" || r === "worker" ? r : "all"; };
+export const runsJobs = () => processRole() !== "api";
+export const servesHttp = () => processRole() !== "worker";
+
+let lastTickAt: number | null = null, lastTickMs = 0, lastTickError: string | null = null;
+/** For the deep health probe: when the money jobs last completed on THIS instance. */
+export const jobsHealth = () => ({ role: processRole(), lastTickAt: lastTickAt ? new Date(lastTickAt).toISOString() : null, lastTickMs, lastTickError, stale: runsJobs() && (lastTickAt == null || Date.now() - lastTickAt > 3 * 60_000) });
+
+/** Run `fn` only if this instance holds the cluster-wide job lock. On Postgres that is a
+ *  session-level advisory lock held for the duration of the tick (a second instance sees
+ *  it taken and skips — money jobs never double-run). Elsewhere there is one instance. */
+async function withJobLock(fn: () => Promise<void>): Promise<boolean> {
+  if (!usingPostgres()) { await fn(); return true; }
+  const client = await pgPool().connect();
+  try {
+    const r = await client.query<{ ok: boolean }>("SELECT pg_try_advisory_lock(7331001) AS ok");
+    if (!r.rows[0]?.ok) return false;
+    try { await fn(); } finally { await client.query("SELECT pg_advisory_unlock(7331001)"); }
+    return true;
+  } finally { client.release(); }
+}
+
 export async function reconcileTick(): Promise<void> {
+  if (!runsJobs()) return;
+  const t0 = Date.now();
+  const ran = await withJobLock(reconcileOnce).catch((e) => { lastTickError = e instanceof Error ? e.message : String(e); throw e; });
+  if (ran) { lastTickAt = Date.now(); lastTickMs = lastTickAt - t0; lastTickError = null; }
+}
+
+async function reconcileOnce(): Promise<void> {
   await reconcileStuckPayouts().catch((e) => console.error("reconcile payouts", e));
   await reconcilePendingCashins().catch((e) => console.error("reconcile cashins", e));
   // Inbound reconcile applies to any crypto rail with authoritative re-query (IBEX);
@@ -55,6 +92,8 @@ export async function reconcileTick(): Promise<void> {
   try { if (!publicFxFresh(30 * 60_000)) await refreshPublicFx(); } catch (e) { console.error("network fx", e); }
   try { await store().pruneExpiredQuotes(); } catch (e) { console.error("prune quotes", e); }
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
+  // Last: page the operator about anything the tick found (or could not fix).
+  try { await evaluateAlerts(); } catch (e) { console.error("alerts", e); }
 }
 
 let fxIbexDegraded = false; // log the IBEX→public fallback only on state change

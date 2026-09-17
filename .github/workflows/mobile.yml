@@ -1,0 +1,49 @@
+# Mobile delivery on a cadence (Tier-3 item 12 of the infrastructure audit).
+#   · push to main touching mobile/ or shared/ → OTA update on the production channel
+#     (JS only; the runtime version pins it to the current native build).
+#   · tag mobile-vX.Y.Z or manual dispatch → EAS store builds for both platforms
+#     (native: icons, splash, native modules). Submission stays manual until the ASC key
+#     is available (memory: ios-appstore-deploy).
+# One-time setup (operator): repository secret EXPO_TOKEN (an Expo access token with
+# access to the project); Android keystore + iOS credentials on EAS (already remote).
+name: Mobile
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", "shared/**"]
+    tags: ["mobile-v*"]
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "ota or build"
+        required: true
+        default: ota
+
+jobs:
+  ota:
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event.inputs.what == 'ota')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g eas-cli
+      - run: npm --prefix mobile ci --no-audit --no-fund
+      - run: npm --prefix mobile run typecheck
+      - name: OTA update → production channel
+        env: { EXPO_TOKEN: "${{ secrets.EXPO_TOKEN }}" }
+        run: cd mobile && eas update --channel production --non-interactive --message "${{ github.event.head_commit.message || 'manual OTA' }}"
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/mobile-v') || github.event.inputs.what == 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g eas-cli
+      - run: npm --prefix mobile ci --no-audit --no-fund
+      - name: Store builds (iOS + Android app bundle), queued on EAS
+        env: { EXPO_TOKEN: "${{ secrets.EXPO_TOKEN }}" }
+        run: cd mobile && eas build --platform all --profile production --non-interactive --no-wait

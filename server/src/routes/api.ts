@@ -51,6 +51,7 @@ import { usingPostgres } from "../db/store.js";
 import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
+import * as networkSaga from "../core/network/saga.js";
 import { platformFee, contractedPayoutFee } from "../core/pricing.js";
 import { floatPlan } from "../core/floatPlan.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
@@ -2542,13 +2543,48 @@ api.get("/admin/revenue", async (req, res) => {
   // 8. Mobile Money → Mobile Money transfers (admin-gated, off by default).
   if (!getSettings().features.momoTransfer) opps.push({ key: "momo_transfers", title: "MTN ↔ Orange transfers are built but switched off", estimateXafPerMonth: null, tone: "info", detail: "The transfer product (collect from one network, pay out on the other) earns 1.5 % with the same floor and reuses the payout rails. It is a new market — people who today walk to an agent — not a price change on existing customers.", action: "Turn on features.momoTransfer for a pilot cohort once the collect callback is wired." });
 
+  /* ---------- the margin-mix lens: net per product ---------- */
+  const productOf = (p: Payment): "consumer" | "merchant" | "partner" => (partner(p) ? "partner" : p.merchantId ? "merchant" : "consumer");
+  const mixAcc = new Map<string, { count: number; volumeXaf: number; grossXaf: number; costXaf: number }>();
+  const mixAdd = (k: string, volume: number, gross: number, cost: number) => { const e = mixAcc.get(k) ?? { count: 0, volumeXaf: 0, grossXaf: 0, costXaf: 0 }; e.count++; e.volumeXaf += volume; e.grossXaf += gross; e.costXaf += cost; mixAcc.set(k, e); };
+  for (const p of completed) {
+    const { pct: pc } = railPct(p.recipient.provider, p.aggregator ?? "unknown");
+    mixAdd(productOf(p), p.xaf, p.feeXaf + spreadOf(p), Math.round(p.xaf * pc + p.totalXaf * costs.railPct + costs.fixedXaf));
+  }
+  for (const t of momoTransfer.allTransfers(100_000).filter((t) => t.state === "DELIVERED" && Date.parse(t.createdAt) >= cutoff)) {
+    const { pct: pc } = railPct(("phone" in t.to ? (t.to as { provider: ProviderId }).provider : t.from.provider), t.payoutRail ?? "unknown");
+    // Collection is charged by the collecting aggregator too (~1 %); no crypto rail cost.
+    mixAdd("momo_transfer", t.xaf, t.feeXaf, Math.round(t.xaf * pc + t.collectXaf * 0.01));
+  }
+  for (const t of networkSaga.allTx(5000).filter((t) => !t.shadow && t.state === "COMPLETED" && Date.parse(t.createdAt) >= cutoff)) {
+    // The network keeps platform fee + spread + liquidity; collection, payout and Lightning are its rail costs.
+    mixAdd("network", t.source.amount, t.fees.total, t.fees.providerCollect + t.fees.providerPayout + t.fees.lightning);
+  }
+  const LABEL: Record<string, string> = { consumer: "Crypto → Mobile Money (consumer)", merchant: "Business checkouts", partner: "Partner API", momo_transfer: "Mobile Money → Mobile Money", network: "Cross-border corridors" };
+  const LIVE: Record<string, boolean> = { consumer: true, merchant: !!getSettings().features.merchant, partner: !!getSettings().features.developerApi, momo_transfer: !!getSettings().features.momoTransfer, network: getSettings().network.flags.INTEROPERABILITY_V2 };
+  const totalMixVolume = [...mixAcc.values()].reduce((a, e) => a + e.volumeXaf, 0);
+  const products = (["consumer", "merchant", "partner", "momo_transfer", "network"] as const).map((k) => { const e = mixAcc.get(k) ?? { count: 0, volumeXaf: 0, grossXaf: 0, costXaf: 0 }; const net = e.grossXaf - e.costXaf; return { product: k, label: LABEL[k], ...e, netXaf: net, netMarginPct: e.volumeXaf ? Math.round((net / e.volumeXaf) * 1000) / 10 : 0, shareOfVolumePct: totalMixVolume ? Math.round((e.volumeXaf / totalMixVolume) * 1000) / 10 : 0, live: LIVE[k] }; });
+  // Scenario: move 30 % of consumer volume to the best-margin product that has data, or —
+  // with no data yet — to merchant-paid checkouts at the platform fee with no spread cost.
+  const consumer = products.find((x) => x.product === "consumer")!;
+  const candidates = products.filter((x) => x.product !== "consumer" && x.count > 0).sort((a, b) => b.netMarginPct - a.netMarginPct);
+  const best = candidates[0];
+  const bestMargin = best ? best.netMarginPct / 100 : Math.max(0, pr.feePct - costs.payoutPct - costs.fixedXaf / 10_000);
+  const targetSharePct = 30;
+  const moved = consumer.volumeXaf * (targetSharePct / 100);
+  const consumerMargin = consumer.volumeXaf ? consumer.netXaf / consumer.volumeXaf : 0;
+  const netToday = products.reduce((a, x) => a + x.netXaf, 0);
+  const netAtTarget = netToday - moved * consumerMargin + moved * bestMargin;
+  const scenario = consumer.volumeXaf > 0 ? { targetSharePct, toProduct: best?.label ?? "Business checkouts (merchant-paid fee)", netTodayXaf: Math.round(netToday), netAtTargetXaf: Math.round(netAtTarget), upliftXafPerMonth: perMonth(Math.round(netAtTarget - netToday)) } : null;
+  const mix: RevenueReport["mix"] = { products, scenario };
+
   res.json({
     realized: treasury.realizedFx(cutoff),
     period, volumeXaf, payments: completed.length,
     feeRevenueXaf, spreadRevenueXaf, grossRevenueXaf, costsXaf, netRevenueXaf,
     effectiveTakePct, netMarginPct, avgRevenuePerTxXaf: completed.length ? Math.round(grossRevenueXaf / completed.length) : 0,
     byRail, daily, benchmarks, insights, costs,
-    streams, byOperator, spreadByAsset, opportunities: opps,
+    streams, byOperator, spreadByAsset, opportunities: opps, mix,
   } satisfies RevenueReport);
 });
 

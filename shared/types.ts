@@ -975,6 +975,13 @@ export interface RevenueReport {
   /** Revenue levers that do not raise the customer's price — each with a monthly estimate
    *  from this period's data (normalised to 30 days) and the action that captures it. */
   opportunities: Array<{ key: string; title: string; estimateXafPerMonth: number | null; tone: "good" | "warn" | "info"; detail: string; action: string }>;
+  /** Net kept per PRODUCT (the margin-mix lens): what share of volume each carries and
+   *  what it keeps after rail costs, plus what the same volume would net at the target mix. */
+  mix: {
+    products: Array<{ product: "consumer" | "merchant" | "partner" | "momo_transfer" | "network"; label: string; count: number; volumeXaf: number; grossXaf: number; costXaf: number; netXaf: number; netMarginPct: number; shareOfVolumePct: number; live: boolean }>;
+    /** If `targetSharePct` of consumer volume moved to the best net-margin product on offer. */
+    scenario: { targetSharePct: number; toProduct: string; netTodayXaf: number; netAtTargetXaf: number; upliftXafPerMonth: number } | null;
+  };
 }
 
 /* ---------- delivery ---------- */

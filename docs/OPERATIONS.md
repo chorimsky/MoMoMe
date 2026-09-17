@@ -71,3 +71,16 @@ Rotate on a calendar (quarterly, and immediately after any exposure): ADMIN_PASS
 ADMIN_SESSION_SECRET, COMPLIANCE_HMAC_KEY, provider keys (IBEX, PawaPay, Peexit, WhatsApp).
 Two people must hold recovery access to Railway, Vercel, EAS, Apple, Google Play and the
 WhatsApp Business account.
+
+## 6. Mobile on a cadence
+
+Code: `.github/workflows/mobile.yml`.
+
+- Every push to `main` that touches `mobile/` or `shared/` publishes an OTA update to the
+  production channel (needs the `EXPO_TOKEN` repository secret).
+- A tag `mobile-vX.Y.Z` (or a manual run with `build`) queues EAS store builds for both
+  platforms — this is what ships new icons, the splash and any native module. Submit to
+  the stores from the EAS dashboard (or `eas submit`) once the App Store Connect key
+  access is sorted; Play submission uses the service-account key in `eas.json`.
+- Bump `version` in `mobile/app.config.ts` before a native build: OTA updates only reach
+  binaries with the same runtime version.

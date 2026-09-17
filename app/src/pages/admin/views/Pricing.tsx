@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PricingInfo, RevenueReport, Method } from "@shared/types.js";
 import { api } from "../../../api/client.js";
-import { AKpi, Card, Grid, KV, SectionTitle, toneColor, type Tone } from "../AdminUI.js";
+import { AKpi, Card, Grid, KV, Pill, SectionTitle, toneColor, type Tone } from "../AdminUI.js";
 import { fmt } from "../../../lib/format.js";
 import { Failed, Loading } from "./Overview.js";
 
@@ -279,6 +279,31 @@ export function PricingView() {
       </Grid>
 
       {/* ---- by rail ---- */}
+      {r && <Card title="Product mix — what each product keeps" sub="Net after rail costs per product, and what the same volume nets if 30 % of consumer sends moved to the best-margin product. Volume is the ceiling; the mix is the lever." style={{ marginTop: 16 }} pad={false}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+            <thead><tr>{["Product", "Share of volume", "Volume", "Net", "Net margin", ""].map((h, i) => <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 16px", fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "1px solid var(--line-2)" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {r.mix.products.map((p) => (
+                <tr key={p.product}>
+                  <td style={{ padding: "8px 16px", fontWeight: 650 }}>{p.label}</td>
+                  <td className="num" style={{ padding: "8px 16px", textAlign: "right" }}>{p.shareOfVolumePct} %</td>
+                  <td className="num" style={{ padding: "8px 16px", textAlign: "right" }}>{fmt(p.volumeXaf)} XAF</td>
+                  <td className="num" style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: p.netXaf < 0 ? "var(--bad)" : "var(--ink)" }}>{fmt(p.netXaf)} XAF</td>
+                  <td className="num" style={{ padding: "8px 16px", textAlign: "right", color: p.netMarginPct >= 1.5 ? "var(--recv)" : p.netMarginPct >= 0.5 ? "var(--ink)" : "var(--warn-ink)" }}>{p.count ? `${p.netMarginPct} %` : "—"}</td>
+                  <td style={{ padding: "8px 16px", textAlign: "right" }}><Pill status={p.live ? (p.count ? "live" : "on, no volume") : "off"} tone={p.live ? (p.count ? "recv" : "warn") : "ink"} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {r.mix.scenario && (
+          <div style={{ padding: "12px 16px", borderTop: "1px solid var(--line-2)", fontSize: 13, color: "var(--ink-2)" }}>
+            If <b>{r.mix.scenario.targetSharePct} %</b> of consumer volume moved to <b>{r.mix.scenario.toProduct}</b>: net {fmt(r.mix.scenario.netTodayXaf)} → <b style={{ color: "var(--recv)" }}>{fmt(r.mix.scenario.netAtTargetXaf)} XAF</b> this period (≈ {fmt(r.mix.scenario.upliftXafPerMonth)} XAF / month). Same customers, same prices — a different product carrying the volume.
+          </div>
+        )}
+      </Card>}
+
       <Card title="Profit by rail" sub="Which pay-in method makes money, after costs." style={{ marginTop: 16 }} pad={false}>
         {!r || r.byRail.length === 0 ? (
           <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--ink-3)" }}>No completed payments in this period.</div>

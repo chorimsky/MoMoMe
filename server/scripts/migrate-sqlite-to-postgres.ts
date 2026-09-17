@@ -26,7 +26,7 @@ process.env.STORE_BACKEND = "postgres";
 
 async function main() {
   const repo = await import("../src/db/repo.js");
-  const { applySchema } = await import("../src/db/pg.js");
+  const { applySchema, q } = await import("../src/db/pg.js");
   const db = new DatabaseSync(file, { readOnly: true });
   const rows = db.prepare("SELECT key, json FROM snapshot").all() as Array<{ key: string; json: string }>;
   console.log(`${rows.length} snapshot key(s) in ${file}${dry ? " — DRY RUN" : ""}`);
@@ -50,7 +50,13 @@ async function main() {
       const byTxn = new Map<string, LedgerEntry[]>();
       for (const e of entries) { const arr = byTxn.get(e.txnId) ?? []; arr.push(e); byTxn.set(e.txnId, arr); }
       for (const [txnId, legs] of byTxn) {
-        if (!dry) await repo.recordTxn(legs[0].paymentId, legs.map((l) => ({ account: l.account, direction: l.direction, amount: l.amount, currency: l.currency })), legs[0].at, txnId).catch((e) => { if (!String(e).includes("duplicate")) throw e; });
+        // The ledger table is append-only with no natural key: a re-run must not post the
+        // same journal twice, so a txn already present (by its id in the row body) is skipped.
+        if (!dry) {
+          const present = await q<{ n: string }>("SELECT count(*)::text n FROM ledger WHERE body->>'txnId' = $1", [txnId]);
+          if (Number(present[0]?.n ?? 0) > 0) { bump("ledger_txns_skipped"); continue; }
+          await repo.recordTxn(legs[0].paymentId, legs.map((l) => ({ account: l.account, direction: l.direction, amount: l.amount, currency: l.currency })), legs[0].at, txnId);
+        }
         bump("ledger_txns");
       }
     }

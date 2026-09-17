@@ -97,6 +97,10 @@ export const config = {
     /** Optional templates for the other notices (same {{1}} amount / {{2}} ref shape). */
     templateRefund: env("WHATSAPP_TEMPLATE_REFUND"),
     templateReview: env("WHATSAPP_TEMPLATE_REVIEW"),
+    /** A UTILITY template with ONE body param ({{1}} = the alert text) for paging the operator
+     *  outside the 24 h reply window. Without it, the operator opens the window by messaging
+     *  the business number, or the page goes by SMS. */
+    templateAlert: env("WHATSAPP_TEMPLATE_ALERT"),
     /** An AUTHENTICATION-category template (Meta's one-time-passcode kind, with the
      *  "copy code" button). Body {{1}} and the button parameter are both the code. When set,
      *  verification codes go over WhatsApp first and SMS is the fallback. */

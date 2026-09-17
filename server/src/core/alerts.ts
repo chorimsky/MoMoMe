@@ -17,12 +17,15 @@ import { store } from "../db/store.js";
 import { PAYOUTS } from "../adapters/payouts.js";
 import { payoutHealth } from "./routing.js";
 import { availableFloatXaf } from "./stateMachine.js";
-import { notify, sendOtpSms, canSendSms } from "./notifications.js";
+import { notify } from "./notifications.js";
 import * as whatsapp from "../adapters/whatsapp.js";
-import { whatsappConfigured, liveMoney } from "../config.js";
+import { smsChannel } from "../adapters/notify.js";
+import { inReplyWindow } from "./whatsapp.js";
+import { config, whatsappConfigured, liveMoney } from "../config.js";
 import { reconcile as networkReconcile } from "./network/shadow.js";
 import { lowLiquidity } from "./network/liquidity.js";
 import { floatPlan } from "./floatPlan.js";
+import { register, touch } from "./persist.js";
 
 export interface AlertCondition { key: string; severity: "critical" | "warning"; body: string }
 export interface AlertState { key: string; firstAt: string; lastSentAt: string; count: number; body: string }
@@ -33,6 +36,9 @@ const FLOAT_FLOOR_XAF = Number(process.env.ALERT_FLOAT_FLOOR_XAF ?? 250_000) || 
 const STUCK_PAYOUT_MIN = 20;
 const REVIEW_MIN = 60;
 const active = new Map<string, AlertState>();
+// Survives a restart: an open condition is not re-paged as "new" every deploy, and the
+// hourly reminder count keeps counting.
+register("alerts", () => [...active.values()], (d: AlertState[]) => { for (const a of d ?? []) active.set(a.key, a); });
 let lastEvaluation: { at: string; conditions: AlertCondition[] } = { at: new Date(0).toISOString(), conditions: [] };
 
 /** Everything that is wrong right now, as one list. Pure read. */
@@ -70,13 +76,29 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   return out;
 }
 
-async function page(text: string): Promise<void> {
+/** Deliver one page: outbox (always) → WhatsApp (free text inside the 24 h reply window,
+ *  the WHATSAPP_TEMPLATE_ALERT utility template outside it) → SMS gateway as the fallback. */
+export async function page(text: string): Promise<{ via: "whatsapp" | "sms" | "console"; detail?: string }> {
   const to = (getSettings().ops.alertPhone ?? "").replace(/\D/g, "");
-  await notify({ kind: "reconciliation_mismatch", audience: "operator", body: text }).catch(() => {});
-  if (!to) return;
-  let sent = false;
-  if (whatsappConfigured()) { try { const r = await whatsapp.sendText(to, text); sent = !!r.ok; } catch { sent = false; } }
-  if (!sent && canSendSms()) await sendOtpSms(to, text.slice(0, 300), "alert").catch(() => {});
+  await notify({ kind: "ops_alert", audience: "operator", body: text }).catch(() => {});
+  if (!to) return { via: "console" };
+  let detail = "";
+  if (whatsappConfigured()) {
+    try {
+      const r = inReplyWindow(to) ? await whatsapp.sendText(to, text)
+        : config.whatsapp.templateAlert ? await whatsapp.sendTemplate(to, config.whatsapp.templateAlert, config.whatsapp.templateLang, [text.slice(0, 1000)])
+        : { ok: false as const, detail: "outside the 24 h window and WHATSAPP_TEMPLATE_ALERT is not set" };
+      if (r.ok) return { via: "whatsapp" };
+      detail = r.detail ?? "whatsapp failed";
+    } catch (e) { detail = e instanceof Error ? e.message : "whatsapp failed"; }
+  }
+  if (smsChannel.configured()) {
+    const r = await smsChannel.send({ audience: "recipient", kind: "ops_alert", to, body: text.slice(0, 300) }).catch((e) => ({ ok: false, detail: e instanceof Error ? e.message : "sms failed" }));
+    if (r.ok) return { via: "sms" };
+    detail = `${detail ? detail + "; " : ""}${r.detail ?? "sms failed"}`;
+  }
+  await notify({ kind: "ops_alert", audience: "operator", body: `Could not page ${to}: ${detail || "no channel configured"}. The alert above is only in the console.` }).catch(() => {});
+  return { via: "console", detail };
 }
 
 /** Evaluate, page new/persisting conditions, all-clear the ones that vanished. */
@@ -90,16 +112,16 @@ export async function evaluateAlerts(now = Date.now()): Promise<{ raised: string
     const prev = active.get(c.key);
     if (!prev) {
       active.set(c.key, { key: c.key, firstAt: new Date(now).toISOString(), lastSentAt: new Date(now).toISOString(), count: 1, body: c.body });
-      raised.push(c.key);
+      raised.push(c.key); touch("alerts");
       await page(`${c.severity === "critical" ? "🔴" : "🟠"} MoMo›Me: ${c.body}`);
     } else if (now - Date.parse(prev.lastSentAt) >= REMIND_MS) {
-      prev.lastSentAt = new Date(now).toISOString(); prev.count++; prev.body = c.body;
+      prev.lastSentAt = new Date(now).toISOString(); prev.count++; prev.body = c.body; touch("alerts");
       await page(`${c.severity === "critical" ? "🔴" : "🟠"} Still open (${prev.count}h): ${c.body}`);
     }
   }
   for (const [k, st] of [...active]) {
     if (seen.has(k)) continue;
-    active.delete(k); cleared.push(k);
+    active.delete(k); cleared.push(k); touch("alerts");
     await page(`✅ Cleared: ${st.body.split(".")[0]}.`);
   }
   return { raised, cleared, active: [...active.values()] };
@@ -108,4 +130,4 @@ export async function evaluateAlerts(now = Date.now()): Promise<{ raised: string
 export const activeAlerts = (): AlertState[] => [...active.values()];
 export const lastAlertEvaluation = () => lastEvaluation;
 /** Test seam. */
-export function resetAlerts(): void { active.clear(); }
+export function resetAlerts(): void { active.clear(); touch("alerts"); }

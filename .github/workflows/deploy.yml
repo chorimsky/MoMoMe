@@ -52,15 +52,15 @@ jobs:
       - run: npm i -g @railway/cli@4
       - name: Record the deployment to roll back to
         id: prev
+        # A project token scopes the CLI to the project; no `railway link` (interactive) is needed.
         run: |
-          railway link --environment "$TARGET" --service momome-api >/dev/null
-          echo "id=$(railway deployment list --json 2>/dev/null | python3 -c 'import sys,json
+          echo "id=$(railway deployment list --json --environment "$TARGET" --service momome-api 2>/dev/null | python3 -c 'import sys,json
 d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]
 print(d[0]["id"] if d else "")' 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
       - name: Upload a clean export of this commit
         run: |
           mkdir -p /tmp/export && git archive "$GITHUB_SHA" | tar -x -C /tmp/export
-          cd /tmp/export && railway link --environment "$TARGET" --service momome-api >/dev/null
+          cd /tmp/export
           railway variables --environment "$TARGET" --service momome-api --set "APP_VERSION=$GITHUB_SHA" --skip-deploys
           railway up --detach --environment "$TARGET" --service momome-api
       - name: Gate — deep health + synthetic quote

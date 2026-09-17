@@ -400,7 +400,8 @@ export type NotificationKind =
   | "manual_review"          // a payment is held and needs a person
   | "one_time_code"          // a verification code (the code itself is never recorded)
   | "deletion_request"       // someone asked for their data to go, from a device we cannot verify
-  | "test_report";           // a tester submitted a checklist run
+  | "test_report"            // a tester submitted a checklist run
+  | "ops_alert";             // the operator is paged: money stuck, rail down, float low, books off
 
 /** Who the message is for. This is not cosmetic — it decides which channels can carry it.
  *  We hold the RECIPIENT's phone number, so they are reachable by SMS. We hold nothing for

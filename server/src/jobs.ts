@@ -63,8 +63,16 @@ async function withJobLock(fn: () => Promise<void>): Promise<boolean> {
   } finally { client.release(); }
 }
 
+let ticking = false;
 export async function reconcileTick(): Promise<void> {
   if (!runsJobs()) return;
+  // A slow tick (a rail timing out) must not be joined by the next timer firing on the
+  // same instance — the cluster lock covers other instances, this covers this one.
+  if (ticking) return;
+  ticking = true;
+  try { await reconcileTickLocked(); } finally { ticking = false; }
+}
+async function reconcileTickLocked(): Promise<void> {
   const t0 = Date.now();
   const ran = await withJobLock(reconcileOnce).catch((e) => { lastTickError = e instanceof Error ? e.message : String(e); throw e; });
   if (ran) { lastTickAt = Date.now(); lastTickMs = lastTickAt - t0; lastTickError = null; }

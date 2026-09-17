@@ -16,6 +16,44 @@ import { Failed, Loading } from "./Overview.js";
 
 type Spreads = PricingInfo["spreadBps"];
 type Costs = PricingInfo["costs"];
+type Contracts = NonNullable<PricingInfo["contracts"]>;
+const AGGS = ["pawapay", "peexit"] as const;
+const OPS = ["MTN", "ORANGE"] as const;
+/** A tiny grid: aggregator rows × operator columns, each a percentage and a flat XAF. */
+function ContractsEditor({ value, onChange }: { value: Contracts; onChange: (v: Contracts) => void }) {
+  const set = (agg: string, op: "MTN" | "ORANGE", field: "pct" | "fixedXaf", raw: string) => {
+    const next: Contracts = JSON.parse(JSON.stringify(value));
+    const cur = next[agg]?.[op] ?? { pct: 0, fixedXaf: 0 };
+    const n = Number(raw);
+    if (raw.trim() === "") { if (next[agg]) { delete next[agg]![op]; if (!Object.keys(next[agg]!).length) delete next[agg]; } onChange(next); return; }
+    if (!Number.isFinite(n)) return;
+    next[agg] = { ...(next[agg] ?? {}), [op]: { ...cur, [field]: field === "pct" ? n / 100 : n } };
+    onChange(next);
+  };
+  const cell = { fontSize: 12.5, padding: "5px 7px", borderRadius: 8, border: "1px solid var(--line-2)", background: "var(--surface)", color: "var(--ink)", width: 84 } as const;
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 12.5 }}>
+        <thead><tr><th style={{ textAlign: "left", padding: "4px 8px", color: "var(--ink-3)", fontSize: 11 }}>Aggregator</th>{OPS.map((o) => <th key={o} colSpan={2} style={{ textAlign: "left", padding: "4px 8px", color: "var(--ink-3)", fontSize: 11 }}>{o === "MTN" ? "MTN MoMo" : "Orange Money"} — % · flat XAF</th>)}</tr></thead>
+        <tbody>
+          {AGGS.map((agg) => (
+            <tr key={agg}>
+              <td className="mono" style={{ padding: "4px 8px", fontWeight: 700 }}>{agg}</td>
+              {OPS.map((op) => {
+                const c = value[agg]?.[op];
+                return (<td key={op} colSpan={2} style={{ padding: "4px 8px" }}>
+                  <input aria-label={`${agg} ${op} percent`} inputMode="decimal" placeholder="—" value={c ? String(Math.round(c.pct * 10000) / 100) : ""} onChange={(e) => set(agg, op, "pct", e.target.value)} style={cell} />
+                  <span style={{ color: "var(--ink-3)", margin: "0 6px" }}>% +</span>
+                  <input aria-label={`${agg} ${op} flat`} inputMode="numeric" placeholder="0" value={c ? String(c.fixedXaf) : ""} onChange={(e) => set(agg, op, "fixedXaf", e.target.value)} style={cell} disabled={!c} />
+                </td>);
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 const RAIL_LABEL: Record<Method, string> = { LIGHTNING: "Lightning", ONCHAIN: "On-chain BTC", USDT: "USDT", USDC: "USDC" };
 const SPREAD_ROWS: Array<{ k: Method; label: string }> = [
   { k: "LIGHTNING", label: "Lightning spread" }, { k: "ONCHAIN", label: "On-chain spread" }, { k: "USDT", label: "USDT spread" }, { k: "USDC", label: "USDC spread" },
@@ -56,6 +94,7 @@ export function PricingView() {
   const [minFee, setMinFee] = useState(0);
   const [spreadBps, setSpreadBps] = useState<Spreads | null>(null);
   const [costs, setCosts] = useState<Costs | null>(null);
+  const [contracts, setContracts] = useState<Contracts>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -69,6 +108,7 @@ export function PricingView() {
       setMinFee(p.minFeeXaf ?? 0);
       setSpreadBps({ ...p.spreadBps });
       setCosts({ ...p.costs });
+      setContracts(p.contracts ?? {});
       setDirty(false);
     }).catch(() => setLoadErr("Couldn't load pricing."));
 
@@ -109,7 +149,7 @@ export function PricingView() {
   const save = async () => {
     setSaving(true); setErr(null);
     try {
-      await api.saveSettings({ pricing: { feePct: feePctInput / 100, minFeeXaf: minFee, spreadBps, costs } });
+      await api.saveSettings({ pricing: { feePct: feePctInput / 100, minFeeXaf: minFee, spreadBps, costs, contracts } });
       await loadConfig();
       api.adminRevenue(period).then(setReport).catch(() => {});
       setSaved(true);
@@ -266,7 +306,7 @@ export function PricingView() {
       </Card>
 
       {/* ---- by operator ---- */}
-      <Card title="Profit by destination operator" sub="Payout cost is the rail's published fee where it has one (marked rail), the assumption otherwise." style={{ marginTop: 16 }} pad={false}>
+      <Card title="Profit by destination operator" sub="Payout cost is the contracted schedule where you have entered one (contract), else the rail's published fee (rail), else the assumption." style={{ marginTop: 16 }} pad={false}>
         {!r || r.byOperator.length === 0 ? (
           <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--ink-3)" }}>No completed payments in this period.</div>
         ) : (
@@ -305,6 +345,9 @@ export function PricingView() {
             <NumInput label="Rail cost" value={Math.round(costs.railPct * 10000) / 100} onChange={(v) => editCost("railPct", v / 100)} min={0} max={20} step={0.05} suffix="%" />
             <NumInput label="Fixed / tx" value={costs.fixedXaf} onChange={(v) => editCost("fixedXaf", v)} min={0} max={100000} step={10} suffix="XAF" />
           </Grid>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", margin: "16px 0 4px" }}>Contracted disbursement fees (the signed schedule)</div>
+          <p style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "0 0 8px", lineHeight: 1.5 }}>Per aggregator × operator. When set it beats the assumption above everywhere: payouts route to the cheaper funded rail, profit by operator uses it, and the network's fee engine prices on it. Leave a row blank to fall back to the rail's published fee, then the assumption.</p>
+          <ContractsEditor value={contracts} onChange={(v) => { setContracts(v); setDirty(true); }} />
           {pricing.railFees && (
             <p style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.5 }}>
               The rail publishes its disbursement fee: <b>MTN {pricing.railFees.mtn != null ? `${(pricing.railFees.mtn * 100).toFixed(2)} %` : "—"}</b> · <b>Orange {pricing.railFees.orange != null ? `${(pricing.railFees.orange * 100).toFixed(2)} %` : "—"}</b> ({pricing.railFees.source}). Set the payout-cost assumption to match.

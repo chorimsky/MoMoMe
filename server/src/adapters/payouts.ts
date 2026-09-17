@@ -11,6 +11,7 @@
    credentials (configured/live), routing fails over across healthy same-class
    rails, and per-rail live-gating means one can be production while another is off.
    ============================================================ */
+import { contractedPayoutFee } from "../core/pricing.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import type { PayoutStatus } from "./pawapay.js";
 import { pawapayConfigured, pawapayLive, peexitConfigured, peexitLive } from "../config.js";
@@ -74,7 +75,7 @@ export const peexitAdapter: PayoutAdapter = {
   balance: peexit.availableBalanceXaf,
   statusByKey: peexit.statusByKey,
   listPayouts: peexit.listPayouts,
-  payoutFeePct: peexit.payoutFeePct,
+  payoutFeePct: async (provider, country) => (await peexit.payoutFeePct(provider, country)) ?? contractedPayoutFee("peexit", provider)?.pct ?? null,
   // Peexit authenticates its callback with HTTP Basic Auth (creds we handed it).
   verifyCallback: (_raw, headers) => {
     const a = headers["authorization"];
@@ -97,6 +98,9 @@ export const pawapayAdapter: PayoutAdapter = {
   disburse: pawapay.disburse,
   queryStatus: pawapay.queryStatus,
   balance: pawapay.availableBalanceXaf,
+  // PawaPay publishes no fee over the API; the signed schedule in Admin → Rates & Pricing
+  // is the figure cost-first routing compares against Peexit's published one.
+  payoutFeePct: async (provider) => contractedPayoutFee("pawapay", provider)?.pct ?? null,
   statusByKey: pawapay.statusByKey,
   // PawaPay v2 uses RFC-9421 asymmetric signatures, which are NOT implemented (see
   // pawapay.verifyCallback). Previously this accepted ANY body whenever the rail was

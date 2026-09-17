@@ -36,7 +36,7 @@ const DEFAULTS: AdminSettings = {
   // Product surfaces — all on by default; a super-admin can disable any of them.
   features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, receive: true, contacts: true, momoTransfer: false },
   // Treasury sweep destinations — all unset until an operator configures them.
-  treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "" },
+  treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "", floatTargetDays: 5 },
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
   // CTR/large-transaction reporting at 5,000,000 XAF; CDD/identification at
   // 1,000,000 XAF for occasional transactions; 10-year record retention.
@@ -109,6 +109,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
       minFeeXaf: d.pricing?.minFeeXaf ?? DEFAULTS.pricing.minFeeXaf,
       spreadBps: { ...DEFAULTS.pricing.spreadBps, ...(d.pricing?.spreadBps ?? {}) },
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
+      contracts: d.pricing?.contracts ?? {},
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
     egress: { ...DEFAULTS.egress, ...(d.egress ?? {}) },
@@ -152,6 +153,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       minFeeXaf: patch.pricing?.minFeeXaf ?? settings.pricing.minFeeXaf,
       spreadBps: { ...settings.pricing.spreadBps, ...(patch.pricing?.spreadBps ?? {}) },
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
+      contracts: patch.pricing?.contracts ?? settings.pricing.contracts ?? {},
     },
     ops: { ...settings.ops, ...(patch.ops ?? {}) },
     egress: { ...settings.egress, ...(patch.egress ?? {}) },

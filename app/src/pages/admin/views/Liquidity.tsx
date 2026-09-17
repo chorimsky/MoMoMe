@@ -95,6 +95,8 @@ export function LiquidityView() {
         })}
       </Grid>
 
+      {data.floatPlan && <FloatPlanCard plan={data.floatPlan} />}
+
       <TreasurySweep />
     </div>
   );
@@ -290,6 +292,44 @@ function MarkSold({ id, onDone }: { id: string; onDone: () => Promise<void> }) {
       <input className="input num" placeholder="XAF received after selling" value={v} onChange={(e) => setV(e.target.value)} style={{ maxWidth: 220, padding: "5px 8px", fontSize: 12 }} />
       <button className="btn btn-ghost" disabled={busy || !v} onClick={() => void go()} style={{ padding: "5px 10px", fontSize: 12 }}>Mark sold</button>
       {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
+    </div>
+  );
+}
+
+/* ============================================================
+   Float plan — the payout float is the ceiling on volume and idle float is a cost. Per
+   aggregator wallet: what leaves per day (last 14 days), how many days the balance lasts,
+   the top-up to the target. Under two days pages the operator (core/alerts).
+   ============================================================ */
+function FloatPlanCard({ plan }: { plan: NonNullable<LiquiditySnapshot["floatPlan"]> }) {
+  const tone = (d: number | null): Tone => d == null ? "ink" : d < 2 ? "bad" : d < plan.targetDays ? "warn" : "recv";
+  return (
+    <div className="card" style={{ padding: 18, marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Float plan</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Average daily payouts over the last {plan.windowDays} days, per wallet · target {plan.targetDays} days.</div>
+        </div>
+        <span className="pill" style={{ fontSize: 11, color: `var(--${tone(plan.totals.daysOfFloat) === "ink" ? "ink-2" : tone(plan.totals.daysOfFloat)})` }}>{plan.totals.daysOfFloat == null ? "days of float unknown" : `${plan.totals.daysOfFloat} day(s) of float`}</span>
+      </div>
+      <div style={{ overflowX: "auto", marginTop: 12 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+          <thead><tr>{["Wallet", "Balance", "Per day", "Days left", "Top-up to target", "Payouts (14 d)"].map((h) => <th key={h} style={{ textAlign: h === "Wallet" ? "left" : "right", padding: "6px 8px", fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "1px solid var(--line-2)" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {plan.aggregators.map((a) => (
+              <tr key={a.name}>
+                <td className="mono" style={{ padding: "7px 8px", fontWeight: 700 }}>{a.name}{!a.live && <span style={{ color: "var(--ink-3)", fontWeight: 400 }}> · sandbox</span>}</td>
+                <td className="num" style={{ padding: "7px 8px", textAlign: "right" }}>{a.balanceXaf == null ? "—" : `${fmt(Math.round(a.balanceXaf))} XAF`}</td>
+                <td className="num" style={{ padding: "7px 8px", textAlign: "right" }}>{fmt(a.avgDailyXaf)} XAF</td>
+                <td className="num" style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: `var(--${tone(a.daysOfFloat) === "ink" ? "ink-2" : tone(a.daysOfFloat)})` }}>{a.daysOfFloat == null ? "—" : a.daysOfFloat}</td>
+                <td className="num" style={{ padding: "7px 8px", textAlign: "right" }}>{a.topUpXaf > 0 ? `${fmt(a.topUpXaf)} XAF` : "—"}</td>
+                <td className="num" style={{ padding: "7px 8px", textAlign: "right", color: "var(--ink-3)" }}>{fmt(a.payouts)} · {fmt(a.volumeXaf)} XAF</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-2)", margin: "10px 0 0" }}>{plan.note}{plan.idleXaf > 0 ? ` Idle above target: ${fmt(Math.round(plan.idleXaf))} XAF.` : ""}</p>
     </div>
   );
 }

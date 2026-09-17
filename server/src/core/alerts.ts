@@ -22,6 +22,7 @@ import * as whatsapp from "../adapters/whatsapp.js";
 import { whatsappConfigured, liveMoney } from "../config.js";
 import { reconcile as networkReconcile } from "./network/shadow.js";
 import { lowLiquidity } from "./network/liquidity.js";
+import { floatPlan } from "./floatPlan.js";
 
 export interface AlertCondition { key: string; severity: "critical" | "warning"; body: string }
 export interface AlertState { key: string; firstAt: string; lastSentAt: string; count: number; body: string }
@@ -54,6 +55,11 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
     const float = await availableFloatXaf().catch(() => null);
     const floor = FLOAT_FLOOR_XAF;
     if (float != null && float < floor) out.push({ key: "float:low", severity: "critical", body: `Payout float is ${Math.round(float).toLocaleString("en")} XAF — below ${floor.toLocaleString("en")}. Top up the aggregator wallet before payouts start failing.` });
+  }
+  // Float plan: a live aggregator wallet with real daily volume and under two days left.
+  if (liveMoney()) {
+    const plan = await floatPlan(now).catch(() => null);
+    for (const a of plan?.aggregators ?? []) if (a.live && a.avgDailyXaf > 0 && a.daysOfFloat != null && a.daysOfFloat < 2) out.push({ key: `float:days:${a.name}`, severity: "warning", body: `${a.name} wallet holds ${a.daysOfFloat} day(s) of payouts (${Math.round(a.balanceXaf ?? 0).toLocaleString("en")} XAF vs ${a.avgDailyXaf.toLocaleString("en")} XAF/day). Top up ${a.topUpXaf.toLocaleString("en")} XAF to reach ${plan!.targetDays} days.` });
   }
   // The network: books that do not balance, stuck sagas, dry liquidity.
   const rc = networkReconcile();

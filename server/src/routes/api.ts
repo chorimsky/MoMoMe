@@ -51,7 +51,8 @@ import { usingPostgres } from "../db/store.js";
 import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, verifyApiKey } from "../core/apiKeys.js";
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
-import { platformFee } from "../core/pricing.js";
+import { platformFee, contractedPayoutFee } from "../core/pricing.js";
+import { floatPlan } from "../core/floatPlan.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
@@ -2024,6 +2025,17 @@ api.put("/admin/settings", async (req, res) => {
     for (const v of Object.values(pr.spreadBps ?? {})) {
       if (!inRange(v, 0, 2000)) return res.status(400).json({ error: "bad_pricing", message: "Spread must be 0–2000 bps." });
     }
+    // Contracted schedules: known aggregator, known operator, 0–20 % + a non-negative flat part.
+    if (pr.contracts !== undefined) {
+      if (typeof pr.contracts !== "object" || pr.contracts === null) return res.status(400).json({ error: "bad_pricing", message: "contracts must be an object." });
+      for (const [agg, ops] of Object.entries(pr.contracts)) {
+        if (!["pawapay", "peexit"].includes(agg)) return res.status(400).json({ error: "bad_pricing", message: `Unknown aggregator ${agg}.` });
+        for (const [op, f] of Object.entries(ops ?? {})) {
+          if (!["MTN", "ORANGE", "AIRTEL"].includes(op)) return res.status(400).json({ error: "bad_pricing", message: `Unknown operator ${op}.` });
+          if (!f || !inRange(f.pct, 0, 0.2) || !inRange(f.fixedXaf, 0, 5000)) return res.status(400).json({ error: "bad_pricing", message: `${agg}.${op}: pct must be 0–20 % and fixedXaf 0–5000.` });
+        }
+      }
+    }
     const c = pr.costs;
     if (c) {
       if (c.payoutPct !== undefined && !inRange(c.payoutPct, 0, 0.2)) return res.status(400).json({ error: "bad_pricing", message: "Payout cost must be 0%–20%." });
@@ -2150,6 +2162,7 @@ api.get("/admin/liquidity", async (_req, res) => {
       xaf: stranded.reduce((n, e) => n + e.xaf, 0),
       items: stranded.slice(0, 50),
     },
+    floatPlan: await floatPlan().catch(() => undefined),
   });
 });
 
@@ -2179,12 +2192,16 @@ function looksLikeAddress(v: unknown): v is string {
 }
 api.put("/admin/treasury/destinations", async (req, res) => {
   const b = (req.body ?? {}) as Partial<AdminSettings["treasury"]>;
-  const fields: (keyof AdminSettings["treasury"])[] = ["lnAddress", "btcOnchain", "usdtAddress", "usdcAddress"];
+  const fields = ["lnAddress", "btcOnchain", "usdtAddress", "usdcAddress"] as const;
   const patch: Partial<AdminSettings["treasury"]> = {};
   for (const f of fields) {
     if (b[f] === undefined) continue;
     if (!looksLikeAddress(b[f])) return res.status(400).json({ error: "bad_address", message: `That ${f} doesn't look like a valid address.` });
     patch[f] = (b[f] as string).trim();
+  }
+  if (b.floatTargetDays !== undefined) {
+    if (!(typeof b.floatTargetDays === "number" && b.floatTargetDays >= 1 && b.floatTargetDays <= 30)) return res.status(400).json({ error: "bad_target", message: "Float target must be 1–30 days." });
+    patch.floatTargetDays = b.floatTargetDays;
   }
   const s = updateSettings({ treasury: { ...getSettings().treasury, ...patch } });
   res.json({ destinations: s.treasury });
@@ -2333,6 +2350,7 @@ api.get("/admin/pricing", async (_req, res) => {
     eurXafPeg: EUR_XAF_PEG,
     spreadBps: s.spreadBps,
     costs: s.costs,
+    contracts: s.contracts ?? {},
     rates: [
       { pair: "BTC/XAF", rate: Math.round(rateFor("LIGHTNING").midXafPerUnit), spreadBps: s.spreadBps.LIGHTNING },
       { pair: "USDT/XAF", rate: Math.round(rateFor("USDT").midXafPerUnit), spreadBps: s.spreadBps.USDT },
@@ -2434,7 +2452,9 @@ api.get("/admin/revenue", async (req, res) => {
   };
   // Per operator × rail, with the rail's own fee when it publishes one.
   const sched = await Promise.race([peexit.feeSchedule().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
-  const railPct = (provider: ProviderId, agg: string): { pct: number; source: "rail" | "assumed" } => {
+  const railPct = (provider: ProviderId, agg: string): { pct: number; source: "contract" | "rail" | "assumed" } => {
+    const c = contractedPayoutFee(agg, provider);
+    if (c) return { pct: c.pct, source: "contract" };
     const v = agg === "peexit" ? (provider === "ORANGE" ? sched?.disbOrange : sched?.disbMtn) : null;
     return v != null && Number.isFinite(v) && v <= 20 ? { pct: v / 100, source: "rail" } : { pct: costs.payoutPct, source: "assumed" };
   };

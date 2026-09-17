@@ -680,6 +680,11 @@ export interface AdminSettings {
      *  delivered XAF; rail = crypto-in cost as a fraction of the total billed;
      *  fixed = flat per-transaction cost (KYC/ops) in XAF. */
     costs: { payoutPct: number; railPct: number; fixedXaf: number };
+    /** The SIGNED disbursement schedule per aggregator × operator, as a fraction plus a
+     *  flat XAF part (e.g. pawapay.MTN = { pct: 0.012, fixedXaf: 0 }). When set it beats the
+     *  assumption above everywhere: cost-first routing, the revenue view, the network's fee
+     *  engine. Absent entries fall back to what the rail publishes, then to `costs.payoutPct`. */
+    contracts?: Record<string, Partial<Record<"MTN" | "ORANGE" | "AIRTEL", { pct: number; fixedXaf: number }>>>;
   };
   /** Operational controls wired into the live payment path. */
   ops: {
@@ -784,7 +789,20 @@ export interface AdminSettings {
     usdtAddress: string;
     /** ERC-20 (Ethereum) address for USDC withdrawals. */
     usdcAddress: string;
+    /** How many days of average payouts each aggregator wallet should hold (the float
+     *  plan's target; a wallet under 2 days pages the operator). */
+    floatTargetDays?: number;
   };
+}
+
+/** The float plan: per payout aggregator, what leaves per day and how long the wallet lasts. */
+export interface FloatPlan {
+  windowDays: number;
+  targetDays: number;
+  aggregators: Array<{ name: string; live: boolean; balanceXaf: number | null; avgDailyXaf: number; daysOfFloat: number | null; topUpXaf: number; payouts: number; volumeXaf: number }>;
+  totals: { balanceXaf: number | null; avgDailyXaf: number; daysOfFloat: number | null; topUpXaf: number };
+  idleXaf: number;
+  note: string;
 }
 
 /* ---------- treasury withdrawal ---------- */
@@ -873,6 +891,7 @@ export interface LiquiditySnapshot {
    *  ceiling when no rail can be queried (a commitment cap, NOT a balance). */
   floatBasis?: string;
   stranded?: { count: number; xaf: number; items: unknown[] };
+  floatPlan?: FloatPlan;
 }
 
 /* ---------- pricing / FX ---------- */
@@ -882,6 +901,8 @@ export interface PricingInfo {
   eurXafPeg: number;
   spreadBps: { LIGHTNING: number; ONCHAIN: number; USDT: number; USDC: number };
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
+  /** The signed disbursement schedules (settings.pricing.contracts). */
+  contracts?: AdminSettings["pricing"]["contracts"];
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */
   feed: { source: string; updatedAt: string | null; btcUsd: number; usdtUsd: number; eurUsd: number; usdXaf: number };
@@ -948,7 +969,7 @@ export interface RevenueReport {
   };
   /** Profit by destination operator and payout rail — the payout cost is the rail's own
    *  fee when it publishes one, the configured assumption otherwise. */
-  byOperator: Array<{ provider: ProviderId; aggregator: string; payments: number; volumeXaf: number; payoutCostPct: number; costSource: "rail" | "assumed"; payoutCostXaf: number; grossXaf: number; netXaf: number; netMarginPct: number }>;
+  byOperator: Array<{ provider: ProviderId; aggregator: string; payments: number; volumeXaf: number; payoutCostPct: number; costSource: "contract" | "rail" | "assumed"; payoutCostXaf: number; grossXaf: number; netXaf: number; netMarginPct: number }>;
   /** Quoted spread vs what selling the swept crypto actually returned, per asset. */
   spreadByAsset: Array<{ asset: string; quotedBps: number; quotedXaf: number; volumeXaf: number; realizedPct: number | null; realizedXaf: number | null; sweeps: number }>;
   /** Revenue levers that do not raise the customer's price — each with a monthly estimate

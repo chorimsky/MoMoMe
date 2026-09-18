@@ -4,30 +4,61 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import type { ReportsSnapshot } from "@shared/types.js";
-import { PROVIDERS } from "@shared/domain.js";
+import { PROVIDERS, METHOD_META } from "@shared/domain.js";
 import { api } from "../../../api/client.js";
 import { fmt } from "../../../lib/format.js";
-import { AKpi, Card, Grid, KV, SectionTitle, SegToggle, Spark } from "../AdminUI.js";
+import { AKpi, Card, Grid, SectionTitle, SegToggle, Spark } from "../AdminUI.js";
 import { Failed, Loading } from "./Overview.js";
 
-function exportCsv(rows: ReportsSnapshot["byProvider"]) {
-  // Two rates, not one: conversion (paid ÷ created) is the payer's decision; reliability
-  // (delivered ÷ paid) is ours. "Success rate" blurred them into a number nobody could act on.
-  const head = ["Provider", "Attempts", "Paid", "Delivered", "Volume XAF", "Conversion %", "Reliability %", "Success rate %"];
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = rows.map((p) => [PROVIDERS[p.id].name, p.attempts, p.paid, p.payments, p.volumeXaf, p.conversionPct ?? "", p.reliabilityPct ?? "", p.successRatePct ?? ""].map(esc).join(","));
-  const csv = [head.map(esc).join(","), ...lines].join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+/** Export the WHOLE report, not one table: the window, the headline numbers against the
+ *  previous window, the funnel, per-method, per-provider, the failure causes and the daily
+ *  series — each as its own titled block, so the file answers the questions the page does. */
+function exportCsv(d: ReportsSnapshot) {
+  const esc = (v: string | number | null | undefined) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const row = (...v: Array<string | number | null | undefined>) => v.map(esc).join(",");
+  const delta = (now: number, was: number) => (was > 0 ? `${Math.round(((now - was) / was) * 100)}%` : "");
+  const L: string[] = [];
+  L.push(row("MoMo›Me report"), row("Window", d.period.label), row("From", d.period.from), row("To", d.period.to), row("Generated", new Date().toISOString()), "");
+  L.push(row("Headline", "This window", "Previous window", "Change"));
+  L.push(row("Gross revenue XAF", d.revenueXaf, d.previous.revenueXaf, delta(d.revenueXaf, d.previous.revenueXaf)));
+  L.push(row("— platform fees XAF", d.feeXaf, "", ""));
+  L.push(row("— FX spread XAF", d.spreadXaf, "", ""));
+  L.push(row("Volume delivered XAF", d.volumeXaf, d.previous.volumeXaf, delta(d.volumeXaf, d.previous.volumeXaf)));
+  L.push(row("Payments delivered", d.payments, d.previous.payments, delta(d.payments, d.previous.payments)));
+  L.push(row("Recipients paid", d.customers, d.previous.customers, delta(d.customers, d.previous.customers)));
+  L.push(row("Conversion % (paid ÷ created)", d.funnel.conversionPct ?? "", d.previous.conversionPct ?? "", ""));
+  L.push(row("Reliability % (delivered ÷ paid)", d.funnel.reliabilityPct ?? "", d.previous.reliabilityPct ?? "", ""), "");
+  L.push(row("Funnel", "Count"), row("Created", d.funnel.created), row("Paid", d.funnel.paid), row("Delivered", d.funnel.delivered),
+    row("Expired unpaid (drop-off)", d.funnel.unpaidExpired), row("Still waiting for the payer", d.funnel.unpaidOpen),
+    row("Held or cancelled before payment", d.funnel.unpaidHeld),
+    row("Failed after payment", d.funnel.failedAfterPayment), row("In flight", d.funnel.inFlight),
+    row("Volume never sent XAF", d.funnel.lostVolumeXaf), row("Median minutes to expiry", d.funnel.medianMinutesToExpire ?? ""), "");
+  L.push(row("Pay-in method", "Attempts", "Paid", "Delivered", "Volume XAF", "Revenue XAF", "Conversion %", "Reliability %"));
+  for (const m of d.byMethod) L.push(row(m.method, m.attempts, m.paid, m.delivered, m.volumeXaf, m.revenueXaf, m.conversionPct ?? "", m.reliabilityPct ?? ""));
+  L.push("", row("Provider", "Attempts", "Paid", "Delivered", "Volume XAF", "Conversion %", "Reliability %"));
+  for (const p of d.byProvider) L.push(row(PROVIDERS[p.id].name, p.attempts, p.paid, p.payments, p.volumeXaf, p.conversionPct ?? "", p.reliabilityPct ?? ""));
+  if (d.failures.reasons.length) {
+    L.push("", row("Why payments did not complete", "Count", "Volume XAF", "Avg minutes to fail", "State"));
+    for (const f of d.failures.reasons) L.push(row(f.reason, f.count, f.volumeXaf, f.avgMinutesToFail, f.state));
+  }
+  L.push("", row("Date", "Payments", "Volume XAF", "Revenue XAF"));
+  for (const day of d.daily) L.push(row(day.date, day.payments, day.volumeXaf, day.revenueXaf));
+  const url = URL.createObjectURL(new Blob([L.join("\n")], { type: "text/csv" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `momome-report-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `momome-report-${d.period.key}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-const COLS = "1.6fr 0.9fr 1.1fr 1fr";
-const PERIODS = ["Today", "This week", "This month"];
-const PERIOD_KEY: Record<string, string> = { "Today": "today", "This week": "week", "This month": "month" };
+const COLS = "1.6fr 0.9fr 1.1fr 1.2fr";
+const METHOD_COLS = "1.3fr .8fr .8fr .8fr 1.1fr 1fr";
+const METHOD_LABEL: Record<string, string> = Object.fromEntries(Object.entries(METHOD_META).map(([k, v]) => [k, (v as { name: string }).name]));
+const pctDelta = (now: number, was: number): number | undefined => (was > 0 ? Math.round(((now - was) / was) * 100) : undefined);
+// Rolling windows, labelled as such: "This month" used to mean "the last 31 days", which
+// is not what an operator reads it as on the 3rd of the month.
+const PERIODS = ["24 hours", "7 days", "30 days", "90 days"];
+const PERIOD_KEY: Record<string, string> = { "24 hours": "today", "7 days": "week", "30 days": "month", "90 days": "quarter" };
 
 export function ReportsView() {
   const [data, setData] = useState<ReportsSnapshot | null>(null);
@@ -43,30 +74,46 @@ export function ReportsView() {
   }, [period]);
 
   if (err) return <Failed t="Reports" msg={err} />;
-  if (!data) return <Loading t="Reports" s="Revenue, volume and provider performance." />;
+  if (!data) return <Loading t="Reports" s="Gross revenue, volume and where payments stop." />;
 
   return (
     <div>
-      <SectionTitle t="Reports" s="Revenue, volume and provider performance." />
+      <SectionTitle t="Reports" s="Gross revenue (fees + FX spread), volume and where payments stop — by pay-in method and by operator." />
       <div className="mm-toolbar" style={{ marginBottom: 14 }}>
         <SegToggle options={PERIODS} value={period} onChange={setPeriod} />
-        <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>Showing: {period}</span>
+        <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{data.period.label} · vs the {data.period.days === 1 ? "24 hours" : `${data.period.days} days`} before</span>
         <div style={{ flex: 1 }} />
-        <button type="button" className="btn btn-ghost" disabled={data.byProvider.length === 0} onClick={() => exportCsv(data.byProvider)} style={{ padding: "9px 14px", fontSize: 13 }}>↓ Export</button>
+        <button type="button" className="btn btn-ghost" disabled={data.funnel.created === 0} onClick={() => exportCsv(data)} style={{ padding: "9px 14px", fontSize: 13 }}>↓ Export</button>
       </div>
 
       <Grid cols={4} style={{ marginBottom: 14 }}>
-        <AKpi label="Revenue" value={fmt(data.revenueXaf)} unit="XAF" tone="recv" />
-        <AKpi label="Volume" value={fmt(data.volumeXaf)} unit="XAF" />
-        <AKpi label="Payments" value={fmt(data.payments)} />
-        <AKpi label="Customers" value={fmt(data.customers)} />
+        <AKpi label="Gross revenue" value={fmt(data.revenueXaf)} unit="XAF" tone="recv" delta={pctDelta(data.revenueXaf, data.previous.revenueXaf)} deltaLabel="vs previous window"
+          sub={`fees ${fmt(data.feeXaf)} · FX spread ${fmt(data.spreadXaf)}`} />
+        <AKpi label="Volume delivered" value={fmt(data.volumeXaf)} unit="XAF" delta={pctDelta(data.volumeXaf, data.previous.volumeXaf)} deltaLabel="vs previous window"
+          sub={data.payments ? `avg ticket ${fmt(Math.round(data.volumeXaf / data.payments))} XAF` : undefined} />
+        <AKpi label="Payments delivered" value={fmt(data.payments)} delta={pctDelta(data.payments, data.previous.payments)} deltaLabel="vs previous window"
+          sub={`${fmt(data.funnel.created)} created · ${fmt(data.funnel.paid)} paid`} />
+        <AKpi label="Recipients paid" value={fmt(data.customers)} delta={pctDelta(data.customers, data.previous.customers)} deltaLabel="vs previous window"
+          sub="distinct numbers that received money" />
       </Grid>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <Card title="Volume trend">
-          {data.daily.length > 0
-            ? <Spark data={data.daily.map((d) => d.volumeXaf)} h={120} />
-            : <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No data yet</div>}
+        <Card title="Volume and revenue by day" sub={data.daily.length ? `${data.daily[0].date} → ${data.daily[data.daily.length - 1].date} · only days with a delivered payment appear.` : undefined}>
+          {data.daily.length > 0 ? (
+            <>
+              <Spark data={data.daily.map((d) => d.volumeXaf)} h={120} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+                <span className="num">{data.daily[0].date}</span>
+                <span>peak {fmt(Math.max(...data.daily.map((d) => d.volumeXaf)))} XAF</span>
+                <span className="num">{data.daily[data.daily.length - 1].date}</span>
+              </div>
+              <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 12.5, color: "var(--ink-2)", flexWrap: "wrap" }}>
+                <span>Best day <b className="num">{fmt(Math.max(...data.daily.map((d) => d.volumeXaf)))} XAF</b></span>
+                <span>Daily average <b className="num">{fmt(Math.round(data.volumeXaf / Math.max(1, data.daily.length)))} XAF</b></span>
+                <span>Revenue this window <b className="num">{fmt(data.revenueXaf)} XAF</b></span>
+              </div>
+            </>
+          ) : <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No delivered payments in this window.</div>}
         </Card>
 
         {/* The funnel: how many intents were paid, how many paid were delivered — and what
@@ -84,12 +131,22 @@ export function ReportsView() {
                   </div>
                 ))}
               </div>
-              <Grid cols={2} gap={10} style={{ marginTop: 12 }}>
-                <KV k="Conversion (paid ÷ created)" v={f.conversionPct == null ? "—" : `${f.conversionPct}%`} tone={f.conversionPct != null && f.conversionPct < 60 ? "bad" : undefined} />
-                <KV k="Reliability (delivered ÷ paid)" v={f.reliabilityPct == null ? "—" : `${f.reliabilityPct}%`} tone={f.reliabilityPct != null && f.reliabilityPct < 97 ? "warn" : "recv"} />
-                <KV k="Expired unpaid (drop-off)" v={`${fmt(f.unpaidExpired)} · ${fmt(f.lostVolumeXaf)} XAF not sent`} tone={f.unpaidExpired ? "warn" : undefined} />
-                <KV k="Failed after payment" v={fmt(f.failedAfterPayment)} tone={f.failedAfterPayment ? "bad" : undefined} />
-              </Grid>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 14 }}>
+                {([
+                  { k: "Conversion", v: f.conversionPct == null ? "—" : `${f.conversionPct}%`, s: "paid ÷ created", tone: f.conversionPct != null && f.conversionPct < 60 ? "var(--bad)" : "var(--ink)" },
+                  { k: "Reliability", v: f.reliabilityPct == null ? "—" : `${f.reliabilityPct}%`, s: "delivered ÷ paid", tone: f.reliabilityPct == null ? "var(--ink)" : f.reliabilityPct < 97 ? "var(--warn-ink)" : "var(--recv)" },
+                  { k: "Never paid", v: fmt(f.unpaidExpired), s: `${fmt(f.lostVolumeXaf)} XAF not sent`, tone: f.unpaidExpired ? "var(--warn-ink)" : "var(--ink)" },
+                  { k: "Failed after payment", v: fmt(f.failedAfterPayment), s: "money arrived, delivery failed", tone: f.failedAfterPayment ? "var(--bad)" : "var(--ink)" },
+                  ...(f.unpaidHeld ? [{ k: "Held before payment", v: fmt(f.unpaidHeld), s: "review or cancelled", tone: "var(--warn-ink)" }] : []),
+                  ...(f.unpaidOpen ? [{ k: "Still waiting", v: fmt(f.unpaidOpen), s: "the payer has not sent yet", tone: "var(--ink)" }] : []),
+                ]).map((t) => (
+                  <div key={t.k} style={{ background: "var(--surface-2)", borderRadius: "var(--r)", padding: "10px 12px" }}>
+                    <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700, color: "var(--ink-3)" }}>{t.k}</div>
+                    <div className="num" style={{ fontSize: 19, fontWeight: 750, color: t.tone, marginTop: 3 }}>{t.v}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}>{t.s}</div>
+                  </div>
+                ))}
+              </div>
               {f.unpaidExpired > 0 && (
                 <p style={{ fontSize: 12.5, color: "var(--ink-2)", margin: "10px 0 0", lineHeight: 1.5 }}>
                   Drop-offs by pay-in method: {Object.entries(f.unpaidByMethod).map(([m, n]) => `${m} ${n}`).join(" · ")}. They expired a median {f.medianMinutesToExpire ?? "—"} min after creation (invoice validity: {Object.entries(f.invoiceTtlMin).map(([m, n]) => `${m} ${n} min`).join(", ")}). A payer who reaches the pay step and does not send is telling you about the pay step — the QR, the wallet hand-off, the amount in sats — not about the rails.
@@ -101,11 +158,11 @@ export function ReportsView() {
 
         {/* The operator's first question after "how many": why did the rest not complete.
             One row per cause, from the note the state machine wrote when it gave up. */}
-        <Card title="Why payments fail" pad={false}>
+        <Card title="Why payments did not complete" sub="Each cause is the note the engine wrote when it gave up. A drop-off (nobody sent) and a delivery failure (money arrived, payout failed) are different problems — the state column says which." pad={false}>
           <div style={{ padding: "12px 20px 4px", fontSize: 12.5, color: "var(--ink-3)" }}>
             {data.failures.total === 0
-              ? "Every payment in this period completed."
-              : `${fmt(data.failures.total)} of ${fmt(data.failures.attempts)} payments did not complete (${Math.round(100 * data.failures.total / Math.max(1, data.failures.attempts))}%).`}
+              ? `Nothing ended badly in this window${data.funnel.unpaidOpen ? ` — ${fmt(data.funnel.unpaidOpen)} still waiting for the payer.` : "."}`
+              : `${fmt(data.failures.total)} of ${fmt(data.funnel.created)} created ended without delivery (${Math.round(100 * data.failures.total / Math.max(1, data.funnel.created))}%): ${fmt(data.funnel.unpaidExpired)} never paid, ${fmt(data.funnel.failedAfterPayment)} failed after the money arrived${data.funnel.unpaidHeld ? `, ${fmt(data.funnel.unpaidHeld)} held or cancelled first` : ""}. ${fmt(data.funnel.unpaidOpen)} are still waiting for the payer.`}
           </div>
           {data.failures.reasons.map((r) => (
             <div key={r.state + r.reason} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto auto", gap: 12, alignItems: "center", padding: "10px 20px", borderTop: "1px solid var(--line-2)", fontSize: 12.5 }}>
@@ -122,7 +179,35 @@ export function ReportsView() {
           ))}
         </Card>
 
-        <Card title="By provider" pad={false}>
+        {/* Pay-in method is where the drop-offs live: a payer abandons at the pay step of a
+            SPECIFIC method (a Lightning invoice, an ERC-20 address), not at a Mobile Money
+            operator. This table is the one that says which product step to fix. */}
+        <Card title="By pay-in method" sub="Conversion is the payer's decision at this method's pay step; reliability is delivery after the money arrived." pad={false}>
+          <div className="mm-tablewrap">
+            <div className="mm-table">
+              <div style={{ display: "grid", gridTemplateColumns: METHOD_COLS, fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", padding: "14px 20px 10px", borderBottom: "1px solid var(--line-2)" }}>
+                <span>Method</span><span>Created</span><span>Paid</span><span>Delivered</span><span>Volume</span><span>Conv · rel</span>
+              </div>
+              {data.byMethod.length === 0 && <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--ink-3)" }}>No payments in this window.</div>}
+              {data.byMethod.map((m) => (
+                <div key={m.method} style={{ display: "grid", gridTemplateColumns: METHOD_COLS, alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--line-2)" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 650 }}>{METHOD_LABEL[m.method]}</span>
+                  <span className="num" style={{ fontSize: 13 }}>{fmt(m.attempts)}</span>
+                  <span className="num" style={{ fontSize: 13 }}>{fmt(m.paid)}</span>
+                  <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(m.delivered)}</span>
+                  <span className="num" style={{ fontSize: 13 }}>{fmt(m.volumeXaf)} XAF</span>
+                  <span className="num" style={{ fontSize: 13, fontWeight: 700 }}>
+                    <span style={{ color: m.conversionPct == null ? "var(--ink-3)" : m.conversionPct < 60 ? "var(--bad)" : "var(--ink)" }}>{m.conversionPct == null ? "—" : `${m.conversionPct}%`}</span>
+                    <span style={{ color: "var(--ink-3)", fontWeight: 400 }}> · </span>
+                    <span style={{ color: m.reliabilityPct == null ? "var(--ink-3)" : m.reliabilityPct < 97 ? "var(--warn-ink)" : "var(--recv)" }}>{m.reliabilityPct == null ? "—" : `${m.reliabilityPct}%`}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <Card title="By provider" sub="Where the money landed. Conversion here reflects the pay-in step of the payments destined for that operator, not the operator's own reliability." pad={false}>
           <div className="mm-tablewrap">
             <div className="mm-table">
               <div style={{ display: "grid", gridTemplateColumns: COLS, fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", padding: "14px 20px 10px", borderBottom: "1px solid var(--line)" }}>

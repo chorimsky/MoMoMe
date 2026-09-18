@@ -31,7 +31,7 @@ export function Pill({ status, tone }: { status: string; tone?: Tone }) {
   );
 }
 
-export function AKpi({ label, value, unit, delta, tone, spark }: { label: string; value: ReactNode; unit?: string; delta?: number; tone?: Tone; spark?: number[] }) {
+export function AKpi({ label, value, unit, delta, deltaLabel, tone, spark, sub }: { label: string; value: ReactNode; unit?: string; delta?: number; deltaLabel?: string; tone?: Tone; spark?: number[]; sub?: ReactNode }) {
   return (
     <div className="card" style={{ padding: "15px 17px", borderRadius: "var(--r)" }}>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", fontWeight: 700, color: "var(--ink-3)" }}>{label}</div>
@@ -41,10 +41,11 @@ export function AKpi({ label, value, unit, delta, tone, spark }: { label: string
       </div>
       {delta != null && (
         <div style={{ fontSize: 11.5, fontWeight: 600, color: delta >= 0 ? "var(--recv)" : "var(--bad)", marginTop: 4 }}>
-          {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}% <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>vs last week</span>
+          {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}% <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>{deltaLabel ?? "vs last week"}</span>
         </div>
       )}
       {spark && <Spark data={spark} />}
+      {sub && <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }

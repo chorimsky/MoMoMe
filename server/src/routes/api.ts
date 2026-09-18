@@ -2778,17 +2778,30 @@ api.get("/admin/analytics", (req, res) => {
 
 api.get("/admin/reports", async (req, res) => {
   const period = String(req.query.period ?? "month");
-  const windowMs = period === "today" ? 86_400_000 : period === "week" ? 7 * 86_400_000 : 31 * 86_400_000;
-  const cutoff = Date.now() - windowMs;
-  const all = (await store().listPayments()).filter((p) => Date.parse(p.createdAt) >= cutoff);
+  const DAYS: Record<string, number> = { today: 1, week: 7, month: 30, quarter: 90 };
+  const days = DAYS[period] ?? 30;
+  const LABEL: Record<string, string> = { today: "Last 24 hours", week: "Last 7 days", month: "Last 30 days", quarter: "Last 90 days" };
+  const windowMs = days * 86_400_000;
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const everything = await store().listPayments();
+  const all = everything.filter((p) => Date.parse(p.createdAt) >= cutoff);
+  // The preceding window of equal length, so every headline number carries a direction.
+  const prevAll = everything.filter((p) => { const t = Date.parse(p.createdAt); return t >= cutoff - windowMs && t < cutoff; });
   const completed = all.filter((p) => p.displayStatus === "Completed");
   const dayKey = (iso: string) => iso.slice(0, 10);
-  const byDay = new Map<string, { volumeXaf: number; payments: number }>();
+  const byDay = new Map<string, { volumeXaf: number; payments: number; revenueXaf: number }>();
+  // Revenue is fee + the FX spread booked at quote — the same definition Rates & Pricing
+  // uses. Reporting fees only understated revenue by the spread, which is most of it.
+  const prS = getSettings().pricing;
+  const spreadXafOf = (p: Payment) => { const b = typeof p.spreadBps === "number" ? p.spreadBps : prS.spreadBps[p.method]; return b > 0 && b < 10_000 ? Math.round((p.totalXaf * b) / (10_000 - b)) : 0; };
+  const grossOf = (p: Payment) => p.feeXaf + spreadXafOf(p);
   for (const p of completed) {
     const k = dayKey(p.createdAt);
-    const e = byDay.get(k) ?? { volumeXaf: 0, payments: 0 };
+    const e = byDay.get(k) ?? { volumeXaf: 0, payments: 0, revenueXaf: 0 };
     e.volumeXaf += p.xaf;
     e.payments += 1;
+    e.revenueXaf += grossOf(p);
     byDay.set(k, e);
   }
   const daily = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
@@ -2798,6 +2811,9 @@ api.get("/admin/reports", async (req, res) => {
   const wasPaid = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED" || e.state === "PAYOUT_REQUESTED" || e.state === "DELIVERED");
   const unpaidExpired = all.filter((p) => !wasPaid(p) && p.state === "FAILED");
   const unpaidOpen = all.filter((p) => !wasPaid(p) && (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED"));
+  // Never paid, not waiting: held for review or cancelled before any money arrived. Without
+  // this the funnel did not add up (created ≠ paid + expired + open) and the loss was invisible.
+  const unpaidHeld = all.filter((p) => !wasPaid(p) && !unpaidExpired.includes(p) && !unpaidOpen.includes(p));
   const paid = all.filter(wasPaid);
   const failedAfter = paid.filter((p) => p.state === "FAILED" || p.state === "REFUNDED" || p.state === "REFUND_PENDING" || p.state === "MANUAL_REVIEW");
   const inFlight = paid.filter((p) => p.displayStatus !== "Completed" && !failedAfter.includes(p));
@@ -2806,7 +2822,7 @@ api.get("/admin/reports", async (req, res) => {
   const expireMins = unpaidExpired.map((p) => { const f = [...p.events].reverse().find((e) => e.state === "FAILED"); return f ? (Date.parse(f.at) - Date.parse(p.createdAt)) / 60_000 : null; }).filter((x): x is number => x != null).sort((a, b) => a - b);
   const funnel: import("../../../shared/types.js").ReportsSnapshot["funnel"] = {
     created: all.length, paid: paid.length, delivered: completed.length,
-    unpaidExpired: unpaidExpired.length, unpaidOpen: unpaidOpen.length, failedAfterPayment: failedAfter.length, inFlight: inFlight.length,
+    unpaidExpired: unpaidExpired.length, unpaidOpen: unpaidOpen.length, unpaidHeld: unpaidHeld.length, failedAfterPayment: failedAfter.length, inFlight: inFlight.length,
     conversionPct: all.length ? Math.round((paid.length / all.length) * 100) : null,
     reliabilityPct: paid.length ? Math.round((completed.length / paid.length) * 100) : null,
     unpaidByMethod, medianMinutesToExpire: expireMins.length ? Math.round(expireMins[Math.floor(expireMins.length / 2)]) : null,
@@ -2814,9 +2830,21 @@ api.get("/admin/reports", async (req, res) => {
     lostVolumeXaf: unpaidExpired.reduce((s, p) => s + p.xaf, 0),
   };
   const report: import("../../../shared/types.js").ReportsSnapshot = {
-    revenueXaf: completed.reduce((s, p) => s + p.feeXaf, 0),
+    revenueXaf: completed.reduce((s, p) => s + grossOf(p), 0),
+    feeXaf: completed.reduce((s, p) => s + p.feeXaf, 0),
+    spreadXaf: completed.reduce((s, p) => s + spreadXafOf(p), 0),
     volumeXaf: completed.reduce((s, p) => s + p.xaf, 0),
     payments: completed.length,
+    period: { key: period, label: LABEL[period] ?? `Last ${days} days`, days, from: new Date(cutoff).toISOString(), to: new Date(now).toISOString() },
+    previous: (() => {
+      const pc = prevAll.filter((p) => p.displayStatus === "Completed");
+      const pp = prevAll.filter(wasPaid);
+      return { revenueXaf: pc.reduce((s, p) => s + grossOf(p), 0), volumeXaf: pc.reduce((s, p) => s + p.xaf, 0), payments: pc.length, customers: new Set(prevAll.map((p) => p.recipient.phone.replace(/\D/g, ""))).size, conversionPct: prevAll.length ? Math.round((pp.length / prevAll.length) * 100) : null, reliabilityPct: pp.length ? Math.round((pc.length / pp.length) * 100) : null };
+    })(),
+    byMethod: ALL_METHODS.map((m) => {
+      const ps = all.filter((p) => p.method === m), paidM = ps.filter(wasPaid), doneM = ps.filter((p) => p.displayStatus === "Completed");
+      return { method: m, attempts: ps.length, paid: paidM.length, delivered: doneM.length, volumeXaf: doneM.reduce((s, p) => s + p.xaf, 0), revenueXaf: doneM.reduce((s, p) => s + grossOf(p), 0), conversionPct: ps.length ? Math.round((paidM.length / ps.length) * 100) : null, reliabilityPct: paidM.length ? Math.round((doneM.length / paidM.length) * 100) : null };
+    }).filter((r) => r.attempts > 0),
     // Distinct recipients active in the window (responds to the period filter).
     customers: new Set(all.map((p) => p.recipient.phone.replace(/\D/g, ""))).size,
     daily,

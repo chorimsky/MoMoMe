@@ -1013,11 +1013,24 @@ export interface MobileMoneyInfo {
 
 /* ---------- reports ---------- */
 export interface ReportsSnapshot {
+  /** GROSS revenue: platform fees PLUS the FX spread booked at quote — the same figure
+   *  Rates & Pricing reports. It used to be fees only, so the two pages disagreed by the
+   *  spread (typically most of the revenue). `feeXaf` / `spreadXaf` break it out. */
   revenueXaf: number;
+  feeXaf: number;
+  spreadXaf: number;
   volumeXaf: number;
   payments: number;
+  /** Distinct recipient numbers paid in the window (people who RECEIVED, not senders). */
   customers: number;
-  daily: Array<{ date: string; volumeXaf: number; payments: number }>;
+  /** The window actually covered, and the one it is compared against. */
+  period: { key: string; label: string; days: number; from: string; to: string };
+  /** Same figures over the immediately preceding window of equal length — every KPI on the
+   *  page carries a direction, so "329 279 XAF" means something. */
+  previous: { revenueXaf: number; volumeXaf: number; payments: number; customers: number; conversionPct: number | null; reliabilityPct: number | null };
+  daily: Array<{ date: string; volumeXaf: number; payments: number; revenueXaf: number }>;
+  /** Volume and delivery by pay-in method — where the drop-offs and the money actually are. */
+  byMethod: Array<{ method: Method; attempts: number; paid: number; delivered: number; volumeXaf: number; revenueXaf: number; conversionPct: number | null; reliabilityPct: number | null }>;
   byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number | null;
     /** The two rates that "success rate" used to blur: how many created intents were PAID
      *  (conversion — a payer who never sent is a drop-off, not a failure) and how many PAID
@@ -1028,6 +1041,9 @@ export interface ReportsSnapshot {
     created: number; paid: number; delivered: number;
     unpaidExpired: number;      // invoice expired — the payer never sent (drop-off)
     unpaidOpen: number;         // still waiting for the payer
+    /** Never paid and not waiting either: held for review / cancelled before the money came.
+     *  A conversion loss the operator controls, so it is named rather than folded away. */
+    unpaidHeld: number;
     failedAfterPayment: number; // money arrived, delivery failed (refund owed / review)
     inFlight: number;           // paid, delivering
     conversionPct: number | null;   // paid ÷ created

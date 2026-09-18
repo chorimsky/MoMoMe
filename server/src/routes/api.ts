@@ -2792,6 +2792,27 @@ api.get("/admin/reports", async (req, res) => {
     byDay.set(k, e);
   }
   const daily = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
+  // The funnel. "Paid" = the payer's money arrived (an INBOUND_CONFIRMED event, or any later
+  // state). An invoice that expired unpaid is a DROP-OFF, not a failure: nothing moved and
+  // nobody owes anything — but it is lost volume, and the biggest lever when it is half the intents.
+  const wasPaid = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED" || e.state === "PAYOUT_REQUESTED" || e.state === "DELIVERED");
+  const unpaidExpired = all.filter((p) => !wasPaid(p) && p.state === "FAILED");
+  const unpaidOpen = all.filter((p) => !wasPaid(p) && (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED"));
+  const paid = all.filter(wasPaid);
+  const failedAfter = paid.filter((p) => p.state === "FAILED" || p.state === "REFUNDED" || p.state === "REFUND_PENDING" || p.state === "MANUAL_REVIEW");
+  const inFlight = paid.filter((p) => p.displayStatus !== "Completed" && !failedAfter.includes(p));
+  const unpaidByMethod: Partial<Record<Method, number>> = {};
+  for (const p of unpaidExpired) unpaidByMethod[p.method] = (unpaidByMethod[p.method] ?? 0) + 1;
+  const expireMins = unpaidExpired.map((p) => { const f = [...p.events].reverse().find((e) => e.state === "FAILED"); return f ? (Date.parse(f.at) - Date.parse(p.createdAt)) / 60_000 : null; }).filter((x): x is number => x != null).sort((a, b) => a - b);
+  const funnel: import("../../../shared/types.js").ReportsSnapshot["funnel"] = {
+    created: all.length, paid: paid.length, delivered: completed.length,
+    unpaidExpired: unpaidExpired.length, unpaidOpen: unpaidOpen.length, failedAfterPayment: failedAfter.length, inFlight: inFlight.length,
+    conversionPct: all.length ? Math.round((paid.length / all.length) * 100) : null,
+    reliabilityPct: paid.length ? Math.round((completed.length / paid.length) * 100) : null,
+    unpaidByMethod, medianMinutesToExpire: expireMins.length ? Math.round(expireMins[Math.floor(expireMins.length / 2)]) : null,
+    invoiceTtlMin: Object.fromEntries(ALL_METHODS.map((m) => [m, Math.round(QUOTE_TTL_SEC[m] / 60)])),
+    lostVolumeXaf: unpaidExpired.reduce((s, p) => s + p.xaf, 0),
+  };
   const report: import("../../../shared/types.js").ReportsSnapshot = {
     revenueXaf: completed.reduce((s, p) => s + p.feeXaf, 0),
     volumeXaf: completed.reduce((s, p) => s + p.xaf, 0),
@@ -2802,8 +2823,11 @@ api.get("/admin/reports", async (req, res) => {
     byProvider: PROVIDER_IDS.map((id) => {
       const ps = all.filter((p) => p.recipient.provider === id);
       const done = ps.filter((p) => p.displayStatus === "Completed");
-      return { id, volumeXaf: done.reduce((s, p) => s + p.xaf, 0), payments: done.length, successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : null };
+      const paidPs = ps.filter(wasPaid);
+      return { id, volumeXaf: done.reduce((s, p) => s + p.xaf, 0), payments: done.length, successRatePct: ps.length ? Math.round((done.length / ps.length) * 100) : null,
+        attempts: ps.length, paid: paidPs.length, conversionPct: ps.length ? Math.round((paidPs.length / ps.length) * 100) : null, reliabilityPct: paidPs.length ? Math.round((done.length / paidPs.length) * 100) : null };
     }),
+    funnel,
     failures: { total: 0, attempts: 0, reasons: [] }, // filled below
   };
   // Why payments fail — the operator's first question after "how many". Grouped by the

@@ -1018,7 +1018,27 @@ export interface ReportsSnapshot {
   payments: number;
   customers: number;
   daily: Array<{ date: string; volumeXaf: number; payments: number }>;
-  byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number | null }>;
+  byProvider: Array<{ id: ProviderId; volumeXaf: number; payments: number; successRatePct: number | null;
+    /** The two rates that "success rate" used to blur: how many created intents were PAID
+     *  (conversion — a payer who never sent is a drop-off, not a failure) and how many PAID
+     *  payments were DELIVERED (reliability — the part the rails and the engine own). */
+    attempts: number; paid: number; conversionPct: number | null; reliabilityPct: number | null }>;
+  /** The funnel for the window: created → paid → delivered, with where the rest went. */
+  funnel: {
+    created: number; paid: number; delivered: number;
+    unpaidExpired: number;      // invoice expired — the payer never sent (drop-off)
+    unpaidOpen: number;         // still waiting for the payer
+    failedAfterPayment: number; // money arrived, delivery failed (refund owed / review)
+    inFlight: number;           // paid, delivering
+    conversionPct: number | null;   // paid ÷ created
+    reliabilityPct: number | null;  // delivered ÷ paid
+    unpaidByMethod: Partial<Record<Method, number>>;
+    /** Of the unpaid-expired, how long after creation they expired (median minutes) and the
+     *  invoice validity per method — an expiry shorter than the payer's habit is a product bug. */
+    medianMinutesToExpire: number | null;
+    invoiceTtlMin: Partial<Record<Method, number>>;
+    lostVolumeXaf: number;      // what the unpaid intents would have delivered
+  };
   /** Why payments did not complete in the window, most common first. `reason` is the note
    *  the state machine wrote on the terminal transition (e.g. "invoice expired — not paid"),
    *  normalised so amounts and ids do not split one cause into many rows. */

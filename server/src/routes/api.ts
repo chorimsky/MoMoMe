@@ -2432,13 +2432,38 @@ api.get("/admin/revenue", async (req, res) => {
     } else {
       insights.push({ tone: "good", text: `Your blended take is ${effectiveTakePct}% — below the corridor benchmark (~${benchmarks.corridorPct}%) and far below the Sub-Saharan Africa average (~${benchmarks.ssaAvgPct}%). Competitive for the corridor.` });
     }
-    if (netMarginPct <= 0) insights.push({ tone: "bad", text: `Net margin is ${netMarginPct}% — your cost assumptions exceed revenue. Lower payout/rail costs or raise the take.` });
-    else if (netMarginPct < 1.5) insights.push({ tone: "warn", text: `Net margin is thin at ${netMarginPct}% of volume. The payout-cost assumption (${(costs.payoutPct * 100).toFixed(2)}%) is the biggest lever — negotiate your aggregator rate.` });
-    else insights.push({ tone: "good", text: `Net margin is healthy at ${netMarginPct}% of volume (${netRevenueXaf.toLocaleString()} XAF net this period).` });
+    // The margin, decomposed — so a negative number names its cause and the lever that
+    // closes it, instead of "lower costs or raise the take".
+    const parts = completed.map((p) => paymentCost(p, publishedFor(p)));
+    const payoutXaf = parts.reduce((a, k) => a + k.payout, 0), railXaf = parts.reduce((a, k) => a + k.rail, 0), fixedXaf = parts.reduce((a, k) => a + k.fixed, 0);
+    const bySource = parts.reduce<Record<string, number>>((m, k) => { m[k.source] = (m[k.source] ?? 0) + 1; return m; }, {});
+    const pctV = (x: number) => (volumeXaf ? Math.round((x / volumeXaf) * 10000) / 100 : 0);
+    const payoutPctEff = pctV(payoutXaf), railPctEff = pctV(railXaf), fixedPctEff = pctV(fixedXaf);
+    const costPctEff = pctV(costsXaf);
+    const breakEvenPayout = Math.round((effectiveTakePct - railPctEff - fixedPctEff) * 100) / 100;
+    const gapXaf = Math.max(0, -netRevenueXaf);
+    const gapBps = volumeXaf ? Math.ceil((gapXaf / volumeXaf) * 10000) : 0;
+    const assumedN = bySource.assumed ?? 0, knownN = completed.length - assumedN;
+    const decomposition = `take ${effectiveTakePct}% vs cost ${costPctEff}% = payout ${payoutPctEff}% + crypto rail ${railPctEff}% + fixed ${fixedPctEff}% (${completed.length} × ${costs.fixedXaf} XAF)`;
+    if (netMarginPct <= 0) {
+      insights.push({ tone: "bad", text: `Net margin is ${netMarginPct}% (${netRevenueXaf.toLocaleString()} XAF): ${decomposition}. Your take covers a payout cost of up to ${breakEvenPayout}% — the model charges ${payoutPctEff}%.` });
+      const levers: string[] = [];
+      if (assumedN > 0) levers.push(`${assumedN} of ${completed.length} payments are costed at the ${(costs.payoutPct * 100).toFixed(2)}% assumption — enter the contracted PawaPay/Peexit schedule (below) and the figure becomes fact`);
+      if (costs.fixedXaf > 0) levers.push(`the fixed ${costs.fixedXaf} XAF per payment is ${fixedXaf.toLocaleString()} XAF this period (${fixedPctEff}% of volume) — set it to what a payout actually costs in overhead, usually 0`);
+      if (railPctEff > 0.2) levers.push(`the crypto-rail assumption (${(costs.railPct * 100).toFixed(2)}% of the amount billed) is ${railXaf.toLocaleString()} XAF — IBEX Lightning fees are a few ppm; set it to the real figure`);
+      levers.push(`or +${gapBps} bps of spread on every rail closes the ${gapXaf.toLocaleString()} XAF gap at today's mix (the customer sees a slightly lower rate)`);
+      insights.push({ tone: "warn", text: `To close it, in order of what is fact vs assumption: ${levers.join("; ")}.` });
+    } else if (netMarginPct < 1.5) insights.push({ tone: "warn", text: `Net margin is thin at ${netMarginPct}% of volume: ${decomposition}. The payout cost is the biggest lever — ${assumedN ? `${assumedN} payment(s) still costed at the assumption` : "all costs are known figures"}.` });
+    else insights.push({ tone: "good", text: `Net margin is healthy at ${netMarginPct}% of volume (${netRevenueXaf.toLocaleString()} XAF net this period): ${decomposition}.` });
     for (const r of byRail) {
-      if (r.netMarginPct <= 0) insights.push({ tone: "bad", text: `${r.method} loses money at ${r.netMarginPct}% net — costs exceed its take. Widen its spread or de-prioritise it.` });
+      if (r.netMarginPct > 0) continue;
+      if (r.payments < 3) { insights.push({ tone: "info", text: `${r.method}: ${r.payments} payment${r.payments === 1 ? "" : "s"} (${r.volumeXaf.toLocaleString()} XAF) nets ${r.netXaf.toLocaleString()} XAF — too few to judge the rail; a single small ticket carries the whole fixed cost.` }); continue; }
+      const rp = completed.filter((p) => p.method === r.method).map((p) => paymentCost(p, publishedFor(p)));
+      const rFixed = rp.reduce((a, k) => a + k.fixed, 0), rPayout = rp.reduce((a, k) => a + k.payout, 0);
+      const cause = rFixed >= r.grossXaf * 0.5 ? `the fixed per-payment cost (${rFixed.toLocaleString()} XAF) eats ${Math.round((rFixed / Math.max(1, r.grossXaf)) * 100)}% of its take` : rPayout > r.grossXaf ? `the payout cost (${rPayout.toLocaleString()} XAF) alone exceeds its take (${r.grossXaf.toLocaleString()} XAF)` : `costs ${r.costsXaf.toLocaleString()} XAF against a take of ${r.grossXaf.toLocaleString()} XAF`;
+      insights.push({ tone: "bad", text: `${r.method} nets ${r.netMarginPct}% on ${r.payments} payments: ${cause}. ${rFixed >= r.grossXaf * 0.5 ? "Fix the cost model before touching its spread." : `Widen its spread by ≈ ${Math.ceil((-r.netXaf / Math.max(1, r.volumeXaf)) * 10000)} bps, or route it less.`}` });
     }
-    insights.push({ tone: "info", text: `Net margin uses an estimated ${(costs.payoutPct * 100).toFixed(2)}% payout cost — set your real PawaPay/Peexit/MTN/Orange rate below for an exact figure.` });
+    insights.push({ tone: assumedN ? "info" : "good", text: assumedN ? `${assumedN} of ${completed.length} payments are costed at the ${(costs.payoutPct * 100).toFixed(2)}% payout assumption${knownN ? `; ${knownN} at an invoice, contract or published rate` : ""}. Enter the contracted PawaPay/Peexit schedule below and every figure here recomputes.` : `Every payout cost this period is a known figure (invoice, contract or the rail's published rate).` });
   }
 
   /* ---------- v2: streams, operators, spread capture, opportunities ---------- */

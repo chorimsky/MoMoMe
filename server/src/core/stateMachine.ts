@@ -21,6 +21,9 @@ import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
 import { ensureIdentity } from "./identity.js";
 import { getSettings, refreshSettingsIfStale } from "./settings.js";
 import type { PayoutStatus } from "../adapters/pawapay.js";
+import * as peexit from "../adapters/peexit.js";
+import { payoutByName } from "../adapters/payouts.js";
+import { paymentCost } from "./pricing.js";
 import { bolt11AmountMsat } from "./bolt11.js";
 import { rateFor } from "./fx.js";
 import { ratesFresh, ensureRatesFresh } from "./rates.js";
@@ -774,6 +777,19 @@ async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerR
       { account: "payout_float_XAF", direction: "debit", amount: p.xaf, currency: "XAF" },
       { account: "external_recipient", direction: "credit", amount: p.xaf, currency: "XAF" },
     ]);
+    // What this payout cost us, written on the payment while we know it best: the
+    // aggregator's own fee for the ref when it has been read (Peexit statements), else the
+    // contract, else the published figure, else the assumption. Margin reports read this.
+    try {
+      const invoice = p.aggregator === "peexit" ? peexit.feeXafFor(p.ref) : undefined;
+      if (typeof invoice === "number" && Number.isFinite(invoice)) { p.railCostXaf = invoice; p.railCostSource = "invoice"; }
+      else {
+        const published = p.aggregator ? await (payoutByName(p.aggregator)?.payoutFeePct?.(p.recipient.provider, p.recipient.country).catch(() => null) ?? Promise.resolve(null)) : null;
+        const c = paymentCost({ ...p, railCostXaf: undefined, railCostSource: undefined }, published);
+        p.railCostXaf = c.payout; p.railCostSource = c.source;
+      }
+      await store().putPayment(p);
+    } catch (e) { console.warn(`[cost] ${p.ref}: could not record the rail cost`, e instanceof Error ? e.message : e); }
     await transition(p, "DELIVERED");
     // Tell the recipient their money landed. Best-effort and awaited-but-swallowing: a
     // delivered payment is delivered whether or not an SMS gateway answered.

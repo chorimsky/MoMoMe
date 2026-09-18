@@ -24,3 +24,25 @@ export async function payoutCostXaf(aggregator: string, provider: string, xaf: n
   const a = getSettings().pricing.costs.payoutPct;
   return { cost: Math.round(xaf * a + getSettings().pricing.costs.fixedXaf), pct: a, source: "assumed" };
 }
+
+/** ONE cost model for a delivered payment, used by the revenue report, the capital
+ *  intelligence engine and the mix lens alike (they used to each apply the flat
+ *  assumption, so a real invoice never reached a margin figure):
+ *    payout  = railCostXaf recorded at delivery (invoice → contract → published → assumed)
+ *    rail    = crypto-in cost (railPct × total billed)
+ *    fixed   = per-transaction overhead
+ *  `published` is the rail's API fee when the caller has it (Peexit); optional. */
+export function paymentCost(p: { xaf: number; totalXaf: number; aggregator?: string; recipient: { provider: string }; railCostXaf?: number; railCostSource?: "invoice" | "contract" | "published" | "assumed" }, published?: number | null): { payout: number; rail: number; fixed: number; total: number; source: "invoice" | "contract" | "published" | "assumed" } {
+  const c = getSettings().pricing.costs;
+  let payout: number, source: "invoice" | "contract" | "published" | "assumed";
+  if (typeof p.railCostXaf === "number" && Number.isFinite(p.railCostXaf) && p.railCostSource) { payout = p.railCostXaf; source = p.railCostSource; }
+  else {
+    const ct = contractedPayoutFee(p.aggregator ?? "", p.recipient.provider);
+    if (ct) { payout = Math.round(p.xaf * ct.pct + ct.fixedXaf); source = "contract"; }
+    else if (published != null && Number.isFinite(published)) { payout = Math.round(p.xaf * published); source = "published"; }
+    else { payout = Math.round(p.xaf * c.payoutPct); source = "assumed"; }
+  }
+  const rail = Math.round(p.totalXaf * c.railPct);
+  const fixed = Math.round(c.fixedXaf);
+  return { payout, rail, fixed, total: payout + rail + fixed, source };
+}

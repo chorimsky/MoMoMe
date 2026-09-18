@@ -52,7 +52,7 @@ import { feePctForOwner, setApiKeyFee, createApiKey, listApiKeys, revokeApiKey, 
 import { ingest as ingestTelemetry, report as analyticsReport } from "../core/analytics.js";
 import * as momoTransfer from "../core/momoTransfer.js";
 import * as networkSaga from "../core/network/saga.js";
-import { platformFee, contractedPayoutFee } from "../core/pricing.js";
+import { platformFee, contractedPayoutFee, paymentCost } from "../core/pricing.js";
 import { floatPlan } from "../core/floatPlan.js";
 import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
@@ -2380,7 +2380,11 @@ api.get("/admin/revenue", async (req, res) => {
 
   const spreadBpsOf = (p: Payment) => (typeof p.spreadBps === "number" ? p.spreadBps : pr.spreadBps[p.method]);
   const spreadOf = (p: Payment) => { const b = spreadBpsOf(p); return b > 0 && b < 10000 ? Math.round((p.totalXaf * b) / (10000 - b)) : 0; };
-  const costOf = (p: Payment) => Math.round(p.xaf * costs.payoutPct + p.totalXaf * costs.railPct + costs.fixedXaf);
+  // The one cost model (core/pricing.paymentCost): the cost recorded on the payment at
+  // delivery, else contract → the rail's published fee → the assumption.
+  const sched = await Promise.race([peexit.feeSchedule().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
+  const publishedFor = (p: Payment): number | null => { if (p.aggregator !== "peexit") return null; const v = p.recipient.provider === "ORANGE" ? sched?.disbOrange : sched?.disbMtn; return v != null && Number.isFinite(v) && v <= 20 ? v / 100 : null; };
+  const costOf = (p: Payment) => paymentCost(p, publishedFor(p)).total;
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
   const methods = ALL_METHODS;
@@ -2452,7 +2456,6 @@ api.get("/admin/revenue", async (req, res) => {
     spreadXaf: spreadRevenueXaf,
   };
   // Per operator × rail, with the rail's own fee when it publishes one.
-  const sched = await Promise.race([peexit.feeSchedule().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
   const railPct = (provider: ProviderId, agg: string): { pct: number; source: "contract" | "rail" | "assumed" } => {
     const c = contractedPayoutFee(agg, provider);
     if (c) return { pct: c.pct, source: "contract" };
@@ -2466,8 +2469,9 @@ api.get("/admin/revenue", async (req, res) => {
     const { pct: pc, source } = railPct(p.recipient.provider, agg);
     const e = opMap.get(k) ?? { provider: p.recipient.provider, aggregator: agg, payments: 0, volumeXaf: 0, payoutCostPct: pc, costSource: source, payoutCostXaf: 0, grossXaf: 0, netXaf: 0, netMarginPct: 0 };
     const g = p.feeXaf + spreadOf(p);
-    const c = Math.round(p.xaf * pc + p.totalXaf * costs.railPct + costs.fixedXaf);
-    e.payments++; e.volumeXaf += p.xaf; e.payoutCostXaf += Math.round(p.xaf * pc); e.grossXaf += g; e.netXaf += g - c;
+    const k2 = paymentCost(p, publishedFor(p));
+    if (k2.source === "invoice") e.costSource = "contract"; // an invoice is better than a contract; the column has three values
+    e.payments++; e.volumeXaf += p.xaf; e.payoutCostXaf += k2.payout; e.grossXaf += g; e.netXaf += g - k2.total;
     opMap.set(k, e);
   }
   const byOperator = [...opMap.values()].map((e) => ({ ...e, netMarginPct: pct(e.netXaf, e.volumeXaf) })).sort((a, b) => b.volumeXaf - a.volumeXaf);
@@ -2547,10 +2551,7 @@ api.get("/admin/revenue", async (req, res) => {
   const productOf = (p: Payment): "consumer" | "merchant" | "partner" => (partner(p) ? "partner" : p.merchantId ? "merchant" : "consumer");
   const mixAcc = new Map<string, { count: number; volumeXaf: number; grossXaf: number; costXaf: number }>();
   const mixAdd = (k: string, volume: number, gross: number, cost: number) => { const e = mixAcc.get(k) ?? { count: 0, volumeXaf: 0, grossXaf: 0, costXaf: 0 }; e.count++; e.volumeXaf += volume; e.grossXaf += gross; e.costXaf += cost; mixAcc.set(k, e); };
-  for (const p of completed) {
-    const { pct: pc } = railPct(p.recipient.provider, p.aggregator ?? "unknown");
-    mixAdd(productOf(p), p.xaf, p.feeXaf + spreadOf(p), Math.round(p.xaf * pc + p.totalXaf * costs.railPct + costs.fixedXaf));
-  }
+  for (const p of completed) mixAdd(productOf(p), p.xaf, p.feeXaf + spreadOf(p), costOf(p));
   for (const t of momoTransfer.allTransfers(100_000).filter((t) => t.state === "DELIVERED" && Date.parse(t.createdAt) >= cutoff)) {
     const { pct: pc } = railPct(("phone" in t.to ? (t.to as { provider: ProviderId }).provider : t.from.provider), t.payoutRail ?? "unknown");
     // Collection is charged by the collecting aggregator too (~1 %); no crypto rail cost.

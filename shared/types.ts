@@ -211,6 +211,11 @@ export interface Payment {
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
+  /** What the payout ACTUALLY cost (XAF) and how we know: `invoice` = the aggregator's own
+   *  settled row, `contract` = the signed schedule, `published` = the rail's API figure,
+   *  `assumed` = Settings → Pricing. Set at delivery; every margin figure reads this first. */
+  railCostXaf?: number;
+  railCostSource?: "invoice" | "contract" | "published" | "assumed";
   /** Set when a payout couldn't land and the inbound crypto must be refunded — the
    *  sender still needs to supply a refund destination (the refund-claim flow). */
   refundNeedsDestination?: boolean;

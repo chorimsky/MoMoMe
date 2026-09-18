@@ -17,7 +17,7 @@ import { can } from "../data/permissions.js";
 import { dateTime, titleCase } from "../lib/money.js";
 import { PageHeader, Grid, Card, DataState, DataTable, StatusBadge, ConfidenceBadge, SourceTrace, CalculationTrace, AuditTimeline, Steps, Modal, Field, ErrorLine, Badge, Seg, KV, type Column } from "../components/ui.js";
 
-const TYPE_LABEL: Record<RecommendationType, string> = { RAISE_CAPITAL: "Raise capital", FOLLOW_UP_INVESTOR: "Follow up investor", REVIEW_LIQUIDITY: "Review liquidity", INCREASE_RESERVE: "Increase reserve", REDUCE_IDLE_CAPITAL: "Reduce idle capital", DIVERSIFY_CAPITAL: "Diversify capital", REVIEW_ROUTE: "Review route", REVIEW_FORECAST: "Review forecast" };
+const TYPE_LABEL: Record<RecommendationType, string> = { RAISE_CAPITAL: "Raise capital", FOLLOW_UP_INVESTOR: "Follow up investor", REVIEW_LIQUIDITY: "Review liquidity", INCREASE_RESERVE: "Increase reserve", REDUCE_IDLE_CAPITAL: "Reduce idle capital", DIVERSIFY_CAPITAL: "Diversify capital", REVIEW_ROUTE: "Review route", REVIEW_FORECAST: "Review forecast", FIX_COST_MODEL: "Fix the cost model", REPRICE: "Reprice" };
 
 export function RecommendationsPage({ base = "/capital-intelligence/recommendations" }: { base?: string }) {
   const { intel } = useFilters();

@@ -5,7 +5,7 @@
    /capital-intelligence/revenue — revenue with breakdowns.
    ============================================================ */
 import { useMemo, useState } from "react";
-import type { IntelTransactions, RouteIntel, RevenueSlice } from "@shared/capital.js";
+import type { IntelTransactions, RouteIntel, RevenueSlice, MarginDiagnosis } from "@shared/capital.js";
 import { capitalApi } from "../data/source.js";
 import { useResource } from "../data/hooks.js";
 import { useFilters } from "../data/filters.js";
@@ -123,7 +123,7 @@ export function RevenuePage() {
   ];
   return (
     <div>
-      <PageHeader title="Revenue Intelligence" sub="Customer fees and FX spread against provider and settlement costs. Costs are the configured assumptions from Settings → Pricing — set your contracted rates there for an exact figure." freshness={d?.freshness} />
+      <PageHeader title="Revenue Intelligence" sub="Customer fees and FX spread against provider and settlement costs. Costs are what each payment actually cost where the aggregator reported it, else the contracted schedule, else the assumption — the diagnosis says which, and why the margin is what it is. Set your contracted rates in Settings → Pricing for an exact figure." freshness={d?.freshness} />
       <DataState loading={r.loading} error={r.error} forbidden={r.forbidden} onRetry={r.refresh} rows={6}>
         {d && (
           <div style={{ display: "grid", gap: 14 }}>
@@ -134,6 +134,7 @@ export function RevenuePage() {
               <MetricCard label="Gross revenue" value={money(d.totals.gross, "XAF", { compact: true })} />
               <MetricCard label="Net revenue" value={money(d.totals.net, "XAF", { compact: true })} sub={`margin ${pct(d.totals.marginPct)}`} tone={d.totals.net < 0 ? "bad" : "good"} />
             </Grid>
+            <MarginDiagnosisCard dg={d.diagnosis} />
             <Card title="Gross vs net" sub="Daily revenue in the period.">
               <ChartContainer title="Revenue" question="Is net tracking gross, or are costs eating the take?" legend={[{ label: "Gross", color: "var(--ink)" }, { label: "Net", color: "var(--recv)" }]} unit="XAF" empty={!d.daily.some((x) => x.gross)}><ColumnChart labels={d.daily.map((x) => x.date)} series={[{ name: "Gross", values: d.daily.map((x) => x.gross), color: "var(--ink)" }, { name: "Net", values: d.daily.map((x) => x.net), color: "var(--recv)" }]} /></ChartContainer>
             </Card>
@@ -143,5 +144,48 @@ export function RevenuePage() {
         )}
       </DataState>
     </div>
+  );
+}
+
+/* ---------- why the margin is what it is ---------- */
+function MarginDiagnosisCard({ dg }: { dg: MarginDiagnosis }) {
+  const src = dg.cost.payoutBySource;
+  const tone = (sev: MarginDiagnosis["findings"][number]["severity"]) => sev === "critical" ? "var(--bad)" : sev === "warning" ? "var(--warn)" : "var(--ink-3)";
+  const part = (label: string, v: number, total: number, color: string) => <div style={{ flex: Math.max(0.5, v), background: color, minWidth: v > 0 ? 6 : 0, height: 10, borderRadius: 3 }} title={`${label} ${money(v, "XAF")} (${total ? Math.round((v / total) * 100) : 0} %)`} />;
+  return (
+    <Card title={dg.net < 0 ? `Why this period loses ${money(-dg.net, "XAF")}` : `Where the ${money(dg.net, "XAF")} margin comes from`} sub="Every component of the margin, and what to do about each finding — in order of impact.">
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <div>
+            <div className="cap-sub">Revenue {money(dg.revenue.total, "XAF")}</div>
+            <div style={{ display: "flex", gap: 3, marginTop: 6 }}>{part("Fees", dg.revenue.fee, dg.revenue.total, "var(--brand)")}{part("Spread", dg.revenue.spread, dg.revenue.total, "var(--accent)")}</div>
+            <div className="cap-sub" style={{ marginTop: 4 }}>fees {money(dg.revenue.fee, "XAF")} · spread {money(dg.revenue.spread, "XAF")}</div>
+          </div>
+          <div>
+            <div className="cap-sub">Cost {money(dg.cost.total, "XAF")}</div>
+            <div style={{ display: "flex", gap: 3, marginTop: 6 }}>{part("Payout", dg.cost.payout, dg.cost.total, "var(--ink-2)")}{part("Crypto rail", dg.cost.rail, dg.cost.total, "var(--ink-3)")}{part("Fixed", dg.cost.fixed, dg.cost.total, "var(--line)")}</div>
+            <div className="cap-sub" style={{ marginTop: 4 }}>payout {money(dg.cost.payout, "XAF")} · rail {money(dg.cost.rail, "XAF")} · fixed {money(dg.cost.fixed, "XAF")}</div>
+          </div>
+          <div>
+            <div className="cap-sub">How the payout cost is known</div>
+            <div style={{ display: "flex", gap: 3, marginTop: 6 }}>{part("Invoice", src.invoice.xaf, dg.cost.payout, "var(--good, #1F7A52)")}{part("Contract", src.contract.xaf, dg.cost.payout, "var(--brand)")}{part("Published", src.published.xaf, dg.cost.payout, "var(--accent)")}{part("Assumed", src.assumed.xaf, dg.cost.payout, "var(--bad)")}</div>
+            <div className="cap-sub" style={{ marginTop: 4 }}>invoice {src.invoice.count} · contract {src.contract.count} · published {src.published.count} · <span style={{ color: src.assumed.count ? "var(--bad)" : undefined }}>assumed {src.assumed.count}</span></div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {dg.findings.map((f, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "6px 1fr", gap: 12, alignItems: "stretch" }}>
+              <div style={{ background: tone(f.severity), borderRadius: 3 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.title}{f.impactXaf != null && <span className="cap-sub" style={{ marginLeft: 8 }}>{money(f.impactXaf, "XAF")}</span>}</div>
+                <div className="cap-sub" style={{ marginTop: 2, lineHeight: 1.45 }}>{f.detail}</div>
+                <div style={{ fontSize: 12.5, marginTop: 4 }}>→ {f.action}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="cap-sub">Average ticket {money(dg.facts.avgTicket, "XAF")} · {dg.facts.feeAtFloor} at the minimum fee · {dg.facts.merchantPaid} merchant-paid · {dg.facts.noSpreadRecorded} without a recorded spread{dg.facts.breakEvenTicket != null && dg.facts.breakEvenTicket > 0 ? ` · break-even ticket ≈ ${money(dg.facts.breakEvenTicket, "XAF")}` : ""}.</div>
+      </div>
+    </Card>
   );
 }

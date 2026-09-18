@@ -15,6 +15,7 @@ import { shadowTick } from "./core/network/shadow.js";
 import { refreshPublicFx, publicFxFresh } from "./core/network/fx.js";
 import { networkTick } from "./core/network/monitor.js";
 import { evaluateAlerts } from "./core/alerts.js";
+import { backfillRailCosts } from "./core/railCosts.js";
 import { usingPostgres } from "./db/store.js";
 import { pgPool } from "./db/pg.js";
 import { scanCompliance } from "./core/compliance.js";
@@ -100,6 +101,7 @@ async function reconcileOnce(): Promise<void> {
   try { if (!publicFxFresh(30 * 60_000)) await refreshPublicFx(); } catch (e) { console.error("network fx", e); }
   try { await store().pruneExpiredQuotes(); } catch (e) { console.error("prune quotes", e); }
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
+  try { await backfillRailCosts(); } catch (e) { console.error("rail costs", e); }
   // Last: page the operator about anything the tick found (or could not fix).
   try { await evaluateAlerts(); } catch (e) { console.error("alerts", e); }
 }

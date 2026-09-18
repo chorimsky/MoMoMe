@@ -136,6 +136,20 @@ export interface IntelRevenue {
   byCountry: RevenueSlice[]; byRoute: RevenueSlice[]; byProvider: RevenueSlice[]; byProduct: RevenueSlice[];
   daily: Array<{ date: string; gross: number; net: number }>;
   sources: Source[];
+  /** Why the margin is what it is — every component named, with what to do about it. */
+  diagnosis: MarginDiagnosis;
+}
+/** The margin decomposed into its parts, and the findings that explain a loss. */
+export interface MarginDiagnosis {
+  payments: number; volume: number;
+  revenue: { fee: number; spread: number; total: number };
+  cost: { payout: number; rail: number; fixed: number; total: number; payoutBySource: Record<"invoice" | "contract" | "published" | "assumed", { count: number; xaf: number }> };
+  net: number; marginPct: number | null;
+  /** Payments that individually lost money, with the reason each lost. */
+  losers: { count: number; xaf: number; sample: Array<{ ref: string; xaf: number; fee: number; spread: number; cost: number; net: number; why: string }> };
+  /** Structural facts about the period's data. */
+  facts: { noSpreadRecorded: number; feeAtFloor: number; merchantPaid: number; avgTicket: number; breakEvenTicket: number | null; assumedPayoutPct: number; effectiveCostPct: number | null };
+  findings: Array<{ severity: "critical" | "warning" | "info"; title: string; detail: string; action: string; impactXaf?: number }>;
 }
 
 /* ---------- forecasts ---------- */
@@ -198,7 +212,7 @@ export interface RiskItem {
 export interface IntelRisk { freshness: Freshness; items: RiskItem[]; overall: RiskLevel; sources: Source[] }
 
 /* ---------- recommendations + approval workflow ---------- */
-export type RecommendationType = "RAISE_CAPITAL" | "FOLLOW_UP_INVESTOR" | "REVIEW_LIQUIDITY" | "INCREASE_RESERVE" | "REDUCE_IDLE_CAPITAL" | "DIVERSIFY_CAPITAL" | "REVIEW_ROUTE" | "REVIEW_FORECAST";
+export type RecommendationType = "RAISE_CAPITAL" | "FOLLOW_UP_INVESTOR" | "REVIEW_LIQUIDITY" | "INCREASE_RESERVE" | "REDUCE_IDLE_CAPITAL" | "DIVERSIFY_CAPITAL" | "REVIEW_ROUTE" | "REVIEW_FORECAST" | "FIX_COST_MODEL" | "REPRICE";
 export type RecommendationStatus = "CREATED" | "REVIEWED" | "APPROVED" | "EXECUTING" | "COMPLETED" | "DISMISSED";
 export const RECOMMENDATION_FLOW: RecommendationStatus[] = ["CREATED", "REVIEWED", "APPROVED", "EXECUTING", "COMPLETED"];
 export interface Recommendation {

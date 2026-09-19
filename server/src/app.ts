@@ -3,6 +3,8 @@ import cors from "cors";
 import { api } from "./routes/api.js";
 import { v1 } from "./routes/v1.js";
 import { network } from "./routes/network.js";
+import { identityV2 } from "./routes/identityV2.js";
+import { identityEnabled, identityMode, providersHealth } from "./core/identityResolution/resolver.js";
 import { latencyMiddleware } from "./core/interop/metrics.js";
 import { webhooks } from "./routes/webhooks.js";
 import { lnurl } from "./routes/lnurl.js";
@@ -134,13 +136,15 @@ export function createApp() {
     const store = { backend: usingPostgres() ? "postgres" : "sqlite", durable: persistDurable() };
     const rails = PAYOUTS.filter((p) => p.configured()).map((p) => ({ name: p.name, live: p.live(), ...payoutHealth(p.name) }));
     const alerts = activeAlerts();
+    // Identity resolution is advisory: a provider outage is reported, never a 503 by itself.
+    const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status })) } : { enabled: false };
     const problems: string[] = [];
     if (!store.durable) problems.push("store is not durable");
     if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: (process.env.APP_VERSION ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: (process.env.APP_VERSION ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).
@@ -156,6 +160,8 @@ export function createApp() {
   // The interoperability network (docs/interop-v2): its own surface beside the live one,
   // 404 unless INTEROPERABILITY_V2 is on (always reachable in the sandbox for rehearsal).
   app.use("/api/network", network);
+  // Identity Resolution (docs/identity): its own surface, 404 unless IDENTITY_RESOLUTION_ENABLED.
+  app.use("/api/v2/identity", identityV2);
   app.use("/api", api);
 
   // Unmatched route → JSON 404 (not Express's default HTML).

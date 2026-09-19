@@ -26,7 +26,7 @@ import {
   StepHeader,
 } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
-import { useFeatures, useNetworkOpen } from '@/hooks/use-features';
+import { useFeatures, useIdentityConfig, useNetworkOpen } from '@/hooks/use-features';
 import { useTheme } from '@/hooks/use-theme';
 import { MomoStep } from '@/components/momo-step';
 import { track } from '@/lib/analytics';
@@ -123,6 +123,14 @@ export default function SendScreen() {
   // said those are two different people. That is the wrong-recipient signal in its purest
   // form, so it is said out loud.
   const [openedAs, setOpenedAs] = useState<string | null>(null);
+  // Identity Resolution v2 (docs/identity): off by default → the V1 lookup below is the whole
+  // story. On, the number goes to /v2/identity/resolve and the card shows an explicit state —
+  // a provider outage is "unavailable", never "not found".
+  const identity = useIdentityConfig();
+  type IdState = 'idle' | 'typing' | 'validating' | 'verified' | 'not_found' | 'inactive' | 'unavailable' | 'unsupported' | 'error';
+  const [idState, setIdState] = useState<IdState>('idle');
+  const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
+  const [idAttempt, setIdAttempt] = useState(0);
   const [method, setMethod] = useState<Method | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
@@ -226,7 +234,9 @@ export default function SendScreen() {
   // thing that lets a sender notice they have the wrong person. The number typed again is
   // not a name.
   const nameOk = nameVerified || isRealName(recipientName, phone);
-  const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk;
+  // Gate mode: an account the operator says is missing or inactive cannot be paid.
+  const idBlocked = identity.enabled && identity.mode === 'gate' && (idState === 'not_found' || idState === 'inactive');
+  const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk && !idBlocked;
 
   // Best-effort recipient-name resolve (debounced, non-blocking).
   const prevDigits = useRef('');
@@ -246,6 +256,8 @@ export default function SendScreen() {
         setResolvedProvider(null);
         setOpenedAs(null);
       }
+      setIdState(digits.length ? 'typing' : 'idle');
+      setIdMeta(null);
       return;
     }
     // A business checkout: the recipient IS the business (name from the pay link), and the
@@ -254,7 +266,42 @@ export default function SendScreen() {
     // the mismatch it had just created.
     if (merchantRef.current) return;
     let alive = true;
+    if (identity.enabled) setIdState('validating');
     const id = setTimeout(() => {
+      if (identity.enabled) {
+        api
+          .identityResolve(digits, country)
+          .then((r) => {
+            if (!alive) return;
+            const idn = r.identity;
+            setIdMeta({ operator: idn.operator, country: idn.country });
+            setResolvedProvider(idn.operator && (COUNTRIES[country].providers as string[]).includes(idn.operator) ? (idn.operator as ProviderId) : null);
+            if (idn.status === 'VERIFIED' && idn.display_name) {
+              const name = idn.display_name;
+              setRecipientName(name);
+              setNameSource('provider');
+              setIdState('verified');
+              setOpenedAs((prev) => (prev && norm(prev) !== norm(name) ? prev : null));
+              return;
+            }
+            setIdState(idn.status === 'NOT_FOUND' ? 'not_found' : idn.status === 'INACTIVE' ? 'inactive' : idn.status === 'PROVIDER_UNAVAILABLE' ? 'unavailable' : idn.status === 'UNSUPPORTED' ? 'unsupported' : 'error');
+            // Never show UNKNOWN as verified: the sender names the recipient, exactly as in V1.
+            if (nameSourceRef.current !== 'internal') {
+              setRecipientName(manualName.current);
+              setNameSource(manualName.current ? 'manual' : 'unknown');
+            }
+          })
+          .catch(() => {
+            if (!alive) return;
+            setIdState('error');
+            setIdMeta(null);
+            if (nameSourceRef.current !== 'internal') {
+              setRecipientName(manualName.current);
+              setNameSource(manualName.current ? 'manual' : 'unknown');
+            }
+          });
+        return;
+      }
       api
         .resolveRecipient(digits, country)
         .then((r) => {
@@ -278,7 +325,7 @@ export default function SendScreen() {
       alive = false;
       clearTimeout(id);
     };
-  }, [phone, country]);
+  }, [phone, country, identity.enabled, idAttempt]);
 
   const goMethod = () => {
     // The number's prefix decides the operator — the server routes on it regardless.
@@ -669,7 +716,11 @@ export default function SendScreen() {
                 <Ionicons name={openedAs ? 'alert-circle' : 'checkmark-circle'} size={18} color={openedAs ? t.warn : t.recv} />
                 <View style={{ flex: 1 }}>
                   <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientName}</Body>
-                  <Body muted style={{ fontSize: 12 }}>{nameSource === 'provider' ? tr('nm_verified') : tr('nm_sent_before')}</Body>
+                  <Body muted style={{ fontSize: 12 }}>
+                    {identity.enabled && idState === 'verified' && nameSource === 'provider'
+                      ? `${idMeta?.operator ? (PROVIDERS[idMeta.operator as ProviderId]?.name ?? idMeta.operator) + ' ' : ''}Mobile Money · ${COUNTRIES[(idMeta?.country ?? country) as CountryCode]?.name ?? idMeta?.country}`
+                      : nameSource === 'provider' ? tr('nm_verified') : tr('nm_sent_before')}
+                  </Body>
                   {openedAs ? (
                     <Body style={{ color: t.warn, fontSize: 12.5, marginTop: 2 }}>{tr('name_mismatch', { n: openedAs })}</Body>
                   ) : null}
@@ -680,8 +731,28 @@ export default function SendScreen() {
               // send an EMPTY name here — the one signal that catches a wrong recipient was
               // never asked for, and Review then showed the digits as if they were a person.
               <View style={{ gap: Spacing.one, marginTop: Spacing.three }}>
-                <Label>{tr('name_prompt')}</Label>
-                <TextInput
+                {identity.enabled && idState === 'validating' ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+                    <ActivityIndicator size="small" color={t.muted} />
+                    <Body muted style={{ fontSize: 12.5 }}>{tr('id_validating')}</Body>
+                  </View>
+                ) : null}
+                {identity.enabled && ['not_found', 'inactive', 'unavailable', 'unsupported', 'error'].includes(idState) ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.one }} accessibilityRole="alert">
+                    <Ionicons name={idState === 'unavailable' || idState === 'error' ? 'time-outline' : 'alert-circle'} size={16} color={t.warn} style={{ marginTop: 1 }} />
+                    <Body style={{ flex: 1, color: t.text, fontSize: 12.5, lineHeight: 17 }}>
+                      {tr(idState === 'not_found' ? 'id_not_found' : idState === 'inactive' ? 'id_inactive' : idState === 'unavailable' ? 'id_unavailable' : idState === 'unsupported' ? 'id_unsupported' : 'id_error')}
+                      {idBlocked ? `\n${tr('id_gate_blocked')}` : ''}
+                    </Body>
+                    {idState === 'unavailable' || idState === 'error' ? (
+                      <Pressable onPress={() => setIdAttempt((n) => n + 1)} hitSlop={8} accessibilityRole="button">
+                        <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 12.5 }}>{tr('id_retry')}</Body>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+                {idBlocked ? null : <Label>{tr('name_prompt')}</Label>}
+                {idBlocked ? null : <TextInput
                   value={recipientName}
                   onChangeText={(x) => {
                     manualName.current = x;
@@ -692,7 +763,7 @@ export default function SendScreen() {
                   placeholderTextColor={t.muted}
                   autoCapitalize="words"
                   style={[styles.nameInput, { color: t.text, borderColor: t.line, backgroundColor: t.surface2 }]}
-                />
+                />}
                 {recipientName.trim().length > 0 && !isRealName(recipientName, phone) ? (
                   <Body style={{ color: t.warn, fontSize: 12.5 }}>{tr('name_needs_letters')}</Body>
                 ) : null}

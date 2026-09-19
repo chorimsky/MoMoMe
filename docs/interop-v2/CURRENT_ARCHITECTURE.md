@@ -33,3 +33,11 @@ Monorepo: `app/` (React/Vite, Vercel, www.momome.xyz), `server/` (Express, Railw
 saga,shadow}.ts`; `routes/network.ts`; `settings.network`; Admin → Interoperability → Network panel.
 None of these are imported by the money path above. `jobs.ts` calls `shadowTick()` which is a
 no-op unless `SHADOW_ROUTING` is on and only READS production records.
+
+## Identity Resolution v2 (2026-09-20, additive)
+`shared/identity.ts`; `core/identityResolution/{msisdn,errors,names,cache,audit,resolver}.ts` +
+`providers/{types,mtnDirect,orange,aggregator,sandbox}.ts`; `routes/identityV2.ts` mounted at
+`/api/v2/identity` (404 unless `IDENTITY_RESOLUTION_ENABLED`). The only touches on the money path:
+`createPaymentCore` attaches `Payment.recipientIdentity` from the **cache** (never a provider call,
+advisory), `transition()` freezes that snapshot once `INBOUND_CONFIRMED` exists, `reconcileTick`
+prunes expired records, `/health/deep` and `/config` report the flag. Docs: `docs/identity/`.

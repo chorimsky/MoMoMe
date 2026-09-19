@@ -77,6 +77,9 @@ importers:
       express:
         specifier: ^4.21.2
         version: 4.22.2
+      libphonenumber-js:
+        specifier: ^1.13.13
+        version: 1.13.13
       ogg-opus-decoder:
         specifier: ^1.7.5
         version: 1.7.5
@@ -1312,6 +1315,9 @@ packages:
 
   leaflet@1.9.4:
     resolution: {integrity: sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==}
+
+  libphonenumber-js@1.13.13:
+    resolution: {integrity: sha512-hV6SmWnyQ8U1QXhhqbqYBHIStNnscG7A5XbGodgdHhf/8N5PwhYpJA5U/yHDjYwPYTd8uNGXqq416XctuvK2PA==}
 
   linebreak@1.1.0:
     resolution: {integrity: sha512-MHp03UImeVhB7XZtjd0E4n6+3xr5Dq/9xI/5FptGk5FrbDR3zagPa2DS6U8ks/3HjbKWG9Q1M2ufOzxV2qLYSQ==}
@@ -2852,6 +2858,8 @@ snapshots:
   jsqr@1.4.0: {}
 
   leaflet@1.9.4: {}
+
+  libphonenumber-js@1.13.13: {}
 
   linebreak@1.1.0:
     dependencies:

@@ -12,6 +12,7 @@ import * as SecureStore from 'expo-secure-store';
 import { devicePublicKeys, enrolledFor, forgetDeviceKeys, markEnrolled, signRequest } from '@/lib/deviceSign';
 import { currentLang, STRINGS, translate, type StringKey } from '@/lib/i18n';
 import type { NetworkIntent, NetworkQuote, NetworkRoute, NetworkTransaction } from '@shared/network';
+import type { IdentityResolveResponse } from '@shared/identity';
 
 import type { MomoTransfer,
   AmbassadorSummary,
@@ -200,6 +201,8 @@ export interface AppConfig {
   features?: Partial<AppFeatures>;
   /** The Pan-African network: true only while a corridor out of Cameroon is open. */
   network?: { enabled: boolean };
+  /** Identity Resolution v2 (docs/identity): off by default; advisory before gate. */
+  identity?: { enabled: boolean; mode: 'advisory' | 'gate' };
 }
 export interface NetworkMarkets { source: { code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }> }; destinations: Array<{ code: string; name: string; currency: string; dial: string; providers: Array<{ id: string; name: string }>; minPerTx: number; maxPerTx: number }> }
 
@@ -224,6 +227,13 @@ export const api = {
   registerPushToken: (token: string, platform: 'ios' | 'android' | 'unknown', lang: 'en' | 'fr' = 'en') =>
     req<{ ok: true }>('/me/push-token', { method: 'POST', body: JSON.stringify({ token, platform, lang }) }),
   unregisterPushToken: () => req<{ ok: true }>('/me/push-token', { method: 'DELETE' }),
+
+  /** Identity Resolution v2 — device-signed POST, purpose-bound; 404 while the flag is off. */
+  identityResolve: (identifier: string, country: CountryCode = 'CM', expectedName?: string) =>
+    req<IdentityResolveResponse>('/v2/identity/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, country, purpose: 'RECIPIENT_VERIFICATION', ...(expectedName ? { expected_name: expectedName } : {}) }),
+    }),
 
   resolveRecipient: (phone: string, country: CountryCode = 'CM') =>
     req<ResolveResult>(

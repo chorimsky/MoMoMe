@@ -6,7 +6,7 @@ import { COUNTRIES, PROVIDERS, FEE_PCT, MIN_XAF, MAX_XAF, PROVIDER_PAYOUT_MAX, M
 import { ProviderChip, Flag, QR, CopyField, Spinner, Momo } from "../../components/atoms.js";
 import { fmt, initials } from "../../lib/format.js";
 import { useI18n, errMessage } from "../../lib/i18n.js";
-import { useFeatures } from "../../lib/features.js";
+import { useFeatures, useIdentityConfig } from "../../lib/features.js";
 import { api } from "../../api/client.js";
 import { track } from "../../lib/analytics.js";
 import { pollMs } from "../../lib/net.js";
@@ -73,6 +73,14 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // registered name turns out to be someone else. It used to be replaced silently — the
   // sender chose "Alice" and saw "MANGA SERGE" with a green tick and no comment.
   const [enteredAs, setEnteredAs] = useState<string | null>(null);
+  // Identity Resolution v2 (docs/identity): OFF by default, then the V1 lookup below is the
+  // whole story. On, the number goes to /v2/identity/resolve and the box shows one of the
+  // explicit states — a provider outage is "unavailable", never "not found".
+  const identity = useIdentityConfig();
+  type IdState = "idle" | "typing" | "validating" | "verified" | "not_found" | "inactive" | "unavailable" | "unsupported" | "error";
+  const [idState, setIdState] = useState<IdState>("idle");
+  const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
+  const [idAttempt, setIdAttempt] = useState(0); // "Retry" bumps this to re-run the lookup
   const phoneRef = useRef<HTMLInputElement>(null);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
@@ -111,11 +119,43 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
     const d = s.phone.replace(/\D/g, "");
     // Reset resolving on the early return too — otherwise deleting digits back under
     // 8 while a resolve is in flight leaves the spinner stuck and Continue disabled.
-    if (d.length < 8) { setResolving(false); setEnteredAs(null); set({ recipientName: "", nameSource: "idle" }); return; }
+    if (d.length < 8) { setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
+    if (identity.enabled) setIdState("validating");
     let active = true;
     const id = setTimeout(async () => {
       try {
+        if (identity.enabled) {
+          // v2: explicit states. The draft keeps the same nameSource vocabulary so Review
+          // and the server see exactly what they see today.
+          const keepName = (s.recipientName || "").trim().length >= 2 && (s.nameSource === "manual" || s.nameSource === "internal");
+          let r: Awaited<ReturnType<typeof api.identityResolve>>;
+          try { r = await api.identityResolve(s.phone, s.country); }
+          catch {
+            if (!active) return;
+            // Any failure (network, 429, 401, or the flag switched off under us) is "error":
+            // the sender can still type the name, exactly as V1 lets them.
+            setIdState("error"); setIdMeta(null);
+            set(keepName ? { nameSource: s.nameSource === "internal" ? "internal" : "manual" } : { recipientName: "", nameSource: "unknown" });
+            return;
+          }
+          if (!active) return;
+          const idn = r.identity;
+          const prov = idn.operator && (c.providers as string[]).includes(idn.operator) ? { provider: idn.operator as typeof s.provider } : {};
+          setIdMeta({ operator: idn.operator, country: idn.country });
+          if (idn.status === "VERIFIED" && idn.display_name) {
+            const prev = (s.recipientName || "").trim();
+            setEnteredAs(prev && isRealName(prev, s.phone) && !namesMatch(prev, idn.display_name) ? prev : null);
+            setIdState("verified");
+            set({ recipientName: idn.display_name, nameSource: "provider", ...prov });
+          } else {
+            setIdState(idn.status === "NOT_FOUND" ? "not_found" : idn.status === "INACTIVE" ? "inactive" : idn.status === "PROVIDER_UNAVAILABLE" ? "unavailable" : idn.status === "UNSUPPORTED" ? "unsupported" : "error");
+            // Never show UNKNOWN as verified: the name box opens for the sender, as in V1.
+            if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
+            else set({ recipientName: "", nameSource: "unknown", ...prov });
+          }
+          return;
+        }
         const r = await api.resolveRecipient(s.phone, s.country);
         if (!active) return;
         // Anchor the operator to the number's prefix (overrides the manual pick).
@@ -143,9 +183,12 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
     }, 500);
     return () => { active = false; clearTimeout(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.phone]);
+  }, [s.phone, identity.enabled, idAttempt]);
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
+  // Gate mode (IDENTITY_RESOLUTION_MODE=gate): an account the operator says is missing or
+  // inactive cannot be paid. Advisory mode (the default) only informs.
+  const idBlocked = identity.enabled && identity.mode === "gate" && (idState === "not_found" || idState === "inactive");
   // The same test the server applies before it will mint anything. It used to be applied
   // only THERE — so a Gabon number typed under Cameroon, or a number one digit too long,
   // sailed through Details, Method and Review and was refused on the fourth screen with a
@@ -168,7 +211,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // name is the one thing that lets a sender notice they have the wrong person; a verified
   // one comes from the operator or from a payment that actually landed.
   const nameOk = verified || isRealName(s.recipientName, s.phone);
-  const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving;
+  const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving && !idBlocked;
 
   // A business checkout with an open amount: the copy names the business and the
   // presets are till-sized, not remittance-sized.
@@ -268,7 +311,17 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
           <div style={{ marginTop: 12 }} aria-live="polite">
             {resolving ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", border: "1px solid var(--line)", borderRadius: "var(--r)", background: "var(--surface-2)" }}>
-                <Spinner size={15} /> <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{t("checking_name")}</span>
+                <Spinner size={15} /> <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>{identity.enabled ? t("id_validating") : t("checking_name")}</span>
+              </div>
+            ) : identity.enabled && idState === "verified" && verified ? (
+              <div data-identity="verified" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", border: "1px solid var(--recv)", borderRadius: "var(--r)", background: "var(--recv-wash)" }}>
+                <span style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--recv)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13, flex: "none" }}>✓</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{s.recipientName}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{idMeta?.operator ? `${PROVIDERS[idMeta.operator as keyof typeof PROVIDERS]?.name ?? idMeta.operator} Mobile Money` : "Mobile Money"} · {COUNTRIES[(idMeta?.country ?? s.country) as keyof typeof COUNTRIES]?.name ?? idMeta?.country}</div>
+                  {enteredAs && <div role="alert" style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 4, lineHeight: 1.4 }}>{fill(t("name_mismatch"), { n: enteredAs })}</div>}
+                </div>
+                <button onClick={() => set({ nameSource: "manual" })} className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12.5 }}>{t("edit")}</button>
               </div>
             ) : verified ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", border: "1px solid var(--recv)", borderRadius: "var(--r)", background: "var(--recv-wash)" }}>
@@ -282,12 +335,24 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
               </div>
             ) : (s.nameSource === "unknown" || s.nameSource === "manual") ? (
               <div style={{ padding: "13px 14px", border: "1px solid var(--warn)", borderRadius: "var(--r)", background: "var(--send-wash)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                {identity.enabled && idState !== "idle" && idState !== "typing" && idState !== "verified" && (
+                  <div data-identity={idState} role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 10, fontSize: 12.5, lineHeight: 1.45, color: "var(--ink)" }}>
+                    <span style={{ color: "var(--warn)", fontWeight: 800, fontSize: 15, lineHeight: 1.1 }}>{idState === "unavailable" || idState === "error" ? "⏱" : "⚠"}</span>
+                    <span style={{ flex: 1 }}>
+                      {idState === "not_found" ? t("id_not_found") : idState === "inactive" ? t("id_inactive") : idState === "unavailable" ? t("id_unavailable") : idState === "unsupported" ? t("id_unsupported") : t("id_error")}
+                      {idBlocked && <><br /><b>{t("id_gate_blocked")}</b></>}
+                    </span>
+                    {(idState === "unavailable" || idState === "error") && (
+                      <button type="button" onClick={() => setIdAttempt((n) => n + 1)} className="btn btn-quiet" style={{ padding: "4px 9px", fontSize: 12.5, flex: "none" }}>{t("id_retry")}</button>
+                    )}
+                  </div>
+                )}
+                {!idBlocked && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <span style={{ color: "var(--warn)", fontWeight: 800, fontSize: 15 }}>⚠</span>
                   <span style={{ fontSize: 13, fontWeight: 650, color: "var(--ink)" }}>{s.nameSource === "manual" ? t("confirm_name") : t("name_unverified")}</span>
-                </div>
-                <input value={s.recipientName} onChange={(e) => set({ recipientName: e.target.value })} placeholder={t("enter_name_ph")} aria-label={t("enter_name_ph")}
-                  style={{ width: "100%", padding: "11px 13px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />
+                </div>}
+                {!idBlocked && <input value={s.recipientName} onChange={(e) => set({ recipientName: e.target.value })} placeholder={t("enter_name_ph")} aria-label={t("enter_name_ph")}
+                  style={{ width: "100%", padding: "11px 13px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 16, color: "var(--ink)", outline: "none" }} />}
                 {s.recipientName.trim().length > 0 && !isRealName(s.recipientName, s.phone) && (
                   <div role="status" style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn-ink)", lineHeight: 1.4 }}>{t("name_needs_letters")}</div>
                 )}

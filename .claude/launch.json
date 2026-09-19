@@ -53,6 +53,20 @@
         "mobile:start"
       ],
       "port": 8081
+    },
+    {
+      "name": "momome-server-identity",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "IDENTITY_RESOLUTION_ENABLED=true",
+        "RAILS_MODE=sandbox",
+        "pnpm",
+        "--filter",
+        "./server",
+        "dev"
+      ],
+      "port": 4000,
+      "autoPort": false
     }
   ]
 }

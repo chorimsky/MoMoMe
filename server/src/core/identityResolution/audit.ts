@@ -1,0 +1,33 @@
+/* Audit trail + metrics. One row per request: who, why, which hash, which provider, what
+   came back, how long. No raw number, no name. Bounded, persisted. */
+import { register, touch } from "../persist.js";
+import type { IdentityPurpose, IdentityStatus, IdentityErrorCode } from "../../../../shared/identity.js";
+
+export interface IdentityAuditRow { requestId: string; correlationId?: string; actor: string; purpose: IdentityPurpose; identifierHash: string; country: string; operator: string | null; provider: string; status: IdentityStatus | "ERROR"; error?: IdentityErrorCode; latencyMs: number; cache: "hit" | "miss" | "bypass"; at: string }
+const rows: IdentityAuditRow[] = [];
+register("identity_audit", () => rows.slice(-5_000), (d: IdentityAuditRow[]) => { rows.length = 0; rows.push(...(d ?? [])); });
+
+export const metrics = { total: 0, success: 0, failure: 0, provider_timeout: 0, not_found: 0, cache_hit: 0, cache_miss: 0, latencyMs: [] as number[], rate_limited: 0, unauthorized: 0 };
+export function record(row: IdentityAuditRow): void {
+  rows.push(row); if (rows.length > 5_000) rows.shift(); touch("identity_audit");
+  metrics.total++;
+  if (row.status === "VERIFIED") metrics.success++; else if (row.status === "ERROR" || row.status === "PROVIDER_UNAVAILABLE" || row.status === "VERIFICATION_FAILED") metrics.failure++;
+  if (row.error === "IDENTITY_PROVIDER_TIMEOUT") metrics.provider_timeout++;
+  if (row.status === "NOT_FOUND") metrics.not_found++;
+  if (row.cache === "hit") metrics.cache_hit++; else if (row.cache === "miss") metrics.cache_miss++;
+  metrics.latencyMs.push(row.latencyMs); if (metrics.latencyMs.length > 1_000) metrics.latencyMs.shift();
+}
+export const auditRows = (limit = 200) => rows.slice(-limit).reverse();
+export function metricsSnapshot() {
+  const l = [...metrics.latencyMs].sort((a, b) => a - b);
+  return { identity_resolution_total: metrics.total, identity_resolution_success: metrics.success, identity_resolution_failure: metrics.failure, identity_resolution_provider_timeout: metrics.provider_timeout, identity_resolution_not_found: metrics.not_found, identity_resolution_cache_hit: metrics.cache_hit, identity_resolution_cache_miss: metrics.cache_miss, identity_resolution_rate_limited: metrics.rate_limited, identity_resolution_unauthorized: metrics.unauthorized, identity_resolution_latency: { p50: l[Math.floor(l.length / 2)] ?? null, p95: l[Math.floor(l.length * 0.95)] ?? null, n: l.length } };
+}
+/** Abuse detection: distinct identifiers per actor per hour. */
+const seen = new Map<string, { hashes: Set<string>; since: number }>();
+export function distinctPerHour(actor: string, hash: string, now = Date.now()): number {
+  let e = seen.get(actor);
+  if (!e || now - e.since > 3_600_000) { e = { hashes: new Set(), since: now }; seen.set(actor, e); }
+  e.hashes.add(hash);
+  if (seen.size > 50_000) seen.clear();
+  return e.hashes.size;
+}

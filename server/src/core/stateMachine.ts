@@ -362,6 +362,12 @@ const DISPLAY: Partial<Record<PaymentState, DisplayStatus>> = {
 };
 
 async function transition(p: Payment, state: PaymentState, note?: string): Promise<void> {
+  // Identity Resolution v2: the recipient identity snapshot is frozen from the moment money
+  // is in. The money path never edits it; this guards any future caller that might.
+  if (p.recipientIdentity && p.events.some((e) => e.state === "INBOUND_CONFIRMED")) {
+    const prev = await store().getPayment(p.id);
+    if (prev?.recipientIdentity && JSON.stringify(prev.recipientIdentity) !== JSON.stringify(p.recipientIdentity)) p.recipientIdentity = prev.recipientIdentity;
+  }
   p.state = state;
   p.displayStatus = DISPLAY[state] ?? "Pending";
   p.updatedAt = new Date().toISOString();

@@ -72,6 +72,9 @@ import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReport
 import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
 import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
+import { setIdentityOwnerResolver } from "./identityV2.js";
+import { identityEnabled, identityMode, cachedSnapshot } from "../core/identityResolution/resolver.js";
+import { matchNames } from "../core/identityResolution/names.js";
 import { capital, capitalGuard } from "./capital.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
 
@@ -485,8 +488,10 @@ export async function ownerOf(req: ReqLike): Promise<string | undefined> {
   return (await verifyDeviceSig(req, dev.authPub)) ? id : undefined;
 }
 
-// The network surface (/api/network) authenticates devices with this same gate.
+// The network surface (/api/network) and the identity surface (/api/v2/identity)
+// authenticate devices with this same gate.
 setOwnerResolver(ownerOf);
+setIdentityOwnerResolver(ownerOf);
 
 /** The vault scope for a request: the anchored ACCOUNT id if the device has one,
  *  else its (authenticated) device id — so every device on the same phone shares
@@ -690,6 +695,8 @@ api.get("/config", async (_req, res) => {
     // The Pan-African network: true only when a corridor out of Cameroon is switched on
     // and the surface is exposed — the "Send abroad" entry points hide otherwise.
     network: { enabled: networkOpen() },
+    // Identity Resolution v2 (advisory first): clients call /api/v2/identity only when on.
+    identity: { enabled: identityEnabled(), mode: identityMode() },
     // Public support contact (admin-managed in Settings → Company) so the Help
     // and Contact surfaces always show the live email/phone, never a hardcoded
     // placeholder. Phone is also used to derive the WhatsApp (wa.me) and tel link.
@@ -1097,6 +1104,18 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
     createdAt: now,
     updatedAt: now,
   };
+  // Identity Resolution v2 (ADVISORY): attach the recipient identity the sender resolved
+  // before creating this payment — read from the verification cache only, so a provider
+  // outage or slowness can never touch payment creation. Immutable from here on; the V1
+  // flow neither reads nor requires it. Nothing is attached when the flag is off.
+  if (identityEnabled()) {
+    try {
+      const snap = cachedSnapshot(recipient.phone, recipient.country);
+      if (snap && (snap.status === "VERIFIED" || snap.status === "INACTIVE" || snap.status === "NOT_FOUND")) {
+        payment.recipientIdentity = { ...snap, nameMatch: snap.displayName && cleanName ? matchNames(cleanName, snap.displayName) : "NOT_AVAILABLE" };
+      }
+    } catch { /* advisory — never block */ }
+  }
   // Merchant attribution: if this came from a merchant payment link, tag it — but
   // ONLY when the recipient actually matches that merchant's settlement number, so
   // a caller can't falsely credit a merchant's sales.

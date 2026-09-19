@@ -211,6 +211,11 @@ export interface Payment {
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
+  /** Identity Resolution v2 (docs/identity): the recipient identity that was resolved before
+   *  this payment was created — attached at creation from the verification cache, never by a
+   *  provider call on the money path, and immutable from INBOUND_CONFIRMED onwards. Advisory:
+   *  the V1 flow neither reads nor requires it. */
+  recipientIdentity?: import("./identity.js").RecipientIdentitySnapshot;
   /** What the payout ACTUALLY cost (XAF) and how we know: `invoice` = the aggregator's own
    *  settled row, `contract` = the signed schedule, `published` = the rail's API figure,
    *  `assumed` = Settings → Pricing. Set at delivery; every margin figure reads this first. */

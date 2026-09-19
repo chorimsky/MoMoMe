@@ -26,6 +26,7 @@ import type { RegulatoryReport, RegulatoryBody, RegulatoryFiling, ApiKeyUsage, M
   Method, AppFeatures, TestReport, TestCaseResult,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
+import type { IdentityResolveResponse } from "@shared/identity.js";
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
 import { idbGet, idbSet } from "../lib/idb.js";
 
@@ -305,7 +306,7 @@ export type ReceivedItem = { ref: string; xaf: number; state: string; displaySta
 export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
 
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean } }>("/config"),
+  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } }>("/config"),
   /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
   networkMarkets: () => req<NetworkMarkets>("/network/markets"),
   networkIntent: (body: { sourceProvider: string; sourcePhone: string; destinationMarket: string; destinationProvider: string; destinationPhone: string; destinationName?: string; sourceAmount: number }) =>
@@ -349,6 +350,13 @@ export const api = {
   deleteAccount: () =>
     req<{ ok: boolean; deleted: { contacts: number; device: boolean; referrals: boolean }; retained: { payments: number; reason: string } }>(
       "/me/delete", { method: "POST" }),
+
+  /** Identity Resolution v2 (docs/identity) — POST, signed by the device, purpose-bound.
+   *  404 while IDENTITY_RESOLUTION_ENABLED is off: callers gate on /config.identity first. */
+  identityResolve: (identifier: string, country: CountryCode = "CM", expectedName?: string) =>
+    req<IdentityResolveResponse>("/v2/identity/resolve", { method: "POST", body: JSON.stringify({ identifier, country, purpose: "RECIPIENT_VERIFICATION", ...(expectedName ? { expected_name: expectedName } : {}) }) }),
+  identityVerify: (identifier: string, expectedName: string, country: CountryCode = "CM") =>
+    req<IdentityResolveResponse>("/v2/identity/verify", { method: "POST", body: JSON.stringify({ identifier, country, purpose: "PAYMENT_CREATION", expected_name: expectedName }) }),
 
   resolveRecipient: (phone: string, country: CountryCode = "CM") =>
     req<ResolveResult>(`/recipients/resolve?phone=${encodeURIComponent(phone)}&country=${country}`),

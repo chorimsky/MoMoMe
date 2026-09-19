@@ -144,6 +144,8 @@ export interface NetworkIntent {
   destinationCurrency: NetworkCurrency;
   destinationPhone: string;
   destinationName?: string;
+  /** Identity Resolution v2 snapshot for the destination, when one was resolved (advisory). */
+  recipientIdentity?: import("./identity.js").RecipientIdentitySnapshot;
   sourceAmount: number;
   status: "OPEN" | "QUOTED" | "CONFIRMED" | "EXPIRED" | "CANCELLED";
   quoteId?: string;

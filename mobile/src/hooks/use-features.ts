@@ -26,6 +26,9 @@ const DEFAULTS: AppFeatures = {
 let features: AppFeatures = DEFAULTS;
 // "Send abroad" entry points: OFF until /config says a corridor is open (never flickers on).
 let networkOpen = false;
+// Identity Resolution v2: OFF until /config says so; the V1 name lookup stays the default.
+export type IdentityConfig = { enabled: boolean; mode: 'advisory' | 'gate' };
+let identity: IdentityConfig = { enabled: false, mode: 'advisory' };
 let loaded = false; // true only after a SUCCESSFUL load
 let inflight = false;
 const listeners = new Set<() => void>();
@@ -40,6 +43,7 @@ function load() {
       loaded = true;
       if (c.features) features = { ...DEFAULTS, ...c.features };
       networkOpen = !!c.network?.enabled;
+      identity = { enabled: !!c.identity?.enabled, mode: c.identity?.mode === 'gate' ? 'gate' : 'advisory' };
       emit();
     })
     .catch(() => {
@@ -68,4 +72,10 @@ const getNetwork = () => networkOpen;
 /** Is sending abroad open for customers? False until /config resolves. */
 export function useNetworkOpen(): boolean {
   return useSyncExternalStore(subscribe, getNetwork, getNetwork);
+}
+
+const getIdentity = () => identity;
+/** Recipient identity resolution (v2): off until /config resolves. */
+export function useIdentityConfig(): IdentityConfig {
+  return useSyncExternalStore(subscribe, getIdentity, getIdentity);
 }

@@ -17,6 +17,10 @@ let _features: AppFeatures = DEFAULTS;
 // The Pan-African network's customer entry points: OFF until /config says a corridor is open.
 let _networkOpen = false;
 const netSubs = new Set<(v: boolean) => void>();
+// Identity Resolution v2: OFF until /config says so (the V1 name lookup stays the default).
+export type IdentityConfig = { enabled: boolean; mode: "advisory" | "gate" };
+let _identity: IdentityConfig = { enabled: false, mode: "advisory" };
+const idSubs = new Set<(v: IdentityConfig) => void>();
 let _loaded = false;    // set true only on a SUCCESSFUL load
 let _inflight = false;  // a fetch is in progress → don't start another
 const subs = new Set<(f: AppFeatures) => void>();
@@ -35,6 +39,7 @@ export function useFeatures(): AppFeatures {
         _loaded = true;
         if (c.features) { _features = { ...DEFAULTS, ...c.features }; subs.forEach((s) => s(_features)); }
         _networkOpen = !!c.network?.enabled; netSubs.forEach((s) => s(_networkOpen));
+        _identity = { enabled: !!c.identity?.enabled, mode: c.identity?.mode === "gate" ? "gate" : "advisory" }; idSubs.forEach((s) => s(_identity));
       }).catch(() => { /* keep defaults; retry on a later mount */ })
         .finally(() => { _inflight = false; });
     }
@@ -48,5 +53,13 @@ export function useNetworkOpen(): boolean {
   const [v, setV] = useState(_networkOpen);
   useFeatures(); // shares the single /config load
   useEffect(() => { netSubs.add(setV); setV(_networkOpen); return () => { netSubs.delete(setV); }; }, []);
+  return v;
+}
+
+/** Is recipient identity resolution (v2) on, and in which mode? Off until /config resolves. */
+export function useIdentityConfig(): IdentityConfig {
+  const [v, setV] = useState(_identity);
+  useFeatures(); // shares the single /config load
+  useEffect(() => { idSubs.add(setV); setV(_identity); return () => { idSubs.delete(setV); }; }, []);
   return v;
 }

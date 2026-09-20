@@ -36,12 +36,24 @@ export const peexitVerify: IdentityProvider = {
       throw new IdentityError(timeout ? "IDENTITY_PROVIDER_TIMEOUT" : "IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit verify-wallet …${last4(id.identifier)}: ${(e as Error)?.message ?? e}`, true);
     }
     lastLatency = Date.now() - t0;
-    if (res.status === 404) { lastOk = true; return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "peexit_verify" }, error: "IDENTITY_NOT_FOUND" }; }
-    if (res.status === 422) { lastOk = true; throw new IdentityError("IDENTITY_UNSUPPORTED_COUNTRY", "This number can't be verified yet.", "peexit verify-wallet 422", false); }
-    if (res.status === 401 || res.status === 403) { lastOk = false; lastError = `http ${res.status}`; throw new IdentityError("IDENTITY_PROVIDER_AUTH_ERROR", "Recipient verification is temporarily unavailable.", `peexit verify-wallet ${res.status} (key or IP allowlist)`, false); }
-    if (!res.ok) { lastOk = false; lastError = `http ${res.status}`; throw new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit verify-wallet ${res.status}`, res.status >= 500); }
-    let body: { isValid?: unknown; accountName?: unknown; operator?: unknown; status?: unknown };
-    try { body = (await res.json()) as typeof body; } catch { lastOk = false; throw new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", "peexit verify-wallet: non-JSON body", true); }
+    // Read the body ONCE, whatever the status: Peexit's own message is what tells a 404
+    // "Account not found on the provider network" apart from LoopBack's 404 "Cannot POST
+    // /…/verify-wallet" (the endpoint missing on this base). The first is an answer about
+    // the account; the second is our problem and must never reach a sender as "not found".
+    const text = await res.text().catch(() => "");
+    let body: { isValid?: unknown; accountName?: unknown; operator?: unknown; status?: unknown; error?: { message?: unknown; statusCode?: unknown } } = {};
+    try { body = text ? (JSON.parse(text) as typeof body) : {}; } catch { body = {}; }
+    const upstreamMsg = String(body.error?.message ?? (typeof (body as { message?: unknown }).message === "string" ? (body as { message: string }).message : "") ?? "").slice(0, 160) || (text.startsWith("<") ? "html body" : text.slice(0, 120));
+    const note = (why: string) => { lastError = `http ${res.status}: ${why}`; console.warn(`[identity] peexit verify-wallet …${last4(id.identifier)} → ${lastError}`); };
+    if (res.status === 404) {
+      if (/not found on the provider|account not found|no account|does not exist|introuvable/i.test(upstreamMsg)) { lastOk = true; lastError = undefined; return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "peexit_verify" }, error: "IDENTITY_NOT_FOUND" }; }
+      lastOk = false; note(upstreamMsg || "no message (endpoint missing on this base?)");
+      throw new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit verify-wallet 404 without an account message: ${upstreamMsg}`, false);
+    }
+    if (res.status === 422) { lastOk = true; note(upstreamMsg); throw new IdentityError("IDENTITY_UNSUPPORTED_COUNTRY", "This number can't be verified yet.", `peexit verify-wallet 422: ${upstreamMsg}`, false); }
+    if (res.status === 401 || res.status === 403) { lastOk = false; note(upstreamMsg || "key or IP allowlist"); throw new IdentityError("IDENTITY_PROVIDER_AUTH_ERROR", "Recipient verification is temporarily unavailable.", `peexit verify-wallet ${res.status} (key or IP allowlist): ${upstreamMsg}`, false); }
+    if (!res.ok) { lastOk = false; note(upstreamMsg); throw new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit verify-wallet ${res.status}: ${upstreamMsg}`, res.status >= 500); }
+    if (typeof body.isValid !== "boolean" && typeof body.accountName !== "string" && typeof body.operator !== "string") { lastOk = false; note(`unexpected 200 body: ${text.slice(0, 120)}`); throw new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", "peexit verify-wallet: 200 without the documented fields", false); }
     lastOk = true; lastError = undefined;
     const operator = typeof body.operator === "string" ? body.operator.toUpperCase() : null;
     const op = operator === "MTN" || operator === "ORANGE" ? operator : id.operator;

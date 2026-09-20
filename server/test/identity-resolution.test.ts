@@ -80,7 +80,13 @@ async function main() {
     ok("…via POST /clients/verify-wallet { countryCode, accountNumber } with the SECRETKEY header", !!sent && sent!.url.endsWith("/clients/verify-wallet") && sent!.init.method === "POST" && JSON.parse(String(sent!.init.body)).countryCode === "CM" && JSON.parse(String(sent!.init.body)).accountNumber === "699000155" && (sent!.init.headers as Record<string, string>).SECRETKEY === "test-key", sent ? sent.url : "no call");
     mock(404, { error: { statusCode: 404, message: "Account not found on the provider network" } });
     a = await peexitVerify.resolve(idCM, ctx);
-    ok("404 → NOT_FOUND", a.status === "NOT_FOUND" && a.error === "IDENTITY_NOT_FOUND");
+    ok("404 'Account not found on the provider network' → NOT_FOUND", a.status === "NOT_FOUND" && a.error === "IDENTITY_NOT_FOUND");
+    mock(404, { error: { statusCode: 404, name: "Error", message: "Cannot POST /api/v1/clients/verify-wallet" } });
+    const route404 = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
+    ok("404 'Cannot POST …' (endpoint missing on this base) → PROVIDER_UNAVAILABLE, NEVER 'not found' for the sender", route404?.code === "IDENTITY_PROVIDER_UNAVAILABLE" && route404.retryable === false && (await peexitVerify.health()).lastError?.includes("Cannot POST") === true, route404?.code);
+    mock(200, "<html>ok</html>");
+    const weird = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
+    ok("a 200 without the documented fields is UNAVAILABLE, not a verified account", weird?.code === "IDENTITY_PROVIDER_UNAVAILABLE");
     mock(200, { isValid: false, operator: "ORANGE", status: "SUSPENDED" });
     a = await peexitVerify.resolve(idCM, ctx);
     ok("isValid:false → INACTIVE, no name", a.status === "INACTIVE" && !a.displayName);

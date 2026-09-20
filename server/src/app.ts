@@ -154,7 +154,7 @@ export function createApp() {
     const rails = PAYOUTS.filter((p) => p.configured()).map((p) => ({ name: p.name, live: p.live(), ...payoutHealth(p.name) }));
     const alerts = activeAlerts();
     // Identity resolution is advisory: a provider outage is reported, never a 503 by itself.
-    const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status })) } : { enabled: false };
+    const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status, ...(p.lastError ? { lastError: p.lastError } : {}), latencyMs: p.latencyMs })) } : { enabled: false };
     const problems: string[] = [];
     if (!store.durable) problems.push("store is not durable");
     if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");

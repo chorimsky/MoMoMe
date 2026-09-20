@@ -37,6 +37,7 @@ export interface IdentityResolutionStatus {
   audit: Array<{ requestId: string; actor: string; purpose: string; identifierHash: string; country: string; operator: string | null; provider: string; status: string; error?: string; latencyMs: number; cache: string; at: string }>;
   priority: string[];
 }
+export interface UnsettledRow { id: string; ref: string; state: string; ageMin: number; xaf: number; method: string; recipient: string; aggregator: string | null; attempts: number; cause: string; action: "awaiting_rail" | "awaiting_sender" | "refund_in_flight" | "retry" | "review" }
 export interface UpiOverview {
   flags: Record<string, boolean>; mode: "SHADOW" | "EXECUTE"; rule: { order: string[]; railPriority: string[] };
   providers: Array<{ kind: string; id: string; health: "HEALTHY" | "DEGRADED" | "UNAVAILABLE" | "MAINTENANCE"; reason?: string; capabilities: Record<string, unknown> }>;
@@ -412,6 +413,8 @@ export const api = {
   // invoice to receive their crypto back (paid outbound via IBEX).
   refundDestination: (id: string, bolt11: string) =>
     req<Payment>(`/payments/${id}/refund-destination`, { method: "POST", body: JSON.stringify({ bolt11 }) }),
+  /** The sender chooses delivery over a refund — the payout is tried again (another rail). */
+  retryDelivery: (id: string) => req<Payment>(`/payments/${id}/retry-delivery`, { method: "POST", body: "{}" }),
 
   listPayments: () => req<Payment[]>("/payments"),
 
@@ -466,6 +469,8 @@ export const api = {
   adminOverview: () => req<AdminOverview>("/admin/overview"),
   adminCustomers: () => req<AdminCustomer[]>("/admin/customers"),
   adminPayments: () => req<Payment[]>("/admin/payments"),
+  /** Debited but not delivered — the list that must be empty. */
+  adminUnsettled: () => req<{ count: number; xaf: number; rows: UnsettledRow[] }>("/admin/payments/unsettled"),
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
   adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),

@@ -65,8 +65,8 @@ export function aggregatorByName(name: string | undefined): PayoutAdapter {
  *  requireLive: when the inbound is REAL money, a sandbox-configured rail must NEVER be
  *  chosen — only LIVE (production) rails are eligible, and we never fall back to a
  *  simulated rail (null instead → hold for manual review). */
-export async function selectFundedAggregator(provider: ProviderId, country: CountryCode, amountXaf: number, requireLive = false): Promise<PayoutAdapter | null> {
-  const supporting = payoutsFor(provider).filter((p) => eligible(p.name));
+export async function selectFundedAggregator(provider: ProviderId, country: CountryCode, amountXaf: number, requireLive = false, exclude: string[] = []): Promise<PayoutAdapter | null> {
+  const supporting = payoutsFor(provider).filter((p) => eligible(p.name) && !exclude.includes(p.name));
   if (!supporting.length) return null;
   const real = supporting.filter((p) => p.configured() && (!requireLive || p.live()));
   if (real.length) {

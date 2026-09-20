@@ -54,6 +54,9 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   const pays = await store().listPayments();
   const stuck = pays.filter((p) => p.state === "PAYOUT_REQUESTED" && now - Date.parse(p.updatedAt) > STUCK_PAYOUT_MIN * 60_000);
   if (stuck.length) out.push({ key: "payments:stuck", severity: "critical", body: `${stuck.length} payout(s) in PAYOUT_REQUESTED for over ${STUCK_PAYOUT_MIN} min: ${stuck.slice(0, 3).map((p) => p.ref).join(", ")}${stuck.length > 3 ? "…" : ""}. Admin → Payments.` });
+  // A refund the sender has not claimed is money we owe and still hold: page after an hour.
+  const unclaimed = pays.filter((p) => p.state === "REFUND_PENDING" && p.refundNeedsDestination && now - Date.parse(p.updatedAt) > 60 * 60_000);
+  if (unclaimed.length) out.push({ key: "payments:refund_unclaimed", severity: "warning", body: `${unclaimed.length} refund(s) unclaimed for over 1 h: ${unclaimed.slice(0, 3).map((p) => p.ref).join(", ")}. The sender can retry delivery or paste an invoice; Admin → Payments can retry on another rail.` });
   const held = pays.filter((p) => p.state === "MANUAL_REVIEW" && now - Date.parse(p.updatedAt) > REVIEW_MIN * 60_000);
   if (held.length) out.push({ key: "payments:review", severity: "warning", body: `${held.length} payment(s) waiting for review for over ${REVIEW_MIN} min: ${held.slice(0, 3).map((p) => p.ref).join(", ")}. Admin → Payments.` });
   // Float: below the approval threshold means the next large payout cannot be honoured.

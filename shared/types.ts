@@ -209,6 +209,11 @@ export interface Payment {
   paidAsset?: InboundAsset;
   /** PawaPay payout id (set once the payout is submitted). */
   payoutRef?: string;
+  /** Idempotency key of the CURRENT payout attempt at the rail: the ref for the first
+   *  attempt, `${ref}:r2` for a failover to another rail. Never reused across attempts. */
+  payoutKey?: string;
+  /** How many payout attempts have been submitted (1 = the original). */
+  payoutAttempts?: number;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
   /** REFUND_PENDING for a payment funded with something other than Lightning: the value the

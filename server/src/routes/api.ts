@@ -74,6 +74,7 @@ import * as regulatory from "../core/regulatory.js";
 import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { setIdentityOwnerResolver } from "./identityV2.js";
 import { recipientDeliveredMessage } from "../core/notifications.js";
+import { retryDeliveryForSender } from "../core/stateMachine.js";
 import { MESSAGE_VARIABLES, LN_MESSAGE_VARIABLES } from "../core/settings.js";
 import { lnurlMetadata, lnurlSuccessMessage } from "../core/lnurl.js";
 import { maskName } from "../../../shared/domain.js";
@@ -1299,6 +1300,23 @@ api.post("/payments/:id/simulate", rateLimitDurableMiddleware("simulate", 30, 60
   res.json(p);
 });
 
+/** The sender chooses delivery over a refund: try the payout again (another funded rail,
+ *  or the same one now that it is back). Owner-only; the state machine guarantees no
+ *  double pay (new attempt key, authoritative re-check, per-payment lock). */
+api.post("/payments/:id/retry-delivery", rateLimitDurableMiddleware("retry_delivery", 5, 60_000), async (req, res) => {
+  const p = await store().getPayment(req.params.id);
+  if (!p || !(await mayViewPayment(req, p.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  const r = await retryDeliveryForSender(p);
+  if (!r.ok) {
+    const message = r.reason === "no_rail" ? "No payout rail can deliver to this number right now — you can claim a refund instead."
+      : r.reason === "too_many_attempts" ? "Delivery was already tried several times — please claim a refund."
+      : r.reason === "not_retryable" ? "This payment isn't awaiting a decision."
+      : "Delivery could not be retried. You can claim a refund.";
+    return res.status(r.reason === "not_retryable" ? 409 : 400).json({ error: r.reason, message });
+  }
+  res.json(await store().getPayment(p.id) ?? p);
+});
+
 /**
  * Refund-claim: a payment whose payout couldn't land is REFUND_PENDING; the sender
  * submits a Lightning invoice here to receive their crypto back (paid outbound via IBEX).
@@ -2268,6 +2286,23 @@ function samplePayment(over: Partial<Payment> = {}): Payment {
     events: [{ at: now, state: "DELIVERED" }], createdAt: now, updatedAt: now, ...over,
   } as Payment;
 }
+
+/* ---------- Debited but not delivered — every payment whose money came in and has not
+   reached the recipient or gone back to the sender, with why and what to do. The list
+   that must be empty. ---------- */
+api.get("/admin/payments/unsettled", async (_req, res) => {
+  const now = Date.now();
+  const all = await store().listPayments();
+  const rows = all.filter((p) => p.events.some((e) => e.state === "INBOUND_CONFIRMED" || e.state === "FX_LOCKED") && !["DELIVERED", "REFUNDED"].includes(p.state) && p.displayStatus !== "Completed")
+    .map((p) => {
+      const last = p.events.at(-1);
+      const sinceIn = p.events.find((e) => e.state === "INBOUND_CONFIRMED")?.at ?? p.createdAt;
+      const action = p.state === "PAYOUT_REQUESTED" ? "awaiting_rail" : p.state === "REFUND_PENDING" ? (p.refundNeedsDestination ? "awaiting_sender" : "refund_in_flight")
+        : p.state === "MANUAL_REVIEW" ? (/compliance|approval threshold|low-trust|duplicate|do NOT refund|unexpected asset|overpaid|underpaid/i.test(last?.note ?? "") ? "review" : "retry") : "review";
+      return { id: p.id, ref: p.ref, state: p.state, ageMin: Math.round((now - Date.parse(sinceIn)) / 60_000), xaf: p.xaf, method: p.method, recipient: `${p.recipient.provider} ···${p.recipient.phone.replace(/\D/g, "").slice(-4)}`, aggregator: p.aggregator ?? null, attempts: p.payoutAttempts ?? 1, cause: last?.note ?? last?.state ?? "", action };
+    }).sort((a, b) => b.ageMin - a.ageMin);
+  res.json({ count: rows.length, xaf: rows.reduce((s, r) => s + r.xaf, 0), rows });
+});
 
 /* ---------- Universal Payment Identity — admin visibility (works with the flags off) ---------- */
 api.get("/admin/upi", async (_req, res) => {

@@ -33,6 +33,21 @@ export default function ClaimScreen() {
     load();
   }, []);
 
+  const [retrying, setRetrying] = useState(false);
+  const retryDelivery = async () => {
+    if (!selected) return;
+    setRetrying(true); setError(null);
+    try {
+      await api.retryDelivery(selected.id);
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const cur = await api.getPayment(selected.id);
+        if (cur.state === 'DELIVERED') { setSelected(null); await load(); setRetrying(false); return; }
+        if (cur.state === 'REFUND_PENDING' && cur.refundNeedsDestination) { setError(tr('retry_delivery_failed')); break; }
+      }
+    } catch (e) { setError(errMessage(e)); }
+    finally { setRetrying(false); }
+  };
   const submit = async () => {
     if (!selected) return;
     setBusy(true);
@@ -70,6 +85,13 @@ export default function ClaimScreen() {
         ) : selected ? (
           <Card padded>
             <Label>{tr('refund_this')} · {xaf(selected.xaf)} · {selected.ref}</Label>
+            {(selected.payoutAttempts ?? 1) < 3 ? (
+              <View style={{ gap: Spacing.one, marginBottom: Spacing.two }}>
+                <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('retry_delivery_offer')}</Body>
+                <Body muted style={{ fontSize: 12.5 }}>{tr('retry_delivery_offer_sub')}</Body>
+                <Button title={retrying ? tr('retry_delivery_title') : tr('retry_delivery_btn', { n: selected.recipient.name })} icon="refresh" onPress={retryDelivery} loading={retrying} />
+              </View>
+            ) : null}
             <Body>{selected.refundSats != null ? `≈ ${selected.refundSats.toLocaleString('en-US').replace(/,/g, ' ')} sats (${selected.payInstruction.amountLabel})` : selected.payInstruction.amountLabel}</Body>
             <Body>{tr('refund_dest_ph')}</Body>
             <Field

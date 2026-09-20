@@ -60,7 +60,9 @@ export async function reconciliationReport(windowDays = 3): Promise<Reconciliati
   // for providers without a statement. Only payments that reached a payout, in the window.
   const since = Date.now() - windowDays * 86_400_000;
   const paidWindow = payments.filter((p) => p.payoutRef && ["PAYOUT_REQUESTED", "DELIVERED", "FAILED", "REFUNDED", "REFUND_PENDING"].includes(p.state) && Date.parse(p.updatedAt) >= since);
+  // A statement row names the rail's key: the ref, or `${ref}:rN` for a failover attempt.
   const byRef = new Map(payments.map((p) => [p.ref, p] as const));
+  for (const p of payments) if (p.payoutKey && p.payoutKey !== p.ref) byRef.set(p.payoutKey, p);
   const seen = new Set<string>();
   for (const agg of PAYOUTS) {
     if (!agg.configured() || !agg.live()) continue; // a simulated rail has no statement worth a verdict
@@ -80,7 +82,7 @@ export async function reconciliationReport(windowDays = 3): Promise<Reconciliati
     for (const p of paidWindow) {
       if (seen.has(p.id) || (p.aggregator ?? "peexit") !== agg.name || budget-- <= 0) continue;
       let st: PayoutStatus | null = null;
-      try { st = await agg.queryStatus(p.ref); } catch { st = null; }
+      try { st = await agg.queryStatus(p.payoutKey ?? p.ref); } catch { st = null; }
       const v = payoutVerdict(p.state, st);
       records.push({ scope: "payouts", provider: agg.name, asset: "XAF", externalId: p.payoutRef ?? p.ref, externalAmount: p.xaf, internalPaymentRef: p.ref, internalAmount: p.xaf, verdict: v.verdict, detail: v.detail });
       seen.add(p.id);

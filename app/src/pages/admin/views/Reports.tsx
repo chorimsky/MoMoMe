@@ -5,9 +5,9 @@
 import { useEffect, useState } from "react";
 import type { ReportsSnapshot } from "@shared/types.js";
 import { PROVIDERS, METHOD_META } from "@shared/domain.js";
-import { api } from "../../../api/client.js";
+import { api, type UnsettledRow } from "../../../api/client.js";
 import { fmt } from "../../../lib/format.js";
-import { AKpi, Card, Grid, SectionTitle, SegToggle, Spark } from "../AdminUI.js";
+import { AKpi, Card, Grid, Pill, SectionTitle, SegToggle, Spark } from "../AdminUI.js";
 import { Failed, Loading } from "./Overview.js";
 
 /** Export the WHOLE report, not one table: the window, the headline numbers against the
@@ -79,6 +79,7 @@ export function ReportsView() {
   return (
     <div>
       <SectionTitle t="Reports" s="Gross revenue (fees + FX spread), volume and where payments stop — by pay-in method and by operator." />
+      <UnsettledCard />
       <div className="mm-toolbar" style={{ marginBottom: 14 }}>
         <SegToggle options={PERIODS} value={period} onChange={setPeriod} />
         <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{data.period.label} · vs the {data.period.days === 1 ? "24 hours" : `${data.period.days} days`} before</span>
@@ -227,5 +228,46 @@ export function ReportsView() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/* ---------- Debited but not delivered ----------
+   Every payment whose money came in and has not reached the recipient or gone back to the
+   sender. The list that must be empty: each row says why it is here, how long, and the one
+   action that moves it. */
+const ACTION_LABEL: Record<UnsettledRow["action"], [string, "warn" | "bad" | "ink" | "recv" | "lightning"]> = {
+  awaiting_rail: ["awaiting the rail", "warn"], awaiting_sender: ["awaiting the sender", "warn"], refund_in_flight: ["refund in flight", "lightning"], retry: ["retry now", "bad"], review: ["needs a decision", "bad"],
+};
+function UnsettledCard() {
+  const [d, setD] = useState<{ count: number; xaf: number; rows: UnsettledRow[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => api.adminUnsettled().then(setD).catch(() => setD({ count: 0, xaf: 0, rows: [] }));
+  useEffect(() => { void load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  const act = async (row: UnsettledRow, kind: "retry" | "refund") => {
+    setBusy(row.id + kind); setMsg(null);
+    try { const r = kind === "retry" ? await api.retryPayment(row.id) : await api.refundPayment(row.id); setMsg(r.ok ? `${row.ref}: ${kind === "retry" ? "payout retried" : "refund applied"}.` : `${row.ref}: ${(r as { message?: string }).message ?? "not possible"}`); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Action failed."); }
+    finally { setBusy(null); }
+  };
+  if (!d) return null;
+  return (
+    <Card title="Debited, not delivered" sub="Money that came in and has neither reached the recipient nor gone back to the sender. This list should be empty."
+      action={<Pill status={d.count === 0 ? "clear" : `${d.count} · ${fmt(d.xaf)} XAF`} tone={d.count === 0 ? "recv" : "bad"} />} style={{ marginBottom: 16 }}>
+      {d.count === 0 && <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Nothing is stuck. Failed payouts fail over to another rail, transient holds retry themselves, and a sender can retry or claim a refund from the app.</div>}
+      {d.rows.map((r) => (
+        <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.2fr 0.6fr 0.9fr 2fr auto", gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
+          <span><span className="mono" style={{ fontWeight: 650 }}>{r.ref}</span><span style={{ color: "var(--ink-3)", display: "block", fontSize: 11.5 }}>{r.method} → {r.recipient} · {r.aggregator ?? "no rail"} · attempt {r.attempts}</span></span>
+          <span className="num" style={{ fontWeight: 650 }}>{fmt(r.xaf)} XAF</span>
+          <span><Pill status={ACTION_LABEL[r.action][0]} tone={ACTION_LABEL[r.action][1]} /><span style={{ color: "var(--ink-3)", display: "block", fontSize: 11.5 }}>{r.state} · {r.ageMin < 60 ? `${r.ageMin} min` : `${Math.round(r.ageMin / 60)} h`}</span></span>
+          <span style={{ color: "var(--ink-2)", lineHeight: 1.4 }}>{r.cause}</span>
+          <span style={{ display: "flex", gap: 6 }}>
+            {(r.action === "retry" || r.action === "review" || r.action === "awaiting_sender") && <button type="button" className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12 }} disabled={busy !== null} onClick={() => void act(r, "retry")}>{busy === r.id + "retry" ? "…" : "Retry payout"}</button>}
+            {(r.action === "review" || r.action === "awaiting_sender") && <button type="button" className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12 }} disabled={busy !== null} onClick={() => void act(r, "refund")}>{busy === r.id + "refund" ? "…" : "Mark refunded"}</button>}
+          </span>
+        </div>
+      ))}
+      {msg && <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 8 }}>{msg}</div>}
+    </Card>
   );
 }

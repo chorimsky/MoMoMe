@@ -63,6 +63,10 @@ export async function peex(path: string, init: RequestInit, timeoutMs = 12_000):
   );
 }
 
+/* Sandbox rehearsal: make the simulated rail fail (or reject) a given key — the way
+   production Peexit does with INSUFFICIENT_FUND_TO_PAY_TX or "channel not active". */
+const simFail = new Map<string, "reject" | "fail">();
+export function simulatePayoutOutcome(idempotencyKey: string, outcome: "reject" | "fail" | null): void { if (!peexitLive()) { if (outcome) simFail.set(idempotencyKey, outcome); else simFail.delete(idempotencyKey); } }
 export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
   const existing = byKey.get(req.idempotencyKey);
   if (existing) return { ...existing, status: "duplicate" };
@@ -71,8 +75,9 @@ export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
   if (real) {
     providerRef = await liveSubmit(req);
   } else {
+    if (simFail.get(req.idempotencyKey) === "reject") throw new Error("simulated: INSUFFICIENT_FUND_TO_PAY_TX");
     providerRef = id("px");
-    statusByRef.set(req.idempotencyKey, "COMPLETED"); // simulated → completes
+    statusByRef.set(req.idempotencyKey, simFail.get(req.idempotencyKey) === "fail" ? "FAILED" : "COMPLETED"); // simulated → completes (or the rehearsed failure)
   }
   const result: DisburseResult = { status: "accepted", providerRef, simulated: !real };
   byKey.set(req.idempotencyKey, result);
@@ -161,7 +166,7 @@ export async function collectStatus(trackId: string): Promise<PayoutStatus | nul
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;
-  if (local.simulated) return "COMPLETED";
+  if (local.simulated) return statusByRef.get(idempotencyKey) ?? "COMPLETED";
   const cached = statusByRef.get(idempotencyKey) ?? "PENDING";
   if (!peexitLive()) return cached;
   // AUTHORITATIVE re-query: GET /disbursement/all_requests?track_id= returns our

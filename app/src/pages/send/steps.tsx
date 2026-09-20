@@ -967,11 +967,31 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
   const [bolt11, setBolt11] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<null | "refunded" | "settling">(null);
+  const [result, setResult] = useState<null | "refunded" | "settling" | "retrying">(null);
+  const [retryErr, setRetryErr] = useState<string | null>(null);
   // Don't setState after unmount (navigating away mid-poll) — avoids React warnings
   // and wasted getPayment requests on metered data.
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
+  // The sender wanted the money DELIVERED. Before asking them for an invoice, offer to try
+  // again — another rail, or the same one now that it is back — and follow the payout.
+  const retryDelivery = async () => {
+    setBusy(true); setRetryErr(null);
+    try {
+      await api.retryDelivery(payment.id);
+      if (!mounted.current) return;
+      setResult("retrying");
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        if (!mounted.current) return;
+        const cur = await api.getPayment(payment.id);
+        if (!mounted.current) return;
+        if (cur.state === "DELIVERED") { reset(); return; }
+        if (cur.state === "REFUND_PENDING" && cur.refundNeedsDestination) { setResult(null); setRetryErr(t("retry_delivery_failed")); return; }
+      }
+    } catch (e) { if (mounted.current) { setResult(null); setRetryErr(errMessage(e, t)); } }
+    finally { if (mounted.current) setBusy(false); }
+  };
 
   const submit = async () => {
     // Accept exactly what wallets copy: a `lightning:` URI prefix, uppercase, and
@@ -1000,6 +1020,15 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
 
   if (result === "refunded") return <RefundedCard reset={reset} />;
   if (result === "settling") return <RefundSettlingCard reset={reset} />;
+  if (result === "retrying") return (
+    <FlowCard>
+      <div style={{ textAlign: "center", padding: "24px 0" }}>
+        <Spinner size={28} />
+        <h2 style={{ fontSize: 20, marginTop: 14 }}>{t("retry_delivery_title")}</h2>
+        <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "8px 0 0", lineHeight: 1.5 }}>{t("retry_delivery_sub")}</p>
+      </div>
+    </FlowCard>
+  );
 
   return (
     <FlowCard>
@@ -1010,6 +1039,14 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
         <h2 style={{ fontSize: 22 }}>{t("refund_title")}</h2>
         <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "10px 0 0", lineHeight: 1.5 }}>{t("refund_sub")}</p>
       </div>
+      {(payment.payoutAttempts ?? 1) < 3 && (
+        <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--recv)", background: "var(--recv-wash)" }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{t("retry_delivery_offer")}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.45 }}>{t("retry_delivery_offer_sub")}</div>
+          <button className="btn btn-primary btn-block" onClick={retryDelivery} disabled={busy} style={{ marginTop: 10 }}>{busy ? "…" : fill(t("retry_delivery_btn"), { n: payment.recipient.name })}</button>
+          {retryErr && <div role="alert" style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 8 }}>{retryErr}</div>}
+        </div>
+      )}
       <div style={{ marginTop: 18, padding: "12px 14px", borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("refund_amount_label")}</span>
         <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{payment.refundSats != null ? `≈ ${satsLabel(payment.refundSats / 1e8)} (${payment.payInstruction.amountLabel})` : payment.payInstruction.amountLabel}</span>

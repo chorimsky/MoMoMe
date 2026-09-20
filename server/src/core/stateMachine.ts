@@ -392,11 +392,13 @@ const HARD_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowe
 /** Submit a payout, auto-retrying TRANSIENT failures (network/5xx) up to 3 times.
  *  A HARD failure (config block) throws immediately — retrying is futile. disburse is
  *  idempotent on the ref, so a retry never double-pays. */
+/** The idempotency key the rail knows this payment's CURRENT payout attempt by. */
+export const payoutKeyOf = (p: Payment): string => p.payoutKey ?? p.ref;
 async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Payment) {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
+      return await agg.disburse({ idempotencyKey: payoutKeyOf(p), provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
     } catch (e) {
       lastErr = e;
       if (HARD_PAYOUT_FAIL.test(e instanceof Error ? e.message : "")) throw e; // config block — stop
@@ -404,6 +406,96 @@ async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Paym
     }
   }
   throw lastErr;
+}
+
+const MAX_PAYOUT_ATTEMPTS = 3;
+/** Deliver through ANOTHER funded live rail after this attempt failed. Called with the
+ *  payment lock held. Returns true when a new attempt is in flight (or completed), false
+ *  when nothing else can carry it — the caller then opens the refund. Never double-pays:
+ *  the failed attempt is re-queried authoritatively first, and a new attempt has a new
+ *  idempotency key that the rails and the reconciler both know. */
+async function failoverPayout(p: Payment, failedRail: string, why: string): Promise<boolean> {
+  const attempts = p.payoutAttempts ?? 1;
+  if (attempts >= MAX_PAYOUT_ATTEMPTS) return false;
+  // Authoritative: is the failed attempt REALLY failed? PENDING or COMPLETED → do not pay again.
+  try {
+    const verdict = await aggregatorByName(failedRail).queryStatus(payoutKeyOf(p));
+    if (verdict === "COMPLETED") { await onPayoutResultLocked(p.ref, "COMPLETED", p.payoutRef); return true; }
+    if (verdict === "PENDING") return false;
+  } catch { /* unverifiable → a fresh key on another rail cannot double-pay this one */ }
+  const cryptoReal = railTrusted(p.payInstruction.provider);
+  const alt = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal, [failedRail]).catch(() => null);
+  if (!alt || (aggregatorLive(alt.name) && !cryptoReal)) return false;
+  p.payoutAttempts = attempts + 1;
+  p.payoutKey = `${p.ref}:r${p.payoutAttempts}`;
+  p.aggregator = alt.name;
+  p.payoutRef = undefined;
+  await store().putPayment(p);
+  if (p.state !== "PAYOUT_REQUESTED") await transition(p, "PAYOUT_REQUESTED", `payout failed at ${failedRail} (${why}) → retrying on ${alt.name}`);
+  else { p.events.push({ at: new Date().toISOString(), state: p.state, note: `payout failed at ${failedRail} (${why}) → retrying on ${alt.name}` }); await store().putPayment(p); }
+  let res;
+  try { res = await submitWithRetry(alt, p); }
+  catch (e) { const m = e instanceof Error ? e.message : "error"; if (HARD_PAYOUT_FAIL.test(m)) markRailHardDown(alt.name, m); p.events.push({ at: new Date().toISOString(), state: p.state, note: `${alt.name} also failed: ${m}` }); await store().putPayment(p); return failoverPayout(p, alt.name, m); }
+  if (res.status === "duplicate") { await transition(p, "MANUAL_REVIEW", "duplicate payout key on failover"); return true; }
+  p.payoutRef = res.providerRef;
+  await store().putPayment(p);
+  if (!res.simulated) { void pollPayout(p.ref); return true; }
+  await wait(900);
+  await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef);
+  return true;
+}
+
+/** The SENDER asks for delivery to be tried again instead of a refund (a rail was down, the
+ *  recipient's line was busy…). Allowed while the refund claim is open and no refund has
+ *  gone out; goes through the same funded-rail selection and idempotency as everything
+ *  else, so it can never pay twice. */
+export async function retryDeliveryForSender(pIn: Payment): Promise<{ ok: boolean; reason?: string }> {
+  return store().lockPayment(pIn.id, async () => {
+    const p = await store().getPayment(pIn.id);
+    if (!p) return { ok: false, reason: "not_found" };
+    if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination || p.refundTxId) return { ok: false, reason: "not_retryable" };
+    if ((p.payoutAttempts ?? 1) >= MAX_PAYOUT_ATTEMPTS) return { ok: false, reason: "too_many_attempts" };
+    if (!p.events.some((e) => e.state === "FX_LOCKED")) return { ok: false, reason: "nothing_arrived" };
+    const cryptoReal = railTrusted(p.payInstruction.provider);
+    const agg = await selectFundedAggregator(p.recipient.provider, p.recipient.country, p.xaf, cryptoReal).catch(() => null);
+    if (!agg || (aggregatorLive(agg.name) && !cryptoReal)) return { ok: false, reason: "no_rail" };
+    if ((await availableFloatXaf()) < 0) return { ok: false, reason: "float_negative" };
+    p.refundNeedsDestination = false; p.refundSats = undefined;
+    p.payoutAttempts = (p.payoutAttempts ?? 1) + 1;
+    p.payoutKey = `${p.ref}:r${p.payoutAttempts}`;
+    p.aggregator = agg.name; p.payoutRef = undefined;
+    await ensureReserved(p);
+    await transition(p, "PAYOUT_REQUESTED", `delivery retried by the sender on ${agg.name}`);
+    let res;
+    try { res = await submitWithRetry(agg, p); }
+    catch (e) { const m = e instanceof Error ? e.message : "error"; if (await failoverPayout(p, agg.name, m)) return { ok: true }; await beginRefund(p, `retry failed: ${m}`); return { ok: false, reason: "rail_rejected" }; }
+    if (res.status === "duplicate") { await transition(p, "MANUAL_REVIEW", "duplicate payout key on sender retry"); return { ok: false, reason: "duplicate" }; }
+    p.payoutRef = res.providerRef; await store().putPayment(p);
+    if (!res.simulated) { void pollPayout(p.ref); return { ok: true }; }
+    await wait(900);
+    await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef);
+    return { ok: true };
+  });
+}
+
+/** Holds that are TRANSIENT by nature — float, rail, approval-free money conditions — are
+ *  retried by the tick as soon as they clear, instead of waiting for a person to notice.
+ *  Uses the operator retry (every money guard re-applied); throttled per payment. Holds
+ *  that need a human (compliance, approval threshold, low-trust, duplicate) are left alone. */
+const TRANSIENT_HOLD = /insufficient XAF float|no funded LIVE payout rail|no payout aggregator with sufficient balance|rail blocked|rejected the disbursement/i;
+export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000, maxAgeMs = 24 * 3_600_000): Promise<number> {
+  let n = 0;
+  for (const p of await store().listPayments()) {
+    if (p.state !== "MANUAL_REVIEW") continue;
+    const last = [...p.events].reverse().find((e) => e.state === "MANUAL_REVIEW");
+    if (!last || !TRANSIENT_HOLD.test(last.note ?? "")) continue;
+    if (now - Date.parse(last.at) > maxAgeMs) continue;               // old enough to be a person's problem (paged)
+    if (now - Date.parse(p.updatedAt) < everyMs) continue;             // throttle
+    const r = await adminRetryWhy(p, "auto (hold cleared)").catch(() => null);
+    if (r?.ok) n++;
+    else { p.updatedAt = new Date(now).toISOString(); await store().putPayment(p); } // wait another interval without a new event
+  }
+  return n;
 }
 
 /** Terminal-but-recoverable: inbound crypto arrived but the payout can't land. Move to
@@ -721,6 +813,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   } catch (e) {
     const msg = e instanceof Error ? e.message : "error";
     if (HARD_PAYOUT_FAIL.test(msg)) markRailHardDown(agg.name, msg);
+    if (await failoverPayout(p, agg.name, msg)) return;
     await beginRefund(p, `payout failed${HARD_PAYOUT_FAIL.test(msg) ? " (rail blocked)" : ""}: ${msg}`);
     return;
   }
@@ -736,7 +829,9 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // reconcile backstop. All idempotent. Simulated: fake the callback inline.
   if (!res.simulated) { void pollPayout(p.ref); return; }
   await wait(900);
-  await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); // lock already held
+  // Simulated: the fake callback says what the sandbox rail was told to say (a rehearsed
+  // FAILED exercises the same failover / refund path as production).
+  await onPayoutResultLocked(p.ref, (await agg.queryStatus(payoutKeyOf(p)).catch(() => null)) ?? "COMPLETED", res.providerRef); // lock already held
 }
 
 /** Actively poll a real payout's status for fast settlement when the dashboard
@@ -748,7 +843,7 @@ async function pollPayout(ref: string): Promise<void> {
     const p = await store().findPaymentByRef(ref);
     if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved
     try {
-      const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(ref);
+      const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
       if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(ref, status, p.payoutRef); return; }
     } catch (e) { console.error("poll payout", ref, e); }
   }
@@ -759,9 +854,14 @@ async function pollPayout(ref: string): Promise<void> {
  * or the sandbox simulation). Completes delivery, or refunds on failure.
  * Idempotent: only acts on a payment still awaiting its payout result.
  */
-export async function onPayoutResult(ref: string, status: PayoutStatus, providerRef?: string): Promise<void> {
+export async function onPayoutResult(refOrKey: string, status: PayoutStatus, providerRef?: string): Promise<void> {
+  // A callback names the rail's idempotency key: the ref for a first attempt, `${ref}:r2`
+  // for a failover. Resolve either to the payment, and only honour a key that is the
+  // payment's CURRENT attempt (a late verdict on a superseded attempt says nothing).
+  const ref = refOrKey.replace(/:r\d+$/, "");
   const p0 = await store().findPaymentByRef(ref);
   if (!p0) return;
+  if (refOrKey !== ref && payoutKeyOf(p0) !== refOrKey) { console.warn(`[settle] ${ref}: ignoring ${status} for superseded payout attempt ${refOrKey}`); return; }
   // Per-payment lock: the callback, the status poll AND the reconcile backstop can all
   // fire for one payout — serialize so the delivery leg + identity provisioning run once.
   return store().lockPayment(p0.id, () => onPayoutResultLocked(ref, status, providerRef));
@@ -811,9 +911,12 @@ async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerR
       country: p.recipient.country, aggregatorRef: p.aggregator ? `${p.aggregator}:${p.payoutRef ?? ""}` : null,
     });
   } else if (status === "FAILED") {
-    // The provider rejected the payout after accepting it → the inbound crypto must go
-    // back to the sender. Enter the refund-claim flow (sender supplies an invoice); the
+    // The provider rejected the payout after accepting it. The sender wanted DELIVERY,
+    // not a refund: try the other funded live rail first (a fresh idempotency key, after
+    // an authoritative re-check that this attempt really failed). Only when no rail can
+    // deliver does the inbound go back to the sender through the refund-claim flow; the
     // ledger is unwound only when the refund actually pays out (finalizeRefund).
+    if (await failoverPayout(p, p.aggregator ?? "peexit", "rejected after accepting")) return;
     void notifyPayoutFailed(p, "the provider rejected it after accepting");
     await beginRefund(p, "payout failed at provider");
   }
@@ -825,7 +928,7 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of await store().listPayments()) {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
-    const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(p.ref);
+    const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
     if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
   }
 }
@@ -905,7 +1008,7 @@ export async function reconcileFailedPayouts(maxAgeMs = 120_000): Promise<void> 
     if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination || !p.aggregator) continue;
     if (Date.parse(p.updatedAt) > cutoff) continue;
     try {
-      const status = await aggregatorByName(p.aggregator).queryStatus(p.ref);
+      const status = await aggregatorByName(p.aggregator).queryStatus(payoutKeyOf(p));
       if (status === "COMPLETED") await transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED after a FAILED verdict — do NOT refund");
     } catch (e) { console.error("reconcile failed-payout", p.id, e); }
   }
@@ -938,7 +1041,8 @@ async function adminRetryLocked(paymentId: string, by = "admin"): Promise<RetryO
   const wasHeld = p?.state === "MANUAL_REVIEW" && !!p.complianceFlags?.length;
   if (!p) return refuse("not_found", "Payment not found.");
   if (p.displayStatus === "Completed") return refuse("completed", "Already delivered — nothing to retry.");
-  if (p.state === "REFUNDED" || p.state === "REFUND_PENDING") return refuse("refunded", "This inbound was refunded; it must not be paid out again."); // never re-pay a refunded inbound
+  if (p.state === "REFUNDED" || (p.state === "REFUND_PENDING" && (!p.refundNeedsDestination || p.refundTxId))) return refuse("refunded", "This inbound was refunded (or a refund is on its way); it must not be paid out again."); // never re-pay a refunded inbound
+  const reopeningRefund = p.state === "REFUND_PENDING"; // claim open, nothing paid back yet: delivery may be tried again
   // Never re-disburse a payout that is already in flight (PAYOUT_REQUESTED). It looks
   // "stuck/Pending" but the async confirmation (callback/poll/reconcile) is still
   // running; a second disburse would double-pay if the adapter's in-memory idempotency
@@ -970,13 +1074,14 @@ async function adminRetryLocked(paymentId: string, by = "admin"): Promise<RetryO
   // SAFETY: never move REAL Mobile Money for a non-real (simulated) crypto inbound.
   if (aggregatorLive(agg.name) && !cryptoReal) return refuse("simulated_inbound", "This inbound was simulated (sandbox crypto); real Mobile Money must not be sent for it.");
   p.aggregator = agg.name;
+  if (reopeningRefund) { p.refundNeedsDestination = false; p.refundSats = undefined; p.payoutAttempts = (p.payoutAttempts ?? 1) + 1; p.payoutKey = `${p.ref}:r${p.payoutAttempts}`; p.payoutRef = undefined; }
 
   // parkForReview gave the earmark back when this payment was held — take it again
   // before submitting, because the delivery leg debits it. Idempotent.
   await ensureReserved(p);
   let res;
   try {
-    res = await agg.disburse({ idempotencyKey: p.ref, provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
+    res = await agg.disburse({ idempotencyKey: payoutKeyOf(p), provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
   } catch {
     // Nothing was submitted, so give the earmark straight back. No transition: the
     // payment is already held for review and a second MANUAL_REVIEW event says nothing.
@@ -1001,7 +1106,7 @@ async function adminRetryLocked(paymentId: string, by = "admin"): Promise<RetryO
   if (res.simulated) { await onPayoutResultLocked(p.ref, "COMPLETED", res.providerRef); return { ok: true }; }
   // Real rail: confirm via status query; settle on COMPLETED/FAILED, else keep polling.
   let status: PayoutStatus = "PENDING";
-  try { status = (await agg.queryStatus(p.ref)) ?? "PENDING"; } catch { /* keep PENDING */ }
+  try { status = (await agg.queryStatus(payoutKeyOf(p))) ?? "PENDING"; } catch { /* keep PENDING */ }
   if (status === "COMPLETED" || status === "FAILED") await onPayoutResultLocked(p.ref, status, res.providerRef);
   else void pollPayout(p.ref); // fire-and-forget: acquires the lock AFTER this one releases
   return { ok: true };
@@ -1063,7 +1168,7 @@ async function completeRefundLocked(paymentId: string, bolt11: string): Promise<
   // — otherwise MoMo was paid AND the crypto is returned (full double-loss).
   if (p.aggregator) {
     let payoutStatus: PayoutStatus | null = null;
-    try { payoutStatus = await aggregatorByName(p.aggregator).queryStatus(p.ref); } catch { /* unverifiable → fall through; a genuine FAILED still refunds */ }
+    try { payoutStatus = await aggregatorByName(p.aggregator).queryStatus(payoutKeyOf(p)); } catch { /* unverifiable → fall through; a genuine FAILED still refunds */ }
     if (payoutStatus === "COMPLETED") {
       await transition(p, "MANUAL_REVIEW", "payout re-verified COMPLETED at refund-claim — do NOT refund");
       return { ok: false, error: "payout_completed" };

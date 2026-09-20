@@ -5,7 +5,7 @@
    Each tick is idempotent + self-contained (safe to run from either, at any cadence).
    ============================================================ */
 import { store } from "./db/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts, retryTransientHolds } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { reconcileDeposits } from "./core/depositReconcile.js";
 import { reconciliationSweep } from "./core/interop/reconcile.js";
@@ -95,6 +95,8 @@ async function reconcileOnce(): Promise<void> {
   await reconcileTransfers().catch((e) => console.error("momo transfers", e));
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
+  // A hold caused by float / a rail being down clears itself: retry, do not wait for a person.
+  await retryTransientHolds().then((n) => { if (n) console.log(`[settle] ${n} held payment(s) retried after the hold cleared`); }).catch((e) => console.error("retry holds", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }
   // Shadow routing of production settlements (never moves funds; no-op unless SHADOW_ROUTING).
   try { await shadowTick(); } catch (e) { console.error("network shadow", e); }

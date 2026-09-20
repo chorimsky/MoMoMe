@@ -118,3 +118,15 @@ Rules the server enforces on save: 10–320 characters, printable, and both `{am
 ## 8. What a Lightning wallet shows for a number
 
 `<number>@momome.xyz` is resolved by wallets the operator does not control; the `text/plain` line is the one thing every wallet shows before "Pay". **Admin → Settings → Lightning Address message** owns: the name policy (full name once the holder verified the number in the app and masked until then — recommended; always masked; always full — a public directory, not advised; number only), the named / no-name line, the long description, and the LUD-09 success message, each with `{name} {operator} {number} {last4} {brand} {ref}`, a "what the wallet shows" preview and the length limit (144 for the success message, per the spec). The server refuses a named line without `{name}`, any line without the number, unknown variables and over-length text. A wallet that already fetched the old text keeps it for that payment (the invoice is bound to what it was shown); new resolutions use the saved text at once.
+
+## 9. Debited but not delivered — the guarantee (2026-09-20)
+
+Once a sender's money is confirmed in, the payment MUST end in `DELIVERED` or `REFUNDED`. What now enforces that, in order:
+
+1. **Failover before refund.** A payout the primary rail rejects (`INSUFFICIENT_FUND_TO_PAY_TX`, "channel not active", a 5xx) or accepts-then-fails is re-checked authoritatively and re-submitted on the other funded live rail with a **new idempotency key** (`${ref}:r2`); the rails, the reconciler and callbacks all know the key, and a late verdict on a superseded attempt is ignored. Up to 3 attempts. Only when no rail can carry it does the refund claim open. (Production note: PawaPay is out of rotation until `PAWAPAY_CM_PAYOUTS=true` — until then Peexit is the only rail and a Peexit rejection goes straight to the claim.)
+2. **Transient holds retry themselves.** `MANUAL_REVIEW` for *insufficient XAF float*, *no funded rail*, *rail blocked* is retried by the tick every 5 min for 24 h through the same operator retry (every money guard re-applied). Compliance, approval-threshold, low-trust and duplicate holds stay with a person and page after `REVIEW_MIN`.
+3. **The sender can choose delivery over a refund.** `POST /payments/:id/retry-delivery` ("Try sending to NAME again" on the refund screen, web + mobile) re-runs the payout while the claim is open and nothing has been refunded.
+4. **Refunds over Lightning for every funding asset** (§ stablecoin refunds), and an unclaimed refund pages after 1 h (`payments:refund_unclaimed`).
+5. **Admin → Reports → "Debited, not delivered"** (`GET /api/admin/payments/unsettled`): every such payment with age, cause and the one action — retry / mark refunded. It must read *clear*.
+
+Sandbox rehearsal: `peexit.simulatePayoutOutcome(key, "reject" | "fail")`, `setAggregatorUp(name, false)`; `test/settle-or-refund.test.ts` walks every path.

@@ -345,6 +345,8 @@ export const api = {
   // refund-claim: supply a Lightning invoice to get crypto back when a payout couldn't land
   refundDestination: (id: string, bolt11: string) =>
     req<Payment>(`/payments/${id}/refund-destination`, { method: 'POST', body: JSON.stringify({ bolt11 }) }),
+  /** The sender chooses delivery over a refund — the payout is tried again (another rail). */
+  retryDelivery: (id: string) => req<Payment>(`/payments/${id}/retry-delivery`, { method: 'POST', body: '{}' }),
 
   // encrypted contact vault — the server only ever sees ciphertext (see lib/vault.ts)
   vaultList: (since?: string) =>

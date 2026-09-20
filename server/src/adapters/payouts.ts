@@ -94,7 +94,9 @@ export const pawapayAdapter: PayoutAdapter = {
   // NOT_ALLOWED), so it serves NOTHING for now — leaving it in would let the
   // balance-driven selector pick its funded wallet and fail every payout.
   // RESTORE `p === "MTN" || p === "ORANGE" || p === "AIRTEL"` once PawaPay enables it.
-  supports: () => false,
+  // PAWAPAY_CM_PAYOUTS=true restores it the day PawaPay enables the corridor (until then a
+  // balance-driven selector would pick its funded wallet and fail every payout).
+  supports: (p) => (process.env.PAWAPAY_CM_PAYOUTS ?? "").toLowerCase() === "true" && (p === "MTN" || p === "ORANGE" || p === "AIRTEL"),
   disburse: pawapay.disburse,
   queryStatus: pawapay.queryStatus,
   balance: pawapay.availableBalanceXaf,

@@ -73,6 +73,8 @@ import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
 import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { setIdentityOwnerResolver } from "./identityV2.js";
+import { recipientDeliveredMessage } from "../core/notifications.js";
+import { MESSAGE_VARIABLES } from "../core/settings.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow } from "../core/identityResolution/audit.js";
 import { recordCount as identityRecordCount, cacheTtlVerifiedSec } from "../core/identityResolution/cache.js";
@@ -2126,8 +2128,66 @@ api.put("/admin/settings", async (req, res) => {
     if (tx.taxId !== undefined && typeof tx.taxId !== "string") return res.status(400).json({ error: "bad_tax", message: "Tax id must be text." });
     if (typeof tx.taxId === "string") tx.taxId = tx.taxId.trim().slice(0, 40);
   }
+  if (patch.messages !== undefined) {
+    const m = (patch.messages as { recipientDelivered?: Record<string, unknown> } | null)?.recipientDelivered;
+    if (!m || typeof m !== "object") return res.status(400).json({ error: "bad_messages", message: "messages.recipientDelivered must be an object." });
+    const bad = validateRecipientTemplate(m);
+    if (bad) return res.status(400).json({ error: "bad_messages", message: bad });
+  }
   res.json(updateSettings(patch));
 });
+/** The recipient notice has to stay a usable SMS: bounded, printable, and carrying the two
+ *  things the WhatsApp template path reads back out of it — the amount and the reference. */
+function validateRecipientTemplate(m: Record<string, unknown>): string | null {
+  if (m.enabled !== undefined && typeof m.enabled !== "boolean") return "enabled must be true or false.";
+  if (m.lang !== undefined && !["auto", "en", "fr"].includes(String(m.lang))) return "lang must be auto, en or fr.";
+  if (m.fallback !== undefined && !["en", "fr"].includes(String(m.fallback))) return "fallback must be en or fr.";
+  for (const k of ["en", "fr"] as const) {
+    if (m[k] === undefined) continue;
+    const t = m[k];
+    if (typeof t !== "string") return `${k} must be text.`;
+    const clean = t.replace(/\r/g, "").trim();
+    if (clean.length < 10 || clean.length > 320) return `${k === "en" ? "English" : "French"} message must be 10–320 characters (an SMS is 160 GSM characters per segment).`;
+    if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(clean)) return `${k === "en" ? "English" : "French"} message contains control characters.`;
+    if (!clean.includes("{amount}") || !clean.includes("{ref}")) return `${k === "en" ? "English" : "French"} message must include {amount} and {ref} — the recipient needs both, and WhatsApp notices are built from them.`;
+    const unknown = [...clean.matchAll(/\{(\w+)\}/g)].map((x) => x[1]).filter((v) => !(MESSAGE_VARIABLES as readonly string[]).includes(v));
+    if (unknown.length) return `Unknown variable {${unknown[0]}}. Use: ${MESSAGE_VARIABLES.map((v) => `{${v}}`).join(" ")}.`;
+    m[k] = clean;
+  }
+  return null;
+}
+/** Preview the recipient notice as it would be sent for a sample payment, both languages. */
+api.get("/admin/settings/messages/preview", (_req, res) => {
+  const sample = samplePayment();
+  res.json({ en: recipientDeliveredMessage(sample, "en").body, fr: recipientDeliveredMessage(sample, "fr").body, variables: MESSAGE_VARIABLES });
+});
+/** Send the recipient notice to a number the operator owns, through the real channels
+ *  (SMS / WhatsApp as configured) — recorded in the outbox under ref TEST. Super Admin:
+ *  it spends a message on a gateway. */
+api.post("/admin/settings/messages/test", async (req, res) => {
+  const role = getUser(sessionOf(req)!.uid)?.role;
+  if (!role || !isSuperAdmin(role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only — a test message costs a real SMS." });
+  const b = (req.body ?? {}) as { to?: unknown; lang?: unknown; country?: unknown };
+  const country = (typeof b.country === "string" && b.country in COUNTRIES ? b.country : "CM") as CountryCode;
+  const check = checkPhone(typeof b.to === "string" ? b.to : "", country);
+  if (!check.ok || !check.provider) return res.status(400).json({ error: "bad_number", message: "Enter a valid Mobile Money number to send the test to." });
+  const rl = await rateLimitDurable(`msgtest:${sessionOf(req)!.uid}`, 5, 60_000);
+  if (!rl.ok) return res.status(429).json({ error: "rate_limited", message: "Five test messages a minute is plenty." });
+  const sample = samplePayment({ recipient: { phone: check.local, country, provider: check.provider, name: "", nameSource: "unknown" } });
+  const lang = b.lang === "fr" || b.lang === "en" ? b.lang : undefined;
+  const msg = recipientDeliveredMessage(sample, lang);
+  const records = await notify({ kind: "payment_delivered", audience: "recipient", to: `${COUNTRIES[country].dial.replace(/\D/g, "")}${check.local}`, paymentRef: "TEST", body: msg.body });
+  res.json({ body: msg.body, lang: msg.lang, records: records.map((r) => ({ channel: r.channel, status: r.status, detail: r.detail })) });
+});
+function samplePayment(over: Partial<Payment> = {}): Payment {
+  const now = new Date().toISOString();
+  return {
+    id: "pay_sample", ref: "MMM-2026-000000", quoteId: "q_sample", state: "DELIVERED", displayStatus: "Completed", method: "LIGHTNING",
+    recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "NANA JEAN PAUL", nameSource: "provider" },
+    xaf: 25000, feeXaf: 500, totalXaf: 25500, usd: 42, payInstruction: { kind: "lightning", asset: "BTC", amount: 0, invoice: "" } as unknown as Payment["payInstruction"],
+    events: [{ at: now, state: "DELIVERED" }], createdAt: now, updatedAt: now, ...over,
+  } as Payment;
+}
 
 /* ---------- recipient verification (Identity Resolution v2) — admin visibility ----------
    Works whether the flag is on or off (the v2 router itself is 404 while off), so the console

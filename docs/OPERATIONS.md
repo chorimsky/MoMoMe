@@ -91,3 +91,9 @@ Code: `.github/workflows/mobile.yml`.
   access is sorted; Play submission uses the service-account key in `eas.json`.
 - Bump `version` in `mobile/app.config.ts` before a native build: OTA updates only reach
   binaries with the same runtime version.
+
+## 7. What the recipient is told
+
+The delivery notice the recipient gets when the money lands is **managed in Admin → Settings → Recipient message**, not in code: on/off, language rule (follow the sender's app language with a fallback, or always French/English), the English and French texts with `{amount} {ref} {operator} {brand} {name} {sender} {support}`, a live preview against a sample payment, the SMS segment cost of each wording (ç/ê are outside the GSM alphabet: 70-character segments), and a Super-Admin "send a test to your own number" that goes over the real channels and is recorded in Notifications under ref `TEST`.
+
+Rules the server enforces on save: 10–320 characters, printable, and both `{amount}` and `{ref}` present — the WhatsApp template path reads them back out of the body when the recipient is outside the 24 h window. Channels (SMS gateway `SMS_WEBHOOK_URL`, WhatsApp) are still switched under Notification channels; a message switched off is recorded in the outbox as *skipped — turned off in Settings → Recipient message*, never silently dropped.

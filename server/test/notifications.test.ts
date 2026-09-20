@@ -180,5 +180,32 @@ ok("and which audience each channel can actually reach", sms?.reaches.includes("
   globalThis.fetch = realFetch;
 }
 
+/* ---- the recipient's message is the operator's to write ---- */
+{
+  console.log("\nRecipient message — managed in Settings\n");
+  const { recipientDeliveredMessage } = await import("../src/core/notifications.js");
+  const { renderTemplate, DEFAULT_RECIPIENT_MESSAGES } = await import("../src/core/settings.js");
+  updateSettings({ channels: { ...getSettings().channels, SMS: true } });
+  const def = recipientDeliveredMessage(pay({ ref: "MMM-2026-418860" }));
+  ok("the default English notice: amount, operator, reference, brand", def.body === "You have received 500 XAF on your MTN Mobile Money. Ref MMM-2026-418860. Sent via MoMo>Me." && def.lang === "en", def.body);
+  ok("a French sender's recipient is told in French (auto)", recipientDeliveredMessage(pay({ ref: "MMM-2026-418861", senderId: "dev_fr" }), undefined).lang === "en" /* no token: fallback */ && recipientDeliveredMessage(pay({ ref: "MMM-2026-418861" }), "fr").body.startsWith("Vous avez reçu 500 XAF sur votre Mobile Money MTN. Réf MMM-2026-418861."));
+  updateSettings({ messages: { recipientDelivered: { ...DEFAULT_RECIPIENT_MESSAGES.recipientDelivered, lang: "fr" } } });
+  ok("Always French applies to everyone", recipientDeliveredMessage(pay({ ref: "MMM-2026-418862" })).lang === "fr");
+  updateSettings({ messages: { recipientDelivered: { ...DEFAULT_RECIPIENT_MESSAGES.recipientDelivered, lang: "auto", fallback: "fr" } } });
+  ok("auto with a French fallback → French when the sender's language is unknown", recipientDeliveredMessage(pay({ ref: "MMM-2026-418863" })).lang === "fr");
+  updateSettings({ messages: { recipientDelivered: { ...DEFAULT_RECIPIENT_MESSAGES.recipientDelivered, en: "{name}, {amount} landed on your {operator} line from {sender}. Ref {ref}. Questions: {support} — {brand}" } } });
+  const custom = recipientDeliveredMessage(pay({ ref: "MMM-2026-418864", recipient: { phone: "680344485", country: "CM", provider: "MTN", name: "NANA JEAN PAUL", nameSource: "provider" } }), "en");
+  ok("every variable renders, and an empty {sender} takes its 'from' with it", custom.body === `NANA JEAN PAUL, 500 XAF landed on your MTN line. Ref MMM-2026-418864. Questions: ${getSettings().company.phone} — MoMo>Me` && !/\{\w+\}/.test(custom.body), custom.body);
+  ok("an unknown variable stays visible rather than vanishing", renderTemplate("Hi {nobody} {amount}", { amount: "1 XAF" }) === "Hi {nobody} 1 XAF");
+  await notifyDelivered(pay({ ref: "MMM-2026-418864" }));
+  const sentRec = listNotifications().find((r) => r.paymentRef === "MMM-2026-418864" && r.channel === "sms");
+  ok("what goes to the outbox is the managed text — an unknown name leaves no dangling comma", !!sentRec && sentRec.body.startsWith("500 XAF landed on your MTN line."), sentRec?.body);
+  updateSettings({ messages: { recipientDelivered: { ...DEFAULT_RECIPIENT_MESSAGES.recipientDelivered, enabled: false } } });
+  await notifyDelivered(pay({ ref: "MMM-2026-418865" }));
+  const offRec2 = listNotifications().find((r) => r.paymentRef === "MMM-2026-418865" && r.audience === "recipient");
+  ok("switched off → recorded as skipped with the Settings reason, nothing sent", offRec2?.status === "skipped" && /Recipient message is turned off/.test(offRec2.detail ?? ""), offRec2?.detail);
+  updateSettings({ messages: DEFAULT_RECIPIENT_MESSAGES });
+}
+
 console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

@@ -474,6 +474,10 @@ export const api = {
   adminRevokeApiKey: (id: string) => req<{ ok: boolean }>(`/admin/apikeys/${id}`, { method: "DELETE" }),
 
   adminSettings: () => req<AdminSettings>("/admin/settings"),
+  /** Recipient message: the rendered notice for a sample payment, and a real test send. */
+  adminMessagePreview: () => req<{ en: string; fr: string; variables: string[] }>("/admin/settings/messages/preview"),
+  adminMessageTest: (to: string, lang?: "en" | "fr", country: CountryCode = "CM") =>
+    req<{ body: string; lang: "en" | "fr"; records: Array<{ channel: string; status: string; detail?: string }> }>("/admin/settings/messages/test", { method: "POST", body: JSON.stringify({ to, lang, country }) }),
   saveSettings: (patch: Partial<AdminSettings>) =>
     req<AdminSettings>("/admin/settings", { method: "PUT", body: JSON.stringify(patch) }),
 

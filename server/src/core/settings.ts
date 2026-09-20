@@ -12,6 +12,28 @@ import { register, touch, rehydrate } from "./persist.js";
  *  sheet, so a method switched off once stays off forever with no way to notice. */
 export const DEFAULT_METHODS = { LIGHTNING: true, ONCHAIN: true, USDT: true, USDC: true } as const;
 
+/** The recipient's delivery notice, as shipped. Feature-phone first: who, how much, the
+ *  reference, in one line, nothing to tap. GSM-7 in English; the French is proper French
+ *  (ç, é) and the console shows the segment cost of that choice. */
+export const DEFAULT_RECIPIENT_MESSAGES: AdminSettings["messages"] = {
+  recipientDelivered: {
+    enabled: true, lang: "auto", fallback: "en",
+    en: "You have received {amount} on your {operator} Mobile Money. Ref {ref}. Sent via {brand}.",
+    fr: "Vous avez reçu {amount} sur votre Mobile Money {operator}. Réf {ref}. Envoyé via {brand}.",
+  },
+};
+export const MESSAGE_VARIABLES = ["amount", "ref", "operator", "brand", "name", "sender", "support"] as const;
+/** Fill a template. Unknown variables are left visible (an operator sees their typo in the
+ *  preview rather than a silent blank); a missing optional value renders empty and the
+ *  double spaces / dangling "from ." it leaves are tidied. */
+export function renderTemplate(tpl: string, vars: Partial<Record<(typeof MESSAGE_VARIABLES)[number], string>>): string {
+  return tpl
+    .replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (vars[k as keyof typeof vars] ?? "") : m))
+    .replace(/\b(from|de|par|du|pour|to|à)\s*(?=[.,;:!?]|$)/gi, "")   // "from ." when {sender} is empty
+    .replace(/\(\s*\)/g, "").replace(/([.,;:!?])\s*[,;]/g, "$1").replace(/^[\s,;:—-]+/, "")
+    .replace(/[ \t]{2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+}
+
 const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
   channels: { Email: true, SMS: true, WhatsApp: false, Push: true },
@@ -37,6 +59,7 @@ const DEFAULTS: AdminSettings = {
   features: { directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true, merchant: true, receive: true, contacts: true, momoTransfer: false },
   // Treasury sweep destinations — all unset until an operator configures them.
   treasury: { lnAddress: "", btcOnchain: "", usdtAddress: "", usdcAddress: "", floatTargetDays: 5 },
+  messages: DEFAULT_RECIPIENT_MESSAGES,
   // AML/CFT — CEMAC standard defaults (confirm exact figures with counsel/ANIF).
   // CTR/large-transaction reporting at 5,000,000 XAF; CDD/identification at
   // 1,000,000 XAF for occasional transactions; 10-year record retention.
@@ -118,6 +141,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}), velocity: { ...DEFAULTS.compliance.velocity, ...(d.compliance?.velocity ?? {}) } },
     tax: { ...DEFAULTS.tax, ...(d.tax ?? {}) },
+    messages: { recipientDelivered: { ...DEFAULTS.messages.recipientDelivered, ...(d.messages?.recipientDelivered ?? {}) } },
     network: mergeNetwork(DEFAULTS.network, d.network),
   };
 });
@@ -162,6 +186,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}), velocity: { ...settings.compliance.velocity, ...(patch.compliance?.velocity ?? {}) } },
     tax: { ...settings.tax, ...(patch.tax ?? {}) },
+    messages: { recipientDelivered: { ...settings.messages.recipientDelivered, ...(patch.messages?.recipientDelivered ?? {}) } },
     network: mergeNetwork(settings.network, patch.network),
   };
   touch("settings");

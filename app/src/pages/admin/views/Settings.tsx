@@ -70,6 +70,7 @@ export function SettingsView() {
   const [features, setFeatures] = useState<AdminSettings["features"] | null>(null);
   const [compliance, setCompliance] = useState<AdminSettings["compliance"] | null>(null);
   const [tax, setTax] = useState<AdminSettings["tax"] | null>(null);
+  const [messages, setMessages] = useState<AdminSettings["messages"] | null>(null);
   const [watchlistText, setWatchlistText] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -95,7 +96,7 @@ export function SettingsView() {
     api.adminSettings()
       .then(async (s) => {
         if (!alive) return;
-        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setFeatures(s.features); setCompliance(s.compliance); setTax(s.tax);
+        setCompany(s.company); setChannels(s.channels); setOps(s.ops); setMethods(s.methods); setFeatures(s.features); setCompliance(s.compliance); setTax(s.tax); setMessages(s.messages);
         setWatchlistText((s.compliance.sanctionsList ?? []).join("\n"));
         setLogoRaw(s.company.logo ?? null);
         // A logo on a solid background shows as a box in dark mode; a logo with
@@ -126,7 +127,7 @@ export function SettingsView() {
     return () => clearTimeout(id);
   }, [saved]);
 
-  if (!company || !channels || !ops || !methods || !features || !compliance || !tax) {
+  if (!company || !channels || !ops || !methods || !features || !compliance || !tax || !messages) {
     if (err) return <Failed t="Settings" msg={err} />;
     return <Loading t="Settings" s="General configuration and operational controls." />;
   }
@@ -183,7 +184,8 @@ export function SettingsView() {
   const structWinErr = Number.isFinite(compliance.structuringWindowH) && compliance.structuringWindowH >= 1 && compliance.structuringWindowH <= 720 ? undefined : "1–720 hours.";
   const retentionErr = Number.isFinite(compliance.retentionYears) && compliance.retentionYears >= 1 && compliance.retentionYears <= 30 ? undefined : "1–30 years.";
   const complianceErr = ctrErr || cddErr || structXafErr || structWinErr || retentionErr;
-  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr || vatErr || advErr || isErr || levyErr || fdErr);
+  const msgErr = templateError(messages.recipientDelivered.en, "English") ?? templateError(messages.recipientDelivered.fr, "French");
+  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr || vatErr || advErr || isErr || levyErr || fdErr || msgErr);
 
   const save = async () => {
     if (invalid) return;
@@ -191,8 +193,8 @@ export function SettingsView() {
     try {
       // Newline/comma-separated watchlist → deduped array of trimmed entries.
       const sanctionsList = Array.from(new Set(watchlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))).slice(0, 500);
-      const next = await api.saveSettings({ company, channels, ops, methods, features, compliance: { ...compliance, sanctionsList }, tax });
-      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setMethods(next.methods); setFeatures(next.features); setCompliance(next.compliance); setTax(next.tax);
+      const next = await api.saveSettings({ company, channels, ops, methods, features, compliance: { ...compliance, sanctionsList }, tax, messages });
+      setCompany(next.company); setChannels(next.channels); setOps(next.ops); setMethods(next.methods); setFeatures(next.features); setCompliance(next.compliance); setTax(next.tax); setMessages(next.messages);
       setWatchlistText((next.compliance.sanctionsList ?? []).join("\n"));
       setDirty(false); setSaved(true);
       // Let the console shell refresh its brand logo without a reload.
@@ -304,6 +306,9 @@ export function SettingsView() {
           })}
           <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>Changes apply when you press Save changes.</p>
         </Card>
+
+        <RecipientMessageCard value={messages.recipientDelivered} brand={company.brand} support={company.phone} error={msgErr}
+          canTest={canEditRestricted} onChange={(v) => { setMessages({ recipientDelivered: v }); setDirty(true); }} />
 
         <Card title="Operations" sub="Live controls on the payment path.">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
@@ -488,5 +493,125 @@ export function SettingsView() {
         {err && <span style={{ fontSize: 13, fontWeight: 650, color: "var(--bad)" }}>{err}</span>}
       </div>
     </div>
+  );
+}
+
+/* ---------- Recipient message ----------
+   The one text a recipient in Douala gets on a feature phone when the money lands. The
+   operator owns the words: two languages, a language rule, live preview against a sample
+   payment, the SMS segment cost of each choice, and a real test send to their own number. */
+const MSG_VARS: Array<[string, string]> = [["{amount}", "25 000 XAF"], ["{ref}", "the reference"], ["{operator}", "MTN / ORANGE"], ["{brand}", "your brand"], ["{name}", "recipient's registered name, if known"], ["{sender}", "sender's linked number, if any"], ["{support}", "your support phone"]];
+const DEFAULT_MSG = {
+  en: "You have received {amount} on your {operator} Mobile Money. Ref {ref}. Sent via {brand}.",
+  fr: "Vous avez reçu {amount} sur votre Mobile Money {operator}. Réf {ref}. Envoyé via {brand}.",
+};
+function templateError(t: string, which: string): string | null {
+  const c = t.trim();
+  if (c.length < 10 || c.length > 320) return `${which} message must be 10–320 characters.`;
+  if (!c.includes("{amount}") || !c.includes("{ref}")) return `${which} message must include {amount} and {ref}.`;
+  const unknown = [...c.matchAll(/\{(\w+)\}/g)].map((x) => x[1]).filter((v) => !MSG_VARS.some(([k]) => k === `{${v}}`));
+  return unknown.length ? `${which} message: unknown variable {${unknown[0]}}.` : null;
+}
+/** GSM-7 or not, and how many SMS segments that costs — what an operator is really choosing
+ *  when they write "reçu" (ç is not GSM-7: the whole text becomes 70-character UCS-2 segments). */
+const GSM7 = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà^{}\\[~]|€";
+function smsCost(text: string): { chars: number; segments: number; ucs2: boolean; culprits: string[] } {
+  const culprits = [...new Set([...text].filter((ch) => !GSM7.includes(ch)))];
+  const ucs2 = culprits.length > 0;
+  const len = ucs2 ? text.length : [...text].reduce((n, ch) => n + ("^{}\\[~]|€".includes(ch) ? 2 : 1), 0);
+  const per = ucs2 ? 70 : 160, perMulti = ucs2 ? 67 : 153;
+  return { chars: len, segments: len <= per ? 1 : Math.ceil(len / perMulti), ucs2, culprits };
+}
+function renderPreview(tpl: string, brand: string, support: string): string {
+  const vars: Record<string, string> = { amount: "25 000 XAF", ref: "MMM-2026-000000", operator: "MTN", brand: brand.replace(/›/g, ">"), name: "NANA JEAN PAUL", sender: "+237699000155", support };
+  return tpl.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? vars[k] : m))
+    .replace(/\b(from|de|par|du|pour|to|à)\s*(?=[.,;:!?]|$)/gi, "").replace(/\(\s*\)/g, "").replace(/([.,;:!?])\s*[,;]/g, "$1").replace(/^[\s,;:—-]+/, "")
+    .replace(/[ \t]{2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+}
+function RecipientMessageCard({ value, brand, support, error, canTest, onChange }: { value: AdminSettings["messages"]["recipientDelivered"]; brand: string; support: string; error: string | null; canTest: boolean; onChange: (v: AdminSettings["messages"]["recipientDelivered"]) => void }) {
+  const [testTo, setTestTo] = useState("");
+  const [testLang, setTestLang] = useState<"en" | "fr">("en");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const sendTest = async () => {
+    setTestBusy(true); setTestMsg(null);
+    try {
+      const r = await api.adminMessageTest(testTo.trim(), testLang);
+      const sent = r.records.filter((x) => x.status === "sent");
+      const why = r.records.map((x) => `${x.channel}: ${x.status}${x.detail ? ` — ${x.detail}` : ""}`).join(" · ");
+      setTestMsg({ ok: sent.length > 0, text: sent.length ? `Sent over ${sent.map((x) => x.channel).join(" + ")} (uses the SAVED message). ${why}` : `Nothing went out. ${why}` });
+    } catch (e) { setTestMsg({ ok: false, text: e instanceof Error ? e.message : "Test failed." }); }
+    finally { setTestBusy(false); }
+  };
+  const field = (k: "en" | "fr", label: string) => {
+    const cost = smsCost(renderPreview(value[k], brand, support));
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 650 }}>{label}</div>
+          <button type="button" className="btn btn-quiet" style={{ padding: "3px 8px", fontSize: 11.5 }} disabled={value[k] === DEFAULT_MSG[k]} onClick={() => onChange({ ...value, [k]: DEFAULT_MSG[k] })}>Reset to default</button>
+        </div>
+        <textarea value={value[k]} onChange={(e) => onChange({ ...value, [k]: e.target.value })} rows={3} aria-label={label} spellCheck
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13.5, color: "var(--ink)", lineHeight: 1.45, resize: "vertical" }} />
+        <div style={{ marginTop: 6, padding: "9px 12px", borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--line-2)", fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", marginBottom: 3 }}>Preview</div>
+          {renderPreview(value[k], brand, support)}
+        </div>
+        <div style={{ fontSize: 11.5, color: cost.segments > 1 ? "var(--warn-ink)" : "var(--ink-3)", marginTop: 4 }}>
+          {cost.chars} characters · {cost.segments} SMS segment{cost.segments === 1 ? "" : "s"}{cost.ucs2 ? ` · "${cost.culprits.slice(0, 3).join("")}" is outside the basic SMS alphabet, so this text is billed in 70-character segments` : " · plain SMS alphabet"}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <Card title="Recipient message" sub="What the person receiving the money is told the moment it lands on their Mobile Money — by SMS, or WhatsApp when it reaches them there.">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 0 13px", borderBottom: "1px solid var(--line-2)", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Tell the recipient</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{value.enabled ? "Sent on every delivered payment (subject to the channels above)." : "Off — recipients are told nothing; the outbox records why."}</div>
+        </div>
+        <Toggle on={value.enabled} onChange={(v) => onChange({ ...value, enabled: v })} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <label style={{ fontSize: 12.5 }}>
+          <div style={{ fontWeight: 650, marginBottom: 4 }}>Language</div>
+          <select value={value.lang} onChange={(e) => onChange({ ...value, lang: e.target.value as "auto" | "en" | "fr" })} style={{ width: "100%", padding: "8px 10px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", color: "var(--ink)" }}>
+            <option value="auto">Follow the sender's app language</option>
+            <option value="fr">Always French</option>
+            <option value="en">Always English</option>
+          </select>
+        </label>
+        {value.lang === "auto" && (
+          <label style={{ fontSize: 12.5 }}>
+            <div style={{ fontWeight: 650, marginBottom: 4 }}>When the sender's language is unknown</div>
+            <select value={value.fallback} onChange={(e) => onChange({ ...value, fallback: e.target.value as "en" | "fr" })} style={{ width: "100%", padding: "8px 10px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", color: "var(--ink)" }}>
+              <option value="fr">French</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        )}
+      </div>
+      {field("en", "English")}
+      {field("fr", "French")}
+      <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.6, marginBottom: 10 }}>
+        Variables: {MSG_VARS.map(([k, d]) => <span key={k} title={d} style={{ marginRight: 8 }}><span className="mono" style={{ color: "var(--accent)" }}>{k}</span> <span>{d}</span></span>)}
+      </div>
+      {error && <div role="alert" style={{ fontSize: 12.5, color: "var(--send)", marginBottom: 10 }}>{error}</div>}
+      {canTest && (
+        <div style={{ paddingTop: 12, borderTop: "1px solid var(--line-2)" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 6 }}>Send a test to your own number</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="6XX XXX XXX" inputMode="tel" aria-label="Test number"
+              style={{ flex: "1 1 160px", padding: "8px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 14, color: "var(--ink)" }} />
+            <select value={testLang} onChange={(e) => setTestLang(e.target.value as "en" | "fr")} aria-label="Test language" style={{ padding: "8px 10px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", color: "var(--ink)" }}>
+              <option value="en">English</option><option value="fr">French</option>
+            </select>
+            <button type="button" className="btn btn-quiet" disabled={testBusy || !testTo.trim()} onClick={() => void sendTest()} style={{ padding: "8px 14px" }}>{testBusy ? "Sending…" : "Send test"}</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 6 }}>Uses the message as last saved, over the real channels — a gateway SMS costs money. Recorded in Notifications under ref TEST.</div>
+          {testMsg && <div style={{ fontSize: 12.5, color: testMsg.ok ? "var(--recv)" : "var(--warn-ink)", marginTop: 6 }}>{testMsg.text}</div>}
+        </div>
+      )}
+    </Card>
   );
 }

@@ -763,6 +763,13 @@ export interface AdminSettings {
   /** Tax parameters (Cameroon — DGI). Rates are CONFIGURABLE because they change with each
    *  Finance Law and because the taxable base depends on the operating entity's status —
    *  every figure computed from them is an estimate to confirm with the accountant. */
+  /** What the RECIPIENT is told when the money lands — editable by the operator. Variables:
+   *  {amount} {ref} {operator} {brand} {name} {sender} {support}. `lang: "auto"` follows the
+   *  sender's app language and falls back to `fallback`. Both must keep {amount} and {ref}:
+   *  the WhatsApp template path reads them back out of the body. */
+  messages: {
+    recipientDelivered: { enabled: boolean; lang: "auto" | "en" | "fr"; fallback: "en" | "fr"; en: string; fr: string };
+  };
   tax: {
     /** VAT (TVA) on the platform fee, in percent. Cameroon: 17.5 % + 10 % additional
      *  council centimes (CAC) = 19.25 %. */

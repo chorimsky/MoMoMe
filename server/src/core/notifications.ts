@@ -25,7 +25,8 @@ import { channelsFor, smsChannel } from "../adapters/notify.js";
 import { sendAuthCode } from "../adapters/whatsapp.js";
 import { config, whatsappConfigured } from "../config.js";
 import { pushTokenFor, pushTokenCount } from "./pushTokens.js";
-import { getSettings } from "./settings.js";
+import { getSettings, renderTemplate } from "./settings.js";
+import { accountOf } from "./account.js";
 import { id } from "./ids.js";
 import { register, touch } from "./persist.js";
 
@@ -180,15 +181,29 @@ function recipientMsisdn(p: Payment): string {
 function senderLang(p: Payment): "en" | "fr" { return (p.senderId && pushTokenFor(p.senderId)?.lang) || "en"; }
 const who = (p: Payment): string => (p.recipient.name && p.recipient.name.replace(/\D/g, "") !== p.recipient.phone.replace(/\D/g, "") ? p.recipient.name : `${p.recipient.provider} ${p.recipient.phone}`);
 
+/** The recipient's notice, from the operator-managed template (Settings → Recipient
+ *  message). Language: the sender's app language when "auto" (the person they are paying
+ *  most likely shares it), else the configured fallback. */
+export function recipientDeliveredMessage(p: Payment, langOverride?: "en" | "fr"): { body: string; lang: "en" | "fr"; enabled: boolean } {
+  const cfg = getSettings().messages.recipientDelivered;
+  const lang = langOverride ?? (cfg.lang === "auto" ? ((p.senderId && pushTokenFor(p.senderId)?.lang) || cfg.fallback) : cfg.lang);
+  const senderAcct = p.senderId ? accountOf(p.senderId) : null;
+  const vars = {
+    amount: xaf(p.xaf), ref: p.ref, operator: p.recipient.provider, brand: getSettings().company.brand.replace(/›/g, ">"),
+    name: p.recipient.name && p.recipient.name.replace(/\D/g, "") !== p.recipient.phone.replace(/\D/g, "") ? p.recipient.name : "",
+    sender: senderAcct?.startsWith("acct:") ? `+${senderAcct.slice(5)}` : "", support: getSettings().company.phone,
+  };
+  return { body: renderTemplate(lang === "fr" ? cfg.fr : cfg.en, vars), lang, enabled: cfg.enabled };
+}
+
 /** The money landed. The one message that most needs to exist — for BOTH sides. */
 export async function notifyDelivered(p: Payment): Promise<void> {
-  await notify({
-    kind: "payment_delivered",
-    audience: "recipient",
-    to: recipientMsisdn(p),
-    paymentRef: p.ref,
-    body: `You have received ${xaf(p.xaf)} on your ${p.recipient.provider} Mobile Money. Ref ${p.ref}. Sent via MoMo>Me.`,
-  }).catch(() => { /* best-effort */ });
+  const msg = recipientDeliveredMessage(p);
+  if (!msg.enabled) {
+    record({ kind: "payment_delivered", audience: "recipient", channel: "-", to: recipientMsisdn(p), body: msg.body, paymentRef: p.ref, status: "skipped", detail: "Recipient message is turned off in Settings → Recipient message." });
+  } else {
+    await notify({ kind: "payment_delivered", audience: "recipient", to: recipientMsisdn(p), paymentRef: p.ref, body: msg.body }).catch(() => { /* best-effort */ });
+  }
   if (p.senderId && !p.senderId.startsWith("lnurl:")) {
     const fr = senderLang(p) === "fr";
     await notify({

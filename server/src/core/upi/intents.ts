@@ -32,7 +32,7 @@ function move(i: PaymentIntentV2, state: IntentState, note?: string) { if (i.sta
 export class IntentError extends Error { constructor(public code: string, message: string, public status = 400) { super(message); } }
 
 /** CREATED → IDENTITY_RESOLVED → QUOTED. Source/destination stay open until the payer picks. */
-export async function createIntent(input: { owner: string; identity: string; amount: number; currency?: string; defaultCountry?: string; feePct?: number | null; correlationId?: string; source?: { rail: string; asset?: string; network?: string | null } }): Promise<PaymentIntentV2> {
+export async function createIntent(input: { owner: string; identity: string; amount: number; currency?: string; defaultCountry?: string; feePct?: number | null; correlationId?: string; source?: { rail: string; asset?: string; network?: string | null }; live?: boolean }): Promise<PaymentIntentV2> {
   const at = now();
   const i: PaymentIntentV2 = {
     id: id("pi"), owner: input.owner, recipient: { identity: input.identity.trim(), destinations: [] }, amount: { value: Math.round(input.amount), currency: (input.currency ?? "XAF").toUpperCase() },
@@ -43,7 +43,7 @@ export async function createIntent(input: { owner: string; identity: string; amo
   intents.set(i.id, i); touch("upi_intents"); metrics.payment_total++;
   // Identity
   try {
-    const resolved = await identity.resolve(i.recipient.identity, { purpose: "PAYMENT_CREATION", actor: input.owner, defaultCountry: input.defaultCountry });
+    const resolved = await identity.resolve(i.recipient.identity, { purpose: "PAYMENT_CREATION", actor: input.owner, defaultCountry: input.defaultCountry, live: input.live });
     i.recipient.resolved = resolved; i.recipient.identity = resolved.canonical;
     i.recipient.destinations = identity.getDestinations(resolved);
     metrics.identity_resolution_total++;
@@ -127,3 +127,12 @@ export async function syncIntent(i: PaymentIntentV2): Promise<PaymentIntentV2> {
 }
 export function cancelIntent(i: PaymentIntentV2, why: string): boolean { if (["CREATED", "IDENTITY_RESOLVED", "QUOTED", "ROUTE_SELECTED"].includes(i.state)) { move(i, "CANCELLED", why); return true; } return false; }
 export function _resetIntents(): void { intents.clear(); }
+
+/** A shadow intent adopts the V1 payment that actually carries the money: from here on
+ *  syncIntent mirrors it and reconcileIntent compares against it. */
+export function linkIntentToV1(i: PaymentIntentV2, p: Payment): void {
+  i.refs.v1PaymentId = p.id; i.refs.correlationId = i.refs.correlationId || `v1:${p.ref}`;
+  i.source = i.source ?? { rail: p.method === "LIGHTNING" || p.method === "ONCHAIN" ? "LIGHTNING" : "STABLECOIN", asset: p.method === "LIGHTNING" || p.method === "ONCHAIN" ? "BTC" : p.method, network: p.method === "LIGHTNING" ? "LIGHTNING" : p.method === "ONCHAIN" ? "BITCOIN" : "ETHEREUM" };
+  if (["CREATED", "IDENTITY_RESOLVED", "QUOTED", "ROUTE_SELECTED", "LIQUIDITY_FAILED", "PROVIDER_UNAVAILABLE"].includes(i.state)) move(i, "PAYMENT_PENDING", `shadow of V1 ${p.ref}`);
+  touch("upi_intents");
+}

@@ -2,7 +2,7 @@
 
 | switch | effect when false / unset |
 |---|---|
-| `UNIVERSAL_PAYMENT_IDENTITY_ENABLED` | `/api/v2/*` (except `/v2/identity`) is 404 in production; nothing else changes |
+| `UNIVERSAL_PAYMENT_IDENTITY_ENABLED` | `/api/v2/*` (except `/v2/identity`) is 404 in production and V1 payments stop spawning shadow intents; nothing else changes |
 | `PHONE_PAYMENT_RESOLUTION_ENABLED` | `/payment-resolution` closed; Lightning Address, V1 payments, accounts unaffected |
 | `WALLET_RESOLUTION_API_ENABLED` | `/wallet/resolve` closed |
 | `PAYMENT_INTENT_V2_ENABLED` | intents can be quoted/routed (shadow) but never executed |

@@ -12,6 +12,7 @@
    ============================================================ */
 import { Router, type Request, type Response } from "express";
 import { actorOf } from "./identityV2.js";
+import { config } from "../config.js";
 import { upiReachable, flag, flags, routingMode } from "../core/upi/flags.js";
 import * as ident from "../core/upi/identity.js";
 import { assets, NETWORKS } from "../core/upi/assets.js";
@@ -47,7 +48,7 @@ async function guard(req: Request, res: Response, kind: "resolve" | "intent"): P
 
 /* ---- resolution: never a GET with the number in the path, never unauthenticated ---- */
 upi.post("/payment-resolution", rateLimitDurableMiddleware("upi_ip", 120, 60_000), async (req, res) => {
-  if (!flag("PHONE_PAYMENT_RESOLUTION_ENABLED") && !upiReachable()) return res.status(404).json({ error: "UPI_DISABLED" });
+  if (!flag("PHONE_PAYMENT_RESOLUTION_ENABLED") && config.railsMode !== "sandbox") return res.status(404).json({ error: "UPI_DISABLED", message: "Not available." });
   const actor = await guard(req, res, "resolve"); if (!actor) return;
   const b = (req.body ?? {}) as { identity?: unknown; purpose?: unknown; country?: unknown };
   const purpose = String(b.purpose ?? "") as IdentityPurpose;
@@ -66,7 +67,7 @@ upi.post("/payment-resolution", rateLimitDurableMiddleware("upi_ip", 120, 60_000
 
 /* ---- wallet-facing: what a wallet needs to pay this identity (open standards out) ---- */
 upi.post("/wallet/resolve", rateLimitDurableMiddleware("upi_wallet_ip", 60, 60_000), async (req, res) => {
-  if (!flag("WALLET_RESOLUTION_API_ENABLED") && !upiReachable()) return res.status(404).json({ error: "UPI_DISABLED" });
+  if (!flag("WALLET_RESOLUTION_API_ENABLED") && config.railsMode !== "sandbox") return res.status(404).json({ error: "UPI_DISABLED", message: "Not available." });
   const actor = await guard(req, res, "resolve"); if (!actor) return;
   const raw = String((req.body ?? {}).identity ?? "");
   if (actor.kind !== "admin" && identityEnumerationExceeded(actor.id, clientIp(req), identifierHash(raw.replace(/\D/g, "") || raw.toLowerCase()))) return res.status(429).json({ error: "RATE_LIMITED" });

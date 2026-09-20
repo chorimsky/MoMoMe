@@ -176,6 +176,23 @@ async function main() {
     const ex3 = await call("POST", `/v2/payment-intents/${stable.body.intent.id}/execute`, "upi-1", {});
     ok("stablecoin funding through intents stays closed until STABLECOIN_SETTLEMENT_ENABLED (V1 still accepts USDC directly)", ex3.status === 403 && /STABLECOIN_SETTLEMENT_ENABLED/.test(ex3.body.message ?? ""));
     delete process.env.PAYMENT_INTENT_V2_ENABLED; delete process.env.MULTI_RAIL_ROUTING_ENABLED; delete process.env.ROUTING_ENGINE_MODE;
+    // Shadow from REAL V1 traffic: with the master flag on, a V1 payment spawns a linked shadow
+    // intent (quoted, routed, V1's method as the reference) that executes nothing.
+    process.env.UNIVERSAL_PAYMENT_IDENTITY_ENABLED = "true";
+    const { allIntents } = await import("../src/core/upi/intents.js");
+    const before = allIntents(500).length;
+    const sq = await call("POST", "/quotes", "upi-1", { xaf: 7000, method: "USDT", country: "CM" });
+    const sp = await call("POST", "/payments", "upi-1", { quoteId: sq.body.id, recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "Nana Jean Paul" } });
+    let shadowed: Awaited<ReturnType<typeof allIntents>>[number] | undefined;
+    for (let k = 0; k < 40 && !shadowed; k++) { await new Promise((r) => setTimeout(r, 100)); shadowed = allIntents(500).find((x) => x.refs.v1PaymentId === sp.body.id); }
+    ok("a V1 payment (USDT) produced a linked shadow intent, routed with V1's method as the reference, in PAYMENT_PENDING", sp.status === 200 && !!shadowed && shadowed.state === "PAYMENT_PENDING" && shadowed.shadow?.v1Route === "STABLECOIN:USDT" && shadowed.refs.correlationId === `v1:${sp.body.ref}` && allIntents(500).length === before + 1, JSON.stringify(shadowed?.shadow ?? sp.body).slice(0, 160));
+    ok("…and the V1 payment itself is exactly as it would be (nothing executed twice)", sp.body.method === "USDT" && sp.body.state === "AWAITING_INBOUND" && sp.body.recipient.name === "NANA JEAN PAUL");
+    delete process.env.UNIVERSAL_PAYMENT_IDENTITY_ENABLED;
+    const n2 = allIntents(500).length;
+    const sq2 = await call("POST", "/quotes", "upi-1", { xaf: 7000, method: "LIGHTNING", country: "CM" });
+    await call("POST", "/payments", "upi-1", { quoteId: sq2.body.id, recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "Nana Jean Paul" } });
+    await new Promise((r) => setTimeout(r, 300));
+    ok("with the master flag off, V1 payments spawn nothing", allIntents(500).length === n2);
     // V1 untouched: the same quote engine answers exactly as before with every flag on/off.
     const q = await call("POST", "/quotes", "upi-1", { xaf: 5000, method: "LIGHTNING", country: "CM" });
     ok("V1 /quotes unchanged", q.status === 200 && q.body.xaf === 5000 && q.body.method === "LIGHTNING");

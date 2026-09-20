@@ -85,6 +85,7 @@ import { pools } from "../core/upi/liquidity.js";
 import { metricsSnapshot as upiMetrics, reconcileIntent } from "../core/upi/ledger.js";
 import { allIntents, syncIntent, getIntent } from "../core/upi/intents.js";
 import { chainTxs } from "../core/upi/chain.js";
+import { shadowFromV1 } from "../core/upi/shadow.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
 import { identifierHash } from "../core/identityResolution/msisdn.js";
@@ -1215,6 +1216,8 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
     if (!loc) return;
     await store().setSenderLocation(payment.id, loc);
   }).catch(() => {});
+  // Shadow routing on real traffic (docs/upi): what would the engine have chosen? Never blocks.
+  try { shadowFromV1(payment, owner); } catch { /* shadow only */ }
   return { status: 200, body: payment };
 }
 

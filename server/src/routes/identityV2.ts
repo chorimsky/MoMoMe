@@ -28,7 +28,7 @@ function gate(_req: Request, res: Response, next: () => void): void {
 identityV2.use(gate);
 
 /** Who is asking: a signed device / partner key (same gate as /api), or an admin session. */
-async function actorOf(req: Request): Promise<{ id: string; kind: "device" | "partner" | "admin" } | null> {
+export async function actorOf(req: Request): Promise<{ id: string; kind: "device" | "partner" | "admin" } | null> {
   const admin = verifyToken(tokenFromHeaders(req.headers as Record<string, string | string[] | undefined>));
   if (admin) return { id: `admin:${(admin as { uid?: string }).uid ?? "session"}`, kind: "admin" };
   if (!resolveOwner) return null;

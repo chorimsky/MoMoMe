@@ -1,0 +1,3 @@
+# UMA compatibility
+
+UMA (`$alice@provider.com`) is LUD-16 with a signed request/response exchange for currency, compliance (Travel Rule) and payer/payee data around the LNURL-pay step. The model already fits: a `PaymentIdentity` of type `UMA` with a `UMA` destination; the resolver classifies `$…@…` and refuses it unless `UMA_COMPATIBILITY_ENABLED` (never faked). Implementing UMA means: VASP keys and a signing identity, the `lnurlp` request/response extensions, currency negotiation (XAF), compliance payload exchange, and a counterparty registry — none of which is built here; nothing proprietary is built in its place (rule 18). When it is, `resolveUMA` gains the exchange and the Lightning leg stays the existing one.

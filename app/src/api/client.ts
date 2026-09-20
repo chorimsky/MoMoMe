@@ -37,6 +37,16 @@ export interface IdentityResolutionStatus {
   audit: Array<{ requestId: string; actor: string; purpose: string; identifierHash: string; country: string; operator: string | null; provider: string; status: string; error?: string; latencyMs: number; cache: string; at: string }>;
   priority: string[];
 }
+export interface UpiOverview {
+  flags: Record<string, boolean>; mode: "SHADOW" | "EXECUTE"; rule: { order: string[]; railPriority: string[] };
+  providers: Array<{ kind: string; id: string; health: "HEALTHY" | "DEGRADED" | "UNAVAILABLE" | "MAINTENANCE"; reason?: string; capabilities: Record<string, unknown> }>;
+  assets: Array<{ code: string; network: string | null; status: string; type: string }>;
+  pools: Array<{ id: string; currency: string; available: number | null; reserved: number; committed: number; status: string; note?: string }>;
+  shadow: { comparisons: number; agreeing: number; disagreeing: number; recent: Array<{ at: string; intentId: string; engineRoute: string; v1Route: string; agree: boolean; fees: number }> };
+  metrics: Record<string, number>;
+  intents: Array<{ id: string; state: string; identity: string; amount: { value: number; currency: string }; route: string | null; at: string }>;
+  chain: Array<{ id: string; asset: string; network: string; state: string; reconciliation?: string; createdAt: string }>;
+}
 export interface LnPreview { line: string; longDesc: string; success: string }
 export interface IdentityLookupResult { status: IdentityStatus; verified: boolean; displayName?: string; operator: string | null; country: string; accountStatus: string; provider: string; source: string; nameMatch?: NameMatch; error?: string; requestId: string }
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
@@ -538,6 +548,8 @@ export const api = {
   },
   /* The Pan-African network (shared/network.ts). */
   adminNetwork: () => req<NetworkOverview>("/admin/network"),
+  /** Universal Payment Identity layer — flags, routing mode, shadow agreement, registry, pools. */
+  adminUpi: () => req<UpiOverview>("/admin/upi"),
   networkSettings: (patch: { [K in keyof NetworkSettings]?: Partial<NetworkSettings[K]> }) => req<{ network: NetworkSettings }>("/admin/network/settings", { method: "PUT", body: JSON.stringify(patch) }),
   networkShadowRun: () => req<{ compared: number }>("/admin/network/shadow/run", { method: "POST", body: "{}" }),
   networkTick: () => req<{ examined: number }>("/admin/network/tick", { method: "POST", body: "{}" }),

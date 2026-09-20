@@ -77,6 +77,14 @@ import { recipientDeliveredMessage } from "../core/notifications.js";
 import { MESSAGE_VARIABLES, LN_MESSAGE_VARIABLES } from "../core/settings.js";
 import { lnurlMetadata, lnurlSuccessMessage } from "../core/lnurl.js";
 import { maskName } from "../../../shared/domain.js";
+import { flags as upiFlags, routingMode } from "../core/upi/flags.js";
+import { routingRule, shadowSummary } from "../core/upi/routing.js";
+import { capabilityRegistry } from "../core/upi/capabilities.js";
+import { assets, NETWORKS } from "../core/upi/assets.js";
+import { pools } from "../core/upi/liquidity.js";
+import { metricsSnapshot as upiMetrics, reconcileIntent } from "../core/upi/ledger.js";
+import { allIntents, syncIntent, getIntent } from "../core/upi/intents.js";
+import { chainTxs } from "../core/upi/chain.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
 import { identifierHash } from "../core/identityResolution/msisdn.js";
@@ -187,7 +195,7 @@ function sectionForPath(sub: string): Section | null {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
     "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", network: "rails", merchants: "merchants", customers: "customers",
-    identities: "identities", "identity-resolution": "identities", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
+    identities: "identities", "identity-resolution": "identities", upi: "interop", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
     notifications: "notifications", health: "health", settings: "settings",
@@ -2256,6 +2264,12 @@ function samplePayment(over: Partial<Payment> = {}): Payment {
     events: [{ at: now, state: "DELIVERED" }], createdAt: now, updatedAt: now, ...over,
   } as Payment;
 }
+
+/* ---------- Universal Payment Identity — admin visibility (works with the flags off) ---------- */
+api.get("/admin/upi", async (_req, res) => {
+  res.json({ flags: upiFlags(), mode: routingMode(), rule: routingRule(), providers: await capabilityRegistry(), assets: assets(), networks: Object.values(NETWORKS), pools: await pools(), shadow: shadowSummary(), metrics: upiMetrics(), intents: (await Promise.all(allIntents(30).map(syncIntent))).map((i) => ({ id: i.id, state: i.state, identity: i.recipient.identity, amount: i.amount, source: i.source, route: i.route ? `${i.route.type}:${i.route.sourceRail}` : null, refs: i.refs, at: i.createdAt })), chain: chainTxs(30) });
+});
+api.get("/admin/upi/intents/:id/reconcile", async (req, res) => { const i = getIntent(req.params.id); if (!i) return res.status(404).json({ error: "not_found" }); res.json({ intent: await syncIntent(i), reconciliation: await reconcileIntent(i) }); });
 
 /* ---------- recipient verification (Identity Resolution v2) — admin visibility ----------
    Works whether the flag is on or off (the v2 router itself is 404 while off), so the console

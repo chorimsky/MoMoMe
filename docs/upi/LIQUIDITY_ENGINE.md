@@ -1,0 +1,3 @@
+# Liquidity engine
+
+`core/upi/liquidity.ts` — one view of every pool: domestic XAF per payout rail (`cm:payout:peexit`, `cm:payout:pawapay`, balances read from the rails), the network's liquidity sources/positions (AVAILABLE / RESERVED / COMMITTED, floors, alerts) for cross-border, crypto positions reported (held at IBEX). `domesticCapacity()` answers "can this much be paid to this operator now" through the same `payoutReady` the V1 payout uses; reservations for cross-border reuse the network engine's table (`reserve / commit / release`) so an intent and a network transaction can never double-book. Domestic payouts are reserved by V1 at payout time (`selectFundedAggregator`); this layer does not book twice. Sandbox: `simulateDomesticFloat()` for rehearsal only.

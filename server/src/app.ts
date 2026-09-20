@@ -5,6 +5,7 @@ import { api } from "./routes/api.js";
 import { v1 } from "./routes/v1.js";
 import { network } from "./routes/network.js";
 import { identityV2 } from "./routes/identityV2.js";
+import { upi } from "./routes/upi.js";
 import { identityEnabled, identityMode, providersHealth } from "./core/identityResolution/resolver.js";
 import { latencyMiddleware } from "./core/interop/metrics.js";
 import { webhooks } from "./routes/webhooks.js";
@@ -179,6 +180,9 @@ export function createApp() {
   app.use("/api/network", network);
   // Identity Resolution (docs/identity): its own surface, 404 unless IDENTITY_RESOLUTION_ENABLED.
   app.use("/api/v2/identity", identityV2);
+  // Universal Payment Identity (docs/upi): identity → intent → quote → route → request.
+  // 404 unless UNIVERSAL_PAYMENT_IDENTITY_ENABLED (sandbox always reachable).
+  app.use("/api/v2", upi);
   app.use("/api", api);
 
   // Unmatched route → JSON 404 (not Express's default HTML).

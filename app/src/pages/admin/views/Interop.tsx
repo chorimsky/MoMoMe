@@ -11,7 +11,7 @@ import type { Tone } from "../AdminUI.js";
 import { Card, Grid, KV, Pill, SectionTitle } from "../AdminUI.js";
 import { api } from "../../../api/client.js";
 import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress } from "@shared/interop.js";
-import type { Observability } from "../../../api/client.js";
+import type { Observability, UpiOverview } from "../../../api/client.js";
 import { NetworkPanel } from "./Network.js";
 
 const healthTone: Record<ProviderInfo["health"], Tone> = { OPERATIONAL: "recv", DEGRADED: "warn", DOWN: "bad", NOT_CONFIGURED: "ink", SANDBOX: "info" };
@@ -48,6 +48,7 @@ export function InteropView() {
     <div style={{ display: "grid", gap: 16 }}>
       <SectionTitle t="Interoperability" s="What MoMo›Me connects right now, what providers told us, and whether the books agree." />
       <NetworkPanel />
+      <UpiPanel />
       {err && <Card><div style={{ color: "var(--bad)" }}>{err}</div></Card>}
 
       <Grid cols={4}>
@@ -133,5 +134,55 @@ export function InteropView() {
           ))}{!recon?.records.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)", padding: 16 }}>No provider deposits or payouts in the window.</td></tr>}</tbody></table>
       </Card>
     </div>
+  );
+}
+
+/* ---------- Universal Payment Identity ----------
+   One identity, any payer, any supported rail — built beside V1 behind flags that are all
+   off. This panel is how an operator sees that: what is switched on, what the routing engine
+   would have chosen versus what V1 did (shadow), and which rails could carry a route now. */
+const HEALTH_TONE: Record<string, Tone> = { HEALTHY: "recv", DEGRADED: "warn", UNAVAILABLE: "bad", MAINTENANCE: "ink" };
+function UpiPanel() {
+  const [d, setD] = useState<UpiOverview | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { let alive = true; const load = () => api.adminUpi().then((x) => { if (alive) { setD(x); setErr(null); } }).catch(() => { if (alive) setErr("Couldn't load the payment identity layer."); }); void load(); const t = setInterval(load, 30_000); return () => { alive = false; clearInterval(t); }; }, []);
+  if (err) return <Card title="Universal Payment Identity" style={{ marginBottom: 16 }}><div style={{ color: "var(--bad)", fontSize: 13 }}>{err}</div></Card>;
+  if (!d) return null;
+  const on = Object.entries(d.flags).filter(([, v]) => v).map(([k]) => k);
+  const agreePct = d.shadow.comparisons ? Math.round((d.shadow.agreeing / d.shadow.comparisons) * 100) : null;
+  return (
+    <Card title="Universal Payment Identity" sub="+237 6XX XXX XXX → identity → intent → quote → route → the rail that settles it. Additive, flagged, shadow first."
+      action={<Pill status={d.mode === "EXECUTE" ? "Routing: EXECUTE" : "Routing: shadow"} tone={d.mode === "EXECUTE" ? "lightning" : "ink"} />} style={{ marginBottom: 16 }}>
+      <Grid cols={4} style={{ marginBottom: 12 }}>
+        <div><div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)" }}>Flags on</div><div style={{ fontSize: 13, marginTop: 4 }}>{on.length ? on.map((f) => <span key={f} className="mono" style={{ display: "block", fontSize: 11.5 }}>{f}</span>) : <span style={{ color: "var(--ink-3)" }}>none — V1 carries every payment</span>}</div></div>
+        <div><div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)" }}>Shadow agreement</div><div className="num" style={{ fontSize: 22, fontWeight: 750, marginTop: 4 }}>{agreePct === null ? "–" : `${agreePct} %`}</div><div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{d.shadow.comparisons} comparisons · rule {d.rule.order.join(" › ")}</div></div>
+        <div><div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)" }}>Intents</div><div className="num" style={{ fontSize: 22, fontWeight: 750, marginTop: 4 }}>{d.metrics.payment_total ?? 0}</div><div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{d.metrics.payment_success ?? 0} completed · {d.metrics.route_failure_total ?? 0} unroutable</div></div>
+        <div><div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)" }}>Stablecoin transfers</div><div className="num" style={{ fontSize: 22, fontWeight: 750, marginTop: 4 }}>{d.chain.length}</div><div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{d.chain.filter((c) => c.reconciliation === "REQUIRED").length} need reconciliation</div></div>
+      </Grid>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", marginBottom: 6 }}>Rails and providers</div>
+          {d.providers.filter((p) => p.kind !== "AGGREGATOR" || p.id.startsWith("identity:") === false).map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
+              <span><span className="mono" style={{ fontWeight: 650 }}>{p.id}</span>{p.reason && <span style={{ color: "var(--ink-3)", marginLeft: 8, fontSize: 11.5 }}>{p.reason}</span>}</span>
+              <Pill status={p.health.toLowerCase()} tone={HEALTH_TONE[p.health] ?? "ink"} />
+            </div>
+          ))}
+        </div>
+        <div>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", marginBottom: 6 }}>Liquidity pools</div>
+          {d.pools.length === 0 && <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>No pool reports a balance yet.</div>}
+          {d.pools.map((p) => <KV key={p.id} k={<span className="mono">{p.id}</span>} v={`${p.available == null ? "?" : p.available.toLocaleString("en-US").replace(/,/g, " ")} ${p.currency}${p.reserved ? ` · ${p.reserved} reserved` : ""}`} tone={p.status === "AVAILABLE" ? "recv" : p.status === "LOW" ? "warn" : "ink"} />)}
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", margin: "12px 0 6px" }}>Recent shadow decisions</div>
+          {d.shadow.recent.length === 0 && <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>None yet — an intent is routed when a payer quotes through /api/v2.</div>}
+          {d.shadow.recent.slice(0, 6).map((s) => (
+            <div key={`${s.intentId}${s.at}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "5px 0", borderBottom: "1px solid var(--line-2)" }}>
+              <span className="mono" style={{ color: "var(--ink-3)" }}>{s.engineRoute} vs V1 {s.v1Route}</span>
+              <Pill status={s.agree ? "agree" : "differs"} tone={s.agree ? "recv" : "warn"} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
   );
 }

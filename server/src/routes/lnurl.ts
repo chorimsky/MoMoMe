@@ -25,7 +25,7 @@ import { id, nextRef } from "../core/ids.js";
 import { store } from "../db/store.js";
 import * as peex from "../integrations/peex/service.js";
 import {
-  parseLnUser, quoteFromMsat, sendableRangeMsat, lnurlMetadata, lnAddress,
+  parseLnUser, quoteFromMsat, sendableRangeMsat, lnurlMetadata, lnurlSuccessMessage, lnAddress,
 } from "../core/lnurl.js";
 import { rateLimitMiddleware } from "../core/ratelimit.js";
 
@@ -64,6 +64,10 @@ export function pinnedMetadata(national: string): string | undefined {
 function publicName(r: { national: string; country: "CM" | "GA" | "TD" | "CG" | "CF" }, name?: string | null): string | undefined {
   const n = name?.trim();
   if (!n || n.replace(/\D/g, "") === r.national) return undefined;
+  const policy = getSettings().messages.lightningAddress.nameDisplay;
+  if (policy === "none") return undefined;
+  if (policy === "full") return n;
+  if (policy === "masked") return maskName(n);
   const owned = isVerifiedNumber(r.national, r.country) || !!getIdentityByDigits(r.national, r.country)?.claimed;
   return owned ? n : maskName(n);
 }
@@ -176,6 +180,6 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
 
   // LUD-09: what the wallet shows once the invoice is paid — who the money went to, and the
   // reference to quote to support. Under 144 characters, as the spec asks.
-  const successAction = { tag: "message" as const, message: `Sent to ${shown ?? `${r.provider} ···${r.national.slice(-4)}`} · ${r.provider} Mobile Money · ${ref} · MoMo›Me`.slice(0, 144) };
+  const successAction = { tag: "message" as const, message: lnurlSuccessMessage({ national: r.national, provider: r.provider, name: shown, ref }) };
   res.json({ pr: instruction.code, routes: [], successAction });
 });

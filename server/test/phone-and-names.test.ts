@@ -129,6 +129,31 @@ async function main() {
     const { store } = await import("../src/db/store.js");
     const lnPay = (await store().listPayments()).find((p) => p.senderId === "lnurl:237670123456@momome.xyz");
     ok("the payment it creates carries the full registered name and the operator by prefix", lnPay?.recipient.name === "NANA JEAN PAUL" && lnPay.recipient.provider === "MTN" && lnPay.recipient.phone === "670123456", JSON.stringify(lnPay?.recipient));
+
+    console.log("\nThe operator owns the Lightning Address words and the name policy\n");
+    const { updateSettings, getSettings, DEFAULT_RECIPIENT_MESSAGES } = await import("../src/core/settings.js");
+    const lnCfg = () => getSettings().messages.lightningAddress;
+    const plainFor = async (user: string) => { const j = await lp(user); return (JSON.parse(j.metadata ?? "[]") as Array<[string, string]>).find((m) => m[0] === "text/plain")?.[1] ?? ""; };
+    updateSettings({ messages: { ...getSettings().messages, lightningAddress: { ...lnCfg(), nameDisplay: "masked" } } });
+    ok("policy 'masked' masks even a proved number", /N\*\*\* J\*\*\* P\*\*\*/.test(await plainFor("670123459".replace("9", "6"))), await plainFor("670123456"));
+    updateSettings({ messages: { ...getSettings().messages, lightningAddress: { ...lnCfg(), nameDisplay: "none" } } });
+    ok("policy 'none' shows the number only, with the no-name line", /no name on file/.test(await plainFor("670123456")) && !/NANA|N\*\*\*/.test(await plainFor("670123456")));
+    updateSettings({ messages: { ...getSettings().messages, lightningAddress: { ...lnCfg(), nameDisplay: "full", line: "Paying {name} ({operator} ···{last4}) via {brand}", success: "{brand}: {ref} delivered to {name}" } } });
+    const custom = await plainFor("670123456");
+    ok("an edited line reaches the wallet with every variable filled", custom === "Paying NANA JEAN PAUL (MTN ···3456) via MoMo›Me", custom);
+    const cb2 = await (await fetch(`${(await lp("670123456")).callback}?amount=${50_000_000}`)).json() as { successAction?: { message: string } };
+    ok("…and so does the success message", /^MoMo›Me: MMM-\d{4}-\d+ delivered to NANA JEAN PAUL$/.test(cb2.successAction?.message ?? ""), cb2.successAction?.message);
+    updateSettings({ messages: DEFAULT_RECIPIENT_MESSAGES });
+    // Validation over the admin API.
+    const { issueToken } = await import("../src/core/adminAuth.js"); const { createUser } = await import("../src/core/adminUsers.js");
+    const admin = createUser("ln-admin", "Str0ng-Passw0rd!x", "Super Admin" as never);
+    const A = { "x-admin-token": issueToken({ uid: admin.id, role: "Super Admin" as never }).token, "content-type": "application/json" };
+    const put = (body: unknown) => fetch(`${base}/api/admin/settings`, { method: "PUT", headers: A, body: JSON.stringify(body) });
+    ok("a named line without the number is refused", (await put({ messages: { lightningAddress: { line: "Paying {name} via {brand}" } } })).status === 400);
+    ok("an unknown variable is refused", (await put({ messages: { lightningAddress: { success: "Sent {montant} {ref}" } } })).status === 400);
+    ok("a success message over 144 characters is refused", (await put({ messages: { lightningAddress: { success: "x".repeat(150) + " {ref}" } } })).status === 400);
+    ok("a good edit is accepted and read back", (await put({ messages: { lightningAddress: { lineNoName: "{operator} {number} · {brand} — unverified number" } } })).status === 200 && lnCfg().lineNoName === "{operator} {number} · {brand} — unverified number");
+    updateSettings({ messages: DEFAULT_RECIPIENT_MESSAGES });
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);

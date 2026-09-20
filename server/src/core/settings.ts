@@ -21,12 +21,21 @@ export const DEFAULT_RECIPIENT_MESSAGES: AdminSettings["messages"] = {
     en: "You have received {amount} on your {operator} Mobile Money. Ref {ref}. Sent via {brand}.",
     fr: "Vous avez reçu {amount} sur votre Mobile Money {operator}. Réf {ref}. Envoyé via {brand}.",
   },
+  lightningAddress: {
+    nameDisplay: "owner",
+    line: "{name} · {operator} {number} · {brand} — check the name is who you mean to pay",
+    lineNoName: "{operator} {number} · {brand} — no name on file for this number: check it carefully",
+    longDesc: "You are paying {name}, the registered holder of {operator} Mobile Money {number}. Your sats are converted and delivered to that number in seconds. Mobile Money cannot be reversed, so pay only if the name matches the person you intend.",
+    longDescNoName: "You are paying {operator} Mobile Money {number}. The operator has not confirmed a name for this number yet, so double-check every digit with the person you intend to pay. Mobile Money cannot be reversed.",
+    success: "Sent to {name} · {operator} Mobile Money · {ref} · {brand}",
+  },
 };
 export const MESSAGE_VARIABLES = ["amount", "ref", "operator", "brand", "name", "sender", "support"] as const;
+export const LN_MESSAGE_VARIABLES = ["name", "operator", "number", "last4", "brand", "ref"] as const;
 /** Fill a template. Unknown variables are left visible (an operator sees their typo in the
  *  preview rather than a silent blank); a missing optional value renders empty and the
  *  double spaces / dangling "from ." it leaves are tidied. */
-export function renderTemplate(tpl: string, vars: Partial<Record<(typeof MESSAGE_VARIABLES)[number], string>>): string {
+export function renderTemplate(tpl: string, vars: Partial<Record<(typeof MESSAGE_VARIABLES)[number] | (typeof LN_MESSAGE_VARIABLES)[number], string>>): string {
   return tpl
     .replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (vars[k as keyof typeof vars] ?? "") : m))
     .replace(/\b(from|de|par|du|pour|to|à)\s*(?=[.,;:!?]|$)/gi, "")   // "from ." when {sender} is empty
@@ -141,7 +150,7 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
     treasury: { ...DEFAULTS.treasury, ...(d.treasury ?? {}) },
     compliance: { ...DEFAULTS.compliance, ...(d.compliance ?? {}), velocity: { ...DEFAULTS.compliance.velocity, ...(d.compliance?.velocity ?? {}) } },
     tax: { ...DEFAULTS.tax, ...(d.tax ?? {}) },
-    messages: { recipientDelivered: { ...DEFAULTS.messages.recipientDelivered, ...(d.messages?.recipientDelivered ?? {}) } },
+    messages: { recipientDelivered: { ...DEFAULTS.messages.recipientDelivered, ...(d.messages?.recipientDelivered ?? {}) }, lightningAddress: { ...DEFAULTS.messages.lightningAddress, ...(d.messages?.lightningAddress ?? {}) } },
     network: mergeNetwork(DEFAULTS.network, d.network),
   };
 });
@@ -186,7 +195,7 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
     treasury: { ...settings.treasury, ...(patch.treasury ?? {}) },
     compliance: { ...settings.compliance, ...(patch.compliance ?? {}), velocity: { ...settings.compliance.velocity, ...(patch.compliance?.velocity ?? {}) } },
     tax: { ...settings.tax, ...(patch.tax ?? {}) },
-    messages: { recipientDelivered: { ...settings.messages.recipientDelivered, ...(patch.messages?.recipientDelivered ?? {}) } },
+    messages: { recipientDelivered: { ...settings.messages.recipientDelivered, ...(patch.messages?.recipientDelivered ?? {}) }, lightningAddress: { ...settings.messages.lightningAddress, ...(patch.messages?.lightningAddress ?? {}) } },
     network: mergeNetwork(settings.network, patch.network),
   };
   touch("settings");

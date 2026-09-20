@@ -769,6 +769,19 @@ export interface AdminSettings {
    *  the WhatsApp template path reads them back out of the body. */
   messages: {
     recipientDelivered: { enabled: boolean; lang: "auto" | "en" | "fr"; fallback: "en" | "fr"; en: string; fr: string };
+    /** What a payer's Lightning wallet shows for <number>@momome.xyz. `nameDisplay`: "owner"
+     *  = the full registered name once the holder proved the number, masked otherwise;
+     *  "masked" = always masked; "full" = always full (a public directory — not advised);
+     *  "none" = number only. Variables: {name} {operator} {number} {last4} {brand} {ref}. */
+    lightningAddress: {
+      nameDisplay: "owner" | "masked" | "full" | "none";
+      /** text/plain — the ONE line every wallet shows before "Pay" (named / unnamed). */
+      line: string; lineNoName: string;
+      /** text/long-desc — wallets that show more. */
+      longDesc: string; longDescNoName: string;
+      /** LUD-09 message after the invoice is paid (≤ 144 chars). */
+      success: string;
+    };
   };
   tax: {
     /** VAT (TVA) on the platform fee, in percent. Cameroon: 17.5 % + 10 % additional

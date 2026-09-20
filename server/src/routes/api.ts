@@ -74,7 +74,9 @@ import * as regulatory from "../core/regulatory.js";
 import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { setIdentityOwnerResolver } from "./identityV2.js";
 import { recipientDeliveredMessage } from "../core/notifications.js";
-import { MESSAGE_VARIABLES } from "../core/settings.js";
+import { MESSAGE_VARIABLES, LN_MESSAGE_VARIABLES } from "../core/settings.js";
+import { lnurlMetadata, lnurlSuccessMessage } from "../core/lnurl.js";
+import { maskName } from "../../../shared/domain.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
 import { identifierHash } from "../core/identityResolution/msisdn.js";
@@ -2154,10 +2156,18 @@ api.put("/admin/settings", async (req, res) => {
     if (typeof tx.taxId === "string") tx.taxId = tx.taxId.trim().slice(0, 40);
   }
   if (patch.messages !== undefined) {
-    const m = (patch.messages as { recipientDelivered?: Record<string, unknown> } | null)?.recipientDelivered;
-    if (!m || typeof m !== "object") return res.status(400).json({ error: "bad_messages", message: "messages.recipientDelivered must be an object." });
-    const bad = validateRecipientTemplate(m);
-    if (bad) return res.status(400).json({ error: "bad_messages", message: bad });
+    const pm = patch.messages as { recipientDelivered?: Record<string, unknown>; lightningAddress?: Record<string, unknown> } | null;
+    if (!pm || typeof pm !== "object") return res.status(400).json({ error: "bad_messages", message: "messages must be an object." });
+    if (pm.recipientDelivered !== undefined) {
+      if (!pm.recipientDelivered || typeof pm.recipientDelivered !== "object") return res.status(400).json({ error: "bad_messages", message: "messages.recipientDelivered must be an object." });
+      const bad = validateRecipientTemplate(pm.recipientDelivered);
+      if (bad) return res.status(400).json({ error: "bad_messages", message: bad });
+    }
+    if (pm.lightningAddress !== undefined) {
+      if (!pm.lightningAddress || typeof pm.lightningAddress !== "object") return res.status(400).json({ error: "bad_messages", message: "messages.lightningAddress must be an object." });
+      const bad = validateLightningTemplates(pm.lightningAddress);
+      if (bad) return res.status(400).json({ error: "bad_messages", message: bad });
+    }
   }
   res.json(updateSettings(patch));
 });
@@ -2181,10 +2191,43 @@ function validateRecipientTemplate(m: Record<string, unknown>): string | null {
   }
   return null;
 }
-/** Preview the recipient notice as it would be sent for a sample payment, both languages. */
+/** What a payer's wallet reads for a Lightning Address: bounded, printable, and the line a
+ *  wallet shows must still say WHICH number (the name alone is not an address). */
+function validateLightningTemplates(m: Record<string, unknown>): string | null {
+  if (m.nameDisplay !== undefined && !["owner", "masked", "full", "none"].includes(String(m.nameDisplay))) return "nameDisplay must be owner, masked, full or none.";
+  const limits: Record<string, [number, string]> = { line: [200, "Line (named)"], lineNoName: [200, "Line (no name)"], longDesc: [600, "Long description (named)"], longDescNoName: [600, "Long description (no name)"], success: [144, "Success message"] };
+  for (const [k, [max, label]] of Object.entries(limits)) {
+    if (m[k] === undefined) continue;
+    const t = m[k];
+    if (typeof t !== "string") return `${label} must be text.`;
+    const clean = t.replace(/\r/g, "").trim();
+    if (clean.length < 5 || clean.length > max) return `${label} must be 5–${max} characters.`;
+    if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(clean)) return `${label} contains control characters.`;
+    const unknown = [...clean.matchAll(/\{(\w+)\}/g)].map((x) => x[1]).filter((v) => !(LN_MESSAGE_VARIABLES as readonly string[]).includes(v));
+    if (unknown.length) return `${label}: unknown variable {${unknown[0]}}. Use: ${LN_MESSAGE_VARIABLES.map((v) => `{${v}}`).join(" ")}.`;
+    if ((k === "line" || k === "lineNoName") && !clean.includes("{number}") && !clean.includes("{last4}")) return `${label} must show the number ({number} or {last4}) — a payer has to see which account they are paying.`;
+    if (k === "line" && !clean.includes("{name}")) return "Line (named) must include {name} — it exists to show the registered holder.";
+    m[k] = clean;
+  }
+  return null;
+}
+/** Preview the recipient notice and the Lightning Address texts for a sample payment. */
 api.get("/admin/settings/messages/preview", (_req, res) => {
   const sample = samplePayment();
-  res.json({ en: recipientDeliveredMessage(sample, "en").body, fr: recipientDeliveredMessage(sample, "fr").body, variables: MESSAGE_VARIABLES });
+  const ln = { national: "670123456", provider: "MTN" as const };
+  const named = JSON.parse(lnurlMetadata({ ...ln, name: "NANA JEAN PAUL", address: "237670123456@momome.xyz" })) as Array<[string, string]>;
+  const masked = JSON.parse(lnurlMetadata({ ...ln, name: maskName("NANA JEAN PAUL"), address: "237670123456@momome.xyz" })) as Array<[string, string]>;
+  const unnamed = JSON.parse(lnurlMetadata({ ...ln, address: "237670123456@momome.xyz" })) as Array<[string, string]>;
+  const pick = (m: Array<[string, string]>, k: string) => m.find((x) => x[0] === k)?.[1] ?? "";
+  res.json({
+    en: recipientDeliveredMessage(sample, "en").body, fr: recipientDeliveredMessage(sample, "fr").body, variables: MESSAGE_VARIABLES,
+    lightning: {
+      variables: LN_MESSAGE_VARIABLES,
+      named: { line: pick(named, "text/plain"), longDesc: pick(named, "text/long-desc"), success: lnurlSuccessMessage({ ...ln, name: "NANA JEAN PAUL", ref: "MMM-2026-000000" }) },
+      masked: { line: pick(masked, "text/plain"), longDesc: pick(masked, "text/long-desc"), success: lnurlSuccessMessage({ ...ln, name: maskName("NANA JEAN PAUL"), ref: "MMM-2026-000000" }) },
+      unnamed: { line: pick(unnamed, "text/plain"), longDesc: pick(unnamed, "text/long-desc"), success: lnurlSuccessMessage({ ...ln, ref: "MMM-2026-000000" }) },
+    },
+  });
 });
 /** Send the recipient notice to a number the operator owns, through the real channels
  *  (SMS / WhatsApp as configured) — recorded in the outbox under ref TEST. Super Admin:

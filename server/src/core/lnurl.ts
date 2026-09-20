@@ -9,7 +9,7 @@
    ============================================================ */
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
 import { MIN_XAF, MAX_XAF, checkPhone, lightningAddress, phoneDigits, splitDialed } from "../../../shared/domain.js";
-import { getSettings } from "./settings.js";
+import { getSettings, renderTemplate } from "./settings.js";
 import { rateFor } from "./fx.js";
 
 export const SATS_PER_BTC = 100_000_000;
@@ -71,26 +71,30 @@ export function sendableRangeMsat(): { min: number; max: number } {
   };
 }
 
-/** LUD-06 metadata array (JSON-encoded). The text/plain line is what the payer's
- *  wallet shows — it names the linked Mobile Money recipient + number. */
+/** LUD-06 metadata array (JSON-encoded), from the operator-managed templates (Settings →
+ *  Lightning Address message). The text/plain line is the ONLY thing an external wallet
+ *  shows before "Pay": it is the payer's chance to see that the number belongs to the person
+ *  they mean, so the registered name leads — and when there is none, the line says so
+ *  instead of looking reassuring. Mobile Money cannot be reversed. */
 export function lnurlMetadata(opts: { national: string; provider: ProviderId; name?: string | null; address: string }): string {
-  // The text/plain line is the ONLY thing an external wallet shows before "Pay": it is the
-  // payer's chance to see that the number belongs to the person they mean. So the registered
-  // account-holder name leads — and when there is none on file, the line says so instead of
-  // looking reassuring. Mobile Money cannot be reversed.
   const name = opts.name?.trim();
-  const desc = name
-    ? `${name} · ${opts.provider} ${opts.national} · MoMo›Me — check the name is who you mean to pay`
-    : `${opts.provider} ${opts.national} · MoMo›Me — no name on file for this number: check it carefully`;
-  const long = name
-    ? `You are paying ${name}, the registered holder of ${opts.provider} Mobile Money ${opts.national}. Your sats are converted and delivered to that number in seconds. Mobile Money cannot be reversed, so pay only if the name matches the person you intend.`
-    : `You are paying ${opts.provider} Mobile Money ${opts.national}. The operator has not confirmed a name for this number yet, so double-check every digit with the person you intend to pay. Mobile Money cannot be reversed.`;
+  const t = getSettings().messages.lightningAddress;
+  const vars = lnVars({ national: opts.national, provider: opts.provider, name });
   const meta: Array<[string, string]> = [
-    ["text/plain", desc],
-    ["text/long-desc", long],
+    ["text/plain", renderTemplate(name ? t.line : t.lineNoName, vars)],
+    ["text/long-desc", renderTemplate(name ? t.longDesc : t.longDescNoName, vars)],
     ["text/identifier", opts.address],
   ];
   return JSON.stringify(meta);
+}
+/** LUD-09 success message, from the same templates; the spec caps it at 144 characters. */
+export function lnurlSuccessMessage(opts: { national: string; provider: ProviderId; name?: string | null; ref: string }): string {
+  const name = opts.name?.trim();
+  const vars = lnVars({ national: opts.national, provider: opts.provider, name: name || `${opts.provider} ···${opts.national.slice(-4)}`, ref: opts.ref });
+  return renderTemplate(getSettings().messages.lightningAddress.success, vars).slice(0, 144);
+}
+export function lnVars(o: { national: string; provider: string; name?: string | null; ref?: string }): Record<"name" | "operator" | "number" | "last4" | "brand" | "ref", string> {
+  return { name: o.name ?? "", operator: o.provider, number: o.national, last4: o.national.slice(-4), brand: getSettings().company.brand, ref: o.ref ?? "" };
 }
 
 /** The canonical address for a resolved recipient — the same builder the Receive screens

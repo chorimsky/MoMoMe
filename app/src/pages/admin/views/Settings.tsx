@@ -185,7 +185,8 @@ export function SettingsView() {
   const retentionErr = Number.isFinite(compliance.retentionYears) && compliance.retentionYears >= 1 && compliance.retentionYears <= 30 ? undefined : "1–30 years.";
   const complianceErr = ctrErr || cddErr || structXafErr || structWinErr || retentionErr;
   const msgErr = templateError(messages.recipientDelivered.en, "English") ?? templateError(messages.recipientDelivered.fr, "French");
-  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr || vatErr || advErr || isErr || levyErr || fdErr || msgErr);
+  const lnErr = lightningTemplateError(messages.lightningAddress);
+  const invalid = !!(emailErr || phoneErr || brandErr || thresholdErr || complianceErr || vatErr || advErr || isErr || levyErr || fdErr || msgErr || lnErr);
 
   const save = async () => {
     if (invalid) return;
@@ -308,7 +309,10 @@ export function SettingsView() {
         </Card>
 
         <RecipientMessageCard value={messages.recipientDelivered} brand={company.brand} support={company.phone} error={msgErr}
-          canTest={canEditRestricted} onChange={(v) => { setMessages({ recipientDelivered: v }); setDirty(true); }} />
+          canTest={canEditRestricted} onChange={(v) => { setMessages({ ...messages, recipientDelivered: v }); setDirty(true); }} />
+
+        <LightningAddressMessageCard value={messages.lightningAddress} brand={company.brand} error={lnErr}
+          onChange={(v) => { setMessages({ ...messages, lightningAddress: v }); setDirty(true); }} />
 
         <Card title="Operations" sub="Live controls on the payment path.">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 0", borderBottom: "1px solid var(--line-2)" }}>
@@ -612,6 +616,83 @@ function RecipientMessageCard({ value, brand, support, error, canTest, onChange 
           {testMsg && <div style={{ fontSize: 12.5, color: testMsg.ok ? "var(--recv)" : "var(--warn-ink)", marginTop: 6 }}>{testMsg.text}</div>}
         </div>
       )}
+    </Card>
+  );
+}
+
+/* ---------- Lightning Address message ----------
+   <number>@momome.xyz is paid from wallets the operator does not control; the text/plain
+   line is the ONE thing every wallet shows before "Pay". The operator owns those words, and
+   the rule for how much of the registered name a stranger may see. */
+const LN_VARS: Array<[string, string]> = [["{name}", "registered holder (as the policy shows it)"], ["{operator}", "MTN / ORANGE"], ["{number}", "the number"], ["{last4}", "its last four digits"], ["{brand}", "your brand"], ["{ref}", "the reference (success message)"]];
+type LnMsg = AdminSettings["messages"]["lightningAddress"];
+const DEFAULT_LN: LnMsg = {
+  nameDisplay: "owner",
+  line: "{name} · {operator} {number} · {brand} — check the name is who you mean to pay",
+  lineNoName: "{operator} {number} · {brand} — no name on file for this number: check it carefully",
+  longDesc: "You are paying {name}, the registered holder of {operator} Mobile Money {number}. Your sats are converted and delivered to that number in seconds. Mobile Money cannot be reversed, so pay only if the name matches the person you intend.",
+  longDescNoName: "You are paying {operator} Mobile Money {number}. The operator has not confirmed a name for this number yet, so double-check every digit with the person you intend to pay. Mobile Money cannot be reversed.",
+  success: "Sent to {name} · {operator} Mobile Money · {ref} · {brand}",
+};
+const LN_LIMITS: Record<keyof Omit<LnMsg, "nameDisplay">, [number, string]> = { line: [200, "Line (named)"], lineNoName: [200, "Line (no name)"], longDesc: [600, "Long description (named)"], longDescNoName: [600, "Long description (no name)"], success: [144, "Success message"] };
+function lightningTemplateError(m: LnMsg): string | null {
+  for (const k of Object.keys(LN_LIMITS) as Array<keyof typeof LN_LIMITS>) {
+    const [max, label] = LN_LIMITS[k]; const c = m[k].trim();
+    if (c.length < 5 || c.length > max) return `${label} must be 5–${max} characters.`;
+    const unknown = [...c.matchAll(/\{(\w+)\}/g)].map((x) => x[1]).filter((v) => !LN_VARS.some(([kk]) => kk === `{${v}}`));
+    if (unknown.length) return `${label}: unknown variable {${unknown[0]}}.`;
+    if ((k === "line" || k === "lineNoName") && !c.includes("{number}") && !c.includes("{last4}")) return `${label} must show the number ({number} or {last4}).`;
+    if (k === "line" && !c.includes("{name}")) return "Line (named) must include {name}.";
+  }
+  return null;
+}
+function renderLn(tpl: string, brand: string, name: string): string {
+  const vars: Record<string, string> = { name, operator: "MTN", number: "670123456", last4: "3456", brand, ref: "MMM-2026-000000" };
+  return tpl.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? vars[k] : m)).replace(/[ \t]{2,}/g, " ").trim();
+}
+function LightningAddressMessageCard({ value, brand, error, onChange }: { value: LnMsg; brand: string; error: string | null; onChange: (v: LnMsg) => void }) {
+  const sampleName = value.nameDisplay === "full" ? "NANA JEAN PAUL" : value.nameDisplay === "none" ? "" : "N*** J*** P***";
+  const field = (k: keyof typeof LN_LIMITS, hint: string) => {
+    const [max, label] = LN_LIMITS[k];
+    const preview = renderLn(value[k], brand, k === "success" && !sampleName ? "MTN ···3456" : sampleName || "NANA JEAN PAUL");
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 650 }}>{label} <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>· {hint}</span></div>
+          <button type="button" className="btn btn-quiet" style={{ padding: "3px 8px", fontSize: 11.5 }} disabled={value[k] === DEFAULT_LN[k]} onClick={() => onChange({ ...value, [k]: DEFAULT_LN[k] })}>Reset to default</button>
+        </div>
+        <textarea value={value[k]} onChange={(e) => onChange({ ...value, [k]: e.target.value })} rows={k.startsWith("long") ? 3 : 2} aria-label={label} spellCheck
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13.5, color: "var(--ink)", lineHeight: 1.45, resize: "vertical" }} />
+        <div style={{ marginTop: 6, padding: "9px 12px", borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--line-2)", fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", marginBottom: 3 }}>What the wallet shows</div>
+          {preview}
+        </div>
+        <div style={{ fontSize: 11.5, color: preview.length > max ? "var(--warn-ink)" : "var(--ink-3)", marginTop: 4 }}>{value[k].trim().length} / {max} characters</div>
+      </div>
+    );
+  };
+  return (
+    <Card title="Lightning Address message" sub="What a payer's Bitcoin wallet shows for <number>@momome.xyz before they pay, and after. Any wallet in the world resolves this — the words are yours.">
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 4 }}>How much of the registered name a payer sees</div>
+        <select value={value.nameDisplay} onChange={(e) => onChange({ ...value, nameDisplay: e.target.value as LnMsg["nameDisplay"] })} style={{ width: "100%", padding: "8px 10px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", color: "var(--ink)" }}>
+          <option value="owner">Full name once the holder has verified the number in the app; masked until then (recommended)</option>
+          <option value="masked">Always masked (N*** J*** P***)</option>
+          <option value="full">Always the full name — a public directory of every account, not advised</option>
+          <option value="none">Never — number only</option>
+        </select>
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>The endpoint is open to the world: anyone can resolve any number. The name is what lets a payer check they have the right person — and, unmasked, what lets a stranger learn who owns a number.</div>
+      </div>
+      {field("line", "the one line every wallet shows before Pay")}
+      {field("lineNoName", "when no name is on file")}
+      {field("longDesc", "wallets that show more")}
+      {field("longDescNoName", "when no name is on file")}
+      {field("success", "shown after the invoice is paid")}
+      <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.6 }}>
+        Variables: {LN_VARS.map(([k, d]) => <span key={k} title={d} style={{ marginRight: 8 }}><span className="mono" style={{ color: "var(--accent)" }}>{k}</span> <span>{d}</span></span>)}
+      </div>
+      {error && <div role="alert" style={{ fontSize: 12.5, color: "var(--send)", marginTop: 10 }}>{error}</div>}
+      <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 10 }}>A wallet that already fetched the old text keeps it for that payment (the invoice is bound to what it was shown); new resolutions use the saved text at once.</p>
     </Card>
   );
 }

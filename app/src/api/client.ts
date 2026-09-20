@@ -37,6 +37,7 @@ export interface IdentityResolutionStatus {
   audit: Array<{ requestId: string; actor: string; purpose: string; identifierHash: string; country: string; operator: string | null; provider: string; status: string; error?: string; latencyMs: number; cache: string; at: string }>;
   priority: string[];
 }
+export interface LnPreview { line: string; longDesc: string; success: string }
 export interface IdentityLookupResult { status: IdentityStatus; verified: boolean; displayName?: string; operator: string | null; country: string; accountStatus: string; provider: string; source: string; nameMatch?: NameMatch; error?: string; requestId: string }
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
 import { idbGet, idbSet } from "../lib/idb.js";
@@ -475,7 +476,7 @@ export const api = {
 
   adminSettings: () => req<AdminSettings>("/admin/settings"),
   /** Recipient message: the rendered notice for a sample payment, and a real test send. */
-  adminMessagePreview: () => req<{ en: string; fr: string; variables: string[] }>("/admin/settings/messages/preview"),
+  adminMessagePreview: () => req<{ en: string; fr: string; variables: string[]; lightning: { variables: string[]; named: LnPreview; masked: LnPreview; unnamed: LnPreview } }>("/admin/settings/messages/preview"),
   adminMessageTest: (to: string, lang?: "en" | "fr", country: CountryCode = "CM") =>
     req<{ body: string; lang: "en" | "fr"; records: Array<{ channel: string; status: string; detail?: string }> }>("/admin/settings/messages/test", { method: "POST", body: JSON.stringify({ to, lang, country }) }),
   saveSettings: (patch: Partial<AdminSettings>) =>

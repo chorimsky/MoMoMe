@@ -247,6 +247,8 @@ export const STRINGS: Dict = {
   rcv_track: ["See what you've received", "Voir ce que vous avez reçu"],
   rcv_track_hint: ["Every payment to this number is yours. Claim it to track them.", "Chaque paiement vers ce numéro est à vous. Activez-le pour les suivre."],
   rcv_ln_section: ["From a Bitcoin wallet", "Depuis un portefeuille Bitcoin"],
+  rcv_payer_sees: ["Whoever pays this address sees:", "La personne qui paie cette adresse voit :"],
+  rcv_payer_sees_masked: ["verify your number in the app (More → Your number) to show your full name", "vérifiez votre numéro dans l'app (Plus → Votre numéro) pour afficher votre nom complet"],
   rcv_ln_hint: ["Paying from a Bitcoin app? This address works there too — it lands on your Mobile Money.", "Paiement depuis une application Bitcoin ? Cette adresse y fonctionne aussi — ça arrive sur votre Mobile Money."],
   rcv_show_ln_qr: ["Show wallet code", "Afficher le code portefeuille"],
   rcv_your_code: ["Your payment address", "Votre adresse de paiement"],

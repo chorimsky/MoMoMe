@@ -106,6 +106,28 @@ async function main() {
     ok("a Gabon number sent as Cameroon is refused before any rail sees it", foreign.status === 400 || foreign.status === 422, String(foreign.status));
     const camtel = await post("/api/payments", { quoteId: await quote(), recipient: { phone: "621234567", country: "CM", provider: "MTN", name: "Some One" } });
     ok("an unsupported operator's number is refused, not routed on the dropdown", camtel.status === 400 || camtel.status === 422, String(camtel.status));
+
+    console.log("\nLightning Address — the payer sees who they are paying, strangers do not get a directory\n");
+    const { maskName } = await import("../../shared/domain.js");
+    ok("maskName keeps the initials only", maskName("RIMSKY CHE CHO") === "R***** C** C**" && maskName("NANA JEAN PAUL") === "N*** J*** P***");
+    const lp = async (user: string) => (await (await fetch(`${base}/.well-known/lnurlp/${user}`)).json()) as { tag?: string; metadata?: string; callback?: string; reason?: string };
+    let pr = await lp("670123456");
+    let meta = JSON.parse(pr.metadata ?? "[]") as Array<[string, string]>;
+    let plain = meta.find((m) => m[0] === "text/plain")?.[1] ?? "";
+    ok("an UNCLAIMED number resolves with the holder's name MASKED", pr.tag === "payRequest" && /N\*\*\* J\*\*\* P\*\*\*/.test(plain) && !/NANA JEAN PAUL/.test(plain), plain);
+    ok("…and the text/identifier is the canonical address", meta.find((m) => m[0] === "text/identifier")?.[1] === "237670123456@momome.xyz");
+    for (const u of ["237670123456", "+237670123456", "00237670123456"]) ok(`the address user "${u}" is the same recipient`, (await lp(encodeURIComponent(u))).callback?.endsWith("/lnurl/pay/670123456") === true);
+    ok("a number that cannot be paid out is not a payable address", (await lp("677000789000")).tag !== "payRequest" && (await lp("621234567")).tag !== "payRequest");
+    const { linkDevice } = await import("../src/core/account.js");
+    linkDevice("device-owner", "670123456"); // the holder proved the number (OTP anchor)
+    pr = await lp("670123456");
+    meta = JSON.parse(pr.metadata ?? "[]") as Array<[string, string]>; plain = meta.find((m) => m[0] === "text/plain")?.[1] ?? "";
+    ok("once the holder has proved the number, the FULL registered name is shown to payers", /NANA JEAN PAUL/.test(plain), plain);
+    const cb = await (await fetch(`${pr.callback}?amount=${50_000_000}`)).json() as { pr?: string; successAction?: { tag: string; message: string }; reason?: string };
+    ok("the callback mints an invoice and a LUD-09 success message naming the recipient and the reference", !!cb.pr && cb.successAction?.tag === "message" && /NANA JEAN PAUL/.test(cb.successAction.message) && /MMM-\d{4}-\d+/.test(cb.successAction.message) && cb.successAction.message.length <= 144, cb.successAction?.message ?? cb.reason);
+    const { store } = await import("../src/db/store.js");
+    const lnPay = (await store().listPayments()).find((p) => p.senderId === "lnurl:237670123456@momome.xyz");
+    ok("the payment it creates carries the full registered name and the operator by prefix", lnPay?.recipient.name === "NANA JEAN PAUL" && lnPay.recipient.provider === "MTN" && lnPay.recipient.phone === "670123456", JSON.stringify(lnPay?.recipient));
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);

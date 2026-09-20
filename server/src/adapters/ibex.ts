@@ -416,7 +416,9 @@ export const ibexAdapter: RailAdapter = {
         body: JSON.stringify({
           accountId: config.ibex.accountId,
           amountMsat: invoiceMsat,
-          memo: `MoMoMe ${req.ref}`.slice(0, 50), // shown in the payer's wallet; IBEX caps at 50 chars
+          // Shown in the payer's wallet beside the amount; IBEX caps at 50 chars, so the
+          // recipient comes first and the ref fills what is left.
+          memo: (req.label ? `${req.label} · ${req.ref}` : `MoMoMe ${req.ref}`).slice(0, 50),
           expiration: Math.min(QUOTE_TTL_SEC.LIGHTNING, 900), // IBEX max 15 min
           webhookUrl: req.callbackUrl,
           ...(config.ibex.webhookSecret ? { webhookSecret: config.ibex.webhookSecret } : {}),

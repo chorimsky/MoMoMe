@@ -13,6 +13,9 @@ import type { Payment, Quote } from "../../../shared/types.js";
 import { config } from "../config.js";
 import { getSettings } from "../core/settings.js";
 import { resolveRecipient } from "../core/nameResolver.js";
+import { isVerifiedNumber } from "../core/account.js";
+import { getIdentityByDigits } from "../core/identity.js";
+import { maskName } from "../../../shared/domain.js";
 import { rateFor, formatAmount } from "../core/fx.js";
 import { liveMoney } from "../config.js";
 import { ratesFresh } from "../core/rates.js";
@@ -52,12 +55,25 @@ export function pinnedMetadata(national: string): string | undefined {
   return hit && Date.now() - hit.at < SERVED_TTL_MS ? hit.metadata : undefined;
 }
 
+/* What a stranger resolving <number>@momome.xyz may learn about its holder. The registered
+   name is what lets a payer confirm the right person — and, unmasked on an open endpoint, it
+   is also a directory of every Mobile Money account in the country, one GET per number. So:
+   the full name when the holder has proved the number is theirs (OTP anchor, or a claimed
+   identity — they hand this address out themselves); a masked one (R***** C** C**)
+   otherwise. The payment record itself always carries the full registered name. */
+function publicName(r: { national: string; country: "CM" | "GA" | "TD" | "CG" | "CF" }, name?: string | null): string | undefined {
+  const n = name?.trim();
+  if (!n || n.replace(/\D/g, "") === r.national) return undefined;
+  const owned = isVerifiedNumber(r.national, r.country) || !!getIdentityByDigits(r.national, r.country)?.claimed;
+  return owned ? n : maskName(n);
+}
+
 /* ---- LUD-16: GET /.well-known/lnurlp/:user → payRequest ---- */
 lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000), async (req, res) => {
   const r = parseLnUser(req.params.user);
   if (!r) return res.status(200).json(lnErr("Not a valid Mobile Money number."));
 
-  const name = await resolveRecipient(r.national, r.country).then((x) => x.name).catch(() => undefined);
+  const name = publicName(r, await resolveRecipient(r.national, r.country).then((x) => x.name).catch(() => undefined));
   const address = lnAddress(r);
   const { min, max } = sendableRangeMsat();
   const metadata = lnurlMetadata({ national: r.national, provider: r.provider, name, address });
@@ -110,7 +126,8 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   // LUD-06: the invoice must carry h = sha256(metadata) — the SAME metadata string the
   // payRequest served, byte for byte, or a strict wallet refuses to pay. Rebuilt here from
   // the same inputs (the builder is deterministic for a given name).
-  const metadata = pinnedMetadata(r.national) ?? lnurlMetadata({ national: r.national, provider: r.provider, name, address: lnAddress(r) });
+  const shown = publicName(r, name);
+  const metadata = pinnedMetadata(r.national) ?? lnurlMetadata({ national: r.national, provider: r.provider, name: shown, address: lnAddress(r) });
   const descriptionHash = createHash("sha256").update(metadata, "utf8").digest("hex");
 
   // Mint the bolt11 the wallet will pay. The amount is exactly the payer's msat.
@@ -157,5 +174,8 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
   if (instruction.providerRef) await store().indexProviderRef(instruction.providerRef, payment.id);
   void peex.enrich(payment);
 
-  res.json({ pr: instruction.code, routes: [] });
+  // LUD-09: what the wallet shows once the invoice is paid — who the money went to, and the
+  // reference to quote to support. Under 144 characters, as the spec asks.
+  const successAction = { tag: "message" as const, message: `Sent to ${shown ?? `${r.provider} ···${r.national.slice(-4)}`} · ${r.provider} Mobile Money · ${ref} · MoMo›Me`.slice(0, 144) };
+  res.json({ pr: instruction.code, routes: [], successAction });
 });

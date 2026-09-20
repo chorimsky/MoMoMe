@@ -78,3 +78,10 @@ Flag and mode at a glance; the chain in order with each provider's health; Camer
 | not_found / inactive | the honest copy; name box stays open in advisory | advisory yes · gate **no** |
 | unavailable / error | "temporarily unavailable" + **Retry**; name box open | yes (advisory) |
 | unsupported | "can't be verified yet — confirm the name yourself" | yes |
+
+## Lightning Address — how a payer on the Lightning network knows who they are paying
+Every Mobile Money number is `<E.164 digits>@momome.xyz` (LUD-16). `parseLnUser` reads the user part with the same `phoneDigits`/`splitDialed` rules as every other entry point (`237670123456`, `+237…`, `00237…` are one address), refuses anything `checkPhone` would not pay out, and fixes the operator from the prefix.
+
+1. **payRequest** (`GET /.well-known/lnurlp/<number>`): the name comes from the same resolver chain as the apps (`resolveRecipient` → identity chain → Peexit), **whatever rail will settle the payout**. The `text/plain` metadata line — the one thing every wallet shows before "Pay" — leads with the registered name; `text/identifier` is the canonical address. Because this endpoint is open to the world, the name is shown **in full only when the holder has proved the number** (OTP anchor in the app, or a claimed identity — they hand the address out themselves) and **masked otherwise** (`R***** C** C**`): enough for a payer to check, not a directory of every account in the country.
+2. **callback** (`GET /lnurl/pay/<number>?amount=`): the invoice carries `h = sha256(metadata)` (LUD-06) so a strict wallet proves it is paying what it was shown; the payment record carries the **full** registered name and operator; the response includes a LUD-09 `successAction` — *"Sent to NAME · MTN Mobile Money · MMM-… · MoMo›Me"* — so the wallet confirms who received it.
+3. **In-app Lightning payments**: the invoice memo the payer's external wallet displays is the recipient (`NANA JEAN PAUL ···3456 · MMM-…`), not just a reference.

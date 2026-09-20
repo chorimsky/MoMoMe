@@ -12,6 +12,8 @@
    server never sees the code or the key. See docs/device-account-and-contacts.md §6.4.
    ============================================================ */
 import crypto from "node:crypto";
+import { localDigits } from "../../../shared/domain.js";
+import type { CountryCode } from "../../../shared/types.js";
 import { register, touch } from "./persist.js";
 import { reviewAccess, isReviewPhone } from "./review.js";
 
@@ -83,6 +85,14 @@ export function linkDevice(deviceId: string, phone: string): string {
 /** The account id a device belongs to, or undefined if it hasn't anchored. */
 export function accountOf(deviceId: string): string | undefined {
   return accountByDevice.get(deviceId);
+}
+/** Has the holder of this number proved it (an OTP-verified anchor on some device)? The
+ *  Receive screen shows such a person their own Lightning Address to hand out, so their
+ *  registered name may appear in full to whoever resolves it. */
+export function isVerifiedNumber(phone: string, country: CountryCode = "CM"): boolean {
+  const want = localDigits(phone, country);
+  for (const acct of accountByDevice.values()) if (acct.startsWith("acct:") && localDigits(acct.slice(5), country) === want) return true;
+  return false;
 }
 
 export function putRecovery(accountId: string, blob: Omit<RecoveryBlob, "updatedAt">): void {

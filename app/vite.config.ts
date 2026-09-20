@@ -27,6 +27,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": "http://localhost:4000",
+      "/.well-known/lnurlp": "http://localhost:4000", // what a payer's wallet sees, previewed on Receive
     },
   },
 });

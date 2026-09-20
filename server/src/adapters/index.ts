@@ -114,6 +114,8 @@ export interface CreateInboundRequest {
   /** LUD-06 description_hash (hex). Rails that can set it are tried FIRST; a rail that
    *  cannot still mints (lenient wallets pay it) so a Lightning Address never dead-ends. */
   descriptionHash?: string;
+  /** Recipient label for the invoice memo (see InstructionRequest.label). */
+  label?: string;
 }
 
 /** Create the inbound pay instruction, routing to the primary rail for the method
@@ -219,7 +221,7 @@ async function callSandbox(req: CreateInboundRequest): Promise<PayInstruction> {
 
 function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInstruction> {
   const callbackUrl = `${config.publicUrl}/webhooks/${rail.name}`;
-  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl, ...(req.descriptionHash ? { descriptionHash: req.descriptionHash } : {}) };
+  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl, ...(req.descriptionHash ? { descriptionHash: req.descriptionHash } : {}), ...(req.label ? { label: req.label } : {}) };
   return rail.createInstruction(full);
 }
 

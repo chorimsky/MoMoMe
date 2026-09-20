@@ -153,6 +153,14 @@ export function compareNames(expected: string | null | undefined, actual: string
   if (sharedReal >= 2 || (full && short.length === 1)) return "PARTIAL_MATCH";
   return "NO_MATCH";
 }
+/** A registered name as the public may see it: "RIMSKY CHE CHO" → "R***** C** C**". Enough
+ *  for a payer to check they have the right person, not enough for a stranger with the
+ *  number to learn who owns it. Mobile Money operators show their own confirmations this way. */
+export function maskName(name: string | null | undefined): string {
+  return String(name ?? "").trim().split(/\s+/).filter(Boolean)
+    .map((t) => (t.length <= 1 ? t : t[0] + "*".repeat(Math.min(t.length - 1, 6)))).join(" ");
+}
+
 /** The yes/no the send flow asks: is this spelling NOT a different person? PARTIAL counts
  *  as a match here — a shared surname is not what the wrong-number safeguard is for. */
 export function namesMatch(a: string | null | undefined, b: string | null | undefined): boolean {

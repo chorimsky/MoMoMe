@@ -10,6 +10,10 @@ export interface InstructionRequest {
   method: Method;
   /** Payment ref — used as the memo and the idempotency key with the provider. */
   ref: string;
+  /** Who the money is for, as the payer's own wallet should show it beside the amount
+   *  ("NANA JEAN PAUL ···3456"). The payer already confirmed this name; their wallet is the
+   *  last place they see it before the sats leave. */
+  label?: string;
   /** Inbound amount in asset units (BTC or USDT). */
   amount: number;
   /** Quote value in USD — used by rails that can receive into a USD-denominated

@@ -735,6 +735,13 @@ api.delete("/admin/apikeys/:id", async (req, res) => {
     : res.status(404).json({ error: "not_found", message: "Key not found or already revoked." });
 });
 
+/** "NANA JEAN PAUL ···3456" — the payer's wallet shows this beside the amount. A recipient
+ *  with no name on file is shown as the operator and the number's tail. */
+function invoiceLabel(r: { name: string; phone: string; provider: string }): string {
+  const named = isRealName(r.name, r.phone);
+  return `${named ? r.name : r.provider} ···${r.phone.replace(/\D/g, "").slice(-4)}`;
+}
+
 /* ---------- recipient name resolution ---------- */
 api.get("/recipients/resolve", rateLimitDurableMiddleware("resolve", 60, 60_000), async (req, res) => {
   // Tie resolution to an identified device — it discloses names (the internal identity
@@ -1051,6 +1058,7 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
       ref,
       amount: quote.inboundAmount,
       usd: quote.usd, // for USD-wallet (Stablesats) hedging rails
+      label: invoiceLabel(recipient),
     });
   } catch (e) {
     // Couldn't mint the inbound address (e.g. a stablecoin whose IBEX receive combo
@@ -1074,7 +1082,7 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
   // working payment for a nicer QR.
   if (quote.method === "ONCHAIN" && instruction.providerRef && getSettings().methods.LIGHTNING) {
     try {
-      const ln = await createInstruction({ method: "LIGHTNING", ref, amount: quote.inboundAmount, usd: quote.usd });
+      const ln = await createInstruction({ method: "LIGHTNING", ref, amount: quote.inboundAmount, usd: quote.usd, label: invoiceLabel(recipient) });
       if (ln.providerRef) {
         instruction = {
           ...instruction,

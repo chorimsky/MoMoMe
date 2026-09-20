@@ -8,7 +8,7 @@
    address is the Mobile Money number.
    ============================================================ */
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
-import { COUNTRIES, MIN_XAF, MAX_XAF, detectProvider, localDigits, checkPhone, lightningAddress } from "../../../shared/domain.js";
+import { MIN_XAF, MAX_XAF, checkPhone, lightningAddress, phoneDigits, splitDialed } from "../../../shared/domain.js";
 import { getSettings } from "./settings.js";
 import { rateFor } from "./fx.js";
 
@@ -25,14 +25,11 @@ export interface LnRecipient {
 /** Parse the user part of a Lightning Address (the Mobile Money number) into a
  *  routable recipient. Accepts national (677000789) or full (237677000789). */
 export function parseLnUser(user: string): LnRecipient | null {
-  const d = String(user ?? "").replace(/\D/g, "");
+  const d = phoneDigits(user);
   if (d.length < 8 || d.length > 15) return null;
-  // If the number carries a CEMAC dial code prefix, adopt that country; else CM.
-  let country: CountryCode = "CM";
-  for (const co of Object.values(COUNTRIES)) {
-    const dial = co.dial.replace(/\D/g, "");
-    if (d.startsWith(dial) && d.length > dial.length) { country = co.code; break; }
-  }
+  // The same reading every other entry point uses: a dialed number adopts its country
+  // (only when the rest fits that country's plan), a bare one is Cameroon.
+  const { country } = splitDialed(d, "CM");
   // The SAME shape check a payout recipient gets. This rule used to be its own copy —
   // "at least 8 digits and a known prefix", with no upper bound — so a Lightning Address
   // for 677000789000 resolved, returned a payable request, and a wallet anywhere in the

@@ -11,7 +11,7 @@
    and was never read by any web surface, so the flag could be switched off with no
    effect and the web had no way to receive at all.
    ============================================================ */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { COUNTRIES, MAX_XAF, MIN_XAF, PROVIDER_PAYOUT_MAX, checkPhone, lightningAddress, receiveLink } from "@shared/domain.js";
 import { downloadPayCard, sharePayCard, type PayCard } from "../lib/paycard";
@@ -36,6 +36,18 @@ export function Receive() {
   const [amountDraft, setAmountDraft] = useState("");
   const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, "")) || 0, MAX_XAF);
   const [showLn, setShowLn] = useState(false);
+  // What a payer's wallet will show for this address — the registered name, masked until the
+  // holder has verified the number in the app. Read from the same endpoint wallets use.
+  const [payerSees, setPayerSees] = useState<string | null>(null);
+  useEffect(() => {
+    setPayerSees(null);
+    if (!number) return;
+    let alive = true;
+    fetch(`/.well-known/lnurlp/${encodeURIComponent(number.replace(/\D/g, ""))}`).then((r) => r.json())
+      .then((j: { metadata?: string }) => { if (!alive) return; const m = JSON.parse(j.metadata ?? "[]") as Array<[string, string]>; const line = m.find((x) => x[0] === "text/plain")?.[1] ?? ""; setPayerSees(line.split(" · ")[0] || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [number]);
   const origin = typeof window !== "undefined" ? window.location.origin : "https://momome.xyz";
   const link = number ? receiveLink(origin, number, amountXaf) : "";
   const shareLine = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}` : "";
@@ -161,6 +173,11 @@ export function Receive() {
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 750, color: "var(--ink-3)" }}>{t("rcv_ln_section")}</div>
               <p style={{ color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45, margin: "4px 0 8px" }}>{t("rcv_ln_hint")}</p>
               <CopyField label={t("rcv_copy_addr")} value={address} />
+              {payerSees && (
+                <p style={{ color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45, margin: "8px 0 0" }}>
+                  {t("rcv_payer_sees")} <b>{payerSees}</b>{/\*/.test(payerSees) ? ` — ${t("rcv_payer_sees_masked")}` : ""}
+                </p>
+              )}
               <button className="btn btn-quiet" style={{ marginTop: 8, fontSize: 12.5 }} onClick={() => setShowLn((v) => !v)}>{showLn ? t("amb_hide_qr") : t("rcv_show_ln_qr")}</button>
               {showLn && (
                 <div role="img" aria-label={`${t("rcv_ln_section")}: ${address}`} style={{ display: "grid", placeItems: "center", padding: 12 }}>

@@ -39,3 +39,4 @@ mobile/google-services.json
 
 # The server DB folder is `data/`; source folders that happen to be named data must not be swallowed.
 !app/src/capital/data/
+BUILD_VERSION

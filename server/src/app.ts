@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
@@ -84,6 +85,22 @@ export function responseDeadline(ms: number) {
 }
 
 /** Build the Express app (no listen). Used by the server bootstrap and tests. */
+/** Which commit is answering. APP_VERSION (CI sets it), the platform's own SHA, or the
+ *  BUILD_VERSION file scripts/deploy.sh writes into a clean export — a CLI upload has no git
+ *  metadata, and without this the deploy gate cannot tell the new build from the old one. */
+let fileVersion: string | null | undefined;
+export function appVersion(): string | null {
+  const env = process.env.APP_VERSION ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA;
+  if (env) return env.slice(0, 7);
+  if (fileVersion === undefined) {
+    fileVersion = null;
+    for (const rel of ["../../BUILD_VERSION", "../../../BUILD_VERSION", "../../../../BUILD_VERSION"]) {
+      try { const v = readFileSync(new URL(rel, import.meta.url), "utf8").trim(); if (v) { fileVersion = v.slice(0, 7); break; } } catch { /* next */ }
+    }
+  }
+  return fileVersion;
+}
+
 export function createApp() {
   const app = express();
   // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
@@ -144,7 +161,7 @@ export function createApp() {
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: (process.env.APP_VERSION ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

@@ -54,8 +54,25 @@ Code: `.github/workflows/deploy.yml`, `scripts/deploy-gate.sh`, `scripts/railway
 - Every green push to `main` deploys **staging**; a tag `vX.Y.Z` deploys **production**.
   Both run the gate (deep health 200 with the deployed SHA + a synthetic quote) and roll
   back to the previous SUCCESS deployment if it fails.
-- Manual fallback stays valid: `git archive HEAD | tar -x -C tmp && cd tmp && railway up`
-  from the export root, then `scripts/deploy-gate.sh <url>`.
+- Manual deploys go through **`scripts/deploy.sh [production|staging]`** — the same steps as
+  CI: clean export of HEAD, `BUILD_VERSION` stamped so `/health/deep.version` names the
+  commit, upload, wait for Railway's verdict, gate against that SHA, roll back on failure
+  (automatic with `RAILWAY_API_TOKEN`, otherwise it prints the id). The gate no longer
+  accepts an empty version when a SHA is expected.
+
+### Deploy review 2026-09-20 — what was found
+- **GitHub Actions is not running at all**: every run since at least 2026-09-19 fails in
+  0–4 s with *"The job was not started because your account is locked due to a billing
+  issue."* CI, Mobile and Deploy are all dead until the GitHub account's billing is fixed
+  (github.com → Settings → Billing). Nothing in the repo can change that.
+- `deploy.yml` had a YAML error (a multi-line `python -c` inside a block scalar) that
+  would have kept it from ever parsing even with billing fixed — fixed.
+- Manual `railway up` deploys reported `version: null`, so the gate could not tell the
+  new build from the old — fixed by the `BUILD_VERSION` stamp above.
+- The web app deploys from Vercel's Git integration on every push to `main` (independent
+  of GitHub Actions); the API from Railway by upload only (no Git integration).
+- Production still runs on **SQLite** (`store.backend: sqlite`) — the Postgres cutover
+  (§1) remains an operator step; and the `float:low` alert has been open since 2026-09-18.
 
 ## 4. Monitoring that pages
 

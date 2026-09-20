@@ -53,10 +53,11 @@ jobs:
       - name: Record the deployment to roll back to
         id: prev
         # A project token scopes the CLI to the project; no `railway link` (interactive) is needed.
+        # One line of Python on purpose: a multi-line -c body inside this block scalar is what
+        # broke the YAML and silently disabled every deploy run.
         run: |
-          echo "id=$(railway deployment list --json --environment "$TARGET" --service momome-api 2>/dev/null | python3 -c 'import sys,json
-d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]
-print(d[0]["id"] if d else "")' 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          prev=$(railway deployment list --json --environment "$TARGET" --service momome-api 2>/dev/null | python3 -c 'import sys,json; d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]; print(d[0]["id"] if d else "")' 2>/dev/null || true)
+          echo "id=$prev" >> "$GITHUB_OUTPUT"
       - name: Upload a clean export of this commit
         run: |
           mkdir -p /tmp/export && git archive "$GITHUB_SHA" | tar -x -C /tmp/export

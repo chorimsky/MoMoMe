@@ -20,6 +20,7 @@ import { usingPostgres } from "./db/store.js";
 import { pgPool } from "./db/pg.js";
 import { pruneIdentityRecords } from "./core/identityResolution/cache.js";
 import { chainTick } from "./core/upi/chain.js";
+import { pruneIntents, allIntents, syncIntent } from "./core/upi/intents.js";
 import { scanCompliance } from "./core/compliance.js";
 import { ibexConfigured } from "./config.js";
 import { rate as ibexRate, registerAccountWebhook } from "./adapters/ibex.js";
@@ -105,6 +106,8 @@ async function reconcileOnce(): Promise<void> {
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
   try { pruneIdentityRecords(); } catch (e) { console.error("prune identity records", e); } // data minimisation (IDENTITY_RECORD_RETENTION_DAYS)
   try { await chainTick(); } catch (e) { console.error("upi chain", e); } // stablecoin transfer lifecycle: observe, never re-send
+  // Shadow intents mirror the V1 payment that carries the money; keep them current, then let closed ones go.
+  try { for (const i of allIntents(300)) if (i.refs.v1PaymentId && !["COMPLETED", "CANCELLED", "EXPIRED", "PAYMENT_FAILED", "SETTLEMENT_FAILED"].includes(i.state)) await syncIntent(i); pruneIntents(); } catch (e) { console.error("upi intents", e); }
   try { await backfillRailCosts(); } catch (e) { console.error("rail costs", e); }
   // Last: page the operator about anything the tick found (or could not fix).
   try { await evaluateAlerts(); } catch (e) { console.error("alerts", e); }

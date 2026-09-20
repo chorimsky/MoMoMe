@@ -19,6 +19,7 @@ import { store } from "../../db/store.js";
 import { getTx } from "../network/saga.js";
 import { IdentityError } from "../identityResolution/errors.js";
 import { identityMode } from "../identityResolution/resolver.js";
+import { canaryGate } from "./canary.js";
 
 const intents = new Map<string, PaymentIntentV2>();
 register("upi_intents", () => [...intents.values()].slice(-10_000), (d: PaymentIntentV2[]) => { for (const i of d ?? []) intents.set(i.id, i); });
@@ -91,6 +92,8 @@ export async function executeIntent(i: PaymentIntentV2, mintV1: (x: { method: "L
   if (i.state !== "ROUTE_SELECTED" || !i.route) throw new IntentError("intent_state", `Cannot execute an intent in state ${i.state}.`, 409);
   if (!flag("PAYMENT_INTENT_V2_ENABLED")) throw new IntentError("flag_off", "PAYMENT_INTENT_V2_ENABLED is off — intents can be quoted and routed, not executed.", 403);
   if (routingMode() !== "EXECUTE") throw new IntentError("shadow_mode", "Routing is in SHADOW mode: the route was recorded, nothing was executed. Pay through the V1 flow.", 403);
+  const canary = canaryGate(i.owner, i.amount.currency === "XAF" ? i.amount.value : Number.MAX_SAFE_INTEGER);
+  if (!canary.ok) { move(i, "ROUTE_SELECTED", canary.reason); throw new IntentError("canary_refused", `${canary.reason}. Pay through the V1 flow.`, 403); }
   const mm = i.recipient.destinations.find((d) => d.rail === "MOBILE_MONEY") as Extract<PaymentDestination, { rail: "MOBILE_MONEY" }> | undefined;
   if (!mm || mm.country !== "CM") throw new IntentError("unsupported", "Only domestic (Cameroon) execution goes through this layer today; cross-border uses /api/network.", 400);
   const method = i.source?.rail === "LIGHTNING" ? "LIGHTNING" : i.source?.asset === "USDC" ? "USDC" : i.source?.asset === "USDT" ? "USDT" : null;
@@ -135,4 +138,15 @@ export function linkIntentToV1(i: PaymentIntentV2, p: Payment): void {
   i.source = i.source ?? { rail: p.method === "LIGHTNING" || p.method === "ONCHAIN" ? "LIGHTNING" : "STABLECOIN", asset: p.method === "LIGHTNING" || p.method === "ONCHAIN" ? "BTC" : p.method, network: p.method === "LIGHTNING" ? "LIGHTNING" : p.method === "ONCHAIN" ? "BITCOIN" : "ETHEREUM" };
   if (["CREATED", "IDENTITY_RESOLVED", "QUOTED", "ROUTE_SELECTED", "LIQUIDITY_FAILED", "PROVIDER_UNAVAILABLE"].includes(i.state)) move(i, "PAYMENT_PENDING", `shadow of V1 ${p.ref}`);
   touch("upi_intents");
+}
+
+/** Data hygiene: closed intents (and shadow intents V1 has finished with) leave memory
+ *  after UPI_INTENT_RETENTION_DAYS (default 30); open ones never. Called from the tick. */
+export function pruneIntents(now = Date.now()): number {
+  const days = Math.max(1, Number(process.env.UPI_INTENT_RETENTION_DAYS ?? 30) || 30);
+  const cutoff = now - days * 86_400_000;
+  let n = 0;
+  for (const [k, i] of intents) if (["COMPLETED", "CANCELLED", "EXPIRED", "PAYMENT_FAILED", "SETTLEMENT_FAILED", "LIQUIDITY_FAILED", "PROVIDER_UNAVAILABLE"].includes(i.state) && Date.parse(i.updatedAt) < cutoff) { intents.delete(k); n++; }
+  if (n) touch("upi_intents");
+  return n;
 }

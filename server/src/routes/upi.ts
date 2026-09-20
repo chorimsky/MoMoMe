@@ -41,7 +41,8 @@ function publicIdentity(idn: PaymentIdentity, full: boolean) {
 async function guard(req: Request, res: Response, kind: "resolve" | "intent"): Promise<{ id: string; kind: string } | null> {
   const actor = await actorOf(req);
   if (!actor) { res.status(401).json({ error: "UNAUTHORIZED", message: "Sign in on this device." }); return null; }
-  const rl = await rateLimitDurable(`upi:${kind}:${actor.id}`, kind === "resolve" ? 30 : 20, 60_000);
+  const limit = Math.max(1, Number(process.env[kind === "resolve" ? "UPI_RESOLVE_RATE_LIMIT" : "UPI_INTENT_RATE_LIMIT"] ?? (kind === "resolve" ? 30 : 20)) || 20);
+  const rl = await rateLimitDurable(`upi:${kind}:${actor.id}`, limit, 60_000);
   if (!rl.ok) { res.setHeader("Retry-After", String(rl.retryAfterSec)); res.status(429).json({ error: "RATE_LIMITED", message: "Too many requests. Please wait a moment." }); return null; }
   return actor;
 }

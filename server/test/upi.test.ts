@@ -6,6 +6,7 @@ process.env.ADMIN_SESSION_SECRET = "upi-test-secret";
 process.env.IDENTITY_RESOLUTION_ENABLED = "true";
 process.env.IDENTITY_MAX_DISTINCT_PER_HOUR_IP = "1000";
 process.env.LEGACY_SENDER_UNTIL = "2000-01-01T00:00:00Z";
+process.env.UPI_INTENT_RATE_LIMIT = "200";
 import type { AddressInfo } from "node:net";
 import { p256 } from "@noble/curves/nist.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -162,6 +163,13 @@ async function main() {
     process.env.PAYMENT_INTENT_V2_ENABLED = "true"; process.env.MULTI_RAIL_ROUTING_ENABLED = "true"; process.env.ROUTING_ENGINE_MODE = "EXECUTE";
     const pi2 = await call("POST", "/v2/payment-intents", "upi-1", { recipient: { identity: "670123456" }, amount: { value: 5000 } });
     await call("POST", `/v2/payment-intents/${pi2.body.intent.id}/route`, "upi-1", { source: { rail: "LIGHTNING" } });
+    // Phase 18 — canary: EXECUTE is never everyone at once.
+    const exNo = await call("POST", `/v2/payment-intents/${pi2.body.intent.id}/execute`, "upi-1", {});
+    ok("EXECUTE with no rollout and an unlisted device is refused by the canary (routed, recorded, not executed)", exNo.status === 403 && exNo.body.error === "canary_refused" && /rollout/.test(exNo.body.message), `${exNo.status} ${exNo.body.error}`);
+    process.env.UPI_CANARY_DEVICES = "upi-1"; process.env.UPI_MAX_PER_TX_XAF = "4000";
+    const exCap = await call("POST", `/v2/payment-intents/${pi2.body.intent.id}/execute`, "upi-1", {});
+    ok("a listed device is still held to the per-payment cap", exCap.status === 403 && /per-payment cap/.test(exCap.body.message), exCap.body.message);
+    process.env.UPI_MAX_PER_TX_XAF = "50000";
     const ex2 = await call("POST", `/v2/payment-intents/${pi2.body.intent.id}/execute`, "upi-1", {});
     ok("with the flags on, execute mints the V1 quote + payment and returns a BOLT11 PaymentRequest", ex2.status === 200 && ex2.body.intent.state === "PAYMENT_PENDING" && ex2.body.request?.protocol === "BOLT11" && !!ex2.body.request.refs.v1PaymentId && !!ex2.body.request.refs.correlationId, `${ex2.status} ${JSON.stringify(ex2.body).slice(0, 160)}`);
     const { store } = await import("../src/db/store.js");
@@ -174,8 +182,10 @@ async function main() {
     const stable = await call("POST", "/v2/payment-intents", "upi-1", { recipient: { identity: "670123456" }, amount: { value: 5000 } });
     await call("POST", `/v2/payment-intents/${stable.body.intent.id}/route`, "upi-1", { source: { rail: "STABLECOIN", asset: "USDC" } });
     const ex3 = await call("POST", `/v2/payment-intents/${stable.body.intent.id}/execute`, "upi-1", {});
-    ok("stablecoin funding through intents stays closed until STABLECOIN_SETTLEMENT_ENABLED (V1 still accepts USDC directly)", ex3.status === 403 && /STABLECOIN_SETTLEMENT_ENABLED/.test(ex3.body.message ?? ""));
-    delete process.env.PAYMENT_INTENT_V2_ENABLED; delete process.env.MULTI_RAIL_ROUTING_ENABLED; delete process.env.ROUTING_ENGINE_MODE;
+    ok("stablecoin funding through intents stays closed until STABLECOIN_SETTLEMENT_ENABLED (V1 still accepts USDC directly)", ex3.status === 403 && /STABLECOIN_SETTLEMENT_ENABLED/.test(ex3.body.message ?? ""), `${ex3.status} ${ex3.body.error} ${ex3.body.message}`);
+    const { canaryConfig, executedVolume24h } = await import("../src/core/upi/canary.js");
+    ok("the executed 24 h volume counts the intent that ran (for the daily cap)", executedVolume24h() >= 5000 && canaryConfig().devices.includes("upi-1"));
+    delete process.env.PAYMENT_INTENT_V2_ENABLED; delete process.env.MULTI_RAIL_ROUTING_ENABLED; delete process.env.ROUTING_ENGINE_MODE; delete process.env.UPI_CANARY_DEVICES; delete process.env.UPI_MAX_PER_TX_XAF;
     // Shadow from REAL V1 traffic: with the master flag on, a V1 payment spawns a linked shadow
     // intent (quoted, routed, V1's method as the reference) that executes nothing.
     process.env.UNIVERSAL_PAYMENT_IDENTITY_ENABLED = "true";

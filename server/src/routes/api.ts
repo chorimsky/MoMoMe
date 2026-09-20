@@ -85,6 +85,7 @@ import { pools } from "../core/upi/liquidity.js";
 import { metricsSnapshot as upiMetrics, reconcileIntent } from "../core/upi/ledger.js";
 import { allIntents, syncIntent, getIntent } from "../core/upi/intents.js";
 import { chainTxs } from "../core/upi/chain.js";
+import { canaryConfig, executedVolume24h } from "../core/upi/canary.js";
 import { shadowFromV1 } from "../core/upi/shadow.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
@@ -2270,7 +2271,7 @@ function samplePayment(over: Partial<Payment> = {}): Payment {
 
 /* ---------- Universal Payment Identity — admin visibility (works with the flags off) ---------- */
 api.get("/admin/upi", async (_req, res) => {
-  res.json({ flags: upiFlags(), mode: routingMode(), rule: routingRule(), providers: await capabilityRegistry(), assets: assets(), networks: Object.values(NETWORKS), pools: await pools(), shadow: shadowSummary(), metrics: upiMetrics(), intents: (await Promise.all(allIntents(30).map(syncIntent))).map((i) => ({ id: i.id, state: i.state, identity: i.recipient.identity, amount: i.amount, source: i.source, route: i.route ? `${i.route.type}:${i.route.sourceRail}` : null, refs: i.refs, at: i.createdAt })), chain: chainTxs(30) });
+  res.json({ flags: upiFlags(), mode: routingMode(), rule: routingRule(), canary: { ...canaryConfig(), executed24hXaf: executedVolume24h() }, providers: await capabilityRegistry(), assets: assets(), networks: Object.values(NETWORKS), pools: await pools(), shadow: shadowSummary(), metrics: upiMetrics(), intents: (await Promise.all(allIntents(30).map(syncIntent))).map((i) => ({ id: i.id, state: i.state, identity: i.recipient.identity, amount: i.amount, source: i.source, route: i.route ? `${i.route.type}:${i.route.sourceRail}` : null, refs: i.refs, at: i.createdAt })), chain: chainTxs(30) });
 });
 api.get("/admin/upi/intents/:id/reconcile", async (req, res) => { const i = getIntent(req.params.id); if (!i) return res.status(404).json({ error: "not_found" }); res.json({ intent: await syncIntent(i), reconciliation: await reconcileIntent(i) }); });
 

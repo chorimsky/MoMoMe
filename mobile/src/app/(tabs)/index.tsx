@@ -244,15 +244,24 @@ export default function SendScreen() {
     const digits = phone.replace(/\D/g, '');
     const hadNumber = prevDigits.current.length >= 8;
     prevDigits.current = digits;
-    if (digits.length < 8) {
+    // Look up only a COMPLETE, valid number for the country — never on the eighth of nine.
+    if (digits.length < 8 || !checkPhone(phone, country).ok) {
       // Only a real edit that breaks a valid number clears the recipient. This effect also
       // runs on mount, BEFORE the contact/scan params have filled the field — and it used
       // to wipe the name those params had just seeded, so a contact the operator could not
       // name arrived on the form with no name at all.
-      if (hadNumber) {
+      if (hadNumber && digits.length < 8) {
         manualName.current = '';
         setRecipientName('');
         setNameSource('idle');
+        setResolvedProvider(null);
+        setOpenedAs(null);
+      }
+      // A registered name belongs to the number it was looked up for: once that number is
+      // edited into something invalid, the name must not stay on screen as verified.
+      if (digits.length >= 8 && nameSourceRef.current === 'provider') {
+        setRecipientName(manualName.current);
+        setNameSource(manualName.current ? 'manual' : 'idle');
         setResolvedProvider(null);
         setOpenedAs(null);
       }

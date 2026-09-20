@@ -20,11 +20,36 @@ export const COUNTRIES: Record<CountryCode, Country> = {
   CF: { name: "Cent. Afr. Rep.", code: "CF", dial: "+236", ccy: "XAF", providers: ["ORANGE", "MTN"], active: false, nsnLen: [8] },
 };
 
-/** Local subscriber digits for a number (strips the country dial code). */
+/** The digits of a phone number as a person typed or pasted them, made plain:
+ *   · any Unicode decimal digit becomes ASCII (Arabic-Indic ٦٧٤ and fullwidth ６７４ arrive
+ *     from copied WhatsApp messages and some keyboards);
+ *   · the international prefix "00" (and "+") is dropped, so "00237674…" reads as "237674…";
+ *   · everything else (spaces, dots, brackets, dashes) is removed.
+ *  Every phone helper below starts here; nothing else in the product reads raw input. */
+export function phoneDigits(raw: string | null | undefined): string {
+  let d = String(raw ?? "").replace(/\p{Nd}/gu, (ch) => {
+    const v = Number.parseInt(ch, 10);                      // ASCII stays as it is
+    if (!Number.isNaN(v)) return String(v);
+    const cp = ch.codePointAt(0) ?? 0;                      // Arabic-Indic, Eastern Arabic, fullwidth …
+    for (const zero of [0x0660, 0x06f0, 0xff10, 0x0966, 0x09e6]) if (cp >= zero && cp <= zero + 9) return String(cp - zero);
+    return "";
+  });
+  d = d.replace(/[^\d+]/g, "");
+  if (d.startsWith("+")) d = d.slice(1);
+  else if (d.startsWith("00")) d = d.slice(2);
+  return d.replace(/\D/g, "");
+}
+
+/** Local subscriber digits for a number: the country dial code goes, and so does a trunk
+ *  "0" typed in front of an otherwise complete number ("0674 12 34 56" — Cameroon has no
+ *  trunk prefix, but every diaspora keyboard habit does). */
 export function localDigits(phone: string, country: CountryCode): string {
-  const d = phone.replace(/\D/g, "");
+  const d = phoneDigits(phone);
   const dial = COUNTRIES[country].dial.replace(/\D/g, "");
-  return d.startsWith(dial) ? d.slice(dial.length) : d;
+  let local = d.startsWith(dial) && d.length > dial.length ? d.slice(dial.length) : d;
+  const lens = COUNTRIES[country].nsnLen;
+  if (local.startsWith("0") && !lens.includes(local.length) && lens.includes(local.length - 1)) local = local.slice(1);
+  return local;
 }
 
 /** Is this string a real name, or just the number written back?
@@ -83,12 +108,13 @@ function editDistance(a: string, b: string, max: number): number {
   }
   return d[a.length][b.length];
 }
-/** Cameroonian spellings drift (Aminatou/Aminatu, Mballa/Mbala, Tchoumi/Tchoumi): one edit
- *  in a token of five letters or more, two in one of nine or more, is the same token. */
+/** Cameroonian spellings drift (Aminatou/Aminatu, Mballa/Mbala, Nana/Nanna): one edit in a
+ *  token of four letters or more, two in one of nine or more, is the same token. Three
+ *  letters and under must be exact — Ngo/Nga are different families. */
 function sameToken(a: string, b: string): boolean {
   if (a === b) return true;
   const n = Math.min(a.length, b.length);
-  if (n < 5) return false;
+  if (n < 4) return false;
   return editDistance(a, b, n >= 9 ? 2 : 1) <= (n >= 9 ? 2 : 1);
 }
 /** Does token t of one name appear in the other name's tokens? An initial hits a token's
@@ -158,7 +184,7 @@ export interface PhoneCheck {
  *  dropdown's guess: paying MTN for an Orange number is a failed or misdirected payout, and
  *  the dropdown is the one part of this the sender is most likely to get wrong. */
 export function checkPhone(phone: string, country: CountryCode): PhoneCheck {
-  const raw = (phone ?? "").replace(/\D/g, "");
+  const raw = phoneDigits(phone);
   if (!raw) return { ok: false, local: "", provider: null, reason: "empty" };
 
   // Typed with SOMEONE ELSE'S country code — say whose, so the UI can offer to switch.
@@ -324,7 +350,7 @@ export function satsLabel(btc: number): string {
  *  `fallback`. The dial prefix alone is not proof (a Cameroon local number can start with
  *  "237…"), so the remaining length must also fit that country's numbering plan. */
 export function splitDialed(raw: string, fallback: CountryCode = "CM"): { country: CountryCode; local: string } {
-  const d = (raw ?? "").replace(/\D/g, "");
+  const d = phoneDigits(raw);
   for (const c of Object.values(COUNTRIES)) {
     const dial = c.dial.replace(/\D/g, "");
     if (d.startsWith(dial) && c.nsnLen.includes(d.length - dial.length)) return { country: c.code, local: d.slice(dial.length) };

@@ -8,7 +8,7 @@
    ============================================================ */
 import { parsePhoneNumberFromString, type CountryCode as LibCountry } from "libphonenumber-js/max";
 import type { NormalizedIdentifier } from "../../../../shared/identity.js";
-import { detectProvider, COUNTRIES } from "../../../../shared/domain.js";
+import { detectProvider, COUNTRIES, phoneDigits, localDigits } from "../../../../shared/domain.js";
 import { MARKETS } from "../network/markets.js";
 import { IdentityError } from "./errors.js";
 
@@ -18,8 +18,27 @@ export const SUPPORTED_COUNTRIES = (): string[] => [...new Set([...Object.keys(C
 export function normalizeMsisdn(input: string, defaultCountry = "CM"): NormalizedIdentifier {
   const raw = String(input ?? "").trim();
   if (!raw) throw new IdentityError("IDENTITY_INVALID_IDENTIFIER", "Enter a Mobile Money number.");
-  // Keep only what a number can contain; "6 74 12 34 56" and "+237 674…" both survive.
-  const cleaned = raw.replace(/[^\d+]/g, "");
+  // The same reading as the V1 helpers (shared/domain phoneDigits + localDigits): Unicode
+  // digits, "00"/"+" international prefixes and a stray trunk "0" are all understood, so a
+  // number V1 accepts is never refused here as "invalid" and vice versa. A number whose
+  // digits fit the default country's plan (after its own dial code and trunk 0 are removed)
+  // is read as that country's; anything else is read as international.
+  const digits = phoneDigits(raw);
+  const home = (COUNTRIES as Record<string, { dial: string; nsnLen: number[] }>)[defaultCountry];
+  const knownDials = [...Object.values(COUNTRIES).map((c) => c.dial.replace(/\D/g, "")), ...Object.values(MARKETS).map((m) => m.dial.replace(/\D/g, ""))];
+  const explicitIntl = /^\s*(\+|00)/.test(raw); // the sender SAID which country
+  let cleaned: string;
+  if (explicitIntl) {
+    // "+237 0674…": the trunk 0 slips in after a dial code too — read it under that country.
+    const own = Object.values(COUNTRIES).find((c) => digits.startsWith(c.dial.replace(/\D/g, "")));
+    cleaned = own ? `${own.dial}${localDigits(digits, own.code)}` : `+${digits}`;
+  } else if (home && home.nsnLen.includes(localDigits(digits, defaultCountry as keyof typeof COUNTRIES).length)) {
+    cleaned = `${home.dial}${localDigits(digits, defaultCountry as keyof typeof COUNTRIES)}`;   // a complete home number
+  } else if (knownDials.some((d) => digits.startsWith(d) && digits.length > d.length + 5)) {
+    cleaned = `+${digits}`;                                                                       // another market's number, dialed
+  } else {
+    cleaned = home ? `${home.dial}${digits}` : digits;                                             // wrong length for home → invalid, never "Tokelau"
+  }
   const parsed = parsePhoneNumberFromString(cleaned, defaultCountry as LibCountry);
   if (!parsed || !parsed.isPossible()) throw new IdentityError("IDENTITY_INVALID_IDENTIFIER", "That is not a valid phone number.");
   const country = parsed.country ?? defaultCountry;
@@ -37,7 +56,9 @@ export function normalizeMsisdn(input: string, defaultCountry = "CM"): Normalize
  *  fall back to the market's first payout-capable provider until a prediction/contract
  *  says otherwise — and are marked so by the resolver (operator confidence "prefix"). */
 export function resolveOperatorByPrefix(country: string, national: string): string | null {
-  if (country in COUNTRIES) return detectProvider(national, country as keyof typeof COUNTRIES);
+  // A V1 country whose corridor is not open has no confirmed prefix table: its "first
+  // provider" is a placeholder, not an operator, and must not be presented as one.
+  if (country in COUNTRIES) return COUNTRIES[country as keyof typeof COUNTRIES].active ? detectProvider(national, country as keyof typeof COUNTRIES) : null;
   const m = MARKETS[country];
   return m?.providers[0]?.id ?? null;
 }

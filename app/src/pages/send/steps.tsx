@@ -117,9 +117,11 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // Resolve the recipient name from the Mobile Money number (read-only).
   useEffect(() => {
     const d = s.phone.replace(/\D/g, "");
-    // Reset resolving on the early return too — otherwise deleting digits back under
-    // 8 while a resolve is in flight leaves the spinner stuck and Continue disabled.
-    if (d.length < 8) { setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); set({ recipientName: "", nameSource: "idle" }); return; }
+    // Look up only a COMPLETE, valid number. Firing at "8 digits" asked about a number
+    // nobody has on the eighth of nine, and showed "name not verified" mid-typing.
+    // Reset resolving on the early return too — otherwise deleting digits back while a
+    // resolve is in flight leaves the spinner stuck and Continue disabled.
+    if (!checkPhone(s.phone, s.country).ok) { setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); if (d.length < 8 || s.nameSource === "provider") set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     if (identity.enabled) setIdState("validating");
     let active = true;
@@ -185,7 +187,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
     }, 500);
     return () => { active = false; clearTimeout(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.phone, identity.enabled, idAttempt]);
+  }, [s.phone, s.country, identity.enabled, idAttempt]);
 
   const verified = s.nameSource === "provider" || s.nameSource === "internal";
   // Gate mode (IDENTITY_RESOLUTION_MODE=gate): an account the operator says is missing or

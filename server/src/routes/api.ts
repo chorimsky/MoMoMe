@@ -883,6 +883,11 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
   // always routes to the operator that actually owns the number. checkPhone has already
   // refused the case where that cannot be determined, so this never falls back to the guess.
   recipient.provider = check.provider!;
+  // And store the number CANONICALLY — the local subscriber digits. What the sender typed
+  // ("+237 670 12 34 56", "0670123456") used to be kept verbatim on the payment, so the
+  // receipt, the identity graph, the near-miss check and the rail each read it their own
+  // way; one spelling from here on.
+  recipient.phone = check.local;
   // Never store a null/blank name — fall back to the number so downstream UI
   // (activity, receipts) and the identity layer always have a string. Sanitize +
   // cap (it's forwarded to the payout aggregator's disburse({name}) and stored): strip

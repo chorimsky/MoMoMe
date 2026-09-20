@@ -9,7 +9,7 @@
    happen at number entry, not at payment.
    ============================================================ */
 import type { ResolveResult, CountryCode } from "../../../shared/types.js";
-import { detectProvider } from "../../../shared/domain.js";
+import { checkPhone, localDigits } from "../../../shared/domain.js";
 import { getIdentityByDigits, touchLastSeen } from "./identity.js";
 import * as pawapay from "../adapters/pawapay.js";
 import { identityEnabled, resolveIdentity, cachedSnapshot } from "./identityResolution/resolver.js";
@@ -23,9 +23,11 @@ import { identityEnabled, resolveIdentity, cachedSnapshot } from "./identityReso
  *  The old order was the reverse: a name a sender once TYPED outranked the operator's
  *  record, so a wrong label, once paid, became "verified" for everyone after. Nothing a
  *  sender types can outrank the operator. */
-export async function registeredName(phone: string, country: CountryCode = "CM", opts: { cacheOnly?: boolean } = {}): Promise<{ name: string; source: "provider" | "internal" } | null> {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length < 8) return null;
+export async function registeredName(phoneRaw: string, country: CountryCode = "CM", opts: { cacheOnly?: boolean } = {}): Promise<{ name: string; source: "provider" | "internal" } | null> {
+  // One spelling in, whatever was typed: the operator lookup, the cache and the identity
+  // graph all key on the local subscriber digits.
+  const phone = localDigits(phoneRaw, country);
+  if (phone.length < 8) return null;
   // With Identity Resolution on, the operator's record comes from the v2 chain — today the
   // Peexit verify-wallet call (docs: /clients/verify-wallet), the one rail we hold that
   // returns the registered account name; MTN direct once its credentials exist. pawaPay
@@ -57,11 +59,15 @@ export async function registeredName(phone: string, country: CountryCode = "CM",
 }
 
 export async function resolveRecipient(phone: string, country: CountryCode = "CM"): Promise<ResolveResult> {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length < 8) return { status: "idle" };
+  // Only a COMPLETE, valid number for this country is looked up. "At least 8 digits" used
+  // to fire on the eighth of nine Cameroon digits: the operator was asked about a number
+  // nobody has, the answer was "unknown", and the sender saw "name not verified — enter
+  // it" while still typing the last digit.
+  const check = checkPhone(phone, country);
+  if (!check.ok) return { status: "idle", provider: null };
   // Operator detected from the number's prefix — the routing/identity anchor,
   // returned with every result so the UI confirms it and the payout routes right.
-  const provider = detectProvider(phone, country);
+  const provider = check.provider;
   const reg = await registeredName(phone, country);
   if (reg) {
     return { status: reg.source, name: reg.name, verified: true, trustLevel: reg.source === "provider" ? 1 : 2, provider };

@@ -81,6 +81,9 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   const [idState, setIdState] = useState<IdState>("idle");
   const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
   const [idAttempt, setIdAttempt] = useState(0); // "Retry" bumps this to re-run the lookup
+  // The sender must SAY the registered name is the person they mean. A tick that resets with
+  // every change of number — the one act that catches a wrong digit before money moves.
+  const [idConfirmed, setIdConfirmed] = useState(false);
   const phoneRef = useRef<HTMLInputElement>(null);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
@@ -121,6 +124,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
     // nobody has on the eighth of nine, and showed "name not verified" mid-typing.
     // Reset resolving on the early return too — otherwise deleting digits back while a
     // resolve is in flight leaves the spinner stuck and Continue disabled.
+    setIdConfirmed(false);
     if (!checkPhone(s.phone, s.country).ok) { setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); if (d.length < 8 || s.nameSource === "provider") set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     if (identity.enabled) setIdState("validating");
@@ -215,7 +219,9 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // name is the one thing that lets a sender notice they have the wrong person; a verified
   // one comes from the operator or from a payment that actually landed.
   const nameOk = verified || isRealName(s.recipientName, s.phone);
-  const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving && !idBlocked;
+  // With verification on, a verified name needs the sender's explicit "yes, this is them".
+  const needsConfirm = identity.enabled && idState === "verified" && verified && s.nameSource === "provider";
+  const valid = s.xaf >= MIN_XAF && !overCap && check.ok && nameOk && !resolving && !idBlocked && (!needsConfirm || idConfirmed);
 
   // A business checkout with an open amount: the copy names the business and the
   // presets are till-sized, not remittance-sized.
@@ -324,6 +330,10 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{s.recipientName}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{idMeta?.operator ? `${PROVIDERS[idMeta.operator as keyof typeof PROVIDERS]?.name ?? idMeta.operator} Mobile Money` : "Mobile Money"} · {COUNTRIES[(idMeta?.country ?? s.country) as keyof typeof COUNTRIES]?.name ?? idMeta?.country}</div>
                   {enteredAs && <div role="alert" style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 4, lineHeight: 1.4 }}>{fill(t("name_mismatch"), { n: enteredAs })}</div>}
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
+                    <input type="checkbox" checked={idConfirmed} onChange={(e) => setIdConfirmed(e.target.checked)} style={{ width: 18, height: 18, accentColor: "var(--recv)" }} />
+                    <span>{fill(t("id_confirm_person"), { n: s.recipientName })}</span>
+                  </label>
                 </div>
                 <button onClick={() => set({ nameSource: "manual" })} className="btn btn-quiet" style={{ padding: "5px 9px", fontSize: 12.5 }}>{t("edit")}</button>
               </div>

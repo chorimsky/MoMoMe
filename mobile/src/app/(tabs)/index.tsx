@@ -131,6 +131,8 @@ export default function SendScreen() {
   const [idState, setIdState] = useState<IdState>('idle');
   const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
   const [idAttempt, setIdAttempt] = useState(0);
+  // The sender must SAY the registered name is the person they mean; resets with the number.
+  const [idConfirmed, setIdConfirmed] = useState(false);
   const [method, setMethod] = useState<Method | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
@@ -236,7 +238,8 @@ export default function SendScreen() {
   const nameOk = nameVerified || isRealName(recipientName, phone);
   // Gate mode: an account the operator says is missing or inactive cannot be paid.
   const idBlocked = identity.enabled && identity.mode === 'gate' && (idState === 'not_found' || idState === 'inactive');
-  const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk && !idBlocked;
+  const needsConfirm = identity.enabled && idState === 'verified' && nameSource === 'provider';
+  const detailsValid = check.ok && xafNum >= MIN_XAF && xafNum <= MAX_XAF && !overCap && nameOk && !idBlocked && (!needsConfirm || idConfirmed);
 
   // Best-effort recipient-name resolve (debounced, non-blocking).
   const prevDigits = useRef('');
@@ -244,6 +247,7 @@ export default function SendScreen() {
     const digits = phone.replace(/\D/g, '');
     const hadNumber = prevDigits.current.length >= 8;
     prevDigits.current = digits;
+    setIdConfirmed(false);
     // Look up only a COMPLETE, valid number for the country — never on the eighth of nine.
     if (digits.length < 8 || !checkPhone(phone, country).ok) {
       // Only a real edit that breaks a valid number clears the recipient. This effect also
@@ -732,6 +736,13 @@ export default function SendScreen() {
                   </Body>
                   {openedAs ? (
                     <Body style={{ color: t.warn, fontSize: 12.5, marginTop: 2 }}>{tr('name_mismatch', { n: openedAs })}</Body>
+                  ) : null}
+                  {needsConfirm ? (
+                    <Pressable onPress={() => setIdConfirmed((v) => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: idConfirmed }} hitSlop={8}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, marginTop: Spacing.one }}>
+                      <Ionicons name={idConfirmed ? 'checkbox' : 'square-outline'} size={22} color={idConfirmed ? t.recv : t.muted} />
+                      <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13.5 }}>{tr('id_confirm_person', { n: recipientName })}</Body>
+                    </Pressable>
                   ) : null}
                 </View>
               </View>

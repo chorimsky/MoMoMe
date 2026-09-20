@@ -44,9 +44,64 @@ async function main() {
   console.log("\nName matching\n");
   ok("case, accents and spacing are normalised", normalizeName("Jean-Paul  NANÁ").join(" ") === "JEAN PAUL NANA");
   ok("MATCH", matchNames("John Doe", "JOHN  DOE") === "MATCH");
-  ok("PARTIAL_MATCH (one token)", matchNames("John Doe", "JOHN MICHAEL DOE") === "PARTIAL_MATCH");
+  ok("a middle name the sender left out is still the same person", matchNames("John Doe", "JOHN MICHAEL DOE") === "MATCH");
+  ok("PARTIAL_MATCH (two shared tokens, one that is not)", matchNames("John Doe Smith", "JOHN MICHAEL DOE") === "PARTIAL_MATCH");
   ok("NO_MATCH", matchNames("John Doe", "MICHAEL SMITH") === "NO_MATCH");
   ok("NOT_AVAILABLE when either side is missing", matchNames(undefined, "X") === "NOT_AVAILABLE" && matchNames("X", undefined) === "NOT_AVAILABLE");
+
+  console.log("\nName matching — the one algorithm the server and both apps share\n");
+  const { compareNames, namesMatch } = await import("../../shared/domain.js");
+  const table: Array<[string, string, string]> = [
+    ["Serge Manga", "MANGA SERGE", "MATCH"], ["S. Manga", "MANGA SERGE", "MATCH"], ["Jean-Paul Nana", "NANA JEAN PAUL", "MATCH"],
+    ["Jeanpaul Nana", "NANA JEAN PAUL", "MATCH"], ["Aminatu Bello", "AMINATOU BELLO", "MATCH"], ["Mbala Rose", "MBALLA ROSE", "MATCH"],
+    ["Ngo Marie", "N'GO MARIE CLAIRE", "MATCH"], ["Mme Ngo Marie Claire", "NGO MARIE CLAIRE", "MATCH"], ["John Doe", "JOHN MICHAEL DOE", "MATCH"],
+    ["Nana", "NANA JEAN PAUL", "PARTIAL_MATCH"], ["Jean Nana Yves", "NANA JEAN PAUL", "PARTIAL_MATCH"],
+    ["Jean Ngo", "JEAN MANGA", "NO_MATCH"], ["Alice Ngo", "MANGA SERGE", "NO_MATCH"], ["Nono Jean", "NANA JEAN PAUL", "NO_MATCH"], ["Paul Biya", "NANA JEAN PAUL", "NO_MATCH"],
+    ["J. M.", "JEAN MANGA", "NOT_AVAILABLE"], ["Mr", "MANGA SERGE", "NOT_AVAILABLE"],
+  ];
+  for (const [a, b, want] of table) ok(`"${a}" vs "${b}" → ${want}`, compareNames(a, b) === want, compareNames(a, b));
+  ok("a shared FIRST name alone is not a match (Jean is every third man)", !namesMatch("Jean Ngo", "JEAN MANGA"));
+  ok("the identity module's matchNames IS compareNames", matchNames("Aminatu Bello", "AMINATOU BELLO") === "MATCH" && matchNames("Jean Ngo", "JEAN MANGA") === "NO_MATCH");
+
+  console.log("\nPeexit verify-wallet provider (POST /clients/verify-wallet, mocked transport)\n");
+  const { peexitVerify } = await import("../src/core/identityResolution/providers/peexit.js");
+  const { config } = await import("../src/config.js");
+  const idCM = normalizeMsisdn("699000155", "CM");
+  const ctx = { purpose: "RECIPIENT_VERIFICATION" as const, requestId: "t", actor: "t", timeoutMs: 2000 };
+  const realFetch = globalThis.fetch;
+  const mock = (status: number, body: unknown, capture?: (init: RequestInit, url: string) => void) => { globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => { capture?.(init ?? {}, String(url)); return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }) as typeof fetch; };
+  const savedKey = config.peexit.apiKey; (config.peexit as { apiKey: string }).apiKey = "test-key";
+  try {
+    ok("configured when the Peexit key is set; supports CM × MTN/ORANGE only", peexitVerify.configured() && peexitVerify.supports("CM", "ORANGE") && peexitVerify.supports("CM", "MTN") && !peexitVerify.supports("KE", "SAFARICOM"));
+    let sent: { init: RequestInit; url: string } | null = null;
+    mock(200, { isValid: true, accountName: "NGO MARIE CLAIRE", operator: "ORANGE", status: "ACTIVE" }, (init, url) => { sent = { init, url }; });
+    let a = await peexitVerify.resolve(idCM, ctx);
+    ok("VERIFIED with the operator's registered name and operator", a.status === "VERIFIED" && a.displayName === "NGO MARIE CLAIRE" && a.operator === "ORANGE" && a.accountStatus === "ACTIVE" && a.capabilities.payout, JSON.stringify(a));
+    ok("…via POST /clients/verify-wallet { countryCode, accountNumber } with the SECRETKEY header", !!sent && sent!.url.endsWith("/clients/verify-wallet") && sent!.init.method === "POST" && JSON.parse(String(sent!.init.body)).countryCode === "CM" && JSON.parse(String(sent!.init.body)).accountNumber === "699000155" && (sent!.init.headers as Record<string, string>).SECRETKEY === "test-key", sent ? sent.url : "no call");
+    mock(404, { error: { statusCode: 404, message: "Account not found on the provider network" } });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("404 → NOT_FOUND", a.status === "NOT_FOUND" && a.error === "IDENTITY_NOT_FOUND");
+    mock(200, { isValid: false, operator: "ORANGE", status: "SUSPENDED" });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("isValid:false → INACTIVE, no name", a.status === "INACTIVE" && !a.displayName);
+    mock(200, { isValid: true, operator: "MTN", status: "ACTIVE" });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("a valid account WITHOUT a name → UNKNOWN (never a fabricated name, never VERIFIED)", a.status === "UNKNOWN" && !a.displayName && a.verified === false && a.capabilities.payout);
+    const err = async (status: number, body: unknown) => { mock(status, body); try { await peexitVerify.resolve(idCM, ctx); return null; } catch (e) { return e as InstanceType<typeof IdentityError>; } };
+    let e = await err(403, "<html>403 Forbidden</html>");
+    ok("403 (IP allowlist / key) → AUTH_ERROR, not retryable", e?.code === "IDENTITY_PROVIDER_AUTH_ERROR" && e.retryable === false);
+    e = await err(422, { error: { message: "unsupported country" } });
+    ok("422 → UNSUPPORTED_COUNTRY, not retryable", e?.code === "IDENTITY_UNSUPPORTED_COUNTRY" && e.retryable === false);
+    e = await err(503, { error: "down" });
+    ok("5xx → PROVIDER_UNAVAILABLE, retryable (next provider may answer)", e?.code === "IDENTITY_PROVIDER_UNAVAILABLE" && e.retryable === true);
+    globalThis.fetch = (async () => { const x = new Error("aborted"); x.name = "AbortError"; throw x; }) as typeof fetch;
+    e = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
+    ok("a transport timeout → PROVIDER_TIMEOUT, retryable — never NOT_FOUND", e?.code === "IDENTITY_PROVIDER_TIMEOUT" && e.retryable === true);
+    const h = await peexitVerify.health();
+    ok("health names CM / MTN+ORANGE and never the key", h.configured && h.supports.countries.join() === "CM" && !JSON.stringify(h).includes("test-key"));
+    ok("the chain now lists peexit_verify before the sandbox for CM × ORANGE", providerChain("CM", "ORANGE").map((p) => p.name).join() === "peexit_verify,sandbox", providerChain("CM", "ORANGE").map((p) => p.name).join());
+    ok("…so the capability table says CM.ORANGE has identity resolution", capabilityConfig().CM.ORANGE.identity_resolution === true && capabilityConfig().CM.ORANGE.provider === "peexit_verify");
+  } finally { globalThis.fetch = realFetch; (config.peexit as { apiKey: string }).apiKey = savedKey; }
 
   console.log("\nProvider chain and capabilities (sandbox, no real credentials)\n");
   const chain = providerChain("CM", "MTN");
@@ -133,8 +188,8 @@ async function main() {
     const pay = await signedJson("/payments", { quoteId: q.body.id, recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "Nana Jean Paul" } });
     ok("a payment to a resolved recipient carries the identity snapshot", pay.status === 200 && pay.body.recipientIdentity?.verified === true && pay.body.recipientIdentity.displayName === "NANA JEAN PAUL" && pay.body.recipientIdentity.nameMatch === "MATCH", JSON.stringify(pay.body.recipientIdentity));
     const q2 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
-    const pay2 = await signedJson("/payments", { quoteId: q2.body.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Unresolved Person" } });
-    ok("a payment to an UNRESOLVED recipient is created exactly as before (no snapshot, no provider call)", pay2.status === 200 && !pay2.body.recipientIdentity);
+    const pay2 = await signedJson("/payments", { quoteId: q2.body.id, recipient: { phone: "670124000", country: "CM", provider: "MTN", name: "Unresolved Person" } });
+    ok("a payment to an UNRESOLVED recipient (provider timed out, nothing cached) is created exactly as before — no snapshot", pay2.status === 200 && !pay2.body.recipientIdentity);
     const p1 = await store().getPayment(pay.body.id);
     await signedJson(`/payments/${pay.body.id}/simulate`, {});
     let del = await store().getPayment(pay.body.id);

@@ -17,7 +17,7 @@ core/identityResolution/resolver.ts
    normalizeMsisdn ─► cache (HMAC hash) ─► providerChain(country, operator) ─► name match ─► remember ─► audit + metrics
                                               │
                         ┌─────────────────────┼──────────────────────┐
-                 providers/mtnDirect   providers/orange (stub)   providers/aggregator (pawapay: operator hint only)
+                 providers/mtnDirect   providers/peexit (verify-wallet: name)   providers/orange (stub)   providers/aggregator (pawapay: hint)
                                      providers/sandbox (rehearsal; refuses under liveMoney())
 ```
 
@@ -45,10 +45,20 @@ Not touched: quotes, rails, payouts, ledger, settlement, the network saga, admin
 - `VERIFICATION_FAILED` only from `/verify` when the expected name is `NO_MATCH`.
 
 ## Provider chain
-`IDENTITY_PROVIDER_PRIORITY` (default `mtn_direct,orange_direct,pawapay,sandbox`). A provider is in the chain when it is *configured* and *supports* the market × operator. Fallback to the next provider happens **only** on a retryable failure (timeout, 5xx, network); `NOT_FOUND`, `INACTIVE` and auth errors stop the chain. Each attempt is bounded by `IDENTITY_TIMEOUT`; `IDENTITY_MAX_RETRIES` (≤ 2) extra attempts per provider.
+`IDENTITY_PROVIDER_PRIORITY` (default `mtn_direct,orange_direct,peexit_verify,pawapay,sandbox`). A provider is in the chain when it is *configured* and *supports* the market × operator. Fallback to the next provider happens **only** on a retryable failure (timeout, 5xx, network); `NOT_FOUND`, `INACTIVE` and auth errors stop the chain. Each attempt is bounded by `IDENTITY_TIMEOUT`; `IDENTITY_MAX_RETRIES` (≤ 2) extra attempts per provider.
 
 ## Cache
 Keyed by `HMAC-SHA256(IDENTITY_HASH_KEY, E.164)` (falls back to `COMPLIANCE_HMAC_KEY`). Only `VERIFIED / NOT_FOUND / INACTIVE` are remembered, for `IDENTITY_CACHE_TTL` seconds (default 300). Outages are never cached.
 
 ## Frontend contract
 States `idle → typing → validating → verified | not_found | inactive | unavailable | unsupported | error`. Verified renders `✓ NAME / <Operator> Mobile Money / <Country>`. `unavailable` and `error` offer *Retry*; the manual-name box stays open in advisory mode. In gate mode `not_found`/`inactive` block *Continue*.
+
+## Name matching (2026-09-20 rewrite)
+One algorithm, `compareNames()` in `shared/domain.ts`, used by the server (`identityResolution/names.ts`, the V1 payment name gate via `namesMatch`) and both apps. Tokens: NFD-stripped, lower-cased, apostrophes/periods removed inside a token (N'GO ≡ NGO, "S." → initial), hyphens split (JEAN-PAUL → jean paul), titles dropped (Mr/Mme/Dr/…). A token matches when equal, one edit apart at ≥ 5 letters (two at ≥ 9: Aminatu/AMINATOU, Mbala/MBALLA), an initial matches a first letter, and a joined spelling matches two adjacent tokens (jeanpaul ≡ jean paul).
+- **MATCH** — every token of the shorter spelling is found and it has ≥ 2 tokens (or both sides are the same single token).
+- **PARTIAL_MATCH** — ≥ 2 real (non-initial) tokens shared, or a single-token spelling that is found (a surname alone).
+- **NO_MATCH** — otherwise; in particular a shared first name alone ("Jean Ngo" vs "JEAN MANGA").
+- **NOT_AVAILABLE** — either side empty or made only of initials/titles.
+
+## V1 integration
+With the flag on, `registeredName()` (core/nameResolver.ts, behind `GET /api/recipients/resolve` and the payment name gate) takes its answer from the v2 chain — so the existing apps get real operator names from Peexit without a client release. With the flag off it keeps the sandbox stand-in (`pawapay.lookupName`, null under live money).

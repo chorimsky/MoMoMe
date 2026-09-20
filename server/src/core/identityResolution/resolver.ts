@@ -15,6 +15,7 @@ import type { IdentityProvider, ProviderAnswer } from "./providers/types.js";
 import { mtnDirect } from "./providers/mtnDirect.js";
 import { orangeDirect } from "./providers/orange.js";
 import { aggregator } from "./providers/aggregator.js";
+import { peexitVerify } from "./providers/peexit.js";
 import { sandboxProvider } from "./providers/sandbox.js";
 import { cached, remember, cacheTtlSec } from "./cache.js";
 import { record } from "./audit.js";
@@ -28,12 +29,12 @@ export const identityMode = (): "advisory" | "gate" => ((process.env.IDENTITY_RE
 const TIMEOUT_MS = () => Math.max(1000, Number(process.env.IDENTITY_TIMEOUT ?? 6000) || 6000);
 const MAX_RETRIES = () => Math.min(2, Math.max(0, Number(process.env.IDENTITY_MAX_RETRIES ?? 0) || 0));
 
-const ALL: Record<string, IdentityProvider> = { mtn_direct: mtnDirect, orange_direct: orangeDirect, pawapay: aggregator, sandbox: sandboxProvider };
-/** IDENTITY_PROVIDER_PRIORITY="mtn_direct,orange_direct,pawapay,sandbox" — first that is
+const ALL: Record<string, IdentityProvider> = { mtn_direct: mtnDirect, orange_direct: orangeDirect, peexit_verify: peexitVerify, pawapay: aggregator, sandbox: sandboxProvider };
+/** IDENTITY_PROVIDER_PRIORITY="mtn_direct,orange_direct,peexit_verify,pawapay,sandbox" — first that is
  *  configured and supports the market × operator answers; the next is tried only on a
  *  retryable failure. */
 export function providerChain(country: string, operator: string | null): IdentityProvider[] {
-  const order = (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,pawapay,sandbox").split(",").map((s) => s.trim()).filter((s) => s in ALL);
+  const order = (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,peexit_verify,pawapay,sandbox").split(",").map((s) => s.trim()).filter((s) => s in ALL);
   return order.map((k) => ALL[k]).filter((p) => p.configured() && p.supports(country, operator) && (p.authoritative || p.name === "pawapay" || !liveMoney()));
 }
 export async function providersHealth(): Promise<IdentityProviderHealth[]> { return Promise.all(Object.values(ALL).map((p) => p.health())); }

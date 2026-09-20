@@ -284,7 +284,7 @@ export default function SendScreen() {
               setOpenedAs((prev) => (prev && norm(prev) !== norm(name) ? prev : null));
               return;
             }
-            setIdState(idn.status === 'NOT_FOUND' ? 'not_found' : idn.status === 'INACTIVE' ? 'inactive' : idn.status === 'PROVIDER_UNAVAILABLE' ? 'unavailable' : idn.status === 'UNSUPPORTED' ? 'unsupported' : 'error');
+            setIdState(idn.status === 'NOT_FOUND' ? 'not_found' : idn.status === 'INACTIVE' ? 'inactive' : idn.status === 'PROVIDER_UNAVAILABLE' ? 'unavailable' : idn.status === 'UNSUPPORTED' || idn.status === 'UNKNOWN' ? 'unsupported' : 'error');
             // Never show UNKNOWN as verified: the sender names the recipient, exactly as in V1.
             if (nameSourceRef.current !== 'internal') {
               setRecipientName(manualName.current);

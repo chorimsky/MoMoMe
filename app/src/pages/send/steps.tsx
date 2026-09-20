@@ -149,7 +149,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
             setIdState("verified");
             set({ recipientName: idn.display_name, nameSource: "provider", ...prov });
           } else {
-            setIdState(idn.status === "NOT_FOUND" ? "not_found" : idn.status === "INACTIVE" ? "inactive" : idn.status === "PROVIDER_UNAVAILABLE" ? "unavailable" : idn.status === "UNSUPPORTED" ? "unsupported" : "error");
+            setIdState(idn.status === "NOT_FOUND" ? "not_found" : idn.status === "INACTIVE" ? "inactive" : idn.status === "PROVIDER_UNAVAILABLE" ? "unavailable" : idn.status === "UNSUPPORTED" || idn.status === "UNKNOWN" ? "unsupported" : "error");
             // Never show UNKNOWN as verified: the name box opens for the sender, as in V1.
             if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
             else set({ recipientName: "", nameSource: "unknown", ...prov });

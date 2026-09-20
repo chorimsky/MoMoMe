@@ -52,22 +52,86 @@ export function isRealName(name: string | null | undefined, phone: string): bool
   return /\p{L}/u.test(n); // must contain an actual letter
 }
 
-/** Do two spellings name the same person?
+/** How two spellings of a name relate. MATCH = the same person as far as spelling can tell;
+ *  PARTIAL_MATCH = a real overlap the sender should look at (one shared surname, a typo away);
+ *  NO_MATCH = different people; NOT_AVAILABLE = nothing to compare. */
+export type NameMatch = "MATCH" | "PARTIAL_MATCH" | "NO_MATCH" | "NOT_AVAILABLE";
+
+const NAME_TITLES = new Set(["mr", "mrs", "ms", "mme", "mlle", "m", "dr", "pr", "prof", "sir", "madam", "madame", "monsieur", "hon", "rev", "pasteur", "pastor", "chief", "alhaji", "hadja", "el", "hadj"]);
+/** Tokens of a name as the operators and senders spell them: no accents, no case, no
+ *  apostrophes or hyphens INSIDE a token (N'GO ≡ NGO, JEAN-PAUL splits into two), titles
+ *  dropped, initials kept ("S." → "s"). */
+export function nameTokens(s: string | null | undefined): string[] {
+  return (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/['’.]/g, "")               // N'GO → NGO, "S." → "S"
+    .split(/[^a-z0-9]+/).filter((t) => t.length > 0 && !NAME_TITLES.has(t));
+}
+/** Optimal string alignment distance (insert / delete / substitute / adjacent transposition). */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let row = Infinity;
+    for (let j = 1; j <= b.length; j++) {
+      const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      row = Math.min(row, d[i][j]);
+    }
+    if (row > max) return max + 1;
+  }
+  return d[a.length][b.length];
+}
+/** Cameroonian spellings drift (Aminatou/Aminatu, Mballa/Mbala, Tchoumi/Tchoumi): one edit
+ *  in a token of five letters or more, two in one of nine or more, is the same token. */
+function sameToken(a: string, b: string): boolean {
+  if (a === b) return true;
+  const n = Math.min(a.length, b.length);
+  if (n < 5) return false;
+  return editDistance(a, b, n >= 9 ? 2 : 1) <= (n >= 9 ? 2 : 1);
+}
+/** Does token t of one name appear in the other name's tokens? An initial hits a token's
+ *  first letter; a joined spelling ("jeanpaul") hits two adjacent tokens ("jean" "paul"). */
+function hits(t: string, other: string[]): boolean {
+  if (t.length === 1) return other.some((o) => o[0] === t);
+  if (other.some((o) => sameToken(t, o))) return true;
+  for (let i = 0; i + 1 < other.length; i++) if (t === other[i] + other[i + 1]) return true;
+  return false;
+}
+
+/** Compare a sender's spelling with the operator's registered name.
  *
  *  Operators register names in shouting capitals ("MANGA SERGE"); people type "Serge
- *  Manga", "manga serge" or "S. Manga". Accents, case and order must not count as a
- *  difference, but "Alice Ngo" against "MANGA SERGE" must. Tokens are compared as sets:
- *  a match is when every token of the shorter name appears in the longer one (initials
- *  count when they match a token's first letter), or the two share at least two tokens. */
-export function namesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
-  const toks = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    .split(/[^a-z0-9]+/).filter((t) => t.length > 0);
-  const ta = toks(a ?? ""), tb = toks(b ?? "");
-  if (ta.length === 0 || tb.length === 0) return false;
+ *  Manga", "manga serge", "S. Manga" or "Jean-Paul" for "JEAN PAUL". Accents, case, order,
+ *  punctuation, titles and a one-letter slip must not count as a difference, but "Alice
+ *  Ngo" against "MANGA SERGE" must — and so must "Jean Ngo" against "JEAN MANGA": a shared
+ *  first name alone is no evidence in a country where every third man is a Jean.
+ *    MATCH          every token of the shorter name is found in the longer one and the
+ *                   shorter name has at least two tokens (or both sides are one identical token);
+ *    PARTIAL_MATCH  at least two tokens shared, or a single-token sender spelling that is
+ *                   found (a surname alone — enough to show, not enough to vouch);
+ *    NO_MATCH       fewer than that. */
+export function compareNames(expected: string | null | undefined, actual: string | null | undefined): NameMatch {
+  const ta = nameTokens(expected), tb = nameTokens(actual);
+  if (ta.length === 0 || tb.length === 0) return "NOT_AVAILABLE";
+  // A spelling made only of initials names nobody: nothing to compare.
+  if (!ta.some((t) => t.length > 1) || !tb.some((t) => t.length > 1)) return "NOT_AVAILABLE";
   const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
-  const hit = (t: string) => long.includes(t) || (t.length === 1 && long.some((l) => l[0] === t));
-  const shared = short.filter(hit).length;
-  return shared === short.length || shared >= 2;
+  const hit = short.filter((t) => hits(t, long));
+  const shared = hit.length, sharedReal = hit.filter((t) => t.length > 1).length;
+  const full = shared === short.length;
+  // Initials never carry a verdict on their own: "J. M." tells nobody who is being paid.
+  if (full && short.length >= 2 && sharedReal >= 1 && (long.length <= 2 || shared >= 2)) return "MATCH";
+  if (full && short.length === 1 && long.length === 1) return "MATCH";
+  if (sharedReal >= 2 || (full && short.length === 1)) return "PARTIAL_MATCH";
+  return "NO_MATCH";
+}
+/** The yes/no the send flow asks: is this spelling NOT a different person? PARTIAL counts
+ *  as a match here — a shared surname is not what the wrong-number safeguard is for. */
+export function namesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const r = compareNames(a, b);
+  return r === "MATCH" || r === "PARTIAL_MATCH";
 }
 
 export interface PhoneCheck {

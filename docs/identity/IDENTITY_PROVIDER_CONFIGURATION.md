@@ -7,7 +7,7 @@ All variables are read at call time — a Railway variable change takes effect o
 |---|---|---|
 | `IDENTITY_RESOLUTION_ENABLED` | `false` | master switch; off ⇒ `/api/v2/identity/*` is 404 and no snapshot is attached |
 | `IDENTITY_RESOLUTION_MODE` | `advisory` | `advisory` shows; `gate` blocks NOT_FOUND / INACTIVE recipients in the apps |
-| `IDENTITY_PROVIDER_PRIORITY` | `mtn_direct,orange_direct,pawapay,sandbox` | order of the chain |
+| `IDENTITY_PROVIDER_PRIORITY` | `mtn_direct,orange_direct,peexit_verify,pawapay,sandbox` | order of the chain |
 | `IDENTITY_CACHE_TTL` | `300` s (min 30) | reuse window for VERIFIED / NOT_FOUND / INACTIVE |
 | `IDENTITY_RECORD_RETENTION_DAYS` | `30` | prune after expiry + N days |
 | `IDENTITY_TIMEOUT` | `6000` ms (min 1000) | per attempt |
@@ -28,6 +28,9 @@ The operator supplies these through the Railway UI; they are never pasted into c
 
 ## Orange direct (`orange_direct`)
 `ORANGE_IDENTITY_API_URL`, `ORANGE_IDENTITY_API_KEY` — reserved. The provider is a stub until an Orange Money identity contract exists; with the vars set it still answers `PROVIDER_UNAVAILABLE` (non-retryable) so nothing pretends.
+
+## Peexit verify-wallet (`peexit_verify`)
+No extra variables: reuses `PEEXIT_API_KEY` / `PEEXIT_ENV` / `PEEXIT_API_URL` (+ `PEEXIT_PROXY_URL`) exactly like disbursement. `configured()` = the key is set. Because `server.peexit.com` is IP-allowlisted, a local dev server with the production key gets an HTML 403 → `AUTH_ERROR` (non-retryable, honest). This is the first real name source in production: turning `IDENTITY_RESOLUTION_ENABLED=true` on Railway makes both V1 `/recipients/resolve` and V2 answer from it.
 
 ## Aggregator (`pawapay`)
 Uses the existing `PAWAPAY_*` rail credentials. Operator hint only.

@@ -62,3 +62,7 @@ Audit of the MoMo›Me production codebase before any identity-resolution code w
 - The only shared vocabulary is `Recipient.country/provider` (V1) ↔ `IdentityResolution.country/operator` (V2); V2 derives its operator from the same `detectProvider` prefix table so the two can never disagree in Cameroon.
 - The sandbox identity provider is compiled in but refuses to run when any real rail is live (`liveMoney()`), the same rule that already guards `pawapay.lookupName`.
 - No provider call is ever made on the payment-creation path; V2 attaches only what a prior `/resolve` in the same purpose context produced (cache/store), so an identity outage cannot corrupt or delay a payment.
+
+## Addendum 2026-09-20 — rail API review for a real name source
+- **pawaPay**: no account-holder-name endpoint anywhere in v1 or v2 (payouts, deposits, refunds, callbacks, `predict-provider`, `active-configuration` reviewed). It can only predict the operator. `adapters/pawapay.lookupName` is, and remains, a sandbox fabrication (null under live money).
+- **Peexit**: `POST /clients/verify-wallet` (`SECRETKEY`, `{ countryCode, accountNumber }`) returns `{ isValid, accountName, operator, status }`, 404 when the account does not exist on the network, 422 for an unsupported country. This is an authoritative identity source for Cameroon MTN + Orange with credentials we already hold → implemented as provider `peexit_verify`.

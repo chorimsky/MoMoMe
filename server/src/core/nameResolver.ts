@@ -12,6 +12,7 @@ import type { ResolveResult, CountryCode } from "../../../shared/types.js";
 import { detectProvider } from "../../../shared/domain.js";
 import { getIdentityByDigits, touchLastSeen } from "./identity.js";
 import * as pawapay from "../adapters/pawapay.js";
+import { identityEnabled, resolveIdentity } from "./identityResolution/resolver.js";
 
 /** The name a Mobile Money number is REGISTERED to, as far as we can know it.
  *
@@ -25,8 +26,18 @@ import * as pawapay from "../adapters/pawapay.js";
 export async function registeredName(phone: string, country: CountryCode = "CM"): Promise<{ name: string; source: "provider" | "internal" } | null> {
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 8) return null;
-  const lookup = await pawapay.lookupName(phone).catch(() => null);
-  if (lookup?.name) return { name: lookup.name, source: "provider" };
+  // With Identity Resolution on, the operator's record comes from the v2 chain — today the
+  // Peexit verify-wallet call (docs: /clients/verify-wallet), the one rail we hold that
+  // returns the registered account name; MTN direct once its credentials exist. pawaPay
+  // has no name lookup at all (only /predict-provider), so its lookupName is the sandbox
+  // stand-in and the only source while the flag is off.
+  if (identityEnabled()) {
+    const r = await resolveIdentity({ identifier: phone, defaultCountry: country, purpose: "RECIPIENT_VERIFICATION", actor: "v1:recipients/resolve" }).catch(() => null);
+    if (r?.status === "VERIFIED" && r.displayName) return { name: r.displayName, source: "provider" };
+  } else {
+    const lookup = await pawapay.lookupName(phone).catch(() => null);
+    if (lookup?.name) return { name: lookup.name, source: "provider" };
+  }
   // Country-scoped: a subscriber number is only unique inside its own country, and the
   // old country-blind match answered a Congo number with a Cameroonian's name.
   const known = getIdentityByDigits(phone, country);

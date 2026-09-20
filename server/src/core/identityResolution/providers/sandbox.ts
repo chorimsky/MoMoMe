@@ -18,7 +18,7 @@ export const sandboxProvider: IdentityProvider = {
     const n = id.nationalNumber ?? id.identifier;
     const last = +n[n.length - 1];
     if (n.endsWith("000")) throw new IdentityError("IDENTITY_PROVIDER_TIMEOUT", "Recipient verification is temporarily unavailable.", "simulated timeout", true);
-    if (last === 9) return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "sandbox" }, error: "IDENTITY_NOT_FOUND" };
+    if (last === 9 && !n.endsWith("789")) return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "sandbox" }, error: "IDENTITY_NOT_FOUND" };
     if (last === 8) return { status: "INACTIVE", verified: false, accountStatus: "INACTIVE", capabilities: caps(false), provider: { name: "sandbox", verifiedAt: new Date().toISOString() }, error: "IDENTITY_INACTIVE" };
     let h = 0; for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
     const name = n === "670123456" ? "NANA JEAN PAUL" : NAMES[h % NAMES.length];

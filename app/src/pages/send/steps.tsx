@@ -85,6 +85,10 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // every change of number — the one act that catches a wrong digit before money moves.
   const [idConfirmed, setIdConfirmed] = useState(false);
   const phoneRef = useRef<HTMLInputElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
+  // How many digits the field had last time: a jump of more than one digit is a paste, a
+  // contact or a recent — look that up at once; a keystroke waits for the next one.
+  const prevDigits = useRef(0);
   // The returning sender's recent recipients (anonymous identity, no login).
   const [recents, setRecents] = useState<Array<{ phone: string; country: Draft["country"]; provider: Draft["provider"]; name: string }>>([]);
   useEffect(() => { api.recentRecipients().then((r) => setRecents(r)).catch(() => {}); }, []);
@@ -125,10 +129,12 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
     // Reset resolving on the early return too — otherwise deleting digits back while a
     // resolve is in flight leaves the spinner stuck and Continue disabled.
     setIdConfirmed(false);
-    if (!checkPhone(s.phone, s.country).ok) { setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); if (d.length < 8 || s.nameSource === "provider") set({ recipientName: "", nameSource: "idle" }); return; }
+    if (!checkPhone(s.phone, s.country).ok) { prevDigits.current = d.length; setResolving(false); setEnteredAs(null); setIdState(d.length ? "typing" : "idle"); setIdMeta(null); if (d.length < 8 || s.nameSource === "provider") set({ recipientName: "", nameSource: "idle" }); return; }
     setResolving(true);
     if (identity.enabled) setIdState("validating");
     let active = true;
+    const arrivedWhole = d.length - prevDigits.current > 1;
+    prevDigits.current = d.length;
     const id = setTimeout(async () => {
       try {
         if (identity.enabled) {
@@ -188,7 +194,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
       } finally {
         if (active) setResolving(false);
       }
-    }, 500);
+    }, arrivedWhole ? 0 : 350);
     return () => { active = false; clearTimeout(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.phone, s.country, identity.enabled, idAttempt]);
@@ -331,7 +337,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
                   <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{idMeta?.operator ? `${PROVIDERS[idMeta.operator as keyof typeof PROVIDERS]?.name ?? idMeta.operator} Mobile Money` : "Mobile Money"} · {COUNTRIES[(idMeta?.country ?? s.country) as keyof typeof COUNTRIES]?.name ?? idMeta?.country}</div>
                   {enteredAs && <div role="alert" style={{ fontSize: 12.5, color: "var(--warn-ink)", marginTop: 4, lineHeight: 1.4 }}>{fill(t("name_mismatch"), { n: enteredAs })}</div>}
                   <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, fontWeight: 650, cursor: "pointer" }}>
-                    <input type="checkbox" checked={idConfirmed} onChange={(e) => setIdConfirmed(e.target.checked)} style={{ width: 18, height: 18, accentColor: "var(--recv)" }} />
+                    <input type="checkbox" checked={idConfirmed} onChange={(e) => { setIdConfirmed(e.target.checked); if (e.target.checked && !s.xaf) setTimeout(() => amountRef.current?.focus(), 0); }} style={{ width: 18, height: 18, accentColor: "var(--recv)" }} />
                     <span>{fill(t("id_confirm_person"), { n: s.recipientName })}</span>
                   </label>
                 </div>
@@ -361,7 +367,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
                     )}
                   </div>
                 )}
-                {!idBlocked && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                {!idBlocked && !(identity.enabled && ["not_found", "inactive", "unavailable", "unsupported", "active_unnamed", "error"].includes(idState)) && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <span style={{ color: "var(--warn)", fontWeight: 800, fontSize: 15 }}>⚠</span>
                   <span style={{ fontSize: 13, fontWeight: 650, color: "var(--ink)" }}>{s.nameSource === "manual" ? t("confirm_name") : t("name_unverified")}</span>
                 </div>}
@@ -379,7 +385,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
       <div style={{ marginTop: 14 }}>
         <Label>{biz ? t("mrc_amount_q") : t("amount_q")}</Label>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: "12px 14px" }}>
-          <input className="num" value={s.xaf ? fmt(s.xaf) : ""} placeholder="0" aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
+          <input ref={amountRef} className="num" value={s.xaf ? fmt(s.xaf) : ""} placeholder="0" aria-label={t("amount_q")} onChange={(e) => { const v = +e.target.value.replace(/\D/g, "") || 0; set({ xaf: Math.min(v, MAX_XAF) }); }} inputMode="numeric"
             style={{ border: 0, background: "transparent", font: "inherit", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 27, width: "100%", color: "var(--ink)", outline: "none", letterSpacing: "-0.02em" }} />
           <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-3)" }}>XAF</span>
         </div>

@@ -133,6 +133,7 @@ export default function SendScreen() {
   const [idAttempt, setIdAttempt] = useState(0);
   // The sender must SAY the registered name is the person they mean; resets with the number.
   const [idConfirmed, setIdConfirmed] = useState(false);
+  const amountRef = useRef<TextInput>(null);
   const [method, setMethod] = useState<Method | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
@@ -246,6 +247,8 @@ export default function SendScreen() {
   useEffect(() => {
     const digits = phone.replace(/\D/g, '');
     const hadNumber = prevDigits.current.length >= 8;
+    // A jump of more than one digit is a paste, a contact or a scan — look it up at once.
+    const arrivedWhole = digits.length - prevDigits.current.length > 1;
     prevDigits.current = digits;
     setIdConfirmed(false);
     // Look up only a COMPLETE, valid number for the country — never on the eighth of nine.
@@ -333,7 +336,7 @@ export default function SendScreen() {
           setResolvedProvider(r.provider ?? null);
         })
         .catch(() => {});
-    }, 450);
+    }, arrivedWhole ? 0 : 350);
     return () => {
       alive = false;
       clearTimeout(id);
@@ -738,7 +741,7 @@ export default function SendScreen() {
                     <Body style={{ color: t.warn, fontSize: 12.5, marginTop: 2 }}>{tr('name_mismatch', { n: openedAs })}</Body>
                   ) : null}
                   {needsConfirm ? (
-                    <Pressable onPress={() => setIdConfirmed((v) => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: idConfirmed }} hitSlop={8}
+                    <Pressable onPress={() => setIdConfirmed((v) => { if (!v && !amount) setTimeout(() => amountRef.current?.focus(), 0); return !v; })} accessibilityRole="checkbox" accessibilityState={{ checked: idConfirmed }} hitSlop={8}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, marginTop: Spacing.one }}>
                       <Ionicons name={idConfirmed ? 'checkbox' : 'square-outline'} size={22} color={idConfirmed ? t.recv : t.muted} />
                       <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 13.5 }}>{tr('id_confirm_person', { n: recipientName })}</Body>
@@ -771,7 +774,7 @@ export default function SendScreen() {
                     ) : null}
                   </View>
                 ) : null}
-                {idBlocked ? null : <Label>{tr('name_prompt')}</Label>}
+                {idBlocked || (identity.enabled && ['not_found', 'inactive', 'unavailable', 'unsupported', 'active_unnamed', 'error'].includes(idState)) ? null : <Label>{tr('name_prompt')}</Label>}
                 {idBlocked ? null : <TextInput
                   value={recipientName}
                   onChangeText={(x) => {
@@ -796,6 +799,7 @@ export default function SendScreen() {
             <Label>{merchantCode && lockedAmount ? tr('amount_due') : tr('amount')}</Label>
             <View style={styles.amountRow}>
               <TextInput
+                ref={amountRef}
                 value={amount ? group(amount) : ''}
                 editable={!lockedAmount}
                 onChangeText={(x) => setAmount(x.replace(/\D/g, ''))}

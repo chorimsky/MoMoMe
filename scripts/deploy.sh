@@ -28,7 +28,12 @@ ROOT=$(mktemp -d /tmp/momome-deploy.XXXXXX); trap 'rm -rf "$ROOT"' EXIT
 git archive "$SHA" | tar -x -C "$ROOT"
 printf '%s\n' "$SHA" > "$ROOT/BUILD_VERSION"      # what /health/deep will report as `version`
 cd "$ROOT"
-railway link -p "$PROJECT" -e "$TARGET" -s "$SERVICE" >/dev/null 2>&1 || true
+# Railway's API times out now and then; link is cheap, so insist on it.
+for i in 1 2 3 4; do
+  railway link -p "$PROJECT" -e "$TARGET" -s "$SERVICE" >/dev/null 2>&1 && railway status >/dev/null 2>&1 && break
+  [ "$i" = 4 ] && { echo "deploy: could not link to Railway project $PROJECT ($TARGET/$SERVICE)"; exit 1; }
+  sleep 5
+done
 PREV=$(railway deployment list --json 2>/dev/null | python3 -c 'import sys,json; d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]; print(d[0]["id"] if d else "")' 2>/dev/null || true)
 echo "deploy: $TARGET ← ${SHA:0:7}  (previous SUCCESS: ${PREV:-none})"
 OUT=$(railway up --detach 2>&1) || { echo "$OUT"; exit 1; }

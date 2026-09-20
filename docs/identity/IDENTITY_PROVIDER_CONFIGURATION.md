@@ -33,7 +33,7 @@ The operator supplies these through the Railway UI; they are never pasted into c
 ## Peexit verify-wallet (`peexit_verify`)
 No extra variables: reuses `PEEXIT_API_KEY` / `PEEXIT_ENV` / `PEEXIT_API_URL` (+ `PEEXIT_PROXY_URL`) exactly like disbursement. `configured()` = the key is set. Because `server.peexit.com` is IP-allowlisted, a local dev server with the production key gets an HTML 403 → `AUTH_ERROR` (non-retryable, honest). This is the first real name source in production: turning `IDENTITY_RESOLUTION_ENABLED=true` on Railway makes both V1 `/recipients/resolve` and V2 answer from it.
 
-**Production finding 2026-09-20:** `server.peexit.com` answers `404 Endpoint "POST /v1/clients/verify-wallet" not found.` — the endpoint documented for the sandbox is **not deployed on Peexit's production base**. The provider is therefore DOWN in production (circuit breaker, re-probed every `IDENTITY_BREAKER_MS`, default 10 min) and senders see "can't be verified yet — confirm the name yourself". Ask Peexit to enable Verify-Wallet on the production account / confirm its production path; the day it answers, verification starts without a deploy.
+**Production finding 2026-09-20:** `server.peexit.com` answers `404 Endpoint "POST /v1/clients/verify-wallet" not found.` for the "Verify Wallet" page's route — Peexit documents the same feature twice; the deployed one is **Get KYC** `POST /clients/verify_wallet` (underscore, lowercase country, `accountTitle`), which the provider now calls first. If a provider still cannot answer (route missing, key refused, IP blocked) it rests under the circuit breaker (`IDENTITY_BREAKER_MS`, default 10 min) and senders see "can't be verified yet — confirm the name yourself".
 
 | var | default | meaning |
 |---|---|---|

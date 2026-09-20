@@ -77,13 +77,28 @@ async function main() {
     mock(200, { isValid: true, accountName: "NGO MARIE CLAIRE", operator: "ORANGE", status: "ACTIVE" }, (init, url) => { sent = { init, url }; });
     let a = await peexitVerify.resolve(idCM, ctx);
     ok("VERIFIED with the operator's registered name and operator", a.status === "VERIFIED" && a.displayName === "NGO MARIE CLAIRE" && a.operator === "ORANGE" && a.accountStatus === "ACTIVE" && a.capabilities.payout, JSON.stringify(a));
-    ok("…via POST /clients/verify-wallet { countryCode, accountNumber } with the SECRETKEY header", !!sent && sent!.url.endsWith("/clients/verify-wallet") && sent!.init.method === "POST" && JSON.parse(String(sent!.init.body)).countryCode === "CM" && JSON.parse(String(sent!.init.body)).accountNumber === "699000155" && (sent!.init.headers as Record<string, string>).SECRETKEY === "test-key", sent ? sent.url : "no call");
+    ok("…via POST /clients/verify_wallet { countryCode: 'cm', accountNumber } with the SECRETKEY header (Peexit's deployed Get-KYC route)", !!sent && sent!.url.endsWith("/clients/verify_wallet") && sent!.init.method === "POST" && JSON.parse(String(sent!.init.body)).countryCode === "cm" && JSON.parse(String(sent!.init.body)).accountNumber === "699000155" && (sent!.init.headers as Record<string, string>).SECRETKEY === "test-key", sent ? sent.url : "no call");
+    // The Get-KYC response shape (the one production actually serves).
+    mock(200, { valid: true, accountTitle: "CHO RIMSKY", accountStatus: "ACTIVE", accountType: "MOBILE_WALLET" });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("the Get-KYC shape { valid, accountTitle, accountStatus } → VERIFIED with the name; operator from the prefix", a.status === "VERIFIED" && a.displayName === "CHO RIMSKY" && a.operator === "ORANGE", JSON.stringify(a));
+    mock(200, { valid: false, accountStatus: "BLOCKED", accountType: "MOBILE_WALLET" });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("valid:false with a blocking status → INACTIVE", a.status === "INACTIVE");
+    mock(200, { valid: false });
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("valid:false and nothing else → NOT_FOUND", a.status === "NOT_FOUND");
+    // A route-404 on the first path falls back to the second, once.
+    const paths: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => { const u = String(url); paths.push(u.slice(u.indexOf("/clients"))); return new Response(u.endsWith("verify_wallet") ? JSON.stringify({ error: { statusCode: 404, message: 'Endpoint "POST /v1/clients/verify_wallet" not found.' } }) : JSON.stringify({ isValid: true, accountName: "FALL BACK", operator: "ORANGE", status: "ACTIVE" }), { status: u.endsWith("verify_wallet") ? 404 : 200, headers: { "content-type": "application/json" } }); }) as typeof fetch;
+    a = await peexitVerify.resolve(idCM, ctx);
+    ok("a missing first route falls back to the second path once", paths.join(",") === "/clients/verify_wallet,/clients/verify-wallet" && a.status === "VERIFIED" && a.displayName === "FALL BACK", paths.join(","));
     mock(404, { error: { statusCode: 404, message: "Account not found on the provider network" } });
     a = await peexitVerify.resolve(idCM, ctx);
     ok("404 'Account not found on the provider network' → NOT_FOUND", a.status === "NOT_FOUND" && a.error === "IDENTITY_NOT_FOUND");
     mock(404, { error: { statusCode: 404, name: "Error", message: "Cannot POST /api/v1/clients/verify-wallet" } });
     const route404 = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
-    ok("404 'Cannot POST …' (endpoint missing on this base) → PROVIDER_UNAVAILABLE, NEVER 'not found' for the sender", route404?.code === "IDENTITY_PROVIDER_UNAVAILABLE" && route404.retryable === false && (await peexitVerify.health()).lastError?.includes("Cannot POST") === true, route404?.code);
+    ok("404 'Cannot POST …' on BOTH paths (endpoint missing on this base) → PROVIDER_UNAVAILABLE, NEVER 'not found' for the sender", route404?.code === "IDENTITY_PROVIDER_UNAVAILABLE" && route404.retryable === false && (await peexitVerify.health()).lastError?.includes("Cannot POST") === true, route404?.code);
     // The breaker: a route-404 rests the provider; the chain's verdict is then UNKNOWN
     // ("can't be verified yet"), never "temporarily unavailable, try again".
     process.env.IDENTITY_PROVIDER_PRIORITY = "peexit_verify,pawapay";

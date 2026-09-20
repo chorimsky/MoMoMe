@@ -1,14 +1,17 @@
 /* Assets and networks — normalised, and honest about what MoMo›Me can actually move today.
-   USDT and USDC exist here ONLY on Ethereum, RECEIVE_ONLY, because that is what the IBEX
-   account holds (third-party custody, ERC-20 deposits reconciled by tx hash — see
-   docs/upi/STABLECOIN_CUSTODY_MODEL.md). TRON / Base / Solana are PLANNED rows with no
-   adapter: nothing here activates a network because it is technically possible. */
+   SETTLEMENT MODEL (decided 2026-09-20, docs/upi/STABLECOIN_CUSTODY_MODEL.md): PASS-THROUGH.
+   MoMo›Me holds nothing. A stablecoin or Lightning payment is a FUNDING rail only: it is
+   converted the moment it confirms and paid out as local money; there is no stablecoin
+   balance, no stablecoin destination, no outbound stablecoin send — ever. USDT and USDC exist
+   here on Ethereum (what IBEX accepts as a deposit); TRON / Base / Solana are PLANNED rows with
+   no adapter: nothing activates a network because it is technically possible. */
 import type { Asset, BlockchainNetwork } from "../../../../shared/upi.js";
 import { MARKETS } from "../network/markets.js";
 import { COUNTRIES } from "../../../../shared/domain.js";
 import { ETH_CHAIN_ID, ERC20 } from "../../../../shared/domain.js";
-import { flag } from "./flags.js";
 
+/** The one settlement model. Every payment settles to local money; the system holds nothing. */
+export const SETTLEMENT_MODEL = { custody: "NONE_PASS_THROUGH" as const, holdsBalances: false, outboundStablecoin: false, description: "Inbound Lightning / stablecoin value is converted at confirmation and paid out to Mobile Money; no customer funds are held in any asset, no stablecoin is ever sent." };
 export const NETWORKS: Record<string, BlockchainNetwork> = {
   LIGHTNING: { id: "LIGHTNING", name: "Bitcoin Lightning", chainId: null, nativeAsset: "BTC", rpcProvider: "IBEX Hub / phoenixd", explorer: null, confirmationPolicy: { confirmed: 0, finalized: 0, timeoutMin: 15 }, feeModel: "ROUTING_FEE", status: "ACTIVE" },
   BITCOIN: { id: "BITCOIN", name: "Bitcoin", chainId: null, nativeAsset: "BTC", rpcProvider: "IBEX Hub", explorer: "https://mempool.space/tx/", confirmationPolicy: { confirmed: 1, finalized: 3, timeoutMin: 240 }, feeModel: "GAS", status: "ACTIVE" },
@@ -21,13 +24,12 @@ export const NETWORKS: Record<string, BlockchainNetwork> = {
 function fiat(code: string): Asset { return { code, type: "FIAT", network: null, decimals: 0, currency: code, status: "ACTIVE" }; }
 export function assets(): Asset[] {
   const fiats = new Set<string>([...Object.values(COUNTRIES).map((c) => c.ccy), ...Object.values(MARKETS).map((m) => m.currency)]);
-  const usdtOn = flag("STABLECOIN_SETTLEMENT_ENABLED") && flag("STABLECOIN_USDT_ENABLED");
-  const usdcOn = flag("STABLECOIN_SETTLEMENT_ENABLED") && flag("STABLECOIN_USDC_ENABLED");
   return [
     { code: "BTC", type: "CRYPTO", network: "LIGHTNING", decimals: 11, currency: "BTC", status: "ACTIVE" },
     { code: "BTC", type: "CRYPTO", network: "BITCOIN", decimals: 8, currency: "BTC", status: "ACTIVE" },
-    { code: "USDT", type: "STABLECOIN", network: "ETHEREUM", decimals: 6, issuer: "Tether", currency: "USD", status: usdtOn ? "ACTIVE" : "RECEIVE_ONLY" },
-    { code: "USDC", type: "STABLECOIN", network: "ETHEREUM", decimals: 6, issuer: "Circle", currency: "USD", status: usdcOn ? "ACTIVE" : "RECEIVE_ONLY" },
+    // RECEIVE_ONLY is the model, not a limitation: a stablecoin funds a payment and is never held or sent.
+    { code: "USDT", type: "STABLECOIN", network: "ETHEREUM", decimals: 6, issuer: "Tether", currency: "USD", status: "RECEIVE_ONLY" },
+    { code: "USDC", type: "STABLECOIN", network: "ETHEREUM", decimals: 6, issuer: "Circle", currency: "USD", status: "RECEIVE_ONLY" },
     { code: "USDT", type: "STABLECOIN", network: "TRON", decimals: 6, issuer: "Tether", currency: "USD", status: "PLANNED" },
     { code: "USDC", type: "STABLECOIN", network: "BASE", decimals: 6, issuer: "Circle", currency: "USD", status: "PLANNED" },
     ...[...fiats].sort().map(fiat),
@@ -45,7 +47,7 @@ export function validateAssetNetwork(code: string, network: string | null | unde
     if (["USDT", "USDC"].includes(c) && !network) return { ok: false, reason: `${c} needs a network (${assets().filter((x) => x.code === c && x.status !== "DISABLED").map((x) => x.network).join(", ")}).` };
     return { ok: false, reason: `${assetKey(c, network ?? null)} is not a supported asset.` };
   }
-  if (a.status === "PLANNED" || a.status === "DISABLED") return { ok: false, reason: `${assetKey(a.code, a.network)} is ${a.status.toLowerCase()} — no adapter, liquidity or custody for it yet.` };
+  if (a.status === "PLANNED" || a.status === "DISABLED") return { ok: false, reason: `${assetKey(a.code, a.network)} is ${a.status.toLowerCase()} — no adapter or liquidity for it yet.` };
   return { ok: true, asset: a };
 }
 export const erc20Contracts = ERC20;

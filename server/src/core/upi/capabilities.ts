@@ -42,10 +42,10 @@ export async function capabilityRegistry(): Promise<ProviderCapability[]> {
   const ln = activeRails().filter((r) => r.name !== "sandbox");
   const lnH = ln.length ? (ln.some((r) => railHealth(r.name).eligible) ? "HEALTHY" : "UNAVAILABLE") : (liveMoney() ? "UNAVAILABLE" : "DEGRADED");
   out.push({ kind: "LIGHTNING", id: "BTC/LIGHTNING", asset: "BTC", network: "LIGHTNING", capabilities: { receive: true, send: ln.some((r) => !!r.payInvoice), settlement: true, currency: ["BTC"] }, health: ratesFresh() ? lnH : "DEGRADED", reason: ln.length ? (ratesFresh() ? undefined : "FX rates stale") : "no live Lightning rail — sandbox mints simulated invoices" });
-  // Stablecoins: receive-only on Ethereum via IBEX today; everything else PLANNED.
+  // Stablecoins: FUNDING rails (pass-through). Receive on Ethereum via IBEX; never sent, never held.
   for (const a of assets().filter((x) => x.type === "STABLECOIN")) {
     const receive = a.network === "ETHEREUM" && ln.length > 0;
-    out.push({ kind: "STABLECOIN", id: `${a.code}/${a.network}`, asset: a.code, network: a.network ?? undefined, capabilities: { receive, send: a.status === "ACTIVE", settlement: a.status === "ACTIVE", currency: ["USD"] }, health: a.status === "PLANNED" ? "UNAVAILABLE" : receive ? (a.status === "ACTIVE" ? "HEALTHY" : "DEGRADED") : "UNAVAILABLE", reason: a.status === "PLANNED" ? "no adapter / custody / liquidity for this network" : a.status === "RECEIVE_ONLY" ? "deposits reconciled by tx hash; outbound settlement not enabled (STABLECOIN_SETTLEMENT_ENABLED)" : undefined });
+    out.push({ kind: "STABLECOIN", id: `${a.code}/${a.network}`, asset: a.code, network: a.network ?? undefined, capabilities: { receive, send: false, settlement: false, currency: ["USD"] }, health: a.status === "PLANNED" ? "UNAVAILABLE" : receive ? "HEALTHY" : (liveMoney() ? "UNAVAILABLE" : "DEGRADED"), reason: a.status === "PLANNED" ? "no adapter for this network" : receive ? "funding only — converted at confirmation, paid out as XAF; nothing held, nothing sent" : "sandbox: simulated deposits" });
   }
   // Aggregators (the rails themselves) and the identity providers.
   for (const r of PAYOUTS) out.push({ kind: "AGGREGATOR", id: r.name, capabilities: { payout: true, collection: r.name === "peexit", currency: ["XAF"] }, ...(r.configured() ? mmHealth(r.name, r.live()) : { health: "UNAVAILABLE", reason: "not configured" }) });

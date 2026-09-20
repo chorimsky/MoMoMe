@@ -7,7 +7,7 @@
 | `WALLET_RESOLUTION_API_ENABLED` | `/wallet/resolve` closed |
 | `PAYMENT_INTENT_V2_ENABLED` | intents can be quoted/routed (shadow) but never executed |
 | `MULTI_RAIL_ROUTING_ENABLED` / `ROUTING_ENGINE_MODE` | execution refused; traffic is V1's |
-| `STABLECOIN_SETTLEMENT_ENABLED` (+ `_USDT_` / `_USDC_`) | stablecoin funding through intents refused; Lightning and Mobile Money unaffected; V1's direct USDT/USDC receive unaffected |
+| `STABLECOIN_SETTLEMENT_ENABLED` (+ `_USDT_` / `_USDC_`) | stablecoin FUNDING through intents refused; Lightning and Mobile Money unaffected; V1's direct USDT/USDC deposits unaffected (there is no outbound stablecoin to switch off — the model holds nothing) |
 | `CROSS_BORDER_ROUTING_ENABLED`, `CORRIDOR_*_ENABLED` | cross-border options unavailable with the reason |
 | `UMA_COMPATIBILITY_ENABLED` | UMA identities refused |
 

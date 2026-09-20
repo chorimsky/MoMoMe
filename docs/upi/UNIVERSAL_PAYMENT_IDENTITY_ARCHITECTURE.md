@@ -24,6 +24,9 @@ identity → PaymentIdentityResolver → PaymentIdentity + PaymentDestination[]
 ## Resolver (`core/upi/identity.ts`)
 `resolve()` classifies then dispatches to `resolvePhone` (libphonenumber via `identityResolution/msisdn`; holder from the identity chain — Peexit today), `resolveMomoMeAddress` (`<digits>@momome.xyz` / `momome:+…` → the same MSISDN), `resolveLightningAddress` (ours → MSISDN; foreign → a non-native identity that can only be paid as given), `resolveUMA` (refused unless `UMA_COMPATIBILITY_ENABLED`; never faked). `getDestinations()` lists Mobile Money (only when a configured rail — or the sandbox's simulated rail, V1's own rule — can pay it) and the LUD-16 address; `getCapabilities()` the funding and settlement rails.
 
+## Settlement model
+**No custody; every payment settles; the system holds nothing** (STABLECOIN_CUSTODY_MODEL.md). Lightning and stablecoins are funding rails converted at confirmation; destinations are Mobile Money (and the LUD-16 representation of the same number); never a stablecoin or bank balance.
+
 ## Data model
 `phone → payment_identity → payment_destinations[]` — no `phone → lightning_wallet` relation anywhere. Destinations are computed from capability, not stored as the only truth; a stablecoin destination would be a further row when a custody model exists.
 

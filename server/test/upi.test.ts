@@ -57,7 +57,10 @@ async function main() {
 
   console.log("\nAssets — a stablecoin without a network is not an asset\n");
   ok("USDT alone is refused with the networks named", !validateAssetNetwork("USDT", null).ok && /needs a network/.test((validateAssetNetwork("USDT", null) as { reason: string }).reason));
-  ok("USDT/ETHEREUM is known (receive-only until the flags open)", validateAssetNetwork("USDT", "ETHEREUM").ok && assets().find((x) => x.code === "USDT" && x.network === "ETHEREUM")?.status === "RECEIVE_ONLY");
+  ok("USDT/ETHEREUM is known and RECEIVE_ONLY — the model, not a gap (funding rail, never held or sent)", validateAssetNetwork("USDT", "ETHEREUM").ok && assets().find((x) => x.code === "USDT" && x.network === "ETHEREUM")?.status === "RECEIVE_ONLY");
+  const { SETTLEMENT_MODEL } = await import("../src/core/upi/assets.js");
+  ok("the settlement model is declared: no custody, no balances, no outbound stablecoin", SETTLEMENT_MODEL.custody === "NONE_PASS_THROUGH" && SETTLEMENT_MODEL.holdsBalances === false && SETTLEMENT_MODEL.outboundStablecoin === false);
+  ok("no identity ever has a STABLECOIN or BANK destination", getDestinations(a).every((d) => d.rail !== "STABLECOIN" && d.rail !== "BANK"));
   ok("USDT/TRON is PLANNED and refused for movement", !validateAssetNetwork("USDT", "TRON").ok);
   ok("BTC/LIGHTNING and fiat XAF/KES exist", assets().some((x) => x.code === "BTC" && x.network === "LIGHTNING") && assets().some((x) => x.code === "KES" && x.type === "FIAT"));
 
@@ -70,6 +73,7 @@ async function main() {
   const reg = await capabilityRegistry();
   ok("CM:MTN and CM:ORANGE rows carry collection/payout/identity_verification and a health state", ["CM:MTN", "CM:ORANGE"].every((k) => { const r = reg.find((x) => x.id === k); return !!r && typeof r.capabilities.payout === "boolean" && ["HEALTHY", "DEGRADED", "UNAVAILABLE", "MAINTENANCE"].includes(r.health); }));
   ok("USDT/TRON is UNAVAILABLE with the reason; BANK is UNAVAILABLE", reg.find((x) => x.id === "USDT/TRON")?.health === "UNAVAILABLE" && reg.find((x) => x.id === "BANK")?.health === "UNAVAILABLE");
+  ok("every stablecoin row is send:false, settlement:false regardless of flags", reg.filter((x) => x.kind === "STABLECOIN").every((x) => x.capabilities.send === false && x.capabilities.settlement === false));
 
   console.log("\nTest 3 — intent: Lightning → MoMo›Me → MTN Cameroon (quoted, routed, executed through V1)\n");
   let i = await createIntent({ owner: "dev-upi", identity: "+237670123456", amount: 10_000 });
@@ -183,6 +187,11 @@ async function main() {
     await call("POST", `/v2/payment-intents/${stable.body.intent.id}/route`, "upi-1", { source: { rail: "STABLECOIN", asset: "USDC" } });
     const ex3 = await call("POST", `/v2/payment-intents/${stable.body.intent.id}/execute`, "upi-1", {});
     ok("stablecoin funding through intents stays closed until STABLECOIN_SETTLEMENT_ENABLED (V1 still accepts USDC directly)", ex3.status === 403 && /STABLECOIN_SETTLEMENT_ENABLED/.test(ex3.body.message ?? ""), `${ex3.status} ${ex3.body.error} ${ex3.body.message}`);
+    // "Every payment must settle": an intent confirmed in but not paid out is flagged, never kept.
+    const { flagUnsettled, getIntent: gi } = await import("../src/core/upi/intents.js");
+    const stuck = gi(pi2.body.intent.id)!; stuck.state = "PAYMENT_CONFIRMED"; stuck.events.push({ at: new Date(Date.now() - 45 * 60_000).toISOString(), state: "PAYMENT_CONFIRMED" });
+    const flagged = flagUnsettled();
+    ok("confirmed-in but unsettled past UPI_SETTLE_WITHIN_MIN → RECONCILIATION_REQUIRED", flagged.some((x) => x.id === stuck.id) && stuck.state === "RECONCILIATION_REQUIRED");
     const { canaryConfig, executedVolume24h } = await import("../src/core/upi/canary.js");
     ok("the executed 24 h volume counts the intent that ran (for the daily cap)", executedVolume24h() >= 5000 && canaryConfig().devices.includes("upi-1"));
     delete process.env.PAYMENT_INTENT_V2_ENABLED; delete process.env.MULTI_RAIL_ROUTING_ENABLED; delete process.env.ROUTING_ENGINE_MODE; delete process.env.UPI_CANARY_DEVICES; delete process.env.UPI_MAX_PER_TX_XAF;

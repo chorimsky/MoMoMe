@@ -10,7 +10,6 @@ import { activeRails, railHealth, createInstruction } from "../../adapters/index
 import { payoutHealth, aggregatorFloatXaf, payoutReady } from "../routing.js";
 import { payoutCostXaf } from "../pricing.js";
 import { positions } from "../network/liquidity.js";
-import { flag } from "./flags.js";
 import { liveMoney } from "../../config.js";
 import type { CountryCode, ProviderId } from "../../../../shared/types.js";
 
@@ -39,10 +38,10 @@ export const lightningRail: RailAdapterV2 = {
   async getLiquidity() { return { available: null, reserved: 0, committed: 0, currency: "BTC" }; },
   async health() { const r = activeRails().filter((x) => x.name !== "sandbox"); if (!r.length) return { state: "DEGRADED", reason: "sandbox only" }; return r.some((x) => railHealth(x.name).eligible) ? { state: "HEALTHY" } : { state: "UNAVAILABLE", reason: "every Lightning rail is marked down" }; },
 };
-/** Stablecoins — Ethereum USDT/USDC held at IBEX (third-party custody). Receive is real
- *  (V1 mints the address and reconciles deposits by tx hash); SEND is an abstraction until
- *  STABLECOIN_SETTLEMENT_ENABLED and a documented custody model — no key material exists
- *  in this codebase and none is invented here. */
+/** Stablecoins — a FUNDING rail, by the settlement model: V1 mints the deposit address, the
+ *  deposit is reconciled by tx hash, converted at confirmation and paid out as local money.
+ *  There is no send, no balance and no key material anywhere; `initiate` only ever mints a
+ *  receive instruction. */
 export function stablecoinRail(asset: "USDT" | "USDC", network = "ETHEREUM"): RailAdapterV2 {
   return {
     rail: "STABLECOIN", id: `${asset}/${network}`,
@@ -51,7 +50,7 @@ export function stablecoinRail(asset: "USDT" | "USDC", network = "ETHEREUM"): Ra
     async getStatus() { return { status: "UNKNOWN" }; },
     async getBalance() { return { amount: null, currency: asset }; },
     async getLiquidity() { return { available: null, reserved: 0, committed: 0, currency: asset }; },
-    async health() { if (network !== "ETHEREUM") return { state: "UNAVAILABLE", reason: "planned network — no adapter, custody or liquidity" }; const on = flag("STABLECOIN_SETTLEMENT_ENABLED") && flag(asset === "USDT" ? "STABLECOIN_USDT_ENABLED" : "STABLECOIN_USDC_ENABLED"); const r = activeRails().filter((x) => x.name !== "sandbox"); return !r.length ? { state: "DEGRADED", reason: "sandbox only" } : on ? { state: "HEALTHY" } : { state: "DEGRADED", reason: "receive only — outbound settlement flag off" }; },
+    async health() { if (network !== "ETHEREUM") return { state: "UNAVAILABLE", reason: "planned network — no adapter" }; const r = activeRails().filter((x) => x.name !== "sandbox"); return !r.length ? { state: "DEGRADED", reason: "sandbox only" } : railHealth(r[0].name).eligible ? { state: "HEALTHY" } : { state: "UNAVAILABLE", reason: "deposit rail down" }; },
   };
 }
 /** Mobile Money payout — wraps the payout rails (Peexit, PawaPay) for a market × operator. */

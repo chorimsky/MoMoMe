@@ -81,6 +81,8 @@ export function getDestinations(id: PaymentIdentity): PaymentDestination[] {
     const reachable = id.country === "CM" ? (!!cm?.providers.includes(id.operator as never) && (PAYOUTS.some((r) => r.configured() && r.supports(id.operator as never)) || !liveMoney())) : !!market?.providers.find((p) => p.id === id.operator)?.payout;
     out.push({ rail: "MOBILE_MONEY", provider: id.operator, country: id.country, currency, identifier: id.canonical, status: !reachable ? "UNSUPPORTED" : v === "VERIFIED" ? "ACTIVE" : v === "INACTIVE" ? "INACTIVE" : v === "NOT_FOUND" ? "INACTIVE" : "UNVERIFIED" });
   }
+  // Never a STABLECOIN or BANK destination: the settlement model is pass-through to local
+  // money — MoMo›Me holds nothing and sends no stablecoin (docs/upi/STABLECOIN_CUSTODY_MODEL.md).
   // The LUD-16 representation exists for every payable number — it is how the world's
   // Lightning wallets reach a Mobile Money account today.
   if (id.country === "CM" && id.operator) out.push({ rail: "LIGHTNING", protocol: "LIGHTNING_ADDRESS", address: lightningAddress(digits.slice(3), "CM"), status: out[0]?.status === "UNSUPPORTED" ? "UNSUPPORTED" : "ACTIVE" });

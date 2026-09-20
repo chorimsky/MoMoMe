@@ -98,6 +98,8 @@ export async function executeIntent(i: PaymentIntentV2, mintV1: (x: { method: "L
   if (!mm || mm.country !== "CM") throw new IntentError("unsupported", "Only domestic (Cameroon) execution goes through this layer today; cross-border uses /api/network.", 400);
   const method = i.source?.rail === "LIGHTNING" ? "LIGHTNING" : i.source?.asset === "USDC" ? "USDC" : i.source?.asset === "USDT" ? "USDT" : null;
   if (!method) throw new IntentError("unsupported", "Only Lightning / USDT / USDC funding is executed here.", 400);
+  // Stablecoin FUNDING through intents (pass-through: converted at confirmation, paid out as
+  // XAF, nothing held) is its own switch; V1 accepts the same deposit directly regardless.
   if (method !== "LIGHTNING" && !(flag("STABLECOIN_SETTLEMENT_ENABLED") && flag(method === "USDT" ? "STABLECOIN_USDT_ENABLED" : "STABLECOIN_USDC_ENABLED"))) throw new IntentError("flag_off", `${method} funding through intents needs STABLECOIN_SETTLEMENT_ENABLED + STABLECOIN_${method}_ENABLED (V1 still accepts it directly).`, 403);
   move(i, "LIQUIDITY_RESERVED", "domestic payout capacity checked at route selection; V1 reserves at payout");
   metrics.liquidity_reservation_total++;
@@ -149,4 +151,19 @@ export function pruneIntents(now = Date.now()): number {
   for (const [k, i] of intents) if (["COMPLETED", "CANCELLED", "EXPIRED", "PAYMENT_FAILED", "SETTLEMENT_FAILED", "LIQUIDITY_FAILED", "PROVIDER_UNAVAILABLE"].includes(i.state) && Date.parse(i.updatedAt) < cutoff) { intents.delete(k); n++; }
   if (n) touch("upi_intents");
   return n;
+}
+
+/** "Every payment must settle." Money that is confirmed in but not paid out within
+ *  UPI_SETTLE_WITHIN_MIN (default 30) is a held balance, which the model forbids: the intent
+ *  becomes RECONCILIATION_REQUIRED and the operator is paged through the existing alerts
+ *  (V1's own stuck-payment alarm fires on the payment itself). Never silent. */
+export function flagUnsettled(now = Date.now()): PaymentIntentV2[] {
+  const limitMs = Math.max(5, Number(process.env.UPI_SETTLE_WITHIN_MIN ?? 30) || 30) * 60_000;
+  const out: PaymentIntentV2[] = [];
+  for (const i of intents.values()) {
+    if (!["PAYMENT_CONFIRMED", "SETTLEMENT_PENDING", "SETTLEMENT_PROCESSING"].includes(i.state)) continue;
+    const since = i.events.filter((e) => e.state === i.state).at(-1)?.at ?? i.updatedAt;
+    if (now - Date.parse(since) > limitMs) { move(i, "RECONCILIATION_REQUIRED", `confirmed in but not settled out within ${limitMs / 60_000} min — the model holds nothing`); out.push(i); }
+  }
+  return out;
 }

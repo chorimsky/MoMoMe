@@ -22,6 +22,18 @@ export function metricsSnapshot() {
   const l = [...metrics.latencyMs].sort((a, b) => a - b);
   return { identity_resolution_total: metrics.total, identity_resolution_success: metrics.success, identity_resolution_failure: metrics.failure, identity_resolution_provider_timeout: metrics.provider_timeout, identity_resolution_not_found: metrics.not_found, identity_resolution_cache_hit: metrics.cache_hit, identity_resolution_cache_miss: metrics.cache_miss, identity_resolution_rate_limited: metrics.rate_limited, identity_resolution_unauthorized: metrics.unauthorized, identity_resolution_latency: { p50: l[Math.floor(l.length / 2)] ?? null, p95: l[Math.floor(l.length * 0.95)] ?? null, n: l.length } };
 }
+/** One rule for every name-disclosing surface (V1 /recipients/resolve, /v2/identity): a
+ *  device may look up IDENTITY_MAX_DISTINCT_PER_HOUR different numbers an hour, an address
+ *  IDENTITY_MAX_DISTINCT_PER_HOUR_IP (default 4×, several people share a mobile IP). Devices
+ *  are free to enrol, so the per-IP ceiling is what stops a script farming names. */
+export function identityEnumerationExceeded(actor: string, ip: string | undefined, hash: string, now = Date.now()): boolean {
+  const perActor = Math.max(5, Number(process.env.IDENTITY_MAX_DISTINCT_PER_HOUR ?? 60) || 60);
+  const perIp = Math.max(perActor, Number(process.env.IDENTITY_MAX_DISTINCT_PER_HOUR_IP ?? perActor * 4) || perActor * 4);
+  const a = distinctPerHour(actor, hash, now) > perActor;
+  const i = ip ? distinctPerHour(`ip:${ip}`, hash, now) > perIp : false;
+  if (a || i) metrics.rate_limited++;
+  return a || i;
+}
 /** Abuse detection: distinct identifiers per actor per hour. */
 const seen = new Map<string, { hashes: Set<string>; since: number }>();
 export function distinctPerHour(actor: string, hash: string, now = Date.now()): number {

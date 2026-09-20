@@ -132,6 +132,7 @@ export const STRINGS = {
   id_active_unnamed: ['This Mobile Money account is active, but the operator doesn’t share the name. Confirm who you’re paying.', 'Ce compte Mobile Money est actif, mais l’opérateur ne communique pas le nom. Confirmez qui vous payez.'],
   id_retry: ['Retry', 'Réessayer'],
   id_confirm_person: ['Yes, I’m paying {n}', 'Oui, je paie {n}'],
+  verified_by: ['Verified by', 'Vérifié par'],
   id_gate_blocked: ['The recipient must be verified before you can continue.', 'Le destinataire doit être vérifié avant de continuer.'],
   nm_sent_before: ['You’ve paid this number before', 'Vous avez déjà payé ce numéro'],
   name_mismatch: ['You have this number saved as {n}. The operator lists a different name — make sure this is the person you mean.', 'Vous avez enregistré ce numéro sous {n}. L’opérateur indique un autre nom — vérifiez qu’il s’agit bien de la bonne personne.'],

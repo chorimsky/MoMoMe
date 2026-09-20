@@ -50,8 +50,8 @@ Not touched: quotes, rails, payouts, ledger, settlement, the network saga, admin
 ## Cache
 Keyed by `HMAC-SHA256(IDENTITY_HASH_KEY, E.164)` (falls back to `COMPLIANCE_HMAC_KEY`). Only `VERIFIED / NOT_FOUND / INACTIVE` are remembered: a verified name for `IDENTITY_CACHE_TTL_VERIFIED` (6 h), a negative answer for `IDENTITY_CACHE_TTL` (300 s). Outages are never cached. **Single-flight:** concurrent lookups of one number (Details step, V1 resolve, a payment) share one provider call; each caller still gets its own name verdict.
 
-## Payment path (V1) — cache only, gate enforced server-side
-`registeredName(phone, country, { cacheOnly: true })` inside `createPaymentCore`: minting a payment never waits on an operator API. In gate mode the server refuses (409 `recipient_unverified`) what the apps refuse to continue with — NOT_FOUND / INACTIVE from the cache — so an old client or a script cannot pay past the gate; an outage or an unresolved number is never a refusal.
+## Payment path (V1) — every entry point verifies, gate enforced server-side
+`warmIdentity()` runs first in `createPaymentCore`: a number the cache has never seen (partner API, the WhatsApp bot, an old client) is resolved live within a 2.5 s budget — the apps' recipients are already cached from the Details screen, so it costs them nothing — then `registeredName(…, { cacheOnly: true })` reads the answer. A slow operator API can delay a payment by at most the budget and never fail it. In gate mode the server refuses (409 `recipient_unverified`) what the apps refuse to continue with — NOT_FOUND / INACTIVE from the cache — so an old client or a script cannot pay past the gate; an outage or an unresolved number is never a refusal.
 
 ## Frontend contract
 States `idle → typing → validating → verified | not_found | inactive | unavailable | unsupported | error`. Verified renders `✓ NAME / <Operator> Mobile Money / <Country>`. `unavailable` and `error` offer *Retry*; the manual-name box stays open in advisory mode. In gate mode `not_found`/`inactive` block *Continue*.

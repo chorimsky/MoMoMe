@@ -3,7 +3,7 @@
 ## Threats and controls
 | Threat | Control | Where |
 |---|---|---|
-| Enumerating who owns which number | signed-device auth; `IDENTITY_RATE_LIMIT` per actor/min; IP 120/min; `IDENTITY_MAX_DISTINCT_PER_HOUR` distinct numbers per device/hour (429); NOT_FOUND copy says "couldn't verify", never "does not exist" | `routes/identityV2.ts` |
+| Enumerating who owns which number | signed-device auth; `IDENTITY_RATE_LIMIT` per actor/min; IP 120/min; one rule on EVERY name-disclosing surface (`/v2/identity/*` and V1 `/recipients/resolve`): `IDENTITY_MAX_DISTINCT_PER_HOUR` distinct numbers per device/hour and `IDENTITY_MAX_DISTINCT_PER_HOUR_IP` (default 4×) per address — devices enrol freely, the IP ceiling is what stops a script; the Lightning Address shows a masked name unless the holder proved the number | `identityResolution/audit.ts`, `routes/lnurl.ts` |
 | Purpose creep | `purpose` mandatory and audited; the payment path may only read the cache (`cachedSnapshot`) — never a live lookup | resolver, api.ts |
 | Leaking provider internals | `publicIdentity()` strips `provider.reference` and raw payloads; `/providers` has no URLs or keys; `/health` is admin-only | route |
 | Logging PII | audit rows carry `identifierHash` (HMAC) + `last4` only; errors log codes, not numbers | audit.ts, providers |

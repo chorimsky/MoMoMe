@@ -4,6 +4,7 @@
 process.env.DB_PATH = ":memory:";
 process.env.RAILS_MODE = "sandbox";
 process.env.ADMIN_SESSION_SECRET = "phone-test-secret";
+process.env.IDENTITY_MAX_DISTINCT_PER_HOUR_IP = "1000";
 import type { AddressInfo } from "node:net";
 
 let pass = 0, fail = 0;

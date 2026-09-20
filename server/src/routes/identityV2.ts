@@ -10,9 +10,9 @@ import { Router, type Request, type Response } from "express";
 import { IDENTITY_PURPOSES, type IdentityPurpose, type IdentityResolution } from "../../../shared/identity.js";
 import { identityEnabled, identityMode, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
 import { IdentityError, HTTP_FOR_ERROR } from "../core/identityResolution/errors.js";
-import { auditRows, metricsSnapshot, metrics, distinctPerHour } from "../core/identityResolution/audit.js";
+import { auditRows, metricsSnapshot, metrics, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
 import { identifierHash } from "../core/identityResolution/msisdn.js";
-import { rateLimitDurable, rateLimitDurableMiddleware } from "../core/ratelimit.js";
+import { rateLimitDurable, rateLimitDurableMiddleware, clientIp } from "../core/ratelimit.js";
 import { verifyToken, tokenFromHeaders } from "../core/adminAuth.js";
 export const identityV2 = Router();
 type ReqLike = { headers: Record<string, string | string[] | undefined>; method?: string; url?: string; rawBody?: Buffer };
@@ -20,7 +20,6 @@ let resolveOwner: ((req: ReqLike) => Promise<string | undefined>) | null = null;
 export function setIdentityOwnerResolver(fn: (req: ReqLike) => Promise<string | undefined>): void { resolveOwner = fn; }
 
 const RATE_PER_ACTOR = () => Math.max(1, Number(process.env.IDENTITY_RATE_LIMIT ?? 20) || 20);
-const DISTINCT_PER_HOUR = () => Math.max(5, Number(process.env.IDENTITY_MAX_DISTINCT_PER_HOUR ?? 60) || 60);
 
 function gate(_req: Request, res: Response, next: () => void): void {
   if (identityEnabled()) return next();
@@ -64,8 +63,7 @@ async function handle(req: Request, res: Response, strict: boolean): Promise<voi
   // Per-actor rate limit + enumeration guard (distinct identifiers per hour).
   const rl = await rateLimitDurable(`identity:${actor.id}`, RATE_PER_ACTOR(), 60_000);
   if (!rl.ok) { metrics.rate_limited++; res.setHeader("Retry-After", String(rl.retryAfterSec)); res.status(429).json({ success: false, error: "IDENTITY_RATE_LIMITED", message: "Too many verifications. Please wait a moment." }); return; }
-  const distinct = distinctPerHour(actor.id, identifierHash(identifier.replace(/\D/g, "")));
-  if (actor.kind === "device" && distinct > DISTINCT_PER_HOUR()) { metrics.rate_limited++; res.status(429).json({ success: false, error: "IDENTITY_RATE_LIMITED", message: "Too many different numbers verified from this device. Please try later." }); return; }
+  if (actor.kind !== "admin" && identityEnumerationExceeded(actor.id, clientIp(req), identifierHash(identifier.replace(/\D/g, "")))) { res.status(429).json({ success: false, error: "IDENTITY_RATE_LIMITED", message: "Too many different numbers verified from this device. Please try later." }); return; }
   try {
     const r = await resolveIdentity({ identifier, purpose, actor: actor.id, expectedName: expected, paymentIntentId: typeof b.payment_intent_id === "string" ? b.payment_intent_id : undefined, correlationId: String(req.headers["x-correlation-id"] ?? "") || undefined, defaultCountry: typeof b.country === "string" ? b.country : "CM" });
     let status = r.status;

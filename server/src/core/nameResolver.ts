@@ -76,3 +76,19 @@ export async function resolveRecipient(phone: string, country: CountryCode = "CM
   // the registered one the moment we learn it.
   return { status: "unknown", verified: false, trustLevel: 3, provider };
 }
+
+/** Make sure the verification cache holds an answer for this number before a payment is
+ *  minted — within a budget. The apps resolve on the Details screen, so for them this is a
+ *  cache hit and costs nothing; a partner API call, the WhatsApp bot or an old client gets
+ *  the same verification here, bounded so a slow operator API can delay a payment by at
+ *  most `budgetMs` and never fail it. Returns true when the cache now has an answer. */
+export async function warmIdentity(phoneRaw: string, country: CountryCode, actor: string, budgetMs = 2_500): Promise<boolean> {
+  if (!identityEnabled()) return false;
+  const phone = localDigits(phoneRaw, country);
+  if (cachedSnapshot(phone, country)) return true;
+  const race = await Promise.race([
+    resolveIdentity({ identifier: phone, defaultCountry: country, purpose: "PAYMENT_CREATION", actor }).then(() => true, () => false),
+    new Promise<false>((r) => setTimeout(() => r(false), budgetMs)),
+  ]);
+  return race && !!cachedSnapshot(phone, country);
+}

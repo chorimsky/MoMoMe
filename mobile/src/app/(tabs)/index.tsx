@@ -1096,6 +1096,9 @@ function SuccessView({ payment, recipientLabel, onReset }: { payment: Payment; r
           {tr('delivered_to', { n: xaf(payment.feeBy === 'merchant' ? payment.totalXaf : payment.xaf) })}{'\n'}
           <Text style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{recipientLabel}</Text>
         </Body>
+        {payment.recipientIdentity?.verified || payment.recipient.nameSource === 'provider' ? (
+          <Pill label={`${tr('verified_by')} ${PROVIDERS[payment.recipient.provider]?.name ?? payment.recipient.provider}`} tone="recv" icon="checkmark-circle" />
+        ) : null}
         {payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf ? (
           <Pill label={tr('quoted_settled', { n: xaf(payment.repricedFromXaf) })} tone="accent" icon="information-circle" />
         ) : null}

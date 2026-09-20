@@ -8,7 +8,7 @@ import { namesMatch,
   COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21, cleanText } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
-import { resolveRecipient, registeredName } from "../core/nameResolver.js";
+import { resolveRecipient, registeredName, warmIdentity } from "../core/nameResolver.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
@@ -76,7 +76,8 @@ import { setIdentityOwnerResolver } from "./identityV2.js";
 import { recipientDeliveredMessage } from "../core/notifications.js";
 import { MESSAGE_VARIABLES } from "../core/settings.js";
 import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
-import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow } from "../core/identityResolution/audit.js";
+import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
+import { identifierHash } from "../core/identityResolution/msisdn.js";
 import { recordCount as identityRecordCount, cacheTtlVerifiedSec } from "../core/identityResolution/cache.js";
 import { IdentityError } from "../core/identityResolution/errors.js";
 import { matchNames } from "../core/identityResolution/names.js";
@@ -747,9 +748,16 @@ api.get("/recipients/resolve", rateLimitDurableMiddleware("resolve", 60, 60_000)
   // Tie resolution to an identified device — it discloses names (the internal identity
   // graph aggregates other users' confirmations), so it must not be a fully-anonymous
   // enumeration oracle. The send flow always carries a device id, so no UX impact.
-  if (!(await ownerOf(req))) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const who = await ownerOf(req);
+  if (!who) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const phone = String(req.query.phone ?? "").slice(0, 24); // bound input → bounded cache key / work
   const country = (COUNTRIES[String(req.query.country ?? "") as CountryCode] ? String(req.query.country) : "CM") as CountryCode;
+  // The same enumeration guard as /v2/identity: names are disclosed here, and a device (or
+  // an address) sweeping many DIFFERENT numbers is not someone paying a friend.
+  const chk = checkPhone(phone, country);
+  if (chk.ok && identityEnumerationExceeded(who, clientIp(req), identifierHash(`${COUNTRIES[country].dial}${chk.local}`))) {
+    return res.status(429).json({ error: "rate_limited", message: "Too many different numbers looked up. Please try later." });
+  }
   try {
     res.json(await resolveRecipient(phone, country));
   } catch {
@@ -926,6 +934,10 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
      stated name is checked against the registered one; a mismatch is a question the
      sender must answer, with a token bound to this payment; and the registered name is
      what goes on the payment, the receipt and the SMS — never the typed label. */
+  // Every entry point verifies — not only the apps' Details screen. A number the cache has
+  // not seen (partner API, the bot, an old client) is resolved now within a 2.5 s budget;
+  // the apps' recipients are already cached, so this is instant for them.
+  await warmIdentity(recipient.phone, recipient.country, owner ?? "payment").catch(() => false);
   const registered = await registeredName(recipient.phone, recipient.country, { cacheOnly: true }).catch(() => null);
   const toMerchant = !!(reqBody ?? {}).merchantLinkCode || !!(reqBody ?? {}).merchantCode;
   // A merchant checkout: the payer knows the BUSINESS, not the person whose Mobile Money

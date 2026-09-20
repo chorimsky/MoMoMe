@@ -8,6 +8,7 @@ process.env.IDENTITY_RESOLUTION_ENABLED = "true";
 process.env.IDENTITY_CACHE_TTL = "60";
 process.env.IDENTITY_RATE_LIMIT = "8";
 process.env.IDENTITY_MAX_DISTINCT_PER_HOUR = "6";
+process.env.IDENTITY_MAX_DISTINCT_PER_HOUR_IP = "1000"; // one address runs this whole suite
 process.env.LEGACY_SENDER_UNTIL = "2000-01-01T00:00:00Z";
 import type { AddressInfo } from "node:net";
 import { p256 } from "@noble/curves/nist.js";
@@ -177,6 +178,13 @@ async function main() {
     const r = await fetch(`${base}${p}`, { method: "POST", headers, body: bodyStr });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any>, headers: r.headers };
   };
+  const callGet = async (p: string, dev: string) => {
+    const headers: Record<string, string> = { "x-mm-sender": dev };
+    const priv = keys.get(dev)!; const ts = String(Date.now());
+    const msg = new TextEncoder().encode(`GET\n${p}\n${ts}\n${b64(sha256(new TextEncoder().encode("")))}`);
+    headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true }));
+    return fetch(`${base}${p}`, { headers });
+  };
   try {
     await enroll("dev-1"); await enroll("dev-2");
     let x = await call("/v2/identity/resolve", null, { identifier: "670123456", purpose: "RECIPIENT_VERIFICATION" });
@@ -251,6 +259,14 @@ async function main() {
     const q6 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
     const unk = await signedJson("/payments", { quoteId: q6.body.id, recipient: { phone: "699551000", country: "CM", provider: "ORANGE", name: "Never Looked Up" } });
     ok("…and an outage / never-resolved number is NOT a refusal even in gate mode", unk.status === 200 && !unk.body.recipientIdentity, String(unk.status));
+    // Every entry point verifies: a number the cache has never seen is resolved AT creation
+    // (within a budget) — a partner API call or an old client gets the same gate.
+    const q7 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
+    const cold = await signedJson("/payments", { quoteId: q7.body.id, recipient: { phone: "699000449", country: "CM", provider: "ORANGE", name: "Any Body" } });
+    ok("GATE: a never-resolved NOT_FOUND number is refused at creation, resolved live within the budget", cold.status === 409 && cold.body.code === "identity_not_found", `${cold.status} ${cold.body.code ?? ""}`);
+    const q8 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
+    const coldOk = await signedJson("/payments", { quoteId: q8.body.id, recipient: { phone: "699000447", country: "CM", provider: "ORANGE", name: "Fotso Eric" } });
+    ok("…and a never-resolved VERIFIED number is minted under the registered name with the snapshot attached", coldOk.status === 200 && coldOk.body.recipientIdentity?.verified === true && coldOk.body.recipient.nameSource === "provider", `${coldOk.status} ${JSON.stringify(coldOk.body.recipient ?? coldOk.body)}`);
     process.env.IDENTITY_RESOLUTION_MODE = "advisory";
     const adm = await fetch(`${base}/admin/identity-resolution`, { headers: A }).then((r) => r.json()) as Record<string, any>;
     ok("Admin → Identities sees flag, mode, chain order, provider health, metrics and hashed audit rows", adm.enabled === true && adm.mode === "advisory" && adm.priority[0] === "mtn_direct" && Array.isArray(adm.providers) && adm.metrics.identity_resolution_total > 0 && adm.audit.length > 0 && adm.audit.every((a: any) => !/670123|699000|670125/.test(JSON.stringify(a))) && adm.cache.ttlVerifiedSec >= adm.cache.ttlSec);
@@ -258,6 +274,12 @@ async function main() {
     ok("a support lookup answers under purpose SUPPORT with the name verdict, bypassing the cache", look.status === "VERIFIED" && look.displayName === "NANA JEAN PAUL" && look.nameMatch === "MATCH" && look.source === "sandbox");
     ok("…and is audited under the admin, not a device", auditRows(3).some((a) => a.purpose === "SUPPORT" && a.actor.startsWith("admin:")));
     ok("the support lookup is unauthenticated-proof", (await fetch(`${base}/admin/identity-resolution/lookup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identifier: "670123456" }) })).status === 401);
+
+    // V1 /recipients/resolve discloses names too — same enumeration rule.
+    let v1Limited = 0;
+    await enroll("dev-3");
+    for (let i = 0; i < 9; i++) { const r = await callGet(`/recipients/resolve?phone=6990${String(11000 + i)}&country=CM`, "dev-3"); if (r.status === 429) v1Limited++; }
+    ok("V1 /recipients/resolve is enumeration-guarded like /v2 (429 after the distinct-number ceiling)", v1Limited > 0, `${v1Limited} limited`);
 
     console.log("\nFlag off = V1 exactly\n");
     process.env.IDENTITY_RESOLUTION_ENABLED = "false";

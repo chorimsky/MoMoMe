@@ -111,6 +111,7 @@ export const STRINGS: Dict = {
   id_active_unnamed: ["This Mobile Money account is active, but the operator doesn't share the name. Confirm who you're paying.", "Ce compte Mobile Money est actif, mais l'opérateur ne communique pas le nom. Confirmez qui vous payez."],
   id_retry: ["Retry", "Réessayer"],
   id_confirm_person: ["Yes, I'm paying {n}", "Oui, je paie {n}"],
+  verified_by: ["Verified by", "Vérifié par"],
   id_gate_blocked: ["The recipient must be verified before you can continue.", "Le destinataire doit être vérifié avant de continuer."], verified_mm: ["Verified via Mobile Money", "Vérifié via Mobile Money"],
   sent_before: ["You've sent to this number before", "Vous avez déjà payé ce numéro"], edit: ["Edit", "Modifier"],
   name_unverified: ["Name not verified — enter it to continue", "Nom non vérifié — saisissez-le pour continuer"],

@@ -596,7 +596,7 @@ export function ReviewStep({ s, quote, back, next, refresh, busy }: { s: Draft; 
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: verified ? "var(--recv)" : "var(--ink-3)", margin: "10px 0 0" }}>
         {biz ? (verified ? "✓ " + t("mrc_biz_verified") : t("mrc_biz_unverified"))
-          : s.nameSource === "provider" ? "✓ " + t("verified_mm") : s.nameSource === "internal" ? "✓ " + t("sent_before") : t("name_manual")}
+          : s.nameSource === "provider" ? `✓ ${t("verified_by")} ${PROVIDERS[s.provider]?.name ?? s.provider}` : s.nameSource === "internal" ? "✓ " + t("sent_before") : t("name_manual")}
       </div>
 
       <div style={{ padding: "22px 0 18px", textAlign: "center", borderBottom: "1px solid var(--line-2)" }}>

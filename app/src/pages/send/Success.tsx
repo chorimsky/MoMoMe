@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef, useContext, type CSSProperties } from "react";
 import type { Payment } from "@shared/types.js";
-import { COUNTRIES } from "@shared/domain.js";
+import { PROVIDERS, COUNTRIES } from "@shared/domain.js";
 import { Logo, Momo, useBrandLogo } from "../../components/atoms.js";
 import { fmt } from "../../lib/format.js";
 import { useI18n } from "../../lib/i18n.js";
 import { downloadReceipt, shareReceipt, cryptoMethod, cryptoSent, usdStr, type ReceiptStrings } from "../../lib/receipt.js";
 import { FlowCard, Row, MerchantFlow } from "./ui.js";
 
+/** The operator-registered name is what makes a receipt worth keeping: it proves the money
+ *  went to the named holder of that number, not to a label the sender typed. */
+function verifiedByOperator(p: Payment): string | null {
+  return p.recipientIdentity?.verified || p.recipient.nameSource === "provider" ? (PROVIDERS[p.recipient.provider]?.name ?? p.recipient.provider) : null;
+}
 function fullPhone(p: Payment): string {
   return COUNTRIES[p.recipient.country].dial + " " + p.recipient.phone;
 }
@@ -57,8 +62,9 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
   };
   const onDownload = async () => { setBusy(true); const ok = await downloadReceipt(payment, strings, logo, showCrypto); setBusy(false); flash(ok === "ok" ? t("receipt_saved") : t("error_generic")); };
   const onShare = async () => { setBusy(true); const r = await shareReceipt(payment, strings, logo, showCrypto); setBusy(false); if (r === "copied") flash(t("receipt_copied")); else if (r === "fail") flash(t("receipt_share_fail")); };
+  const verifiedBy = verifiedByOperator(payment);
   const rows: Array<[string, string]> = [
-    [t("recipient"), payment.recipient.name || "—"],
+    [t("recipient"), (payment.recipient.name || "—") + (verifiedBy ? ` ✓ ${t("verified_by")} ${verifiedBy}` : "")],
     [t("mobile_number"), fullPhone(payment)],
     // On-chain re-priced at confirmation: show what was quoted vs what landed (F1).
     ...(payment.repricedFromXaf && payment.repricedFromXaf !== payment.xaf
@@ -148,6 +154,7 @@ export function Receipt({ payment, onClose }: { payment: Payment; onClose: () =>
 }
 
 export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payment; reset: () => void; onViewActivity: () => void }) {
+  const verifiedBy = verifiedByOperator(payment);
   const { t, lang } = useI18n();
   const [showReceipt, setShowReceipt] = useState(false);
   const biz = useContext(MerchantFlow);
@@ -169,6 +176,7 @@ export function SuccessStep({ payment, reset, onViewActivity }: { payment: Payme
         <h2 style={{ fontSize: 25 }}>{t("success_title")}</h2>
         <div className="num" style={{ fontSize: 36, fontWeight: 750, color: "var(--recv)", margin: "12px 0 0", letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>{fmt(payment.feeBy === "merchant" ? payment.totalXaf : payment.xaf)} <span style={{ fontSize: 19 }}>XAF</span></div>
         <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "6px 0 0" }}>{t(payment.feeBy === "merchant" ? "paid_to" : "delivered_to")} <span style={{ fontWeight: 700, color: "var(--ink)" }}>{payment.recipient.name}</span></p>
+        {verifiedBy && <p style={{ color: "var(--recv)", fontSize: 12.5, fontWeight: 650, margin: "4px 0 0" }}>✓ {t("verified_by")} {verifiedBy}</p>}
       </div>
 
       <div style={{ marginTop: 22, background: "var(--surface-2)", borderRadius: "var(--r)", padding: "4px 16px", border: "1px solid var(--line)" }}>

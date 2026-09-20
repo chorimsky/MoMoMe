@@ -12,7 +12,7 @@ import type { ResolveResult, CountryCode } from "../../../shared/types.js";
 import { detectProvider } from "../../../shared/domain.js";
 import { getIdentityByDigits, touchLastSeen } from "./identity.js";
 import * as pawapay from "../adapters/pawapay.js";
-import { identityEnabled, resolveIdentity } from "./identityResolution/resolver.js";
+import { identityEnabled, resolveIdentity, cachedSnapshot } from "./identityResolution/resolver.js";
 
 /** The name a Mobile Money number is REGISTERED to, as far as we can know it.
  *
@@ -23,7 +23,7 @@ import { identityEnabled, resolveIdentity } from "./identityResolution/resolver.
  *  The old order was the reverse: a name a sender once TYPED outranked the operator's
  *  record, so a wrong label, once paid, became "verified" for everyone after. Nothing a
  *  sender types can outrank the operator. */
-export async function registeredName(phone: string, country: CountryCode = "CM"): Promise<{ name: string; source: "provider" | "internal" } | null> {
+export async function registeredName(phone: string, country: CountryCode = "CM", opts: { cacheOnly?: boolean } = {}): Promise<{ name: string; source: "provider" | "internal" } | null> {
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 8) return null;
   // With Identity Resolution on, the operator's record comes from the v2 chain — today the
@@ -32,8 +32,16 @@ export async function registeredName(phone: string, country: CountryCode = "CM")
   // has no name lookup at all (only /predict-provider), so its lookupName is the sandbox
   // stand-in and the only source while the flag is off.
   if (identityEnabled()) {
-    const r = await resolveIdentity({ identifier: phone, defaultCountry: country, purpose: "RECIPIENT_VERIFICATION", actor: "v1:recipients/resolve" }).catch(() => null);
-    if (r?.status === "VERIFIED" && r.displayName) return { name: r.displayName, source: "provider" };
+    // The payment path asks with cacheOnly: the Details screen already resolved this number
+    // (and the verified answer holds for hours), so creating a payment never waits on, or
+    // fails with, an operator API. Everything else may go to the chain.
+    if (opts.cacheOnly) {
+      const snap = cachedSnapshot(phone, country);
+      if (snap?.status === "VERIFIED" && snap.displayName) return { name: snap.displayName, source: "provider" };
+    } else {
+      const r = await resolveIdentity({ identifier: phone, defaultCountry: country, purpose: "RECIPIENT_VERIFICATION", actor: "v1:recipients/resolve" }).catch(() => null);
+      if (r?.status === "VERIFIED" && r.displayName) return { name: r.displayName, source: "provider" };
+    }
   } else {
     const lookup = await pawapay.lookupName(phone).catch(() => null);
     if (lookup?.name) return { name: lookup.name, source: "provider" };

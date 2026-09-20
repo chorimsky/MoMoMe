@@ -108,6 +108,7 @@ export const STRINGS: Dict = {
   id_unavailable: ["Recipient verification is temporarily unavailable. Please try again.", "La vérification du destinataire est temporairement indisponible. Veuillez réessayer."],
   id_error: ["We couldn't check this number right now. You can still confirm the name yourself.", "Impossible de vérifier ce numéro pour l'instant. Vous pouvez confirmer le nom vous-même."],
   id_unsupported: ["This number can't be verified yet — you can still confirm the name yourself.", "Ce numéro ne peut pas encore être vérifié — vous pouvez confirmer le nom vous-même."],
+  id_active_unnamed: ["This Mobile Money account is active, but the operator doesn't share the name. Confirm who you're paying.", "Ce compte Mobile Money est actif, mais l'opérateur ne communique pas le nom. Confirmez qui vous payez."],
   id_retry: ["Retry", "Réessayer"],
   id_gate_blocked: ["The recipient must be verified before you can continue.", "Le destinataire doit être vérifié avant de continuer."], verified_mm: ["Verified via Mobile Money", "Vérifié via Mobile Money"],
   sent_before: ["You've sent to this number before", "Vous avez déjà payé ce numéro"], edit: ["Edit", "Modifier"],

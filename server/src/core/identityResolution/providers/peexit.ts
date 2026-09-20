@@ -22,14 +22,14 @@ export const peexitVerify: IdentityProvider = {
   configured: () => peexitConfigured(),
   // Peexit is a Cameroon aggregator: MTN and Orange XAF wallets only.
   supports: (country, operator) => country === "CM" && (operator === "MTN" || operator === "ORANGE"),
-  async resolve(id: NormalizedIdentifier, _ctx: IdentityContext): Promise<ProviderAnswer> {
+  async resolve(id: NormalizedIdentifier, ctx: IdentityContext): Promise<ProviderAnswer> {
     const t0 = Date.now();
     let res: Response;
     try {
       res = await peex("/clients/verify-wallet", {
         method: "POST",
         body: JSON.stringify({ countryCode: id.country, accountNumber: id.nationalNumber ?? id.identifier.replace(/^\+/, "") }),
-      });
+      }, ctx.timeoutMs);
     } catch (e) {
       lastLatency = Date.now() - t0; lastOk = false; lastError = (e as Error)?.name ?? "network";
       const timeout = /abort|timeout/i.test(String((e as Error)?.name ?? e));

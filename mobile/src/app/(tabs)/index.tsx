@@ -127,7 +127,7 @@ export default function SendScreen() {
   // story. On, the number goes to /v2/identity/resolve and the card shows an explicit state —
   // a provider outage is "unavailable", never "not found".
   const identity = useIdentityConfig();
-  type IdState = 'idle' | 'typing' | 'validating' | 'verified' | 'not_found' | 'inactive' | 'unavailable' | 'unsupported' | 'error';
+  type IdState = 'idle' | 'typing' | 'validating' | 'verified' | 'not_found' | 'inactive' | 'unavailable' | 'unsupported' | 'active_unnamed' | 'error';
   const [idState, setIdState] = useState<IdState>('idle');
   const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
   const [idAttempt, setIdAttempt] = useState(0);
@@ -284,7 +284,7 @@ export default function SendScreen() {
               setOpenedAs((prev) => (prev && norm(prev) !== norm(name) ? prev : null));
               return;
             }
-            setIdState(idn.status === 'NOT_FOUND' ? 'not_found' : idn.status === 'INACTIVE' ? 'inactive' : idn.status === 'PROVIDER_UNAVAILABLE' ? 'unavailable' : idn.status === 'UNSUPPORTED' || idn.status === 'UNKNOWN' ? 'unsupported' : 'error');
+            setIdState(idn.status === 'NOT_FOUND' ? 'not_found' : idn.status === 'INACTIVE' ? 'inactive' : idn.status === 'PROVIDER_UNAVAILABLE' ? 'unavailable' : idn.status === 'UNKNOWN' && idn.account_status === 'ACTIVE' ? 'active_unnamed' : idn.status === 'UNSUPPORTED' || idn.status === 'UNKNOWN' ? 'unsupported' : 'error');
             // Never show UNKNOWN as verified: the sender names the recipient, exactly as in V1.
             if (nameSourceRef.current !== 'internal') {
               setRecipientName(manualName.current);
@@ -737,11 +737,11 @@ export default function SendScreen() {
                     <Body muted style={{ fontSize: 12.5 }}>{tr('id_validating')}</Body>
                   </View>
                 ) : null}
-                {identity.enabled && ['not_found', 'inactive', 'unavailable', 'unsupported', 'error'].includes(idState) ? (
+                {identity.enabled && ['not_found', 'inactive', 'unavailable', 'unsupported', 'active_unnamed', 'error'].includes(idState) ? (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.one }} accessibilityRole="alert">
-                    <Ionicons name={idState === 'unavailable' || idState === 'error' ? 'time-outline' : 'alert-circle'} size={16} color={t.warn} style={{ marginTop: 1 }} />
+                    <Ionicons name={idState === 'unavailable' || idState === 'error' ? 'time-outline' : idState === 'active_unnamed' ? 'checkmark-circle' : 'alert-circle'} size={16} color={idState === 'active_unnamed' ? t.recv : t.warn} style={{ marginTop: 1 }} />
                     <Body style={{ flex: 1, color: t.text, fontSize: 12.5, lineHeight: 17 }}>
-                      {tr(idState === 'not_found' ? 'id_not_found' : idState === 'inactive' ? 'id_inactive' : idState === 'unavailable' ? 'id_unavailable' : idState === 'unsupported' ? 'id_unsupported' : 'id_error')}
+                      {tr(idState === 'not_found' ? 'id_not_found' : idState === 'inactive' ? 'id_inactive' : idState === 'unavailable' ? 'id_unavailable' : idState === 'unsupported' ? 'id_unsupported' : idState === 'active_unnamed' ? 'id_active_unnamed' : 'id_error')}
                       {idBlocked ? `\n${tr('id_gate_blocked')}` : ''}
                     </Body>
                     {idState === 'unavailable' || idState === 'error' ? (

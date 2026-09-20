@@ -26,7 +26,18 @@ import type { RegulatoryReport, RegulatoryBody, RegulatoryFiling, ApiKeyUsage, M
   Method, AppFeatures, TestReport, TestCaseResult,
 } from "@shared/types.js";
 import type { AdminRole, AdminUserView } from "@shared/roles.js";
-import type { IdentityResolveResponse } from "@shared/identity.js";
+import type { IdentityResolveResponse, IdentityProviderHealth, IdentityCapabilityConfig, IdentityStatus, NameMatch } from "@shared/identity.js";
+export interface IdentityResolutionStatus {
+  enabled: boolean; mode: "advisory" | "gate";
+  cache: { ttlSec: number; ttlVerifiedSec: number; records: number };
+  providers: IdentityProviderHealth[];
+  capabilities: Record<string, Record<string, IdentityCapabilityConfig>>;
+  metrics: Record<string, number | { p50: number | null; p95: number | null; n: number }>;
+  last24h: { hours: number; total: number; verified: number; notFound: number; inactive: number; unavailable: number; timeouts: number; unknown: number; cacheHits: number; latency: { p50: number | null; p95: number | null }; byProvider: Record<string, { total: number; verified: number; failed: number }> };
+  audit: Array<{ requestId: string; actor: string; purpose: string; identifierHash: string; country: string; operator: string | null; provider: string; status: string; error?: string; latencyMs: number; cache: string; at: string }>;
+  priority: string[];
+}
+export interface IdentityLookupResult { status: IdentityStatus; verified: boolean; displayName?: string; operator: string | null; country: string; accountStatus: string; provider: string; source: string; nameMatch?: NameMatch; error?: string; requestId: string }
 import { devicePublicKeys, signRequest } from "../lib/deviceAccount.js";
 import { idbGet, idbSet } from "../lib/idb.js";
 
@@ -466,6 +477,10 @@ export const api = {
   saveSettings: (patch: Partial<AdminSettings>) =>
     req<AdminSettings>("/admin/settings", { method: "PUT", body: JSON.stringify(patch) }),
 
+  /** Recipient verification (Identity Resolution v2) — status whether the flag is on or off. */
+  adminIdentityResolution: () => req<IdentityResolutionStatus>("/admin/identity-resolution"),
+  adminIdentityLookup: (identifier: string, country: CountryCode = "CM", expectedName?: string) =>
+    req<IdentityLookupResult>("/admin/identity-resolution/lookup", { method: "POST", body: JSON.stringify({ identifier, country, expectedName }) }),
   adminIdentities: () => req<Identity[]>("/admin/identities"),
   adminIdentityStats: () => req<IdentityStats>("/admin/identities/stats"),
   claimIdentity: (id: string) => req<Identity>(`/admin/identities/${id}/claim`, { method: "POST" }),

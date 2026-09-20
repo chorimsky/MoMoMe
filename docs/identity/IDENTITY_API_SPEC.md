@@ -5,7 +5,7 @@ Base: `/api/v2/identity`. **404** for every path while `IDENTITY_RESOLUTION_ENAB
 ## Authentication
 - Device: the same signed-request scheme as `/api/*` (`x-mm-sender`, `x-mm-ts`, `x-mm-sig`); an un-enrolled or unsigned device is **401 `IDENTITY_UNAUTHORIZED`**.
 - Partner API key (`ownerOf`) and admin session token are also actors.
-- `purpose` is mandatory: `RECIPIENT_VERIFICATION | PAYMENT_CREATION | CONTACT_SAVE | COMPLIANCE_REVIEW | SUPPORT`.
+- `purpose` is mandatory: `RECIPIENT_VERIFICATION | PAYMENT_CREATION | PAYOUT_VALIDATION | TRANSACTION_CONFIRMATION | FRAUD_PREVENTION | SUPPORT`.
 
 ## POST /resolve
 ```json
@@ -50,6 +50,12 @@ Providers' health + `metrics` (`identity_resolution_total / success / failure / 
 - PROVIDER_UNAVAILABLE — *Recipient verification is temporarily unavailable. Please try again.*
 - UNSUPPORTED / UNKNOWN — *This number can't be verified yet — you can still confirm the name yourself.*
 - VERIFICATION_FAILED — *The name doesn't match the account. Please check the recipient.*
+
+## Gate mode on the V1 payment path
+With `IDENTITY_RESOLUTION_MODE=gate`, `POST /api/payments` answers **409 `recipient_unverified`** (`code: identity_not_found | identity_inactive`) when the verification **cache** holds NOT_FOUND / INACTIVE for the recipient — cache only, so an outage or an unresolved number is never a refusal; merchant checkouts are exempt. Advisory mode never refuses.
+
+## Admin (any mode, `Identities` section)
+`GET /api/admin/identity-resolution` → flag, mode, chain order, provider health, capability table, process metrics, `last24h` window from the persisted audit, last 30 audit rows (hash + last 4 only). `POST /api/admin/identity-resolution/lookup { identifier, country?, expectedName? }` → a support lookup under purpose `SUPPORT`, audited under the admin uid, cache bypassed; 404 while the flag is off.
 
 ## Compatibility
 `GET /api/recipients/resolve` (V1) is unchanged and remains the default for both apps while the flag is off. `Payment.recipientIdentity` is an optional, additive field.

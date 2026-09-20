@@ -124,7 +124,7 @@ async function main() {
   ok("…and an outage is not cached", cached(identifierHash("+237670123000")) === null);
   r = await resolveIdentity({ identifier: "620000000", purpose: "RECIPIENT_VERIFICATION", actor: "dev-a" });
   ok("an unsupported operator → UNSUPPORTED", r.status === "UNSUPPORTED" && r.error === "IDENTITY_UNSUPPORTED_OPERATOR");
-  ok("every request is audited by hash, never by number", auditRows(20).every((a) => !/\d{9}/.test(JSON.stringify(a))) && auditRows(20).length >= 5);
+  ok("every request is audited by hash, never by number", auditRows(20).every((a) => !/670123|620000/.test(JSON.stringify(a))) && auditRows(20).length >= 5);
   const m = metricsSnapshot();
   ok("metrics count total / success / not found / timeout / cache", m.identity_resolution_total >= 6 && m.identity_resolution_success >= 1 && m.identity_resolution_not_found >= 1 && m.identity_resolution_provider_timeout >= 1 && m.identity_resolution_cache_hit >= 1, JSON.stringify(m));
   ok("record pruning keeps fresh records", pruneIdentityRecords() === 0 && cached(identifierHash("+237670123456")) !== null);
@@ -199,12 +199,43 @@ async function main() {
     ok("cachedSnapshot never calls a provider: an unknown number is simply null", cachedSnapshot("699999999", "CM") === null);
     void H;
 
+    console.log("\nCache lifetimes, single-flight, gate mode, admin visibility\n");
+    const { cached: cachedRec } = await import("../src/core/identityResolution/cache.js");
+    const vRec = cachedRec(identifierHash("+237670123456")); const nfRec = cachedRec(identifierHash("+237670123459"));
+    ok("a VERIFIED name holds for hours; NOT_FOUND for minutes", !!vRec && !!nfRec && Date.parse(vRec!.expiresAt) - Date.now() > 3_600_000 && Date.parse(nfRec!.expiresAt) - Date.now() <= 60_000 * 2, `${vRec?.expiresAt} / ${nfRec?.expiresAt}`);
+    const before = metricsSnapshot().identity_resolution_cache_miss;
+    const [s1, s2, s3] = await Promise.all([1, 2, 3].map((i) => resolveIdentity({ identifier: "670125456", purpose: "RECIPIENT_VERIFICATION", actor: `sf-${i}`, expectedName: i === 2 ? "Nobody Else" : undefined })));
+    ok("three simultaneous lookups of one number make ONE provider call (single-flight)", metricsSnapshot().identity_resolution_cache_miss === before + 1 && s1.status === "VERIFIED" && s3.displayName === s1.displayName, `${metricsSnapshot().identity_resolution_cache_miss - before} misses`);
+    ok("…and each caller still gets its own name verdict", s2.nameMatch === "NO_MATCH" && s1.nameMatch === "NOT_AVAILABLE");
+    process.env.IDENTITY_RESOLUTION_MODE = "gate";
+    // A number far from anything paid before (the near-miss guard is its own safeguard).
+    await call("/v2/identity/resolve", "dev-1", { identifier: "699000159", purpose: "RECIPIENT_VERIFICATION" });
+    const q4 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
+    const gated = await signedJson("/payments", { quoteId: q4.body.id, recipient: { phone: "699000159", country: "CM", provider: "ORANGE", name: "Some Body" } });
+    ok("GATE mode: the server refuses a payment to an account the operator says is not there (409, cache-only)", gated.status === 409 && gated.body.error === "recipient_unverified" && gated.body.code === "identity_not_found", `${gated.status} ${JSON.stringify(gated.body)}`);
+    const q5 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
+    const okPay = await signedJson("/payments", { quoteId: q5.body.id, recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "Nana Jean Paul" } });
+    ok("…and still mints one to a verified account", okPay.status === 200 && okPay.body.recipientIdentity?.verified === true);
+    const q6 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
+    const unk = await signedJson("/payments", { quoteId: q6.body.id, recipient: { phone: "699551000", country: "CM", provider: "ORANGE", name: "Never Looked Up" } });
+    ok("…and an outage / never-resolved number is NOT a refusal even in gate mode", unk.status === 200 && !unk.body.recipientIdentity, String(unk.status));
+    process.env.IDENTITY_RESOLUTION_MODE = "advisory";
+    const adm = await fetch(`${base}/admin/identity-resolution`, { headers: A }).then((r) => r.json()) as Record<string, any>;
+    ok("Admin → Identities sees flag, mode, chain order, provider health, metrics and hashed audit rows", adm.enabled === true && adm.mode === "advisory" && adm.priority[0] === "mtn_direct" && Array.isArray(adm.providers) && adm.metrics.identity_resolution_total > 0 && adm.audit.length > 0 && adm.audit.every((a: any) => !/670123|699000|670125/.test(JSON.stringify(a))) && adm.cache.ttlVerifiedSec >= adm.cache.ttlSec);
+    const look = await fetch(`${base}/admin/identity-resolution/lookup`, { method: "POST", headers: { ...A, "content-type": "application/json" }, body: JSON.stringify({ identifier: "670123456", expectedName: "nana jean paul" }) }).then((r) => r.json()) as Record<string, any>;
+    ok("a support lookup answers under purpose SUPPORT with the name verdict, bypassing the cache", look.status === "VERIFIED" && look.displayName === "NANA JEAN PAUL" && look.nameMatch === "MATCH" && look.source === "sandbox");
+    ok("…and is audited under the admin, not a device", auditRows(3).some((a) => a.purpose === "SUPPORT" && a.actor.startsWith("admin:")));
+    ok("the support lookup is unauthenticated-proof", (await fetch(`${base}/admin/identity-resolution/lookup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identifier: "670123456" }) })).status === 401);
+
     console.log("\nFlag off = V1 exactly\n");
     process.env.IDENTITY_RESOLUTION_ENABLED = "false";
     x = await call("/v2/identity/resolve", "dev-1", { identifier: "670123456", purpose: "RECIPIENT_VERIFICATION" });
     ok("the surface answers 404 with the flag off", x.status === 404);
     const cfg2 = await fetch(`${base}/config`).then((r) => r.json()) as Record<string, any>;
     ok("/config says off", cfg2.identity?.enabled === false);
+    const admOff = await fetch(`${base}/admin/identity-resolution`, { headers: A }).then((r) => r.json()) as Record<string, any>;
+    ok("the admin card still explains itself with the flag off", admOff.enabled === false && Array.isArray(admOff.providers));
+    ok("…but the support lookup is closed (no side door)", (await fetch(`${base}/admin/identity-resolution/lookup`, { method: "POST", headers: { ...A, "content-type": "application/json" }, body: JSON.stringify({ identifier: "670123456" }) })).status === 404);
     const q3 = await signedJson("/quotes", { xaf: 5000, method: "LIGHTNING", country: "CM" });
     const pay3 = await signedJson("/payments", { quoteId: q3.body.id, recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "Nana Jean Paul" } });
     ok("a payment created with the flag off carries no snapshot even though the cache has one", pay3.status === 200 && !pay3.body.recipientIdentity);

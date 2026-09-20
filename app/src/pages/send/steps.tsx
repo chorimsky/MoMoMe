@@ -77,7 +77,7 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
   // whole story. On, the number goes to /v2/identity/resolve and the box shows one of the
   // explicit states — a provider outage is "unavailable", never "not found".
   const identity = useIdentityConfig();
-  type IdState = "idle" | "typing" | "validating" | "verified" | "not_found" | "inactive" | "unavailable" | "unsupported" | "error";
+  type IdState = "idle" | "typing" | "validating" | "verified" | "not_found" | "inactive" | "unavailable" | "unsupported" | "active_unnamed" | "error";
   const [idState, setIdState] = useState<IdState>("idle");
   const [idMeta, setIdMeta] = useState<{ operator: string | null; country: string } | null>(null);
   const [idAttempt, setIdAttempt] = useState(0); // "Retry" bumps this to re-run the lookup
@@ -149,7 +149,9 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
             setIdState("verified");
             set({ recipientName: idn.display_name, nameSource: "provider", ...prov });
           } else {
-            setIdState(idn.status === "NOT_FOUND" ? "not_found" : idn.status === "INACTIVE" ? "inactive" : idn.status === "PROVIDER_UNAVAILABLE" ? "unavailable" : idn.status === "UNSUPPORTED" || idn.status === "UNKNOWN" ? "unsupported" : "error");
+            // UNKNOWN + ACTIVE: the operator confirmed a live account but withholds the name —
+            // worth saying, it is not the same as "we know nothing".
+            setIdState(idn.status === "NOT_FOUND" ? "not_found" : idn.status === "INACTIVE" ? "inactive" : idn.status === "PROVIDER_UNAVAILABLE" ? "unavailable" : idn.status === "UNKNOWN" && idn.account_status === "ACTIVE" ? "active_unnamed" : idn.status === "UNSUPPORTED" || idn.status === "UNKNOWN" ? "unsupported" : "error");
             // Never show UNKNOWN as verified: the name box opens for the sender, as in V1.
             if (keepName) set({ nameSource: s.nameSource === "internal" ? "internal" : "manual", ...prov });
             else set({ recipientName: "", nameSource: "unknown", ...prov });
@@ -337,9 +339,9 @@ export function DetailsStep({ s, set, next, feePct, minFeeXaf, lockRecipient, hi
               <div style={{ padding: "13px 14px", border: "1px solid var(--warn)", borderRadius: "var(--r)", background: "var(--send-wash)" }}>
                 {identity.enabled && idState !== "idle" && idState !== "typing" && idState !== "verified" && (
                   <div data-identity={idState} role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 10, fontSize: 12.5, lineHeight: 1.45, color: "var(--ink)" }}>
-                    <span style={{ color: "var(--warn)", fontWeight: 800, fontSize: 15, lineHeight: 1.1 }}>{idState === "unavailable" || idState === "error" ? "⏱" : "⚠"}</span>
+                    <span style={{ color: idState === "active_unnamed" ? "var(--recv)" : "var(--warn)", fontWeight: 800, fontSize: 15, lineHeight: 1.1 }}>{idState === "unavailable" || idState === "error" ? "⏱" : idState === "active_unnamed" ? "✓" : "⚠"}</span>
                     <span style={{ flex: 1 }}>
-                      {idState === "not_found" ? t("id_not_found") : idState === "inactive" ? t("id_inactive") : idState === "unavailable" ? t("id_unavailable") : idState === "unsupported" ? t("id_unsupported") : t("id_error")}
+                      {idState === "not_found" ? t("id_not_found") : idState === "inactive" ? t("id_inactive") : idState === "unavailable" ? t("id_unavailable") : idState === "unsupported" ? t("id_unsupported") : idState === "active_unnamed" ? t("id_active_unnamed") : t("id_error")}
                       {idBlocked && <><br /><b>{t("id_gate_blocked")}</b></>}
                     </span>
                     {(idState === "unavailable" || idState === "error") && (

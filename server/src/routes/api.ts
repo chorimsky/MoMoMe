@@ -73,7 +73,10 @@ import * as compliance from "../core/compliance.js";
 import * as regulatory from "../core/regulatory.js";
 import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { setIdentityOwnerResolver } from "./identityV2.js";
-import { identityEnabled, identityMode, cachedSnapshot } from "../core/identityResolution/resolver.js";
+import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
+import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow } from "../core/identityResolution/audit.js";
+import { recordCount as identityRecordCount, cacheTtlVerifiedSec } from "../core/identityResolution/cache.js";
+import { IdentityError } from "../core/identityResolution/errors.js";
 import { matchNames } from "../core/identityResolution/names.js";
 import { capital, capitalGuard } from "./capital.js";
 import { rateLimit, rateLimitReset, rateLimitDurable, rateLimitResetDurable, clientIp, rateLimitMiddleware, rateLimitDurableMiddleware } from "../core/ratelimit.js";
@@ -179,7 +182,7 @@ function sectionForPath(sub: string): Section | null {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
     "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", network: "rails", merchants: "merchants", customers: "customers",
-    identities: "identities", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
+    identities: "identities", "identity-resolution": "identities", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
     notifications: "notifications", health: "health", settings: "settings",
@@ -909,7 +912,7 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
      stated name is checked against the registered one; a mismatch is a question the
      sender must answer, with a token bound to this payment; and the registered name is
      what goes on the payment, the receipt and the SMS — never the typed label. */
-  const registered = await registeredName(recipient.phone, recipient.country).catch(() => null);
+  const registered = await registeredName(recipient.phone, recipient.country, { cacheOnly: true }).catch(() => null);
   const toMerchant = !!(reqBody ?? {}).merchantLinkCode || !!(reqBody ?? {}).merchantCode;
   // A merchant checkout: the payer knows the BUSINESS, not the person whose Mobile Money
   // number settles it. Resolve the merchant now (the same match the attribution below
@@ -1113,6 +1116,13 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): P
       const snap = cachedSnapshot(recipient.phone, recipient.country);
       if (snap && (snap.status === "VERIFIED" || snap.status === "INACTIVE" || snap.status === "NOT_FOUND")) {
         payment.recipientIdentity = { ...snap, nameMatch: snap.displayName && cleanName ? matchNames(cleanName, snap.displayName) : "NOT_AVAILABLE" };
+        // GATE mode: what the apps refuse to continue with, the server refuses to mint. The
+        // operator said this account does not exist or cannot receive; a sender on an old
+        // client (or a script) must not be able to pay it anyway. Still cache-only: an
+        // outage or an unknown number is never a refusal.
+        if (identityMode() === "gate" && !toMerchant && (snap.status === "NOT_FOUND" || snap.status === "INACTIVE")) {
+          return { status: 409, body: { error: "recipient_unverified", code: snap.status === "NOT_FOUND" ? "identity_not_found" : "identity_inactive", message: snap.status === "NOT_FOUND" ? "We couldn't verify this Mobile Money account. Please check the number and try again." : "This Mobile Money account can't receive money right now. Please check the number." } };
+        }
       }
     } catch { /* advisory — never block */ }
   }
@@ -2117,6 +2127,37 @@ api.put("/admin/settings", async (req, res) => {
     if (typeof tx.taxId === "string") tx.taxId = tx.taxId.trim().slice(0, 40);
   }
   res.json(updateSettings(patch));
+});
+
+/* ---------- recipient verification (Identity Resolution v2) — admin visibility ----------
+   Works whether the flag is on or off (the v2 router itself is 404 while off), so the console
+   can show WHY nothing is being verified: flag, mode, which providers are configured, what
+   the last hour looked like. Audit rows carry hashes and last-4 only. */
+api.get("/admin/identity-resolution", async (_req, res) => {
+  const providers = await providersHealth();
+  res.json({
+    enabled: identityEnabled(), mode: identityMode(),
+    cache: { ttlSec: cacheTtl(), ttlVerifiedSec: cacheTtlVerifiedSec(), records: identityRecordCount() },
+    providers, capabilities: capabilityConfig(), metrics: identityMetrics(), last24h: identityWindow(24), audit: identityAudit(30),
+    priority: (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,peexit_verify,pawapay,sandbox").split(",").map((x) => x.trim()),
+  });
+});
+/** Support lookup: an operator checking a disputed number. Purpose SUPPORT, audited under the
+ *  admin's id, same chain as the apps — refused while the flag is off (no side door). */
+api.post("/admin/identity-resolution/lookup", async (req, res) => {
+  if (!identityEnabled()) return res.status(404).json({ error: "identity_disabled", message: "Recipient verification is off (IDENTITY_RESOLUTION_ENABLED)." });
+  const b = (req.body ?? {}) as { identifier?: unknown; country?: unknown; expectedName?: unknown };
+  const identifier = typeof b.identifier === "string" ? b.identifier.trim() : "";
+  if (!identifier) return res.status(400).json({ error: "bad_request", message: "identifier is required." });
+  const who = verifyToken(tokenFromHeaders(req.headers))?.uid ?? "console";
+  try {
+    const r = await resolveIdentity({ identifier, defaultCountry: typeof b.country === "string" ? b.country : "CM", purpose: "SUPPORT", actor: `admin:${who}`, expectedName: typeof b.expectedName === "string" ? b.expectedName : undefined, bypassCache: true });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ status: r.status, verified: r.verified, displayName: r.displayName, operator: r.operator, country: r.country, accountStatus: r.accountStatus, provider: r.provider.name, source: r.source, nameMatch: r.nameMatch, error: r.error, requestId: r.requestId });
+  } catch (e) {
+    if (e instanceof IdentityError) return res.status(400).json({ error: e.code, message: e.message });
+    res.status(502).json({ error: "IDENTITY_PROVIDER_UNAVAILABLE", message: "Recipient verification is temporarily unavailable." });
+  }
 });
 
 /* ---------- identity layer ---------- */

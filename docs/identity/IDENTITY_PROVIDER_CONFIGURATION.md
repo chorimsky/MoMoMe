@@ -8,7 +8,8 @@ All variables are read at call time — a Railway variable change takes effect o
 | `IDENTITY_RESOLUTION_ENABLED` | `false` | master switch; off ⇒ `/api/v2/identity/*` is 404 and no snapshot is attached |
 | `IDENTITY_RESOLUTION_MODE` | `advisory` | `advisory` shows; `gate` blocks NOT_FOUND / INACTIVE recipients in the apps |
 | `IDENTITY_PROVIDER_PRIORITY` | `mtn_direct,orange_direct,peexit_verify,pawapay,sandbox` | order of the chain |
-| `IDENTITY_CACHE_TTL` | `300` s (min 30) | reuse window for VERIFIED / NOT_FOUND / INACTIVE |
+| `IDENTITY_CACHE_TTL` | `300` s (min 30) | reuse window for NOT_FOUND / INACTIVE (they can flip when the account is registered or unblocked) |
+| `IDENTITY_CACHE_TTL_VERIFIED` | `21600` s (6 h; never below `IDENTITY_CACHE_TTL`) | reuse window for a VERIFIED name — a registered name rarely changes, and re-asking the operator on every payment to the same person costs a round-trip each time |
 | `IDENTITY_RECORD_RETENTION_DAYS` | `30` | prune after expiry + N days |
 | `IDENTITY_TIMEOUT` | `6000` ms (min 1000) | per attempt |
 | `IDENTITY_MAX_RETRIES` | `0` (max 2) | extra attempts per provider on retryable failures |

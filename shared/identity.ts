@@ -26,8 +26,8 @@ export type AccountStatus = "ACTIVE" | "INACTIVE" | "UNKNOWN";
 
 /** Why an identity is being resolved. Required on every request: this is a payment
  *  identity engine, not a people search. */
-export type IdentityPurpose = "RECIPIENT_VERIFICATION" | "PAYMENT_CREATION" | "PAYOUT_VALIDATION" | "TRANSACTION_CONFIRMATION" | "FRAUD_PREVENTION";
-export const IDENTITY_PURPOSES: IdentityPurpose[] = ["RECIPIENT_VERIFICATION", "PAYMENT_CREATION", "PAYOUT_VALIDATION", "TRANSACTION_CONFIRMATION", "FRAUD_PREVENTION"];
+export type IdentityPurpose = "RECIPIENT_VERIFICATION" | "PAYMENT_CREATION" | "PAYOUT_VALIDATION" | "TRANSACTION_CONFIRMATION" | "FRAUD_PREVENTION" | "SUPPORT";
+export const IDENTITY_PURPOSES: IdentityPurpose[] = ["RECIPIENT_VERIFICATION", "PAYMENT_CREATION", "PAYOUT_VALIDATION", "TRANSACTION_CONFIRMATION", "FRAUD_PREVENTION", "SUPPORT"];
 
 import type { NameMatch } from "./domain.js";
 export type { NameMatch };

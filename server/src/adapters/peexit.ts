@@ -54,11 +54,11 @@ function mapStatus(s: string | undefined): PayoutStatus {
 /** Every Peexit call goes through here, so the egress proxy applies uniformly to
  *  disbursement, collection, status re-query and balance reads — a partial rollout would
  *  leave some calls arriving from a non-allowlisted IP and 403ing. */
-export async function peex(path: string, init: RequestInit): Promise<Response> {
+export async function peex(path: string, init: RequestInit, timeoutMs = 12_000): Promise<Response> {
   return fetchT(
     `${config.peexit.apiUrl}${path}`,
     { ...init, headers: { "content-type": "application/json", SECRETKEY: config.peexit.apiKey, ...(init.headers ?? {}) } },
-    12_000,
+    timeoutMs,
     config.peexit.proxyUrl || undefined,
   );
 }

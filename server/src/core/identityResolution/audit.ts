@@ -31,3 +31,23 @@ export function distinctPerHour(actor: string, hash: string, now = Date.now()): 
   if (seen.size > 50_000) seen.clear();
   return e.hashes.size;
 }
+
+/** What the last `hours` looked like, from the PERSISTED rows — the process counters above
+ *  reset on every deploy, which made the console read "0 lookups" after a restart. */
+export function windowStats(hours = 24, now = Date.now()) {
+  const since = now - hours * 3_600_000;
+  const w = rows.filter((r) => Date.parse(r.at) >= since);
+  const lat = w.map((r) => r.latencyMs).sort((a, b) => a - b);
+  const count = (f: (r: IdentityAuditRow) => boolean) => w.filter(f).length;
+  const byProvider: Record<string, { total: number; verified: number; failed: number }> = {};
+  for (const r of w) {
+    const b = (byProvider[r.provider] ??= { total: 0, verified: 0, failed: 0 });
+    b.total++; if (r.status === "VERIFIED") b.verified++; if (r.status === "PROVIDER_UNAVAILABLE" || r.status === "ERROR") b.failed++;
+  }
+  return {
+    hours, total: w.length, verified: count((r) => r.status === "VERIFIED"), notFound: count((r) => r.status === "NOT_FOUND"), inactive: count((r) => r.status === "INACTIVE"),
+    unavailable: count((r) => r.status === "PROVIDER_UNAVAILABLE" || r.status === "ERROR"), timeouts: count((r) => r.error === "IDENTITY_PROVIDER_TIMEOUT"),
+    unknown: count((r) => r.status === "UNKNOWN" || r.status === "UNSUPPORTED"), cacheHits: count((r) => r.cache === "hit"),
+    latency: { p50: lat[Math.floor(lat.length / 2)] ?? null, p95: lat[Math.floor(lat.length * 0.95)] ?? null }, byProvider,
+  };
+}

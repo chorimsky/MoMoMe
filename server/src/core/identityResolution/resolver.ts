@@ -55,7 +55,24 @@ export function capabilityConfig(): Record<string, Record<string, IdentityCapabi
 
 export interface ResolveInput { identifier: string; purpose: IdentityPurpose; actor: string; expectedName?: string; paymentIntentId?: string; correlationId?: string; defaultCountry?: string; bypassCache?: boolean }
 
+/** Single-flight: the web Details step, the V1 resolve and a payment can ask for the same
+ *  number within the same second — one provider call answers all of them. Keyed by the
+ *  raw digits (normalisation happens inside); expected-name comparison is per caller. */
+const inflight = new Map<string, Promise<IdentityResolution>>();
 export async function resolveIdentity(input: ResolveInput): Promise<IdentityResolution> {
+  const key = input.bypassCache ? null : `${input.defaultCountry ?? "CM"}:${input.identifier.replace(/\D/g, "")}`;
+  if (key) {
+    const running = inflight.get(key);
+    if (running) {
+      const shared = await running;
+      return { ...shared, nameMatch: shared.status === "VERIFIED" ? matchNames(input.expectedName, shared.displayName) : "NOT_AVAILABLE", source: shared.source === "none" ? "none" : "cache" };
+    }
+  }
+  const run = resolveIdentityOnce(input);
+  if (key) { inflight.set(key, run); run.finally(() => inflight.delete(key)).catch(() => {}); }
+  return run;
+}
+async function resolveIdentityOnce(input: ResolveInput): Promise<IdentityResolution> {
   const requestId = `idq_${randomUUID().slice(0, 12)}`;
   const t0 = Date.now();
   const base = (overrides: Partial<IdentityResolution>, id?: ReturnType<typeof normalizeMsisdn>): IdentityResolution => ({
@@ -88,12 +105,12 @@ export async function resolveIdentity(input: ResolveInput): Promise<IdentityReso
   if (!chain.length) return finish(base({ status: "UNSUPPORTED", error: "IDENTITY_UNSUPPORTED_OPERATOR", capabilities: caps(false) }, id), "bypass");
   let lastErr: IdentityError | null = null;
   let operatorHint: string | null = null;
-  for (const p of chain) {
+  providers: for (const p of chain) {
     for (let attempt = 0; attempt <= MAX_RETRIES(); attempt++) {
       try {
         const a: ProviderAnswer = await p.resolve(id, { purpose: input.purpose, requestId, actor: input.actor, paymentIntentId: input.paymentIntentId, timeoutMs: TIMEOUT_MS() });
         if (a.operator && a.operator !== id.operator) operatorHint = a.operator;
-        if (!p.authoritative && p.name === "pawapay") { operatorHint = a.operator ?? operatorHint; continue; } // reachability only — keep looking for an authoritative answer
+        if (!p.authoritative && p.name === "pawapay") { operatorHint = a.operator ?? operatorHint; continue providers; } // reachability only — on to the next provider (never a retry of the hint)
         const r = base({ ...a, operator: a.operator ?? id.operator, source: p.name === "sandbox" ? "sandbox" : "provider", nameMatch: a.status === "VERIFIED" ? matchNames(input.expectedName, a.displayName) : "NOT_AVAILABLE" }, id);
         if (r.status === "VERIFIED" || r.status === "NOT_FOUND" || r.status === "INACTIVE") { const rec = remember(hash, last4(id.identifier), r); r.expiresAt = rec.expiresAt; }
         return finish(r, "miss");

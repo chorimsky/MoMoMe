@@ -19,7 +19,7 @@ const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}
 async function main() {
   const { normalizeMsisdn, identifierHash } = await import("../src/core/identityResolution/msisdn.js");
   const { matchNames, normalizeName } = await import("../src/core/identityResolution/names.js");
-  const { resolveIdentity, providerChain, capabilityConfig, cachedSnapshot } = await import("../src/core/identityResolution/resolver.js");
+  const { resolveIdentity, providerChain, capabilityConfig, cachedSnapshot, providersHealth, _resetBreakers } = await import("../src/core/identityResolution/resolver.js");
   const { IdentityError } = await import("../src/core/identityResolution/errors.js");
   const { cached, pruneIdentityRecords } = await import("../src/core/identityResolution/cache.js");
   const { auditRows, metricsSnapshot } = await import("../src/core/identityResolution/audit.js");
@@ -84,6 +84,17 @@ async function main() {
     mock(404, { error: { statusCode: 404, name: "Error", message: "Cannot POST /api/v1/clients/verify-wallet" } });
     const route404 = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
     ok("404 'Cannot POST …' (endpoint missing on this base) → PROVIDER_UNAVAILABLE, NEVER 'not found' for the sender", route404?.code === "IDENTITY_PROVIDER_UNAVAILABLE" && route404.retryable === false && (await peexitVerify.health()).lastError?.includes("Cannot POST") === true, route404?.code);
+    // The breaker: a route-404 rests the provider; the chain's verdict is then UNKNOWN
+    // ("can't be verified yet"), never "temporarily unavailable, try again".
+    process.env.IDENTITY_PROVIDER_PRIORITY = "peexit_verify,pawapay";
+    mock(404, { error: { statusCode: 404, message: 'Endpoint "POST /v1/clients/verify-wallet" not found.' } });
+    const rested = await resolveIdentity({ identifier: "699000177", purpose: "RECIPIENT_VERIFICATION", actor: "brk" });
+    ok("an endpoint that is not there rests the provider and the sender gets UNKNOWN", rested.status === "UNKNOWN" && !rested.error, `${rested.status} ${rested.error ?? ""}`);
+    let calls = 0; mock(200, { isValid: true, accountName: "X Y", operator: "ORANGE", status: "ACTIVE" }, () => { calls++; });
+    const again = await resolveIdentity({ identifier: "699000178", purpose: "RECIPIENT_VERIFICATION", actor: "brk" });
+    ok("…and is not asked again inside the window", calls === 0 && again.status === "UNKNOWN", `calls=${calls} status=${again.status}`);
+    ok("…health shows it DOWN with the upstream message", (await providersHealth()).some((h) => h.name === "peexit_verify" && h.status === "DOWN" && /not found/.test(h.lastError ?? "")));
+    delete process.env.IDENTITY_PROVIDER_PRIORITY; _resetBreakers();
     mock(200, "<html>ok</html>");
     const weird = await peexitVerify.resolve(idCM, ctx).then(() => null, (x) => x as InstanceType<typeof IdentityError>);
     ok("a 200 without the documented fields is UNAVAILABLE, not a verified account", weird?.code === "IDENTITY_PROVIDER_UNAVAILABLE");

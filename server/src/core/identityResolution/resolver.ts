@@ -33,11 +33,24 @@ const ALL: Record<string, IdentityProvider> = { mtn_direct: mtnDirect, orange_di
 /** IDENTITY_PROVIDER_PRIORITY="mtn_direct,orange_direct,peexit_verify,pawapay,sandbox" — first that is
  *  configured and supports the market × operator answers; the next is tried only on a
  *  retryable failure. */
-export function providerChain(country: string, operator: string | null): IdentityProvider[] {
+/* Circuit breaker. A provider that fails in a way no retry can fix — the endpoint is not on
+   that base, the key is refused, the IP is not allowlisted — is rested for
+   IDENTITY_BREAKER_MS (default 10 min) instead of being asked on every keystroke of every
+   sender. While it rests the chain moves on (an aggregator hint, or nothing): the sender is
+   told the number "can't be verified yet", which is true, rather than "try again", which
+   would not help. One probe per window finds out when it is back. */
+const BREAKER_MS = () => Math.max(60_000, Number(process.env.IDENTITY_BREAKER_MS ?? 600_000) || 600_000);
+const restingUntil = new Map<string, { until: number; why: string }>();
+export function restProvider(name: string, why: string, now = Date.now()): void { restingUntil.set(name, { until: now + BREAKER_MS(), why }); }
+export function _resetBreakers(): void { restingUntil.clear(); }
+export function providerResting(name: string, now = Date.now()): { why: string } | null { const r = restingUntil.get(name); return r && r.until > now ? { why: r.why } : null; }
+export function providerChain(country: string, operator: string | null, now = Date.now()): IdentityProvider[] {
   const order = (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,peexit_verify,pawapay,sandbox").split(",").map((s) => s.trim()).filter((s) => s in ALL);
-  return order.map((k) => ALL[k]).filter((p) => p.configured() && p.supports(country, operator) && (p.authoritative || p.name === "pawapay" || !liveMoney()));
+  return order.map((k) => ALL[k]).filter((p) => p.configured() && p.supports(country, operator) && (p.authoritative || p.name === "pawapay" || !liveMoney()) && !providerResting(p.name, now));
 }
-export async function providersHealth(): Promise<IdentityProviderHealth[]> { return Promise.all(Object.values(ALL).map((p) => p.health())); }
+export async function providersHealth(): Promise<IdentityProviderHealth[]> {
+  return Promise.all(Object.values(ALL).map(async (p) => { const h = await p.health(); const r = providerResting(p.name); return r ? { ...h, status: "DOWN" as const, lastError: h.lastError ?? r.why } : h; }));
+}
 
 /** Capability table: what an AUTHORIZED, configured provider actually gives us per market ×
  *  operator — never an assumption. */
@@ -102,7 +115,12 @@ async function resolveIdentityOnce(input: ResolveInput): Promise<IdentityResolut
   }
   if (!id.operator) return finish(base({ status: "UNSUPPORTED", error: "IDENTITY_UNSUPPORTED_OPERATOR" }, id), "bypass");
   const chain = providerChain(id.country, id.operator);
-  if (!chain.length) return finish(base({ status: "UNSUPPORTED", error: "IDENTITY_UNSUPPORTED_OPERATOR", capabilities: caps(false) }, id), "bypass");
+  if (!chain.length) {
+    // Nobody can answer right now vs nobody ever could: a resting provider makes it UNKNOWN.
+    const resting = Object.values(ALL).some((p) => p.configured() && p.supports(id.country, id.operator) && providerResting(p.name));
+    if (resting) return finish(base({ status: "UNKNOWN", capabilities: caps(true), provider: { name: "none" } }, id), "bypass");
+    return finish(base({ status: "UNSUPPORTED", error: "IDENTITY_UNSUPPORTED_OPERATOR", capabilities: caps(false) }, id), "bypass");
+  }
   let lastErr: IdentityError | null = null;
   let operatorHint: string | null = null;
   providers: for (const p of chain) {
@@ -116,7 +134,13 @@ async function resolveIdentityOnce(input: ResolveInput): Promise<IdentityResolut
         return finish(r, "miss");
       } catch (e) {
         lastErr = e instanceof IdentityError ? e : new IdentityError("IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", (e as Error)?.message, true);
-        if (!lastErr.retryable) break; // auth error etc.: do not hammer; try the next provider
+        if (!lastErr.retryable) {
+          // A configuration-class failure (route missing, key refused, IP blocked): rest the
+          // provider and forget this attempt — the chain's verdict must come from someone who
+          // could actually answer, not from a provider that is not wired up.
+          if (lastErr.code === "IDENTITY_PROVIDER_UNAVAILABLE" || lastErr.code === "IDENTITY_PROVIDER_AUTH_ERROR") { restProvider(p.name, lastErr.detail ?? lastErr.code); lastErr = null; }
+          break;
+        }
       }
     }
     // Only a retryable failure reaches here → fall through to the next provider.
@@ -124,8 +148,8 @@ async function resolveIdentityOnce(input: ResolveInput): Promise<IdentityResolut
   // Every answering provider failed (or only the aggregator was there): say so honestly.
   // The sandbox counts as an answering provider — its simulated timeout must surface as
   // PROVIDER_UNAVAILABLE exactly like a real one, never as UNKNOWN or NOT_FOUND.
-  const answererTried = chain.some((p) => p.authoritative || p.name === "sandbox");
-  if (!answererTried) return finish(base({ status: "UNKNOWN", operator: operatorHint ?? id.operator, capabilities: caps(true), provider: { name: "pawapay" } }, id), "bypass");
+  const answererTried = chain.some((p) => p.authoritative || p.name === "sandbox") && lastErr !== null;
+  if (!answererTried) return finish(base({ status: "UNKNOWN", operator: operatorHint ?? id.operator, capabilities: caps(true), provider: { name: chain.some((p) => p.name === "pawapay") ? "pawapay" : "none" } }, id), "bypass");
   const code = lastErr?.code ?? "IDENTITY_PROVIDER_UNAVAILABLE";
   return finish(base({ status: STATUS_FOR_ERROR[code] ?? "PROVIDER_UNAVAILABLE", error: code, operator: operatorHint ?? id.operator }, id), "bypass");
 }

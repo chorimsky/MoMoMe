@@ -1012,7 +1012,7 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
       </div>
       <div style={{ marginTop: 18, padding: "12px 14px", borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("refund_amount_label")}</span>
-        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{payment.payInstruction.amountLabel}</span>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{payment.refundSats != null ? `≈ ${satsLabel(payment.refundSats / 1e8)} (${payment.payInstruction.amountLabel})` : payment.payInstruction.amountLabel}</span>
       </div>
       <div style={{ marginTop: 16 }}><Label>{t("refund_input")}</Label></div>
       <textarea value={bolt11} onChange={(e) => setBolt11(e.target.value)} placeholder="lnbc…" rows={3}

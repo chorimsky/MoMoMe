@@ -1314,7 +1314,7 @@ api.post("/payments/:id/refund-destination", rateLimitDurableMiddleware("refund_
   if (!r.ok) {
     const message = r.error === "amount_mismatch" ? "The invoice amount must match your original payment — or use an amount-less invoice."
       : r.error === "not_refundable" ? "This payment isn't awaiting a refund."
-      : r.error === "refund_lightning_only" ? "Automated refunds are available for Lightning payments only."
+      : r.error === "refund_rate_unavailable" ? "Live exchange rates are momentarily unavailable — the refund is priced on a real rate, please try again in a moment."
       : r.error === "bad_invoice" ? "Couldn't read that Lightning invoice. Please paste it again."
       : "Couldn't process the refund. Please check the invoice and try again.";
     return res.status(r.error === "not_refundable" ? 409 : 400).json({ error: r.error, message });

@@ -70,6 +70,7 @@ export default function ClaimScreen() {
         ) : selected ? (
           <Card padded>
             <Label>{tr('refund_this')} · {xaf(selected.xaf)} · {selected.ref}</Label>
+            <Body>{selected.refundSats != null ? `≈ ${selected.refundSats.toLocaleString('en-US').replace(/,/g, ' ')} sats (${selected.payInstruction.amountLabel})` : selected.payInstruction.amountLabel}</Body>
             <Body>{tr('refund_dest_ph')}</Body>
             <Field
               label={tr('refund_destination')}

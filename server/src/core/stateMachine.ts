@@ -13,8 +13,8 @@ import { store } from "../db/store.js";
 import { captureUnattributed } from "./unattributed.js";
 import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed } from "./notifications.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
-import { isLive, aggregatorLive } from "../config.js";
-import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus } from "../adapters/index.js";
+import { isLive, aggregatorLive, liveMoney } from "../config.js";
+import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus, outboundRail } from "../adapters/index.js";
 import { emitPaymentEvent } from "./interop/outbound.js";
 import { selectAggregator, selectFundedAggregator, aggregatorByName, aggregatorFloatXaf, balanceReasons, recordExecution, markRailHardDown } from "./routing.js";
 import { recordSuccessfulPayout, payoutBlocked } from "./merchant.js";
@@ -26,7 +26,7 @@ import { payoutByName } from "../adapters/payouts.js";
 import { paymentCost } from "./pricing.js";
 import { bolt11AmountMsat } from "./bolt11.js";
 import { rateFor } from "./fx.js";
-import { ratesFresh, ensureRatesFresh } from "./rates.js";
+import { ratesFresh, ensureRatesFresh, btcUsd, usdtUsd } from "./rates.js";
 
 /** Live queryable XAF across funded aggregators, briefly cached so the payment hot
  *  path (every /payments pre-flight + every confirmInbound) doesn't issue a balance
@@ -412,17 +412,19 @@ async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Paym
  *  refund" state. (Ledger is NOT reversed here — we still hold the inbound asset; it's
  *  unwound when the refund is actually paid out — the refund-claim flow.) */
 async function beginRefund(p: Payment, note: string): Promise<void> {
-  // Only Lightning has an automated refund-claim path (the sender supplies a bolt11
-  // and we pay it). On-chain BTC / ERC-20 stablecoin inbounds have NO auto path —
-  // completeRefund rejects them (refund_lightning_only), so they used to strand
-  // permanently in REFUND_PENDING. Route them to MANUAL_REVIEW so an operator returns
-  // the crypto out-of-band and then adminRefund reverses the ledger.
-  if (p.payInstruction.method !== "LIGHTNING") {
-    await transition(p, "MANUAL_REVIEW", `${note} — ${p.payInstruction.method} inbound needs a manual crypto refund`);
+  // Every payment must settle — as a payout or as a refund; the system holds nothing.
+  // The refund-claim path pays a Lightning invoice the sender supplies, whatever funded the
+  // payment: sats for sats, and for an on-chain BTC or stablecoin deposit the SAME VALUE in
+  // sats at the current rate (completeRefund computes it and never over-pays). Only when no
+  // rail can send Lightning at all is the payment held for an operator to return the
+  // crypto out-of-band (adminRefund then reverses the ledger).
+  if (!outboundLightningAvailable()) {
+    await transition(p, "MANUAL_REVIEW", `${note} — no outbound Lightning rail to refund with; return the ${p.payInstruction.asset} out of band`);
     return;
   }
   p.refundNeedsDestination = true;
-  await transition(p, "REFUND_PENDING", note);
+  if (p.payInstruction.method !== "LIGHTNING") { const msat = await refundableMsat(p).catch(() => null); if (msat != null) p.refundSats = Math.floor(msat / 1000); }
+  await transition(p, "REFUND_PENDING", `${note} — refund over Lightning: ${p.refundSats != null ? `≈ ${p.refundSats} sats (${p.payInstruction.asset} value)` : p.payInstruction.asset}`);
 }
 
 /** The sender changes their mind BEFORE paying. Only an un-paid, un-booked payment can be
@@ -1045,8 +1047,8 @@ export async function completeRefund(pIn: Payment, bolt11: string): Promise<{ ok
 async function completeRefundLocked(paymentId: string, bolt11: string): Promise<{ ok: boolean; error?: string }> {
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p || p.state !== "REFUND_PENDING" || !p.refundNeedsDestination) return { ok: false, error: "not_refundable" };
-  if (p.payInstruction.method !== "LIGHTNING") return { ok: false, error: "refund_lightning_only" };
-  const inboundMsat = btcToMsat(p.payInstruction.amount);
+  const inboundMsat = await refundableMsat(p);
+  if (inboundMsat == null) return { ok: false, error: "refund_rate_unavailable" };
   const invMsat = bolt11AmountMsat(bolt11);
   if (invMsat == null) return { ok: false, error: "bad_invoice" };
   // Over/under-refund guard: accept an amount-less invoice (we set the amount) or one
@@ -1089,6 +1091,28 @@ async function completeRefundLocked(paymentId: string, bolt11: string): Promise<
   }
 }
 
+/** What the sender is owed, in msat, for a Lightning refund of THIS payment:
+ *   · Lightning: the sats that arrived (full-or-nothing, so the quoted amount);
+ *   · on-chain BTC: the BTC that was actually booked (same asset, current re-priced amount);
+ *   · USDT / USDC: the dollars that were booked, converted at the CURRENT BTC price — the
+ *     sender gets the same value back; the stablecoin stays at the rail and is swept.
+ *  null when the rate feed is not fresh (a refund is money; it waits for a real price). */
+/** Can a refund be sent over Lightning at all? A live outbound rail — or the sandbox, where
+ *  the claim flow is rehearsed exactly as in production. */
+const outboundLightningAvailable = (): boolean => !!outboundRail() || !liveMoney();
+export async function refundableMsat(p: Payment): Promise<number | null> {
+  const m = p.payInstruction.method;
+  if (m === "LIGHTNING") return btcToMsat(p.payInstruction.amount);
+  const entries = await store().entriesFor(p.id).catch(() => []);
+  const booked = entries.find((e) => e.account === "customer_wallet" && e.direction === "credit" && e.amount > 0);
+  const amount = booked?.amount ?? p.payInstruction.amount;
+  const asset = booked?.currency ?? p.paidAsset ?? p.payInstruction.asset;
+  if (asset === "BTC") return btcToMsat(amount);
+  await ensureRatesFresh().catch(() => {});
+  if (!ratesFresh()) return null;
+  const usd = amount * (asset === "USDT" || asset === "USDC" ? usdtUsd() : 1);
+  return Math.floor((usd / btcUsd()) * 1e11);
+}
 /** The outbound refund settled — unwind the ledger (we no longer hold the inbound) and
  *  mark REFUNDED. Idempotent. */
 async function finalizeRefund(p: Payment): Promise<void> {

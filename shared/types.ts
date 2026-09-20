@@ -211,6 +211,10 @@ export interface Payment {
   payoutRef?: string;
   /** Which aggregator the routing engine chose for this payout. */
   aggregator?: Aggregator;
+  /** REFUND_PENDING for a payment funded with something other than Lightning: the value the
+   *  sender is owed, in sats at the time the refund opened (the exact amount is fixed at
+   *  claim time, never above what was received). Shown so the sender knows what invoice to make. */
+  refundSats?: number;
   /** Identity Resolution v2 (docs/identity): the recipient identity that was resolved before
    *  this payment was created — attached at creation from the verification cache, never by a
    *  provider call on the money path, and immutable from INBOUND_CONFIRMED onwards. Advisory:

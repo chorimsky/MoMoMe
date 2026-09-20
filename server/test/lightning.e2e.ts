@@ -142,7 +142,9 @@ async function main() {
     const goodLogin = await POST("/api/admin/login", { username: "admin", password: "momome-admin" }); // seeded Super Admin
     ok("login with correct credentials → token", goodLogin.status === 200 && typeof goodLogin.body.token === "string");
     ok("login returns the user with role", goodLogin.body.user?.username === "admin" && goodLogin.body.user?.role === "Super Admin");
-    const tok = goodLogin.body.token as string;
+    const tok0 = goodLogin.body.token as string;
+    // eslint-disable-next-line prefer-const
+    let tok = tok0;
     const withTok = await J("/api/admin/overview", auth(tok));
     ok("admin API with valid token → 200", withTok.status === 200);
     const forged = await J("/api/admin/overview", auth(tok.slice(0, -2) + "xx"));
@@ -156,15 +158,17 @@ async function main() {
     ok("revenue books the FX spread (was invisible)", rev.body.payments >= 1 && rev.body.spreadRevenueXaf > 0);
     ok("revenue nets out costs", rev.body.netRevenueXaf === rev.body.grossRevenueXaf - rev.body.costsXaf && Array.isArray(rev.body.insights));
 
-    // 7b. Per-user accounts + RBAC enforcement
-    const mkSupport = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "support-pass", role: "Support Agent" }) }));
-    ok("super admin creates a user → 201", mkSupport.status === 201 && mkSupport.body.user?.username === "agent1");
-    const dupe = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "support-pass", role: "Support Agent" }) }));
+    // 7b. Per-user accounts + RBAC enforcement (user management needs a step-up: re-enter the password)
+    const elev = await J("/api/admin/elevate", auth(tok, { method: "POST", body: JSON.stringify({ password: "momome-admin" }) }));
+    tok = (elev.body as { token?: string }).token ?? tok0;
+    const mkSupport = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "Str0ng-Support!pass", role: "Support Agent" }) }));
+    ok("super admin creates a user → 201", mkSupport.status === 201 && mkSupport.body.user?.username === "agent1", `${mkSupport.status} ${JSON.stringify(mkSupport.body).slice(0,120)}`);
+    const dupe = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent1", password: "Str0ng-Support!pass", role: "Support Agent" }) }));
     ok("duplicate username → 409", dupe.status === 409);
     const weak = await J("/api/admin/users", auth(tok, { method: "POST", body: JSON.stringify({ username: "agent2", password: "short", role: "Support Agent" }) }));
     ok("weak password rejected → 400", weak.status === 400);
 
-    const agentLogin = await POST("/api/admin/login", { username: "agent1", password: "support-pass" });
+    const agentLogin = await POST("/api/admin/login", { username: "agent1", password: "Str0ng-Support!pass" });
     ok("new user can sign in", agentLogin.status === 200);
     const agentTok = agentLogin.body.token as string;
     // Support Agent can read payments (in remit) but not liquidity (out of remit).
@@ -200,7 +204,7 @@ async function main() {
     ok("change password with wrong current → 403 (the session itself stays valid)", badChange.status === 403);
     const goodChange = await J("/api/admin/password", auth(agentTok, { method: "POST", body: JSON.stringify({ currentPassword: "support-pass", newPassword: "newsupportpass" }) }));
     ok("change own password → 200", goodChange.status === 200);
-    const oldFails = await POST("/api/admin/login", { username: "agent1", password: "support-pass" });
+    const oldFails = await POST("/api/admin/login", { username: "agent1", password: "Str0ng-Support!pass" });
     ok("old password no longer works → 401", oldFails.status === 401);
     const newWorks = await POST("/api/admin/login", { username: "agent1", password: "newsupportpass" });
     ok("new password works", newWorks.status === 200);
@@ -631,13 +635,25 @@ async function main() {
     /* ---- Part F — refund-claim flow hardening (audit findings M1–M4) ---- */
     console.log("\nPart F — refund-claim flow hardening");
 
-    // M3 — an ON-CHAIN payout failure has no automated refund path, so it must hold for
-    // MANUAL_REVIEW (operator returns the crypto), NOT strand in REFUND_PENDING (which
-    // completeRefund rejects as refund_lightning_only).
+    // M3 (revised 2026-09-20, "every payment must settle — the system holds nothing"): an
+    // ON-CHAIN or STABLECOIN payout failure opens the SAME refund-claim path as Lightning —
+    // the sender is paid the same value over Lightning — instead of holding for an operator.
     seedPayment("pay_oc_fail", "h_oc_fail", BTC_IN, "ONCHAIN");
     storeMod.getPayment("pay_oc_fail")!.state = "PAYOUT_REQUESTED";
     await onPayoutResult("pay_oc_fail", "FAILED");
-    ok("M3: on-chain payout failure → MANUAL_REVIEW (not a dead REFUND_PENDING)", storeMod.getPayment("pay_oc_fail")!.state === "MANUAL_REVIEW");
+    ok("M3: on-chain payout failure → REFUND_PENDING awaiting the sender's invoice (value in sats)", storeMod.getPayment("pay_oc_fail")!.state === "REFUND_PENDING" && storeMod.getPayment("pay_oc_fail")!.refundNeedsDestination === true && (storeMod.getPayment("pay_oc_fail")!.refundSats ?? 0) > 0, `${storeMod.getPayment("pay_oc_fail")!.state} ${storeMod.getPayment("pay_oc_fail")!.refundSats}`);
+    // A USDT-funded payment whose payout failed: the refund is the DOLLAR value in sats at the
+    // current price, computed from what was booked, never more; paid over Lightning.
+    seedPayment("pay_usdt_fail", "h_usdt_fail", 84.3, "USDT");
+    { const pu = storeMod.getPayment("pay_usdt_fail")!; pu.payInstruction.asset = "USDT"; pu.state = "PAYOUT_REQUESTED"; storeMod.putPayment(pu); }
+    await storeMod.recordTxn("pay_usdt_fail", [{ account: "inbound_clearing", direction: "debit", amount: 84.3, currency: "USDT" }, { account: "customer_wallet", direction: "credit", amount: 84.3, currency: "USDT" }]);
+    await onPayoutResult("pay_usdt_fail", "FAILED");
+    const pu = storeMod.getPayment("pay_usdt_fail")!;
+    const { refundableMsat } = await import("../src/core/stateMachine.js");
+    const msat = await refundableMsat(pu);
+    ok("M3b: a USDT payout failure → REFUND_PENDING with the dollar value quoted in sats", pu.state === "REFUND_PENDING" && pu.refundNeedsDestination === true && msat != null && Math.abs(msat / 1e11 * 65000 - 84.3) < 1, `${pu.state} ${pu.refundSats} sats ≈ $${msat ? (msat / 1e11 * 65000).toFixed(2) : "?"}`);
+    const usdtRefund = await completeRefund(pu, "lnbc1amountless");
+    ok("M3b: the claim pays the sender over Lightning and the payment is REFUNDED, ledger reversed", usdtRefund.ok === true && storeMod.getPayment("pay_usdt_fail")!.state === "REFUNDED" && entriesFor("pay_usdt_fail").length >= 4, `${JSON.stringify(usdtRefund)} ${storeMod.getPayment("pay_usdt_fail")!.state}`);
 
     // M4 — adminRetry must refuse a payout that is already in flight (PAYOUT_REQUESTED),
     // even with FX_LOCK present — a second disburse could double-pay if the adapter's

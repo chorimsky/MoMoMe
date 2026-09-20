@@ -72,3 +72,11 @@ export async function advanceChainTx(t: ChainTx, nowMs = Date.now(), monitor = m
   return t;
 }
 export async function chainTick(nowMs = Date.now()): Promise<number> { let n = 0; for (const t of txs.values()) { const before = t.state; await advanceChainTx(t, nowMs); if (t.state !== before) n++; } return n; }
+
+/** Record an inbound deposit the rail reported, once per tx hash, already BROADCAST (the rail
+ *  saw it) so the lifecycle continues from CONFIRMING. */
+export function noteDeposit(asset: string, network: string, amount: number, txid: string): ChainTx {
+  const existing = [...txs.values()].find((t) => t.txid === txid && t.direction === "IN");
+  if (existing) return existing;
+  return createChainTx({ asset, network, direction: "IN", amount, txid });
+}

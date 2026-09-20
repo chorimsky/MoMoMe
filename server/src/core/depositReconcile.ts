@@ -23,6 +23,7 @@ import type { InboundAsset, Payment } from "../../../shared/types.js";
 import { OVERPAY_TOLERANCE, confirmInbound, markDetected, parkForReview, recordUnattributedInbound } from "./stateMachine.js";
 import { activeRails } from "../adapters/index.js";
 import { store } from "../db/store.js";
+import { noteDeposit } from "./upi/chain.js";
 import { listUnattributed } from "./unattributed.js";
 import { erc20TransfersInTx } from "./erc20.js";
 import { btcOutputsInTx } from "./bitcoinTx.js";
@@ -72,6 +73,9 @@ async function runPass(): Promise<void> {
     for (const u of listUnattributed()) if (u.eventId) seenIds.add(u.eventId);
     for (const d of deposits) {
       if (done.has(d.id) || seenIds.has(d.id)) { done.add(d.id); continue; }
+      // Every deposit the rail reports becomes a chain transfer the operator can watch
+      // through its own lifecycle (Admin → Interoperability → UPI); idempotent per tx.
+      if (d.txHash && (d.asset === "USDT" || d.asset === "USDC")) noteDeposit(d.asset, "ETHEREUM", d.amount, d.txHash);
       const mine = payments.filter(isDepositMethod).filter((p) => p.payInstruction.provider === rail.name);
       const open = mine.filter(openForDeposit).filter((p) => p.payInstruction.method === methodOf(d.asset));
       // 1. The chain says which address was paid. Exact, and immune to batched withdrawals.

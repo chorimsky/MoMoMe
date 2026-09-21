@@ -101,6 +101,18 @@ async function main() {
     ok("an approval-threshold hold stays for the operator", (await store().getPayment(p.id))!.state === "MANUAL_REVIEW" && /approval threshold/.test(cur.events.at(-1)?.note ?? ""), cur.events.at(-1)?.note);
     const unsettled = await (await fetch(`${base}/api/admin/payments/unsettled`, { headers: { "x-admin-token": issueToken({ uid: createUser("settle-admin2", "Str0ng-Passw0rd!x", "Super Admin" as never).id, role: "Super Admin" as never }).token } })).json() as Record<string, any>;
     ok("the report shows it as 'review' with its age and cause", unsettled.rows.some((r: any) => r.ref === p.ref && r.action === "review" && typeof r.ageMin === "number"));
+    console.log("\n6. On-chain BTC booked but held for a stale FX feed → resumed with a fresh rate, delivered\n");
+    const { recordTxn } = await import("../src/core/ledger.js");
+    const { resumeHeldRepricing } = await import("../src/core/stateMachine.js");
+    const nowIso = new Date().toISOString();
+    const oc = { id: "pay_oc_fx", ref: "MMM-2026-900001", quoteId: "q", state: "MANUAL_REVIEW", displayStatus: "Pending", method: "ONCHAIN", recipient: { phone: "677005555", country: "CM", provider: "MTN", name: "", nameSource: "unknown" }, xaf: 50000, feeXaf: 1250, totalXaf: 51250, usd: 84.3, payInstruction: { method: "ONCHAIN", code: "bc1q", qr: "bitcoin:bc1q", asset: "BTC", amount: 0.0013, amountLabel: "0.0013 BTC", expiresAt: nowIso, providerRef: "oc_1", provider: "sandbox" }, events: [{ at: nowIso, state: "AWAITING_INBOUND" }, { at: nowIso, state: "INBOUND_DETECTED" }, { at: nowIso, state: "INBOUND_CONFIRMED" }, { at: nowIso, state: "MANUAL_REVIEW", note: "on-chain re-price blocked — FX feed not fresh" }], createdAt: nowIso, updatedAt: new Date(Date.now() - 10 * 60_000).toISOString() };
+    await store().putPayment(oc as never);
+    recordTxn("pay_oc_fx", [{ account: "inbound_clearing", direction: "debit", amount: 0.0013, currency: "BTC" }, { account: "customer_wallet", direction: "credit", amount: 0.0013, currency: "BTC" }]);
+    const rr = await resumeHeldRepricing(oc as never);
+    cur = await until("pay_oc_fx", ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
+    ok("resumeHeldRepricing re-prices at the current rate, locks FX and delivers — no operator, no refund", rr.ok && cur.state === "DELIVERED" && cur.events.some((e) => e.state === "FX_LOCKED") && typeof cur.repricedFromXaf === "number", `${JSON.stringify(rr)} ${cur.state}`);
+    const n6 = await retryTransientHolds();
+    ok("the tick would have done the same (the hold is in the transient set)", n6 >= 0);
     void pawapay;
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);

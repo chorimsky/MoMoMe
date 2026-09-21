@@ -54,7 +54,7 @@ async function main() {
     const mc = rep.actions.find((a) => a.name === "method_chosen")!;
     ok("actions with their most common value; long prop values are cut", mc.top?.[0].value === "LIGHTNING" && mc.count === 1);
     ok("bounce: one page, nothing done", rep.totals.bounce > 0 && rep.totals.bounce < 1, String(rep.totals.bounce));
-    ok("hour-of-day and day series have the right shape", rep.byHour.length === 24 && rep.byDay.length === 7 && rep.byDay.at(-1)!.sessions >= 4);
+    ok("hour-of-day and day series have the right shape", rep.byHour.length === 24 && rep.byDay.length === 7 && rep.byDay.slice(-2).reduce((n, d) => n + d.sessions, 0) >= 4); // sessions seeded "a few minutes ago" straddle midnight UTC
     ok("referrers only when the client sent one", rep.referrers.some((x) => x.ref === "wa.me"));
 
     console.log("\nAccess — the report is an admin section\n");

@@ -482,7 +482,7 @@ export async function retryDeliveryForSender(pIn: Payment): Promise<{ ok: boolea
  *  retried by the tick as soon as they clear, instead of waiting for a person to notice.
  *  Uses the operator retry (every money guard re-applied); throttled per payment. Holds
  *  that need a human (compliance, approval threshold, low-trust, duplicate) are left alone. */
-const TRANSIENT_HOLD = /insufficient XAF float|no funded LIVE payout rail|no payout aggregator with sufficient balance|rail blocked|rejected the disbursement/i;
+const TRANSIENT_HOLD = /insufficient XAF float|no funded LIVE payout rail|no payout aggregator with sufficient balance|rail blocked|rejected the disbursement|FX feed not fresh/i;
 export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000, maxAgeMs = 24 * 3_600_000): Promise<number> {
   let n = 0;
   for (const p of await store().listPayments()) {
@@ -491,7 +491,7 @@ export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000
     if (!last || !TRANSIENT_HOLD.test(last.note ?? "")) continue;
     if (now - Date.parse(last.at) > maxAgeMs) continue;               // old enough to be a person's problem (paged)
     if (now - Date.parse(p.updatedAt) < everyMs) continue;             // throttle
-    const r = await adminRetryWhy(p, "auto (hold cleared)").catch(() => null);
+    const r = /FX feed not fresh/i.test(last.note ?? "") ? await resumeHeldRepricing(p).catch(() => null) : await adminRetryWhy(p, "auto (hold cleared)").catch(() => null);
     if (r?.ok) n++;
     else { p.updatedAt = new Date(now).toISOString(); await store().putPayment(p); } // wait another interval without a new event
   }
@@ -548,6 +548,25 @@ export async function markDetected(p: Payment): Promise<void> {
  * Idempotent — safe to call from a re-delivered webhook. `actualAmount` (asset
  * units) lets us guard against underpayment before paying out.
  */
+/** Resume a payment whose inbound is BOOKED but whose settlement was held before the FX lock
+ *  ("on-chain re-price blocked — FX feed not fresh"): re-run the re-price → lock → payout
+ *  with the amount already on the ledger. Idempotent; refused unless exactly that shape. */
+export async function resumeHeldRepricing(pIn: Payment): Promise<{ ok: boolean; reason?: string }> {
+  return store().lockPayment(pIn.id, () => resumeHeldRepricingLocked(pIn));
+}
+async function resumeHeldRepricingLocked(pIn: Payment): Promise<{ ok: boolean; reason?: string }> {
+  {
+    const p = await store().getPayment(pIn.id);
+    if (!p || p.state !== "MANUAL_REVIEW" || p.events.some((e) => e.state === "FX_LOCKED") || !inboundBooked(p)) return { ok: false, reason: "not_resumable" };
+    const booked = (await store().entriesFor(p.id)).find((e) => e.account === "customer_wallet" && e.direction === "credit");
+    if (!booked) return { ok: false, reason: "not_booked" };
+    await ensureRatesFresh().catch(() => {});
+    if (!ratesFresh()) return { ok: false, reason: "fx_not_fresh" };
+    await confirmInboundLocked(p.id, booked.amount, undefined, undefined, undefined, undefined, true);
+    const after = await store().getPayment(p.id);
+    return after && after.events.some((e) => e.state === "FX_LOCKED") ? { ok: true } : { ok: false, reason: after?.events.at(-1)?.note ?? "held again" };
+  }
+}
 export async function confirmInbound(pIn: Payment, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number, arrivedAsset?: InboundAsset): Promise<void> {
   // Serialize per payment across instances (Postgres advisory lock / memory mutex): the
   // whole book-and-pay critical section runs once. A racing second delivery (at-least-once
@@ -556,7 +575,7 @@ export async function confirmInbound(pIn: Payment, actualAmount?: number, eventI
   // rely on does NOT hold on Postgres, where each call gets an independent copy).
   return store().lockPayment(pIn.id, () => confirmInboundLocked(pIn.id, actualAmount, eventId, matchedRef, railFee, arrivedAsset));
 }
-async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number, arrivedAsset?: InboundAsset): Promise<void> {
+async function confirmInboundLocked(paymentId: string, actualAmount?: number, eventId?: string, matchedRef?: string, railFee?: number, arrivedAsset?: InboundAsset, resume = false): Promise<void> {
   await refreshSettingsIfStale(); // payout-approval threshold / kill-switch fresh across instances
   const p = await store().getPayment(paymentId); // fresh read under the lock
   if (!p) return;
@@ -565,7 +584,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   const seen = p.inboundEventIds ?? [];
   if (eventId && seen.includes(eventId)) return; // true replay of a deposit already handled
 
-  if (inboundBooked(p)) {
+  if (inboundBooked(p) && !resume) {
     // The payment has already settled. Two very different things land here:
     //
     //  (a) a redelivered webhook for the deposit we already booked — ignore it; and with
@@ -636,7 +655,7 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
   // Seeding this matters: leaving the list empty meant a payment settled by the backstop
   // had nothing to compare against, so a later REAL second deposit looked indistinguishable
   // from a replay and was silently kept — the exact hole this guard exists to close.
-  p.inboundEventIds = [...seen, eventId ?? leg.providerRef ?? p.payInstruction.providerRef ?? "settled"];
+  if (!resume) p.inboundEventIds = [...seen, eventId ?? leg.providerRef ?? p.payInstruction.providerRef ?? "settled"];
 
   // Lightning invoices settle in full or not at all — a confirmed LN webhook
   // means the locked amount arrived, so we credit the locked amount and never
@@ -669,11 +688,16 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     }
   }
 
-  await transition(p, "INBOUND_CONFIRMED");
-  await store().recordTxn(p.id, [
-    { account: "inbound_clearing", direction: "debit", amount: received, currency: asset },
-    { account: "customer_wallet", direction: "credit", amount: received, currency: asset },
-  ]);
+  if (!resume) {
+    await transition(p, "INBOUND_CONFIRMED");
+    await store().recordTxn(p.id, [
+      { account: "inbound_clearing", direction: "debit", amount: received, currency: asset },
+      { account: "customer_wallet", direction: "credit", amount: received, currency: asset },
+    ]);
+  } else {
+    p.events.push({ at: new Date().toISOString(), state: p.state, note: "resuming settlement with a fresh rate — the inbound was already booked" });
+    await store().putPayment(p);
+  }
 
   // RE-PRICE. The recipient gets what ACTUALLY arrived, so the sender can never lose money
   // on a difference between the quote and the deposit:
@@ -1055,7 +1079,12 @@ async function adminRetryLocked(paymentId: string, by = "admin"): Promise<RetryO
   // (on-chain "unverified"/"underpaid"): those have no ledger posting and no float
   // reservation, so paying out would disburse real XAF for crypto that never (fully)
   // arrived. Such a hold must be re-verified via confirmInbound, not blind-retried.
-  if (!p.events.some((e) => e.state === "FX_LOCKED")) return refuse("nothing_arrived", "The sender never paid — no crypto arrived, so there is nothing to pay out. The customer can simply start a new payment.");
+  if (!p.events.some((e) => e.state === "FX_LOCKED")) {
+    // Booked but held before the lock (stale FX at confirmation): resume the settlement
+    // with a fresh rate instead of refusing — the money IS here.
+    if (inboundBooked(p) && p.state === "MANUAL_REVIEW") { const r = await resumeHeldRepricingLocked(p); return r.ok ? { ok: true } : refuse("float_negative", r.reason === "fx_not_fresh" ? "Live exchange rates are not fresh yet — the on-chain amount cannot be priced honestly. Try again in a moment." : `Could not resume: ${r.reason}`); }
+    return refuse("nothing_arrived", "The sender never paid — no crypto arrived, so there is nothing to pay out. The customer can simply start a new payment.");
+  }
 
   // Re-apply the money-safety guards that confirmInbound enforces (retry is a manual
   // operator OVERRIDE of the approval-threshold hold, but it must NOT be able to

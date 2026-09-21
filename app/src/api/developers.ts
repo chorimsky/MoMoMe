@@ -32,14 +32,26 @@ export interface DevWebhook { id: string; url: string; events: string[]; created
 export interface UsageSummary { from: string; to: string; requests: number; errors: number; quotes: number; payments: number; completed: number; failed: number; volumeXaf: number; feesXaf: number; webhooks: number; webhookFailures: number; settlements: number; settledXaf: number; avgLatencyMs: number; successRatePct: number }
 export interface UsageBlock { summary: UsageSummary; days: Array<{ day: string; requests: number; payments: number; completed: number; failed: number; volumeXaf: number; feesXaf: number }> }
 
+export interface DevPlan { id: string; name: string; description?: string; platformFeePct: number; rateLimitRpm: number; tiers: Array<{ fromXaf: number; feePct: number }> }
+export interface DevRequest { id: string; orgId: string; kind: "kyb" | "plan_change" | "live_access"; status: "open" | "approved" | "rejected"; createdAt: string; updatedAt: string; payload: Record<string, unknown>; decisionNote?: string }
 export const dev = {
-  signup: (b: { email: string; name: string; password: string; organization: string; country?: string }) => post<{ user: DevUser; organization: DevOrg; token: string; expiresAt: string }>("/signup", b),
+  signup: (b: { email: string; name: string; password: string; organization: string; country?: string; plan?: string; note?: string; expected_monthly_volume_xaf?: string }) => post<{ user: DevUser; organization: DevOrg; token: string; expiresAt: string; email_verification?: { sent: boolean; dev_link?: string } }>("/signup", b),
   login: (b: { email: string; password: string }) => post<{ user: DevUser; token: string; expiresAt: string }>("/login", b),
-  me: () => req<{ user: DevUser; organizations: DevOrg[]; environment: "live" | "test"; api_base: string; sandbox_base: string | null }>("/me"),
+  logout: (everywhere = false) => post<{ ok: boolean }>("/logout", { everywhere }),
+  changePassword: (current: string, password: string) => post<{ ok: boolean; token: string }>("/password", { current, password }),
+  verifyEmail: (token: string) => post<{ ok: boolean }>("/verify-email", { token }),
+  resendVerification: () => post<{ ok: boolean; sent?: boolean; dev_link?: string; already?: boolean }>("/resend-verification", {}),
+  forgotPassword: (email: string) => post<{ ok: boolean; message: string; dev_link?: string }>("/forgot-password", { email }),
+  resetPassword: (token: string, password: string) => post<{ ok: boolean; token: string }>("/reset-password", { token, password }),
+  invitation: (token: string) => req<{ email: string; name: string; organization: string; needs_password: boolean }>(`/invitation/${token}`),
+  acceptInvitation: (token: string, password?: string) => post<{ ok: boolean; token: string }>(`/invitation/${token}/accept`, { password }),
+  requests: (id: string) => req<{ requests: DevRequest[]; kyb_fields: string[] }>(`/orgs/${id}/requests`),
+  submitRequest: (id: string, b: Record<string, string>) => post<DevRequest>(`/orgs/${id}/requests`, b),
+  me: () => req<{ user: DevUser & { emailVerified: boolean }; organizations: DevOrg[]; environment: "live" | "test"; api_base: string; sandbox_base: string | null; plans: DevPlan[] }>("/me"),
   org: (id: string) => req<DevOrg & { plan: { id: string; name: string; rateLimitRpm: number; platformFeePct: number; tiers: Array<{ fromXaf: number; feePct: number }> }; balance: { available: number; pending: number }; applications: DevApp[]; credentials: number }>(`/orgs/${id}`),
   updateOrg: (id: string, b: { name?: string; country?: string }) => patch<DevOrg>(`/orgs/${id}`, b),
   members: (id: string) => req<{ members: DevMember[]; roles: string[] }>(`/orgs/${id}/members`),
-  addMember: (id: string, b: { email: string; name?: string; role: string }) => post<{ member: unknown; user: DevUser; note?: string }>(`/orgs/${id}/members`, b),
+  addMember: (id: string, b: { email: string; name?: string; role: string }) => post<{ member: unknown; user: DevUser; invitation?: { sent: boolean; dev_link?: string } }>(`/orgs/${id}/members`, b),
   removeMember: (id: string, uid: string) => del<{ ok: boolean }>(`/orgs/${id}/members/${uid}`),
   apps: (id: string) => req<{ applications: DevApp[] }>(`/orgs/${id}/apps`),
   createApp: (id: string, b: { name: string; description?: string }) => post<DevApp>(`/orgs/${id}/apps`, b),

@@ -53,3 +53,13 @@
 .dd-drawer > div { width: min(720px, 100%); max-height: 85vh; overflow: auto; background: var(--surface); border-radius: 14px; padding: 18px; display: grid; gap: 12px; }
 .dd-drawer h3 { margin: 0; display: flex; gap: 10px; align-items: center; font-size: 16px; }
 @media (max-width: 720px) { .dd-kpis { grid-template-columns: 1fr 1fr; } .dd-table { display: block; overflow-x: auto; } }
+
+.dd-plans { display: grid; gap: 8px; }
+.dd-plans label { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; font-size: 13px; }
+.dd-plans label.on { border-color: var(--brand); background: var(--brand-wash); }
+.dd-plans label span { color: var(--ink-2); font-weight: 500; }
+.dd-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dd-grid2 label { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+.dd-grid2 input { padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 14px; color: var(--ink); }
+.dd-grid2 > button { grid-column: 1 / -1; justify-self: start; }
+@media (max-width: 640px) { .dd-grid2 { grid-template-columns: 1fr; } }

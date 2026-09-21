@@ -41,6 +41,8 @@ const ALLOWED_ORIGIN: RegExp[] = [
   /^https:\/\/mo-mo-me-app(-[a-z0-9-]+)?\.vercel\.app$/,
   /^https:\/\/([a-z0-9-]+\.)*momome\.xyz$/,
 ];
+/** Is this a browser origin of OUR app? Used for CORS and for building links back to the dashboard. */
+export const isOwnOrigin = (origin: string | undefined): boolean => !!origin && ALLOWED_ORIGIN.some((re) => re.test(origin));
 function corsOrigin(origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void): void {
   if (!origin) return cb(null, true);
   cb(null, ALLOWED_ORIGIN.some((re) => re.test(origin)));

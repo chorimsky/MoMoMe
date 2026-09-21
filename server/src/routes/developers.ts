@@ -18,7 +18,7 @@
    ============================================================ */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { rateLimitDurableMiddleware, clientIp } from "../core/ratelimit.js";
-import { createUser, verifyPassword, getUser, userByEmail, createOrganization, getOrganization, updateOrganization, membershipsOf, membersOf, addMember, removeMember, can, createApplication, applicationsOf, archiveApplication, ROLES, type OrgRole, type Permission } from "../core/platform/orgs.js";
+import { createUser, verifyPassword, getUser, userByEmail, setPassword, createOrganization, getOrganization, updateOrganization, membershipsOf, membersOf, addMember, removeMember, can, createApplication, applicationsOf, archiveApplication, ROLES, type OrgRole, type Permission } from "../core/platform/orgs.js";
 import { createCredential, listCredentials, getCredential, revokeCredential, rotateCredential, updateCredential, ALL_SCOPES, type Scope, type Environment } from "../core/platform/credentials.js";
 import { issueDevToken, verifyDevToken } from "../core/platform/devAuth.js";
 import { audit, auditOf } from "../core/platform/audit.js";
@@ -27,9 +27,13 @@ import { metasOf, metaOf } from "../core/platform/paymentMeta.js";
 import { publicPayment } from "../core/platform/mapping.js";
 import { settlementsOf, publicSettlement, orgBalance } from "../core/platform/settlements.js";
 import { usageSummary } from "../core/platform/usage.js";
-import { invoicesOf, planOfOrg, listPlans } from "../core/platform/billing.js";
+import { invoicesOf, planOfOrg } from "../core/platform/billing.js";
 import { store } from "../db/store.js";
 import { liveMoney, config } from "../config.js";
+import { isOwnOrigin } from "../app.js";
+import { issueActionToken, consumeActionToken, peekActionToken, bumpSessionVersion, isEmailVerified, markEmailVerified, submitRequest, requestsOf, KYB_FIELDS, type RequestKind } from "../core/platform/accounts.js";
+import { sendEmail, emailConfigured, devLinksAllowed } from "../core/platform/email.js";
+import { listPlans } from "../core/platform/billing.js";
 
 export const developers = Router();
 type DevReq = Request & { dev: { uid: string } };
@@ -38,15 +42,80 @@ const bad = (res: Response, status: number, error: string, message: string) => r
 const tokenOf = (req: Request) => { const a = req.headers.authorization; const s = Array.isArray(a) ? a[0] : a; return s?.startsWith("Bearer ") ? s.slice(7).trim() : undefined; };
 
 /* ---------- accounts ---------- */
-developers.post("/signup", rateLimitDurableMiddleware("dev_signup", 10, 3_600_000), (req, res) => {
+developers.post("/signup", rateLimitDurableMiddleware("dev_signup", 10, 3_600_000), async (req, res) => {
   if (process.env.DEVELOPER_SIGNUP === "off") return bad(res, 403, "signup_closed", "Developer sign-up is by invitation right now. Write to developers@momome.xyz.");
   const b = req.body ?? {};
   const r = createUser({ email: str(b.email), name: str(b.name), password: str(b.password) });
   if (!r.ok) return bad(res, 400, r.error, r.error === "email_taken" ? "An account with this email already exists." : r.error === "password_too_short" ? "Use at least 10 characters." : "Enter a valid email address.");
   const org = createOrganization({ name: str(b.organization) || `${r.user.name}'s organization`, country: str(b.country) || "CM", ownerUserId: r.user.id });
-  audit({ orgId: org.id, actor: { type: "user", id: r.user.id, label: r.user.email }, action: "developer.signed_up", ip: clientIp(req) });
+  // The plan the developer wants. Everyone STARTS on developer (sandbox-ready at once); business
+  // and enterprise are recorded as an open request the operator sees in the activation queue.
+  const wanted = str(b.plan); let planRequest: unknown = null;
+  if (wanted === "business" || wanted === "enterprise") { const q = submitRequest(org.id, r.user.id, "plan_change", { plan: wanted, note: str(b.note).slice(0, 500), expected_monthly_volume_xaf: str(b.expected_monthly_volume_xaf) }); planRequest = q.ok ? q.request : null; }
+  audit({ orgId: org.id, actor: { type: "user", id: r.user.id, label: r.user.email }, action: "developer.signed_up", details: { plan: wanted || "developer" }, ip: clientIp(req) });
+  const verify = await sendVerification(r.user.id, r.user.email, req);
   const t = issueDevToken(r.user.id);
-  res.status(201).json({ user: r.user, organization: org, ...t });
+  res.status(201).json({ user: r.user, organization: org, plan_request: planRequest, email_verification: verify, ...t });
+});
+/** Where action links point. DASHBOARD_URL wins; else the requesting page's own origin — only
+ *  when it is one of OUR app origins (a spoofed Origin must never steer an emailed link). */
+const dashboardUrl = (req?: Request) => {
+  if (process.env.DASHBOARD_URL) return process.env.DASHBOARD_URL.replace(/\/$/, "");
+  const origin = req ? str(req.headers.origin) : "";
+  return isOwnOrigin(origin) ? `${origin}/developers/dashboard` : "https://momome.xyz/developers/dashboard";
+};
+async function sendVerification(userId: string, email: string, req?: Request) {
+  const token = issueActionToken("verify_email", userId);
+  const link = `${dashboardUrl(req)}?verify=${token}`;
+  const rec = await sendEmail("verify_email", email, "Verify your MoMo›Me developer email", `Welcome to MoMo›Me Developers.\n\nConfirm your email address by opening this link (valid 24 hours):\n${link}\n\nIf you did not sign up, ignore this message.`);
+  return { sent: rec.status === "sent", ...(devLinksAllowed() && !emailConfigured() ? { dev_link: link } : {}) };
+}
+/* ---------- email verification, password reset, invitations (no session needed) ---------- */
+developers.post("/verify-email", rateLimitDurableMiddleware("dev_verify", 30, 3_600_000), (req, res) => {
+  const t = consumeActionToken("verify_email", str((req.body ?? {}).token));
+  if (!t) return bad(res, 400, "token_invalid", "This verification link is invalid or has expired. Request a new one from the dashboard.");
+  markEmailVerified(t.userId);
+  audit({ actor: { type: "user", id: t.userId }, action: "developer.email_verified", ip: clientIp(req) });
+  res.json({ ok: true });
+});
+developers.post("/forgot-password", rateLimitDurableMiddleware("dev_forgot", 10, 3_600_000), async (req, res) => {
+  const u = userByEmail(str((req.body ?? {}).email));
+  // Always 200 — the response never says whether the address exists.
+  let dev_link: string | undefined;
+  if (u) {
+    const token = issueActionToken("reset_password", u.id);
+    const link = `${dashboardUrl(req)}?reset=${token}`;
+    const rec = await sendEmail("reset_password", u.email, "Reset your MoMo›Me developer password", `Someone asked to reset the password for ${u.email}.\n\nOpen this link within 1 hour to choose a new one:\n${link}\n\nIf that was not you, ignore this message — nothing changes.`);
+    if (devLinksAllowed() && !emailConfigured()) dev_link = link;
+    audit({ actor: { type: "user", id: u.id, label: u.email }, action: "developer.password_reset_requested", ip: clientIp(req), details: { emailed: rec.status } });
+  }
+  res.json({ ok: true, message: "If that address has an account, a reset link is on its way.", ...(dev_link ? { dev_link } : {}) });
+});
+developers.post("/reset-password", rateLimitDurableMiddleware("dev_reset", 20, 3_600_000), (req, res) => {
+  const b = req.body ?? {};
+  const t = consumeActionToken("reset_password", str(b.token));
+  if (!t) return bad(res, 400, "token_invalid", "This reset link is invalid or has expired. Request a new one.");
+  if (!setPassword(t.userId, str(b.password))) return bad(res, 400, "password_too_short", "Use at least 10 characters.");
+  bumpSessionVersion(t.userId); // every existing session ends
+  markEmailVerified(t.userId);  // a reset link proves control of the mailbox
+  audit({ actor: { type: "user", id: t.userId }, action: "developer.password_reset", ip: clientIp(req) });
+  const tk = issueDevToken(t.userId);
+  res.json({ ok: true, ...tk });
+});
+developers.get("/invitation/:token", (req, res) => {
+  const t = peekActionToken("invitation", req.params.token);
+  if (!t) return bad(res, 404, "token_invalid", "This invitation is invalid or has expired.");
+  const u = getUser(t.userId); const org = t.orgId ? getOrganization(t.orgId) : undefined;
+  res.json({ email: u?.email, name: u?.name, organization: org?.name, needs_password: !u?.lastLoginAt });
+});
+developers.post("/invitation/:token/accept", rateLimitDurableMiddleware("dev_invite_accept", 20, 3_600_000), (req, res) => {
+  const t = consumeActionToken("invitation", req.params.token);
+  if (!t) return bad(res, 400, "token_invalid", "This invitation is invalid or has expired.");
+  const pw = str((req.body ?? {}).password);
+  if (pw && !setPassword(t.userId, pw)) return bad(res, 400, "password_too_short", "Use at least 10 characters.");
+  markEmailVerified(t.userId);
+  audit({ orgId: t.orgId, actor: { type: "user", id: t.userId }, action: "member.invitation_accepted", ip: clientIp(req) });
+  res.json({ ok: true, ...issueDevToken(t.userId) });
 });
 developers.post("/login", rateLimitDurableMiddleware("dev_login", 20, 900_000), (req, res) => {
   const b = req.body ?? {};
@@ -64,7 +133,21 @@ developers.use((req: Request, res: Response, next: NextFunction) => {
 });
 developers.get("/me", (req, res) => {
   const uid = (req as DevReq).dev.uid;
-  res.json({ user: getUser(uid), organizations: membershipsOf(uid).map((m) => ({ ...getOrganization(m.orgId)!, role: m.role })), environment: liveMoney() ? "live" : "test", api_base: `${config.publicUrl}/v1`, sandbox_base: process.env.SANDBOX_API_URL ?? null });
+  res.json({ user: { ...getUser(uid)!, emailVerified: isEmailVerified(uid) }, organizations: membershipsOf(uid).map((m) => ({ ...getOrganization(m.orgId)!, role: m.role })), environment: liveMoney() ? "live" : "test", api_base: `${config.publicUrl}/v1`, sandbox_base: process.env.SANDBOX_API_URL ?? null, plans: listPlans().map((p) => ({ id: p.id, name: p.name, description: p.description, platformFeePct: p.platformFeePct, rateLimitRpm: p.rateLimitRpm, tiers: p.tiers })) });
+});
+developers.post("/logout", (req, res) => { const uid = (req as DevReq).dev.uid; if ((req.body ?? {}).everywhere) bumpSessionVersion(uid); res.json({ ok: true }); });
+developers.post("/password", (req, res) => {
+  const uid = (req as DevReq).dev.uid; const b = req.body ?? {}; const u = getUser(uid)!;
+  if (!verifyPassword(u.email, str(b.current))) return bad(res, 401, "invalid_credentials", "Current password is incorrect.");
+  if (!setPassword(uid, str(b.password))) return bad(res, 400, "password_too_short", "Use at least 10 characters.");
+  bumpSessionVersion(uid);
+  audit({ actor: { type: "user", id: uid, label: u.email }, action: "developer.password_changed", ip: clientIp(req) });
+  res.json({ ok: true, ...issueDevToken(uid) });
+});
+developers.post("/resend-verification", rateLimitDurableMiddleware("dev_resend", 5, 3_600_000), async (req, res) => {
+  const uid = (req as DevReq).dev.uid; const u = getUser(uid)!;
+  if (isEmailVerified(uid)) return res.json({ ok: true, already: true });
+  res.json({ ok: true, ...(await sendVerification(uid, u.email, req)) });
 });
 developers.post("/orgs", (req, res) => {
   const uid = (req as DevReq).dev.uid;
@@ -95,14 +178,18 @@ developers.patch("/orgs/:org", guard("org.update"), (req, res) => {
   res.json(o);
 });
 developers.get("/orgs/:org/members", guard("members.read"), (req, res) => res.json({ members: membersOf(req.params.org).map((m) => ({ user: m.user, role: m.role, since: m.createdAt })), roles: ROLES }));
-developers.post("/orgs/:org/members", guard("members.manage"), (req, res) => {
+developers.post("/orgs/:org/members", guard("members.manage"), async (req, res) => {
   const b = req.body ?? {}; const role = str(b.role) as OrgRole;
   if (!ROLES.includes(role)) return bad(res, 400, "bad_request", `Role must be one of ${ROLES.join(", ")}.`);
   let u = userByEmail(str(b.email));
   if (!u) { const r = createUser({ email: str(b.email), name: str(b.name) || str(b.email) }); if (!r.ok) return bad(res, 400, r.error, "Enter a valid email address."); u = r.user; }
   const m = addMember(req.params.org, u.id, role);
   audit({ orgId: req.params.org, actor: actor(req), action: "member.added", target: { type: "user", id: u.id }, details: { role }, ip: clientIp(req) });
-  res.status(201).json({ member: m, user: u, note: u.lastLoginAt ? undefined : "The invited person sets a password through 'forgot password' (or an operator sets one)." });
+  const org = getOrganization(req.params.org)!; const inviter = getUser((req as DevReq).dev.uid);
+  const token = issueActionToken("invitation", u.id, { orgId: org.id, role });
+  const link = `${dashboardUrl(req)}?invite=${token}`;
+  const rec = await sendEmail("invitation", u.email, `${inviter?.name ?? "A teammate"} invited you to ${org.name} on MoMo›Me`, `${inviter?.name ?? "A teammate"} (${inviter?.email ?? ""}) added you to ${org.name} as ${role}.\n\nOpen this link within 7 days to set your password and sign in:\n${link}`);
+  res.status(201).json({ member: m, user: u, invitation: { sent: rec.status === "sent", ...(devLinksAllowed() && !emailConfigured() ? { dev_link: link } : {}) } });
 });
 developers.delete("/orgs/:org/members/:uid", guard("members.manage"), (req, res) => {
   if (!removeMember(req.params.org, req.params.uid)) return bad(res, 409, "cannot_remove", "The last owner cannot be removed.");
@@ -199,3 +286,18 @@ developers.get("/orgs/:org/usage", guard("usage.read"), (req, res) => {
 });
 developers.get("/orgs/:org/invoices", guard("billing.read"), (req, res) => res.json({ invoices: invoicesOf(req.params.org), plan: planOfOrg(req.params.org), plans: listPlans() }));
 developers.get("/orgs/:org/audit", guard("org.read"), (req, res) => res.json({ events: auditOf(req.params.org, 200) }));
+
+/* ---------- requests to the operator: KYB, plan change, live access ---------- */
+developers.get("/orgs/:org/requests", guard("org.read"), (req, res) => res.json({ requests: requestsOf(req.params.org), kyb_fields: KYB_FIELDS }));
+developers.post("/orgs/:org/requests", guard("org.update"), (req, res) => {
+  const b = req.body ?? {}; const kind = str(b.kind) as RequestKind;
+  if (!["kyb", "plan_change", "live_access"].includes(kind)) return bad(res, 400, "bad_request", "kind must be kyb, plan_change or live_access.");
+  const payload: Record<string, unknown> = {};
+  if (kind === "kyb") for (const k of KYB_FIELDS) if (b[k] !== undefined) payload[k] = str(b[k]).slice(0, 300);
+  if (kind === "plan_change") { payload.plan = str(b.plan); payload.note = str(b.note).slice(0, 500); payload.expected_monthly_volume_xaf = str(b.expected_monthly_volume_xaf); }
+  if (kind === "live_access") { payload.note = str(b.note).slice(0, 500); payload.go_live_date = str(b.go_live_date); }
+  const r = submitRequest(req.params.org, (req as DevReq).dev.uid, kind, payload);
+  if (!r.ok) return bad(res, r.error === "kyb_required" ? 409 : 400, r.error.split(":")[0], r.error === "kyb_required" ? "Submit your company details (KYB) first — live access follows verification." : r.error.startsWith("missing:") ? `Missing: ${r.error.slice(8).replace(/,/g, ", ")}.` : "Invalid request.");
+  audit({ orgId: req.params.org, actor: actor(req), action: `request.${kind}.submitted`, target: { type: "request", id: r.request.id }, ip: clientIp(req) });
+  res.status(201).json(r.request);
+});

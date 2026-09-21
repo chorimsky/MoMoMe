@@ -25,6 +25,8 @@ import { allSettlements, getSettlement, approveSettlement, submitSettlement, com
 import { treasuryView, reservationsOf } from "../core/platform/liquidity.js";
 import { metasOf } from "../core/platform/paymentMeta.js";
 import { clientIp } from "../core/ratelimit.js";
+import { openRequests, allRequests, getRequest, decideRequest } from "../core/platform/accounts.js";
+import { emailOutbox, sendEmail, emailConfigured } from "../core/platform/email.js";
 
 export const platformAdmin = Router();
 type AdminReq = Request & { session?: { uid: string; role: string } };
@@ -107,3 +109,19 @@ platformAdmin.post("/organizations/:id/invoices/:period", (req, res) => {
   res.json(out);
 });
 platformAdmin.get("/audit", (_req, res) => res.json({ events: auditAll(300) }));
+
+/* ---------- activation queue: KYB, plan changes, live access ---------- */
+platformAdmin.get("/requests", (req, res) => res.json({ requests: (str(req.query.all) === "1" ? allRequests() : openRequests()).map((r) => ({ ...r, organization: getOrganization(r.orgId)?.name ?? r.orgId, requester: getUser(r.byUserId)?.email ?? r.byUserId })), email_configured: emailConfigured() }));
+platformAdmin.post("/requests/:id/:decision", async (req, res) => {
+  const d = req.params.decision; if (d !== "approve" && d !== "reject") return res.status(400).json({ error: "bad_request", message: "approve or reject." });
+  const r0 = getRequest(req.params.id); if (!r0) return res.status(404).json({ error: "not_found", message: "No such request." });
+  const r = decideRequest(r0.id, d === "approve" ? "approved" : "rejected", (req as AdminReq).session?.uid ?? "console", str((req.body ?? {}).note) || undefined)!;
+  audit({ orgId: r.orgId, actor: who(req), action: `request.${r.kind}.${r.status}`, target: { type: "request", id: r.id }, details: { note: r.decisionNote }, ip: clientIp(req) });
+  const requester = getUser(r.byUserId); const org = getOrganization(r.orgId);
+  if (requester) {
+    const what = r.kind === "kyb" ? "company verification (KYB)" : r.kind === "plan_change" ? `plan change to ${String(r.payload.plan)}` : "live access";
+    await sendEmail(`request_${r.status}`, requester.email, `MoMo›Me: your ${what} was ${r.status}`, `Hello ${requester.name},\n\nYour ${what} request for ${org?.name ?? r.orgId} was ${r.status}.${r.decisionNote ? `\n\nNote from MoMo›Me: ${r.decisionNote}` : ""}\n\n${r.status === "approved" && r.kind === "live_access" ? "You can now create mm_live_ credentials from the dashboard." : ""}\n— MoMo›Me Developers`);
+  }
+  res.json(r);
+});
+platformAdmin.get("/emails", (_req, res) => res.json({ configured: emailConfigured(), outbox: emailOutbox(100) }));

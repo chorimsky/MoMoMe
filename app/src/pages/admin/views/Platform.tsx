@@ -13,10 +13,10 @@ const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("en-GB
 const inp: React.CSSProperties = { padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)" };
 const small: React.CSSProperties = { padding: "5px 10px", fontSize: 12 };
 
-type Tab = "orgs" | "settlements" | "plans" | "limits" | "usage" | "audit";
+type Tab = "queue" | "orgs" | "settlements" | "plans" | "limits" | "usage" | "emails" | "audit";
 
 export function PlatformView() {
-  const [tab, setTab] = useState<Tab>("orgs");
+  const [tab, setTab] = useState<Tab>("queue");
   const [treasury, setTreasury] = useState<Awaited<ReturnType<typeof api.platformTreasury>> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { api.platformTreasury().then(setTreasury).catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load.")); }, []);
@@ -32,9 +32,11 @@ export function PlatformView() {
         <AKpi label="Available to new payments" value={fmt(treasury.available)} unit="XAF" tone="recv" />
       </Grid>
       <div style={{ display: "flex", gap: 6, margin: "16px 0", flexWrap: "wrap" }}>
-        {(["orgs", "settlements", "plans", "limits", "usage", "audit"] as Tab[]).map((k) => <button key={k} type="button" className={`btn ${tab === k ? "btn-primary" : "btn-ghost"}`} style={small} onClick={() => setTab(k)}>{{ orgs: "Organizations", settlements: "Settlements", plans: "Pricing plans", limits: "Limit rules", usage: "API usage", audit: "Audit" }[k]}</button>)}
+        {(["queue", "orgs", "settlements", "plans", "limits", "usage", "emails", "audit"] as Tab[]).map((k) => <button key={k} type="button" className={`btn ${tab === k ? "btn-primary" : "btn-ghost"}`} style={small} onClick={() => setTab(k)}>{{ queue: "Activation queue", orgs: "Organizations", settlements: "Settlements", plans: "Pricing plans", limits: "Limit rules", usage: "API usage", emails: "Emails", audit: "Audit" }[k]}</button>)}
       </div>
+      {tab === "queue" && <Queue />}
       {tab === "orgs" && <Orgs />}
+      {tab === "emails" && <Emails />}
       {tab === "settlements" && <Settlements />}
       {tab === "plans" && <Plans />}
       {tab === "limits" && <Limits />}
@@ -172,5 +174,31 @@ function Audit() {
   useEffect(() => { void api.platformAudit().then((r) => setEv(r.events)); }, []);
   return <Card title="Platform audit" sub="Developer, credential, operator and settlement actions across organizations.">
     {(ev ?? []).map((e) => <div key={e.id} style={{ fontSize: 12.5, padding: "3px 0", color: "var(--ink-2)" }}>{when(e.at)} · <b>{e.action}</b> · {e.actor.type} {e.actor.label ?? e.actor.id}{e.orgId ? ` · ${e.orgId}` : ""}{e.target ? ` · ${e.target.type} ${e.target.id}` : ""}</div>)}
+  </Card>;
+}
+
+function Queue() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.platformRequests>> | null>(null); const [all, setAll] = useState(false); const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(() => api.platformRequests(all).then(setD), [all]);
+  useEffect(() => { void load(); }, [load]);
+  const decide = async (id: string, decision: "approve" | "reject") => { const note = prompt(decision === "approve" ? "Note to the developer (optional):" : "Reason (sent to the developer):") ?? undefined; if (decision === "reject" && !note) return; setMsg(null); try { await api.platformDecide(id, decision, note); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
+  const kindLabel = (k: string) => ({ kyb: "Company verification", plan_change: "Plan change", live_access: "Live access" }[k] ?? k);
+  return <Card title="Activation queue" sub={`KYB submissions, plan changes and live-access requests. Approving applies the change and emails the developer${d && !d.email_configured ? " (email provider NOT configured — decisions are recorded, not sent)" : ""}.`} action={<button type="button" className="btn btn-ghost" style={small} onClick={() => setAll(!all)}>{all ? "Open only" : "Show decided"}</button>}>
+    {msg && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 8 }}>{msg}</div>}
+    {(d?.requests ?? []).map((r) => <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line-2)", fontSize: 13 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><span><b>{r.organization}</b> · {kindLabel(r.kind)}{r.kind === "plan_change" ? ` → ${String(r.payload.plan)}` : ""} <span style={{ color: "var(--ink-3)" }}>· {r.requester} · {when(r.createdAt)}</span></span>
+        <span>{r.status === "open" ? <><button type="button" className="btn btn-primary" style={small} onClick={() => decide(r.id, "approve")}>Approve</button> <button type="button" className="btn btn-ghost" style={small} onClick={() => decide(r.id, "reject")}>Reject</button></> : <Pill status={r.status} tone={r.status === "approved" ? "recv" : "bad"} />}</span></div>
+      <div style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 4 }}>{Object.entries(r.payload).filter(([, v]) => v !== "" && v != null).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}{r.decisionNote ? ` — note: ${r.decisionNote}` : ""}</div>
+    </div>)}
+    {d && !d.requests.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>Queue is empty.</div>}
+  </Card>;
+}
+function Emails() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.platformEmails>> | null>(null);
+  useEffect(() => { void api.platformEmails().then(setD); }, []);
+  return <Card title="Developer emails" sub={d?.configured ? "Provider configured (EMAIL_API_KEY / EMAIL_FROM)." : "No email provider configured: set EMAIL_API_KEY and EMAIL_FROM (Resend-compatible API) on the server. Until then verification, reset and invitation links are only available in the sandbox response or via 'Set password' here."}>
+    <table style={{ width: "100%", fontSize: 13 }}><thead><tr><th>When</th><th>Kind</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody>
+      {(d?.outbox ?? []).map((e) => <tr key={e.id}><td>{when(e.at)}</td><td>{e.kind}</td><td>{e.to}</td><td>{e.subject}</td><td>{e.status}{e.error ? ` · ${e.error}` : ""}</td></tr>)}
+    </tbody></table>
   </Card>;
 }

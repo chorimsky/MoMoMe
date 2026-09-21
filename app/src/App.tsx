@@ -15,6 +15,7 @@ import { Contact } from "./pages/legal/Contact.js";
 import { DeleteAccount } from "./pages/legal/DeleteAccount.js";
 import { NotFound } from "./pages/legal/NotFound.js";
 import { Developers } from "./pages/Developers.js";
+const DeveloperDashboard = lazy(() => import("./pages/developers/Dashboard.js").then((m) => ({ default: m.DeveloperDashboard })));
 import { Merchant } from "./pages/Merchant.js";
 import { Ambassador } from "./pages/Ambassador.js";
 import { Discover } from "./pages/Discover.js";
@@ -94,6 +95,7 @@ export function App() {
       <Route path="/ai-copilot/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="copilot" /></Suspense></AdminGate>} />
       <Route path="/investor/*" element={<AdminGate brand={PORTAL_BRAND}><Suspense fallback={<ChunkFallback />}><InvestorPortal /></Suspense></AdminGate>} />
       <Route path="/developers" element={<Developers />} />
+      <Route path="/developers/dashboard" element={<Suspense fallback={null}><DeveloperDashboard /></Suspense>} />
       <Route path="/merchant" element={<Merchant />} />
       <Route path="/ambassador" element={<Ambassador />} />
       <Route path="/discover" element={<Discover />} />

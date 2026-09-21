@@ -1,0 +1,9 @@
+{
+  "name": "momome/momome-php",
+  "description": "MoMo›Me API v1 client — Bitcoin, Lightning and stablecoin payouts into African Mobile Money.",
+  "type": "library",
+  "license": "MIT",
+  "require": { "php": ">=8.1", "ext-curl": "*", "ext-json": "*" },
+  "autoload": { "psr-4": { "MoMoMe\\": "src/" } },
+  "extra": { "laravel": { "providers": ["MoMoMe\\Laravel\\MoMoMeServiceProvider"], "aliases": { "MoMoMe": "MoMoMe\\Laravel\\Facades\\MoMoMe" } } }
+}

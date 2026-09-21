@@ -259,6 +259,26 @@ async function main() {
     const wait0 = Date.now();
     const lp = await v1(`/payments/${to.body.data.id}?wait=1&status=AWAITING_PAYMENT`, { key: k });
     ok("GET /v1/payments/:id?wait= long-polls and returns at the timeout with the current record", lp.status === 200 && Date.now() - wait0 >= 900 && lp.body.data.status === "AWAITING_PAYMENT");
+
+    console.log("\n11. The TypeScript SDK against the live contract\n");
+    const { MoMoMe, MoMoMeError, verifyWebhookSignature } = await import("../../sdk/js/src/index.js");
+    const sdk = new MoMoMe(key2, { baseUrl: `${base}/v1` });
+    const sq2 = await sdk.quotes.create({ source: { asset: "BTC", network: "LIGHTNING" }, destination: { country: "CM", amount: "2500" } }, { idempotencyKey: idem() });
+    const sp = await sdk.payments.create({ quote_id: sq2.id, reference: "SDK-1", recipient: { phone: "+237670123456" }, metadata: { via: "sdk" } }, { idempotencyKey: "sdk-order-1" });
+    ok("sdk: quote → payment (typed, unwrapped from the envelope)", sq2.status === "active" && sp.status === "AWAITING_PAYMENT" && sp.metadata.via === "sdk" && sp.payment_instructions?.method === "lightning_invoice");
+    const sp2 = await sdk.payments.create({ quote_id: sq2.id, reference: "SDK-1", recipient: { phone: "+237670123456" }, metadata: { via: "sdk" } }, { idempotencyKey: "sdk-order-1" });
+    ok("sdk: the same idempotency key replays the same payment", sp2.id === sp.id);
+    await sdk.sandbox.pay(sp.id);
+    const settled = await sdk.payments.waitUntilSettled(sp.id, { timeoutMs: 15_000 });
+    ok("sdk: waitUntilSettled long-polls to COMPLETED", settled.status === "COMPLETED", settled.status);
+    let caught: unknown = null;
+    try { await sdk.payments.get("pay_nope"); } catch (e) { caught = e; }
+    ok("sdk: errors are typed MoMoMeError with the API code and request id", caught instanceof MoMoMeError && caught.code === "payment_not_found" && caught.status === 404 && /^req_/.test(caught.requestId ?? ""));
+    const tsig = Date.now(); const rawBody = JSON.stringify({ id: "evt_1", type: "ping" });
+    const goodSig = `t=${tsig},v1=${crypto.createHmac("sha256", "whsec_x").update(`${tsig}.${rawBody}`).digest("hex")}`;
+    ok("sdk: verifyWebhookSignature accepts a valid signature and rejects a tampered body", (await verifyWebhookSignature(rawBody, goodSig, "whsec_x")) && !(await verifyWebhookSignature(rawBody + " ", goodSig, "whsec_x")));
+    const acct = await sdk.account.get();
+    ok("sdk: account + health", (acct as { environment?: string }).environment === "test" && ((await sdk.health()) as { environment?: string }).environment === "test");
   } finally { server.close(); hook.close(); }
   console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

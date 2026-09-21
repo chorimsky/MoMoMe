@@ -22,6 +22,7 @@ import { PricingView } from "./views/Pricing.js";
 import { MobileMoneyView } from "./views/MobileMoney.js";
 import { RailsView } from "./views/Rails.js";
 import { InteropView } from "./views/Interop.js";
+import { PlatformView } from "./views/Platform.js";
 import { AudienceView } from "./views/Audience.js";
 import { ComplianceView } from "./views/Compliance.js";
 import { ReportsView } from "./views/Reports.js";
@@ -66,7 +67,7 @@ function Icon({ name, s = 17 }: { name: string; s?: number }) {
 type Key =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex" | "reports" | "audience"
-  | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness" | "testing";
+  | "notifications" | "health" | "settings" | "administration" | "developers" | "readiness" | "testing" | "platform";
 
 const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: null, items: [["overview", "Overview"]] },
@@ -76,7 +77,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
   { group: "Insights", items: [["reports", "Reports"], ["audience", "Audience"], ["notifications", "Notifications"], ["testing", "Testing"]] },
-  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },
+  { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["platform", "API Platform"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items)) as Record<Key, string>;
 const VIEWS: Record<Key, ComponentType> = {
@@ -102,6 +103,7 @@ const VIEWS: Record<Key, ComponentType> = {
   administration: AdministrationView,
   readiness: ReadinessView,
   testing: TestingView,
+  platform: PlatformView,
 };
 
 // The console nav keys are exactly the shared role Sections — the same module

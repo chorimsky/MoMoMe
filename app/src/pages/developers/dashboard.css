@@ -1,0 +1,55 @@
+/* Developer dashboard — built on the portal's tokens (Developers.css / momome.css). */
+.dd-auth { display: grid; place-items: center; padding: clamp(24px, 8vw, 80px) 0; }
+.dd-auth-card { width: min(440px, 100%); padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.dd-auth-card h1 { font-size: 24px; margin: 8px 0 6px; }
+.dd-form { display: grid; gap: 12px; margin-top: 16px; }
+.dd-form label, .dd-row label { display: grid; gap: 5px; font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+.dd-form input, .dd-row input, .dd-row select, .dd-top-right select { padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 14px; color: var(--ink); outline: none; min-width: 0; }
+.dd-form input:focus, .dd-row input:focus { border-color: var(--brand); }
+.dd-link { background: none; border: 0; color: var(--brand); font: inherit; font-size: 13px; margin-top: 14px; cursor: pointer; padding: 0; }
+.dd-err { margin-top: 10px; padding: 10px 12px; border-radius: var(--r); background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); font-size: 13px; }
+.muted { color: var(--ink-2); } .small { font-size: 12.5px; } .dim { opacity: .55; }
+.dd-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-end; padding: 24px 0 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.dd-title { font-size: 26px; margin: 4px 0; display: flex; align-items: center; gap: 10px; }
+.dd-top-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.dd-env { font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
+.dd-env.test { background: var(--brand-wash); color: var(--brand); } .dd-env.live { background: color-mix(in oklab, var(--recv) 18%, transparent); color: var(--recv); }
+.dd-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 12px 0; border-bottom: 1px solid var(--line-2); }
+.dd-tabs button { background: none; border: 0; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 8px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.dd-tabs button.on { background: var(--ink); color: var(--paper); }
+.dd-main { padding: 18px 0 40px; display: grid; gap: 18px; }
+.dd-panel { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 18px; }
+.dd-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.dd-panel h2 { font-size: 16px; margin: 0; }
+.dd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.dd-kpi { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.dd-kpi-v { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.dd-seg { display: inline-flex; align-items: center; gap: 6px; }
+.dd-seg button { font: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.dd-seg button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.dd-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.dd-row > label { flex: 1 1 160px; } .dd-row > input { flex: 2 1 220px; }
+.dd-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.dd-table th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.dd-table td { padding: 9px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.dd-table tr.click { cursor: pointer; } .dd-table tr.click:hover td { background: var(--surface-2); }
+.dd-actions button { background: none; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 12px; padding: 4px 9px; margin-right: 6px; cursor: pointer; color: var(--ink); }
+.dd-code { margin: 0; padding: 14px; border-radius: 12px; background: oklch(0.19 0.012 68); color: oklch(0.93 0.01 80); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; overflow: auto; white-space: pre; }
+.dd-secret { padding: 16px; border: 1px dashed var(--brand); border-radius: 12px; background: var(--brand-wash); display: grid; gap: 10px; }
+.dd-secret code { font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
+.dd-details { margin-top: 12px; font-size: 13px; } .dd-details summary { cursor: pointer; color: var(--ink-2); }
+.dd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dd-chips label { font-family: var(--font-mono); font-size: 12px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.dd-chips label.on { border-color: var(--brand); background: var(--brand-wash); }
+.dd-bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; padding-top: 10px; }
+.dd-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.dd-bar > div { width: 100%; background: var(--brand); border-radius: 4px 4px 0 0; }
+.dd-bar span { font-size: 9px; color: var(--ink-3); margin-top: 4px; overflow: hidden; white-space: nowrap; }
+.dd-st { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); }
+.dd-st.COMPLETED { background: color-mix(in oklab, var(--recv) 18%, transparent); color: var(--recv); }
+.dd-st.FAILED, .dd-st.EXPIRED, .dd-st.CANCELLED { background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); }
+.dd-st.REFUNDED, .dd-st.MANUAL_REVIEW, .dd-st.REQUESTED, .dd-st.PROCESSING { background: var(--brand-wash); color: var(--brand); }
+.dd-drawer { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; z-index: 50; }
+.dd-drawer > div { width: min(720px, 100%); max-height: 85vh; overflow: auto; background: var(--surface); border-radius: 14px; padding: 18px; display: grid; gap: 12px; }
+.dd-drawer h3 { margin: 0; display: flex; gap: 10px; align-items: center; font-size: 16px; }
+@media (max-width: 720px) { .dd-kpis { grid-template-columns: 1fr 1fr; } .dd-table { display: block; overflow-x: auto; } }

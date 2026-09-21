@@ -343,6 +343,12 @@ function getConfigShared(): Promise<AppConfigResponse> {
 }
 export type AppConfigResponse = { demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } };
 
+export interface UsageSum { requests: number; errors: number; quotes: number; payments: number; completed: number; failed: number; volumeXaf: number; feesXaf: number; webhooks: number; webhookFailures: number; settlements: number; settledXaf: number; avgLatencyMs: number; successRatePct: number }
+export interface PlatformOrgRow { id: string; name: string; slug: string; status: string; createdAt: string; country: string; kyb: string; plan: string; liveEnabled: boolean; suspendedReason?: string; members?: number; credentials?: number; live?: UsageSum; test?: UsageSum; balance?: { available: number; pending: number } }
+export interface PlatformOrgDetail { organization: PlatformOrgRow; plan: PlatformPlan; members: Array<{ userId: string; role: string; createdAt: string; user: { id: string; email: string; name: string; lastLoginAt?: string } }>; applications: Array<{ id: string; name: string; createdAt: string }>; credentials: Array<{ id: string; env: string; label: string; hint: string; scopes: string[]; status: string; createdAt: string; lastUsedAt?: string }>; usage: { live: { summary: UsageSum }; test: { summary: UsageSum } }; balance: { available: number; pending: number }; payments: { live: number; test: number }; reservations: Array<{ id: string; xaf: number; paymentId?: string; createdAt: string; expiresAt: string }>; invoices: Array<Record<string, any>>; audit: Array<{ id: string; at: string; action: string; actor: { type: string; id: string; label?: string }; details?: Record<string, unknown> }> }
+export interface PlatformPlan { id: string; name: string; rateLimitRpm: number; paymentEndpointRpm: number; platformFeePct: number; minFeeXaf: number; tiers: Array<{ fromXaf: number; feePct: number }>; fixedMonthlyXaf: number; negotiatedFeePct?: number; description?: string; custom?: boolean }
+export interface PlatformLimitRule { id: string; name: string; enabled: boolean; priority: number; scope: { orgIds?: string[]; envs?: string[]; countries?: string[]; assets?: string[]; currencies?: string[]; operators?: string[]; plans?: string[] }; ceilings: { maxTransactionXaf?: number; minTransactionXaf?: number; dailyXaf?: number; monthlyXaf?: number; velocityPerHour?: number; dailyCount?: number }; createdAt: string; updatedAt: string }
+
 export const api = {
   getConfig: (): Promise<AppConfigResponse> => getConfigShared(),
   /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
@@ -573,6 +579,23 @@ export const api = {
   adminNetwork: () => req<NetworkOverview>("/admin/network"),
   /** Universal Payment Identity layer — flags, routing mode, shadow agreement, registry, pools. */
   adminUpi: () => req<UpiOverview>("/admin/upi"),
+  /* ---------- API v1 platform (Admin → Platform) ---------- */
+  platformOrgs: () => req<{ organizations: PlatformOrgRow[] }>("/admin/platform/organizations"),
+  platformOrg: (id: string) => req<PlatformOrgDetail>(`/admin/platform/organizations/${id}`),
+  platformUpdateOrg: (id: string, b: { status?: string; suspendedReason?: string; kyb?: string; plan?: string; liveEnabled?: boolean }) => req<PlatformOrgRow>(`/admin/platform/organizations/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  platformCredit: (id: string, xaf: number, reference: string) => req<{ ok: boolean; balance: { available: number } }>(`/admin/platform/organizations/${id}/credit`, { method: "POST", body: JSON.stringify({ xaf, reference }) }),
+  platformPlans: () => req<{ plans: PlatformPlan[] }>("/admin/platform/plans"),
+  platformSavePlan: (p: PlatformPlan) => req<PlatformPlan>(`/admin/platform/plans/${p.id}`, { method: "PUT", body: JSON.stringify(p) }),
+  platformLimits: () => req<{ rules: PlatformLimitRule[] }>("/admin/platform/limits"),
+  platformSaveLimit: (r: Partial<PlatformLimitRule>) => req<PlatformLimitRule>("/admin/platform/limits", { method: "PUT", body: JSON.stringify(r) }),
+  platformDeleteLimit: (id: string) => req<{ ok: boolean }>(`/admin/platform/limits/${id}`, { method: "DELETE" }),
+  platformSettlements: () => req<{ settlements: Array<Record<string, any>> }>("/admin/platform/settlements"),
+  platformSettlementAction: (id: string, action: "approve" | "submit" | "complete" | "fail", b: Record<string, string> = {}) => req<Record<string, any>>(`/admin/platform/settlements/${id}/${action}`, { method: "POST", body: JSON.stringify(b) }),
+  platformTreasury: () => req<{ pool: string; currency: string; total: number | null; reserved: number; settlement_pending: number; available: number | null }>("/admin/platform/treasury"),
+  platformUsage: (period?: string) => req<{ period: string; organizations: Array<{ id: string; name: string; plan: string; live: UsageSum; test: UsageSum }> }>(`/admin/platform/usage${period ? `?period=${period}` : ""}`),
+  platformInvoice: (orgId: string, period: string, action?: "issue" | "paid") => req<Record<string, any>>(`/admin/platform/organizations/${orgId}/invoices/${period}`, { method: "POST", body: JSON.stringify({ action }) }),
+  platformAudit: () => req<{ events: Array<{ id: string; at: string; orgId?: string; action: string; actor: { type: string; id: string; label?: string }; target?: { type: string; id: string }; details?: Record<string, unknown> }> }>("/admin/platform/audit"),
+  platformSetPassword: (userId: string, password: string) => req<{ ok: boolean }>(`/admin/platform/users/${userId}/password`, { method: "POST", body: JSON.stringify({ password }) }),
   networkSettings: (patch: { [K in keyof NetworkSettings]?: Partial<NetworkSettings[K]> }) => req<{ network: NetworkSettings }>("/admin/network/settings", { method: "PUT", body: JSON.stringify(patch) }),
   networkShadowRun: () => req<{ compared: number }>("/admin/network/shadow/run", { method: "POST", body: "{}" }),
   networkTick: () => req<{ examined: number }>("/admin/network/tick", { method: "POST", body: "{}" }),

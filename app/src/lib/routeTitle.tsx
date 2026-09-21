@@ -33,6 +33,7 @@ const TITLES: Record<string, [en: string, fr: string]> = {
   "/diaspora": ["Send money home · MoMo›Me", "Envoyer de l'argent au pays · MoMo›Me"],
   "/ambassador": ["Ambassador programme · MoMo›Me", "Programme ambassadeur · MoMo›Me"],
   "/developers": ["MoMo›Me API — Developer documentation", "API MoMo›Me — Documentation développeur"],
+  "/developers/dashboard": ["Developer dashboard · MoMo›Me", "Tableau de bord développeur · MoMo›Me"],
   "/contact": ["Contact & support · MoMo›Me", "Contact & assistance · MoMo›Me"],
   "/terms": ["Terms of Service · MoMo›Me", "Conditions d'utilisation · MoMo›Me"],
   "/privacy": ["Privacy Policy · MoMo›Me", "Politique de confidentialité · MoMo›Me"],

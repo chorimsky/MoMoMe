@@ -993,11 +993,14 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
       await api.retryDelivery(payment.id);
       if (!mounted.current) return;
       setResult("retrying");
+      let last = "";
       for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
+        // Wait on the payment rather than ask every few seconds: the server answers the
+        // moment it moves (or after 15 s with the unchanged record).
+        const cur = await api.waitPayment(payment.id, last, 15_000).catch(() => api.getPayment(payment.id));
         if (!mounted.current) return;
-        const cur = await api.getPayment(payment.id);
-        if (!mounted.current) return;
+        if (cur.state === last) await new Promise((r) => setTimeout(r, 1000));
+        last = cur.state;
         if (cur.state === "DELIVERED") { reset(); return; }
         if (cur.state === "REFUND_PENDING" && cur.refundNeedsDestination) { setResult(null); setRetryErr(t("retry_delivery_failed")); return; }
       }
@@ -1016,12 +1019,13 @@ export function RefundClaim({ payment, reset }: { payment: Payment; reset: () =>
       const p = await api.refundDestination(payment.id, inv);
       if (!mounted.current) return;
       if (p.state === "REFUNDED") { setResult("refunded"); return; }
-      for (let i = 0; i < 12; i++) { // refund in flight — poll a short while for settlement
-        await new Promise((r) => setTimeout(r, 2500));
-        if (!mounted.current) return;
-        const cur = await api.getPayment(payment.id);
+      let last = p.state;
+      for (let i = 0; i < 4; i++) { // refund in flight — wait a short while for settlement
+        const cur = await api.waitPayment(payment.id, last, 8_000).catch(() => api.getPayment(payment.id));
         if (!mounted.current) return;
         if (cur.state === "REFUNDED") { setResult("refunded"); return; }
+        if (cur.state === last) await new Promise((r) => setTimeout(r, 1000));
+        last = cur.state;
       }
       // Submitted but not yet confirmed — DON'T claim it's done. Show a settling state.
       setResult("settling");

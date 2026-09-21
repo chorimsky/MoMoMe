@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import * as SecureStore from 'expo-secure-store';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -49,6 +50,7 @@ import type {
 type Step = 'details' | 'method' | 'momo' | 'review' | 'pay' | 'success';
 // Once the sender has paid the crypto invoice, the payment walks these states
 // server-side; we show a staged Processing view for them.
+const LAST_METHOD_KEY = 'mm.lastMethod'; // the method used last time, remembered on the device
 const AWAITING_STATES: PaymentState[] = ['QUOTED', 'AWAITING_INBOUND'];
 const STAGE_ORDER: PaymentState[] = [
   'INBOUND_DETECTED',
@@ -357,10 +359,18 @@ export default function SendScreen() {
       setBusy(true);
       setError(null);
       try {
-        const q = await api.createQuote({ xaf: xafNum, method: m, country, ...(merchantCode ? { merchantCode } : {}) });
+        let q: Quote | null = null;
+        const pre = prefetchRef.current;
+        if (pre && pre.key === `${xafNum}:${m}:${country}:${merchantCode ?? ''}`) {
+          const got = await pre.p.catch(() => null);
+          if (got && Date.parse(got.expiresAt) - Date.now() > 20_000) q = got;
+        }
+        prefetchRef.current = null;
+        if (!q) q = await api.createQuote({ xaf: xafNum, method: m, country, ...(merchantCode ? { merchantCode } : {}) });
         setQuote(q);
         setQuoteExpired(false);
         setStep('review');
+        SecureStore.setItemAsync(LAST_METHOD_KEY, m).then(() => setLastMethod(m)).catch(() => {});
       } catch (e) {
         setError(errMessage(e));
       } finally {
@@ -563,7 +573,35 @@ export default function SendScreen() {
       .catch(() => { /* no recommendation → static order */ });
     return () => { alive = false; };
   }, [step, xafNum, phone, country]);
-  const orderedMethods = rec ? [...enabledMethods].sort((a, b) => rec.order.indexOf(a) - rec.order.indexOf(b)) : enabledMethods;
+  // THE SENDER'S HABIT. The method used last time is listed first when the router says it
+  // is viable now, so a repeat sender taps the first card. Remembered on the device only.
+  const [lastMethod, setLastMethod] = useState<Method | null>(null);
+  useEffect(() => { SecureStore.getItemAsync(LAST_METHOD_KEY).then((v) => { if (v) setLastMethod(v as Method); }).catch(() => {}); }, []);
+  const orderedMethods = useMemo(() => {
+    const base = rec ? [...enabledMethods].sort((a, b) => rec.order.indexOf(a) - rec.order.indexOf(b)) : enabledMethods;
+    if (lastMethod && base.includes(lastMethod) && !rec?.unavailable[lastMethod]) return [lastMethod, ...base.filter((m) => m !== lastMethod)];
+    return base;
+  }, [rec, enabledMethods, lastMethod]);
+
+  // PREFETCHED QUOTE. Each round trip is about a second on a mobile link, and the quote is
+  // the one request between the method tap and the review. So on the Method step the quote
+  // for the first card (the habit, else the router's pick) is asked for in the background;
+  // the tap reuses it when it is for the same choice and still has a comfortable rate lock.
+  const prefetchRef = useRef<{ key: string; p: Promise<Quote> } | null>(null);
+  useEffect(() => {
+    if (step !== 'method' || !xafNum) { prefetchRef.current = null; return; }
+    const m = orderedMethods[0];
+    if (!m || rec?.unavailable[m]) return;
+    const key = `${xafNum}:${m}:${country}:${merchantCode ?? ''}`;
+    if (prefetchRef.current?.key === key) return;
+    const id = setTimeout(() => {
+      const p = api.createQuote({ xaf: xafNum, method: m, country, ...(merchantCode ? { merchantCode } : {}) });
+      prefetchRef.current = { key, p };
+      p.catch(() => { if (prefetchRef.current?.p === p) prefetchRef.current = null; });
+    }, 350);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, xafNum, country, orderedMethods[0], rec]);
 
   // Only while the picker is open, and only once per amount.
   useEffect(() => {

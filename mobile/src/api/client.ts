@@ -213,8 +213,20 @@ export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, b
 export type ReceivedItem = { ref: string; xaf: number; state: string; displayStatus: string; createdAt: string; updatedAt: string; method: string };
 export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
 
+// /config is wanted by the tabs, the brand mark and the feature switches the moment the app
+// opens — one round trip is shared and its answer reused for a minute (a failure is not cached).
+const CONFIG_TTL_MS = 60_000;
+let _config: { at: number; p: Promise<AppConfig> } | null = null;
+function getConfigShared(): Promise<AppConfig> {
+  if (_config && Date.now() - _config.at < CONFIG_TTL_MS) return _config.p;
+  const p = req<AppConfig>('/config');
+  _config = { at: Date.now(), p };
+  p.catch(() => { if (_config?.p === p) _config = null; });
+  return p;
+}
+
 export const api = {
-  getConfig: () => req<AppConfig>('/config'),
+  getConfig: (): Promise<AppConfig> => getConfigShared(),
 
   /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
   networkMarkets: () => req<NetworkMarkets>('/network/markets'),

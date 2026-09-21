@@ -328,8 +328,23 @@ export type OtpSent = { sent: boolean; via?: OtpVia; channels?: Record<OtpVia, b
 export type ReceivedItem = { ref: string; xaf: number; state: string; displayStatus: string; createdAt: string; updatedAt: string; method: string };
 export type ReceivedList = { phone: string; items: ReceivedItem[]; totals: { count: number; xaf: number } };
 
+// /config is asked for by several independent parts of the page at mount (feature switches,
+// the brand mark, the send flow's demo hint). Each request costs a full round trip — about a
+// second on a Cameroonian mobile link — so one in-flight promise is shared and the answer is
+// reused for a minute. A failed load is not cached: the next caller tries again.
+const CONFIG_TTL_MS = 60_000;
+let _config: { at: number; p: Promise<AppConfigResponse> } | null = null;
+function getConfigShared(): Promise<AppConfigResponse> {
+  if (_config && Date.now() - _config.at < CONFIG_TTL_MS) return _config.p;
+  const p = req<AppConfigResponse>("/config");
+  _config = { at: Date.now(), p };
+  p.catch(() => { if (_config?.p === p) _config = null; });
+  return p;
+}
+export type AppConfigResponse = { demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } };
+
 export const api = {
-  getConfig: () => req<{ demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } }>("/config"),
+  getConfig: (): Promise<AppConfigResponse> => getConfigShared(),
   /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
   networkMarkets: () => req<NetworkMarkets>("/network/markets"),
   networkIntent: (body: { sourceProvider: string; sourcePhone: string; destinationMarket: string; destinationProvider: string; destinationPhone: string; destinationName?: string; sourceAmount: number }) =>

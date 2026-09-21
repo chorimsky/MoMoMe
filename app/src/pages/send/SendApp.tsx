@@ -210,12 +210,42 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     } catch { return null; }
   }
 
-  /** method → review: fetch authoritative quote from the settlement engine. */
+  // PREFETCHED QUOTE. A round trip costs about a second on a Cameroonian mobile link, and
+  // the quote is the one request between choosing a method and seeing the review. So the
+  // moment a method is selected on the Method step (by the router, by habit, or by a tap)
+  // the quote is asked for in the background; Continue then reuses it if it is for the
+  // same amount, method and country and still has comfortably more than a few seconds of
+  // rate lock left. A quote that goes unused simply expires on the server.
+  const quoteKey = (d: Draft) => `${d.xaf}:${d.method}:${d.country}:${merchant?.code ?? ""}`;
+  const prefetch = useRef<{ key: string; p: Promise<Quote> } | null>(null);
+  useEffect(() => {
+    if (step !== "method" || !s.xaf) return;
+    const key = quoteKey(s);
+    if (prefetch.current?.key === key) return;
+    const id = setTimeout(() => {
+      const p = api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) });
+      prefetch.current = { key, p };
+      p.catch(() => { if (prefetch.current?.p === p) prefetch.current = null; });
+    }, 350);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, s.xaf, s.method, s.country]);
+  const PREFETCH_MIN_LEFT_MS = 20_000;
+
+  /** method → review: fetch authoritative quote from the settlement engine (or take the
+   *  one already prefetched for this exact choice). */
   async function toReview() {
     retryRef.current = toReview;
     setBusy(true); setErr(null);
     try {
-      setQuote(await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) }));
+      let q: Quote | null = null;
+      const pre = prefetch.current;
+      if (pre && pre.key === quoteKey(s)) {
+        const got = await pre.p.catch(() => null);
+        if (got && Date.parse(got.expiresAt) - Date.now() > PREFETCH_MIN_LEFT_MS) q = got;
+      }
+      prefetch.current = null;
+      setQuote(q ?? await api.createQuote({ xaf: s.xaf, method: s.method, country: s.country, ...(merchant?.code ? { merchantCode: merchant.code } : {}) }));
       go("review");
     } catch (e) { fail(e); } finally { setBusy(false); }
   }

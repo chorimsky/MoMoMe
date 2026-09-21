@@ -370,7 +370,12 @@ export type LedgerAccount =
   /** Realized foreign-exchange result of turning swept crypto back into XAF float: the
    *  crypto leaves fx_position here, the XAF that came back arrives in the float from
    *  here. Its XAF balance against its crypto balance IS the realized spread. */
-  | "fx_pnl";
+  | "fx_pnl"
+  /** API v1 (docs/api-v1): an organization's XAF balance — credited by products that collect
+   *  on its behalf, debited by its settlements. The suffix is the organization id. */
+  | `org_balance:${string}`
+  /** XAF owed to organizations for settlements requested and not yet paid out. */
+  | "settlement_payable";
 
 /** Crypto that arrived with no payment to attach it to.
  *

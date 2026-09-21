@@ -28,6 +28,8 @@ export type Section =
   | "overview" | "payments" | "delivery" | "liquidity" | "pricing" | "mobilemoney"
   | "rails" | "interop" | "merchants" | "customers" | "identities" | "compliance" | "peex"
   | "reports" | "audience" | "notifications" | "health" | "settings" | "administration" | "testing"
+  /* API v1 platform: organizations, credentials, plans, limits, settlements, usage. */
+  | "platform"
   /* Capital module: engine intelligence, the investor CRM, capital products/ledgers,
      the copilot, and the investor-facing portal. */
   | "intelligence" | "investors" | "capital" | "copilot" | "portal";
@@ -36,8 +38,8 @@ export type Section =
 export const ROLE_SECTIONS: Record<AdminRole, Section[] | "all"> = {
   "Super Admin": "all",
   "Read Only": "all", // sees everything — but never mutates (enforced separately)
-  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "interop", "merchants", "health", "peex", "notifications", "testing", "audience", "intelligence"],
-  "Finance Manager": ["overview", "pricing", "liquidity", "reports", "audience", "settings", "health", "intelligence", "investors", "capital", "copilot"],
+  "Operations Manager": ["overview", "payments", "delivery", "liquidity", "mobilemoney", "rails", "interop", "merchants", "health", "peex", "notifications", "testing", "audience", "intelligence", "platform"],
+  "Finance Manager": ["overview", "pricing", "liquidity", "reports", "audience", "settings", "health", "intelligence", "investors", "capital", "copilot", "platform"],
   "Compliance Officer": ["overview", "compliance", "customers", "identities", "merchants", "health", "peex", "notifications", "investors"],
   "Support Agent": ["overview", "customers", "payments", "delivery", "merchants", "testing"],
   "Investment Manager": ["overview", "liquidity", "reports", "intelligence", "investors", "capital", "copilot", "notifications"],

@@ -9,6 +9,8 @@ import { namesMatch,
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName, warmIdentity } from "../core/nameResolver.js";
+import { authenticate as authenticateV1 } from "../core/platform/credentials.js";
+import { platformAdmin } from "./platformAdmin.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
@@ -208,6 +210,7 @@ function sectionForPath(sub: string): Section | null {
     readiness: "administration", // go-live console — Super Admin only (checked in the route)
     users: "administration", audit: "administration",
     testing: "testing",
+    platform: "platform",                   // API v1: organizations, credentials, plans, limits, settlements
   };
   return map[p] ?? null;
 }
@@ -304,6 +307,9 @@ api.use("/admin", (req, res, next) => {
     /^\/payments\/[^/]+\/(retry|refund)$/,           // re-pays or refunds a real payment
     /^\/users(\/|$)/,                                // who can access the console at all
     /^\/apikeys(\/|$)/,                              // partner keys authorize real payments
+    /^\/platform\/organizations\/[^/]+\/credit$/,    // credits an organization balance (money we then owe)
+    /^\/platform\/settlements\/[^/]+\/(approve|submit|complete)$/, // pays an organization's balance out
+    /^\/platform\/organizations\/[^/]+$/,            // live activation / suspension of an API customer
     /^\/rails\/egress(?!\/recheck)(\/|$)/,           // repoints the IP allowlist a rail trusts (a re-check only re-reads it)
   ];
   if (req.method !== "GET" && ELEVATED_ONLY.some((re) => re.test(sub)) && !isElevated({ uid: user.id, role, elevatedUntil: session.elevatedUntil })) {
@@ -370,6 +376,8 @@ api.use("/capital", capitalGuard, capital);
 
 /* ---------- the interoperability network's admin surface (behind the guard above) ---------- */
 api.use("/admin", adminNetwork);
+/* ---------- API v1 platform operations (behind the guard above; section "platform") ---------- */
+api.use("/admin/platform", platformAdmin);
 
 /* ---------- change own password ---------- */
 api.post("/admin/password", async (req, res) => {
@@ -483,7 +491,15 @@ async function verifyDeviceSig(req: ReqLike, authPub: JsonWebKey): Promise<boole
 function partnerOf(req: ReqLike): string | undefined {
   const auth = hdr(req, "authorization");
   const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7).trim() : undefined;
-  return verifyApiKey(bearer ?? hdr(req, "x-api-key")) ?? undefined;
+  const secret = bearer ?? hdr(req, "x-api-key");
+  // API v1 credentials (mm_live_/mm_test_) own payments as their ORGANIZATION, so every
+  // credential of the org can read them and webhooks are per org. A credential for the
+  // other environment is refused here exactly as /v1 refuses it.
+  if (secret && /^mm_(live|test)_/.test(secret)) {
+    const r = authenticateV1(secret);
+    return r.ok && r.ctx.env === (liveMoney() ? "live" : "test") ? `org:${r.ctx.org.id}` : undefined;
+  }
+  return verifyApiKey(secret) ?? undefined;
 }
 
 /** After this instant, an un-enrolled sender id is no longer accepted as a bearer

@@ -22,8 +22,9 @@ import { toCanonicalStatus } from "../../../../shared/interop.js";
 import { register, touch } from "../persist.js";
 import { id } from "../ids.js";
 import { fetchT } from "../../adapters/http.js";
+import { liveMoney } from "../../config.js";
 
-export interface Subscription { id: string; owner: string; url: string; secretHint: string; events: string[]; createdAt: string; disabledAt?: string; failures: number }
+export interface Subscription { id: string; owner: string; url: string; secretHint: string; events: string[]; createdAt: string; disabledAt?: string; failures: number; description?: string }
 interface StoredSub extends Subscription { secret: string }
 export interface OutboundEvent { id: string; subscriptionId: string; owner: string; type: string; body: string; createdAt: string; attempts: number; nextAt: string; lastStatus?: number; lastError?: string; deliveredAt?: string; dead?: boolean }
 
@@ -51,12 +52,54 @@ export const publicView = ({ secret: _s, ...s }: StoredSub): Subscription => s;
 export function subscribe(owner: string, url: string, events: string[] = ["payment.status"], allowInsecure = false): { ok: true; sub: Subscription; secret: string } | { ok: false; reason: string } {
   const bad = validCallbackUrl(url, allowInsecure);
   if (bad) return { ok: false, reason: bad };
-  if ([...subs.values()].filter((s) => s.owner === owner && !s.disabledAt).length >= 5) return { ok: false, reason: "at most 5 active subscriptions per key" };
+  if ([...subs.values()].filter((s) => s.owner === owner && !s.disabledAt).length >= (owner.startsWith("org:") ? 10 : 5)) return { ok: false, reason: owner.startsWith("org:") ? "at most 10 active endpoints per organization" : "at most 5 active subscriptions per key" };
   const secret = `whsec_${randomBytes(24).toString("hex")}`;
   const sub: StoredSub = { id: id("sub"), owner, url, secret, secretHint: secret.slice(0, 12) + "…", events, createdAt: new Date().toISOString(), failures: 0 };
   subs.set(sub.id, sub); touch("outbound_webhooks");
   return { ok: true, sub: publicView(sub), secret };
 }
+/** API v1 (docs/api-v1): a subscription with a `description`, editable url/events, enable/disable. */
+export function getSubscription(owner: string, subId: string): Subscription | undefined { const s = subs.get(subId); return s && s.owner === owner ? publicView(s) : undefined; }
+export function updateSubscription(owner: string, subId: string, patch: { url?: string; events?: string[]; enabled?: boolean; description?: string }, allowInsecure = false): { ok: true; sub: Subscription } | { ok: false; reason: string } {
+  const s = subs.get(subId); if (!s || s.owner !== owner) return { ok: false, reason: "not found" };
+  if (patch.url) { const bad = validCallbackUrl(patch.url, allowInsecure); if (bad) return { ok: false, reason: bad }; s.url = patch.url; }
+  if (patch.events?.length) s.events = patch.events;
+  if (patch.enabled === true) { delete s.disabledAt; s.failures = 0; } else if (patch.enabled === false) s.disabledAt = new Date().toISOString();
+  if (patch.description !== undefined) s.description = patch.description.slice(0, 200);
+  touch("outbound_webhooks"); return { ok: true, sub: publicView(s) };
+}
+export function subscriptionSecret(owner: string, subId: string): string | undefined { const s = subs.get(subId); return s && s.owner === owner ? s.secret : undefined; }
+/** Enqueue one typed event to every matching subscription of `owner` (v1 shape). */
+export function enqueueEvent(owner: string, type: string, data: unknown, opts: { onlySub?: string } = {}): string[] {
+  const now = new Date().toISOString();
+  const targets = [...subs.values()].filter((s) => s.owner === owner && !s.disabledAt && (!opts.onlySub || s.id === opts.onlySub) && (s.events.includes(type) || s.events.includes("*")));
+  const ids: string[] = [];
+  for (const s of targets) {
+    const evt = { id: id("evt"), object: "event", type, created_at: now, livemode: liveMoney(), data };
+    queue.push({ id: evt.id, subscriptionId: s.id, owner, type, body: JSON.stringify(evt), createdAt: now, attempts: 0, nextAt: now });
+    ids.push(evt.id);
+  }
+  if (ids.length) { if (queue.length > QUEUE_CAP) queue.splice(0, queue.length - QUEUE_CAP); touch("outbound_webhooks"); void flush(); }
+  return ids;
+}
+/** Re-deliver a past event (a new attempt on the same event id, so the receiver can dedupe). */
+export function replayEvent(owner: string, eventId: string): boolean {
+  const ev = queue.find((e) => e.id === eventId && e.owner === owner); if (!ev) return false;
+  ev.dead = false; delete ev.deliveredAt; ev.nextAt = new Date().toISOString(); touch("outbound_webhooks"); void flush(); return true;
+}
+export function eventsOf(owner: string, subId?: string, limit = 50): Array<Omit<OutboundEvent, "body"> & { event: unknown }> {
+  return queue.filter((e) => e.owner === owner && (!subId || e.subscriptionId === subId)).slice(-limit).reverse().map(({ body, ...e }) => ({ ...e, event: safeJson(body) }));
+}
+const safeJson = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
+/** Which outbound events (v1 vocabulary) this payment's owner has already been told, so a
+ *  transition is announced exactly once. */
+const announced = new Map<string, string>();
+export function announcedState(paymentId: string): string | undefined { return announced.get(paymentId); }
+export function markAnnounced(paymentId: string, state: string): void { announced.set(paymentId, state); if (announced.size > 20_000) announced.delete(announced.keys().next().value as string); }
+let v1Projector: ((p: Payment) => { state: string; type: string; data: unknown } | null) | null = null;
+/** API v1 registers how a Payment becomes a public event (core/platform/mapping) — outbound stays free of that vocabulary. */
+export function setV1Projector(f: typeof v1Projector): void { v1Projector = f; }
+
 export function listSubscriptions(owner: string): Subscription[] { return [...subs.values()].filter((s) => s.owner === owner).map(publicView); }
 export function removeSubscription(owner: string, subId: string): boolean { const s = subs.get(subId); if (!s || s.owner !== owner) return false; subs.delete(subId); touch("outbound_webhooks"); return true; }
 export function subscriptionCount(): number { return [...subs.values()].filter((s) => !s.disabledAt).length; }
@@ -69,6 +112,8 @@ export function sign(secret: string, body: string, t = Date.now()): string {
 export function emitPaymentEvent(p: Payment, intentId?: string | null): void {
   if (!p.senderId) return;
   const owner = p.senderId;
+  // API v1 typed events (payment.completed, …): once per public state, to subscriptions that asked for that type.
+  if (v1Projector) { try { const v = v1Projector(p); if (v && announcedState(p.id) !== v.state) { markAnnounced(p.id, v.state); enqueueEvent(owner, v.type, v.data); } } catch { /* never a settlement failure */ } }
   const targets = [...subs.values()].filter((s) => s.owner === owner && !s.disabledAt && s.events.includes("payment.status"));
   if (!targets.length) return;
   const status = toCanonicalStatus(p.state, p.payInstruction?.expiresAt, Date.now(), [...p.events].reverse().find((e) => e.note)?.note);

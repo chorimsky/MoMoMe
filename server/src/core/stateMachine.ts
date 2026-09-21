@@ -383,7 +383,13 @@ async function transition(p: Payment, state: PaymentState, note?: string): Promi
   // Partners that subscribed hear about it (enqueue only — never on the money path).
   try { emitPaymentEvent(p); } catch { /* observability, never a settlement failure */ }
   try { notifyPaymentChanged(p); } catch { /* a waiting client, never a settlement failure */ }
+  // API v1 (docs/api-v1): the liquidity reservation, usage meter and typed webhook follow
+  // the transition. Registered by the platform layer; nothing here knows its vocabulary.
+  for (const h of transitionHooks) { try { h(p); } catch { /* observability, never a settlement failure */ } }
 }
+const transitionHooks: Array<(p: Payment) => void> = [];
+/** Additive listener for every transition (after the store write). Must never throw into the money path. */
+export function onTransition(h: (p: Payment) => void): void { transitionHooks.push(h); }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

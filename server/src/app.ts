@@ -3,6 +3,8 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cors from "cors";
 import { api } from "./routes/api.js";
 import { v1 } from "./routes/v1.js";
+import { publicV1 } from "./publicApi/routes.js";
+import { developers } from "./routes/developers.js";
 import { network } from "./routes/network.js";
 import { identityV2 } from "./routes/identityV2.js";
 import { upi } from "./routes/upi.js";
@@ -174,6 +176,10 @@ export function createApp() {
   app.use("/api/cron", cron); // Vercel Cron drives the background jobs here (before /api)
   // Interoperability API — mounted BEFORE /api so its paths are not swallowed by the
   // legacy router's catch-all. /api/* is unchanged and remains supported.
+  // API v1 — the public developer surface (docs/api-v1): its own envelope, credentials and
+  // idempotency; every money rule still runs in the /api core.
+  app.use("/v1", publicV1);
+  app.use("/api/developers", developers); // developer dashboard backend (docs/api-v1 §29)
   app.use("/api/v1", v1);
   // The interoperability network (docs/interop-v2): its own surface beside the live one,
   // 404 unless INTEROPERABILITY_V2 is on (always reachable in the sandbox for rehearsal).

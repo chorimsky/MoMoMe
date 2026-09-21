@@ -408,6 +408,9 @@ export const api = {
     req<Payment>(`/payments/${id}/simulate`, { method: "POST" }),
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
+  /** Long-poll: resolves the moment the payment leaves `state`, or after ~25 s with the
+   *  current record. One request instead of a dozen; "paid" shows the second it lands. */
+  waitPayment: (id: string, state: string, timeoutMs = 15_000) => req<Payment>(`/payments/${id}/wait?state=${encodeURIComponent(state)}&timeout=${timeoutMs}`), // under the 20 s request ceiling
 
   // Refund-claim: when a payout couldn't land, the sender supplies a Lightning
   // invoice to receive their crypto back (paid outbound via IBEX).

@@ -450,12 +450,21 @@ export default function SendScreen() {
   };
   const confirm = () => confirmWith(riskToken);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (step !== 'pay' || !payment) return;
+    let alive = true;
+    let lastState = payment.state;
+    let waitFailed = false;
+    // Long-poll: the server answers the moment the state changes (a ~15 s hold otherwise),
+    // so "paid" appears the second it lands and the phone sends a request every 15 s, not 3.
+    // If the wait endpoint is unreachable, fall back to the plain read every 3 s.
     const tick = async () => {
+      if (!alive) return;
       try {
-        const p = await api.getPayment(payment.id);
+        const p = waitFailed ? await api.getPayment(payment.id) : await api.waitPayment(payment.id, lastState).catch((e) => { waitFailed = true; throw e; });
+        if (!alive) return;
+        lastState = p.state;
         setPayment(p);
         if (p.state === 'DELIVERED') {
           setStep('success');
@@ -464,14 +473,16 @@ export default function SendScreen() {
             void rememberPaidContact({ name: recipientName || phone, phone: p.recipient.phone, country, provider });
           }
         }
-        if (TERMINAL_STATES.includes(p.state) && pollRef.current) clearInterval(pollRef.current);
+        if (TERMINAL_STATES.includes(p.state)) return;
       } catch {
         /* keep polling */
       }
+      if (alive) pollRef.current = setTimeout(tick, waitFailed ? 3000 : 200);
     };
-    pollRef.current = setInterval(tick, 3000);
+    pollRef.current = setTimeout(tick, 200);
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      alive = false;
+      if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, [step, payment?.id]);
 

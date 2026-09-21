@@ -270,6 +270,9 @@ export const api = {
     req<Payment>(`/payments/${id}/simulate`, { method: 'POST' }),
 
   getPayment: (id: string) => req<Payment>(`/payments/${id}`),
+  /** Long-poll: resolves the moment the payment leaves `state`, or after ~15 s (under the
+   *  20 s request ceiling) with the current record. */
+  waitPayment: (id: string, state: string, timeoutMs = 15_000) => req<Payment>(`/payments/${id}/wait?state=${encodeURIComponent(state)}&timeout=${timeoutMs}`),
   /** Cancel an un-paid payment (before any pay-in). 409 once anything has arrived. */
   momoQuote: (xaf: number) => req<{ xaf: number; feeXaf: number; collectXaf: number; feePct: number }>(`/momo/transfers/quote?xaf=${xaf}`),
   momoCreate: (b: { from: string; to: string; xaf: number; country?: string; fromName?: string; toName?: string }) => req<MomoTransfer>('/momo/transfers', { method: 'POST', body: JSON.stringify(b) }),

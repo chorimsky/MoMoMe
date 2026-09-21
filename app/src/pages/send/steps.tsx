@@ -468,7 +468,12 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
         for (const x of r.routes) if (!x.viable) { const bad = x.checks.find((c) => !c.ok); unavailable[x.method] = bad?.detail ?? bad?.name ?? "unavailable"; }
         const top = r.routes.find((x) => x.id === r.recommended)?.method ?? viable[0] ?? null;
         setRec({ recommended: top, order: [...viable, ...r.routes.filter((x) => !x.viable).map((x) => x.method)], unavailable });
-        if (top && !userPicked.current && !fixed) set({ method: top });
+        // The sender's own habit beats the router's default: a person who paid with USDT
+        // last time is offered USDT first (if it is viable now), so the step is a glance,
+        // not a decision. The router still decides what is viable.
+        let remembered: Method | null = null;
+        try { const m = localStorage.getItem("mm:lastMethod") as Method | null; if (m && viable.includes(m)) remembered = m; } catch { /* no storage */ }
+        if (!userPicked.current && !fixed && (remembered ?? top)) set({ method: (remembered ?? top)! });
       })
       .catch(() => { /* no recommendation → static order, as before */ });
     return () => { alive = false; };
@@ -682,12 +687,16 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
   useEffect(() => {
     let active = true;
     let id: ReturnType<typeof setTimeout>;
-    const gap = () => pollMs(2500, 6000); // back off on slow/metered links
+    const gap = () => pollMs(300, 2000); // the wait itself holds ~25 s; this is only the breath between waits
+    let waitFailed = false;
     const poll = async () => {
       // Skip the round-trip while backgrounded (data/battery); resume on return.
       if (!document.hidden) {
         try {
-          const p = await api.getPayment(payment.id);
+          // Long-poll: the server answers the second the state changes. If the wait
+          // endpoint is unreachable (an old server, a proxy that cuts long requests), fall
+          // back to the plain read.
+          const p = waitFailed ? await api.getPayment(payment.id) : await api.waitPayment(payment.id, "AWAITING_INBOUND").catch((e) => { waitFailed = true; throw e; });
           if (active && p.state !== "AWAITING_INBOUND") { next(); return; }
         } catch { /* keep polling */ }
       }
@@ -695,9 +704,9 @@ export function PayStep({ payment, method, back, next, refresh, busy, demoMode }
       // server only fails it two minutes later), so keep polling through that grace window.
       // An address never dies: poll for as long as the screen is open.
       const stopAt = Date.parse(inst.expiresAt) + 120_000;
-      if (active && (ADDRESS_METHODS.has(method) || stopAt > Date.now())) id = setTimeout(poll, gap());
+      if (active && (ADDRESS_METHODS.has(method) || stopAt > Date.now())) id = setTimeout(poll, waitFailed ? pollMs(2500, 6000) : gap());
     };
-    id = setTimeout(poll, gap());
+    id = setTimeout(poll, 200);
     const onVis = () => { if (!document.hidden && active) { clearTimeout(id); poll(); } };
     document.addEventListener("visibilitychange", onVis);
     return () => { active = false; clearTimeout(id); document.removeEventListener("visibilitychange", onVis); };
@@ -852,6 +861,8 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
   // pending timer and firing duplicate getPayment requests.
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
+  const lastStateRef = useRef<string | null>(null);
+  const waitFailedRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -862,8 +873,9 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
       // data + battery; the visibilitychange listener fetches the moment they return.
       if (!document.hidden) {
         try {
-          const p = await api.getPayment(paymentId);
+          const p = waitFailedRef.current ? await api.getPayment(paymentId) : await api.waitPayment(paymentId, lastStateRef.current ?? "", 15_000).catch((e) => { waitFailedRef.current = true; throw e; });
           if (!active) return;
+          lastStateRef.current = p.state;
           setState(p.state);
           setPayment(p);
           if (p.state === "DELIVERED") {
@@ -890,8 +902,8 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
       if (elapsed > SLOW_AFTER_MS) setSlow(true);
       // Stop polling at the cap; the slow screen already offers "View activity".
       if (elapsed > MAX_POLL_MS) return;
-      // Ease off once we've crossed into "slow"; back off further on a slow/metered link.
-      timer = setTimeout(poll, pollMs(elapsed > SLOW_AFTER_MS ? 2500 : 800, elapsed > SLOW_AFTER_MS ? 6000 : 2500));
+      // With the long-poll the wait itself does the pacing; only the fallback needs a gap.
+      timer = setTimeout(poll, waitFailedRef.current ? pollMs(elapsed > SLOW_AFTER_MS ? 2500 : 800, elapsed > SLOW_AFTER_MS ? 6000 : 2500) : 150);
     };
     poll();
     const onVis = () => { if (!document.hidden && active) { if (timer) clearTimeout(timer); poll(); } };

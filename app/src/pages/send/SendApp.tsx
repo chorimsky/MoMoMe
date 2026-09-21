@@ -238,6 +238,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
     setBusy(true); setErr(null);
     try {
       setPayment(await api.createPayment({ quoteId: quote.id, recipient: recipient(), merchantLinkCode: merchant?.linkCode, merchantCode: merchant?.code, riskToken }));
+      try { localStorage.setItem("mm:lastMethod", s.method); } catch { /* per-device convenience only */ }
       go("pay");
     } catch (e) {
       // Ask rather than error. The quote is deliberately not consumed by that refusal, so

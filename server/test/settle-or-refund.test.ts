@@ -113,6 +113,22 @@ async function main() {
     ok("resumeHeldRepricing re-prices at the current rate, locks FX and delivers — no operator, no refund", rr.ok && cur.state === "DELIVERED" && cur.events.some((e) => e.state === "FX_LOCKED") && typeof cur.repricedFromXaf === "number", `${JSON.stringify(rr)} ${cur.state}`);
     const n6 = await retryTransientHolds();
     ok("the tick would have done the same (the hold is in the transient set)", n6 >= 0);
+    console.log("\n7. Long-poll: the client is answered the moment the state changes, not on the next tick\n");
+    p = await pay("699006666");
+    const t0 = Date.now();
+    const waiting = fetch(`${base}/api/payments/${p.id}/wait?state=AWAITING_INBOUND&timeout=10000`, { headers: H }).then((r) => r.json()) as Promise<Record<string, any>>;
+    await new Promise((r) => setTimeout(r, 300));
+    await post(`/api/payments/${p.id}/simulate`, {});
+    const woke = await waiting;
+    ok("a wait on AWAITING_INBOUND returns as soon as the inbound lands (well under the timeout)", woke.state !== "AWAITING_INBOUND" && Date.now() - t0 < 5000, `${woke.state} after ${Date.now() - t0} ms`);
+    const t1 = Date.now();
+    const same = await (await fetch(`${base}/api/payments/${p.id}/wait?state=NOPE&timeout=5000`, { headers: H })).json() as Record<string, any>;
+    ok("a wait on a state the payment is not in returns immediately with the current record", same.id === p.id && Date.now() - t1 < 1000);
+    cur = await until(p.id, ["DELIVERED"]);
+    const t2 = Date.now();
+    const timed = await (await fetch(`${base}/api/payments/${p.id}/wait?state=DELIVERED&timeout=1200`, { headers: H })).json() as Record<string, any>;
+    ok("with nothing changing, it returns the current record at the timeout", timed.state === "DELIVERED" && Date.now() - t2 >= 1100 && Date.now() - t2 < 4000, `${Date.now() - t2} ms`);
+    ok("another device cannot wait on it", (await fetch(`${base}/api/payments/${p.id}/wait?state=DELIVERED&timeout=1000`, { headers: { "x-mm-sender": "someone-else" } })).status === 404);
     void pawapay;
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);

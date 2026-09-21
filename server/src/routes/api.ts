@@ -75,6 +75,7 @@ import { adminNetwork, setOwnerResolver, networkOpen } from "./network.js";
 import { setIdentityOwnerResolver } from "./identityV2.js";
 import { recipientDeliveredMessage } from "../core/notifications.js";
 import { retryDeliveryForSender } from "../core/stateMachine.js";
+import { waitForPaymentChange } from "../core/paymentWatch.js";
 import { MESSAGE_VARIABLES, LN_MESSAGE_VARIABLES } from "../core/settings.js";
 import { lnurlMetadata, lnurlSuccessMessage } from "../core/lnurl.js";
 import { maskName } from "../../../shared/domain.js";
@@ -1361,6 +1362,33 @@ api.get("/payments/:id", async (req, res) => {
     }
   }
   res.json(p);
+});
+
+/** Long-poll: answer as soon as the payment leaves `state` (or after `timeout` ms with the
+ *  current record). The Lightning re-query backstop keeps running underneath every few
+ *  seconds so a missed webhook still settles within the wait. Same visibility rule and same
+ *  shape as GET /payments/:id — a client can swap one for the other. */
+api.get("/payments/:id/wait", async (req, res) => {
+  const p0 = await store().getPayment(req.params.id);
+  if (!p0 || !(await mayViewPayment(req, p0.senderId))) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
+  const from = String(req.query.state ?? p0.state);
+  const timeout = Math.min(30_000, Math.max(1_000, Number(req.query.timeout) || 25_000));
+  if (p0.state !== from) return res.json(p0); // already moved on
+  res.setHeader("Cache-Control", "no-store");
+  const deadline = Date.now() + timeout;
+  let closed = false; req.on("close", () => { closed = true; });
+  const requery = () => { if ((p0.state === "AWAITING_INBOUND" || p0.state === "INBOUND_DETECTED") && p0.payInstruction.method === "LIGHTNING") background(reconcileOneInbound(p0)); };
+  requery();
+  const tick = setInterval(requery, 5_000);
+  try {
+    while (!closed && Date.now() < deadline) {
+      const changed = await waitForPaymentChange(p0.id, Math.min(5_000, deadline - Date.now()));
+      if (changed && changed.state !== from) return res.json(changed);
+      const cur = await store().getPayment(p0.id);
+      if (cur && cur.state !== from) return res.json(cur);
+    }
+    if (!closed) res.json(await store().getPayment(p0.id) ?? p0);
+  } finally { clearInterval(tick); }
 });
 
 // Sender-scoped: a customer sees only their OWN payments (by anonymous device id).

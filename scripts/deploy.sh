@@ -36,8 +36,24 @@ for i in 1 2 3 4; do
 done
 PREV=$(railway deployment list --json 2>/dev/null | python3 -c 'import sys,json; d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]; print(d[0]["id"] if d else "")' 2>/dev/null || true)
 echo "deploy: $TARGET ← ${SHA:0:7}  (previous SUCCESS: ${PREV:-none})"
-OUT=$(railway up --detach 2>&1) || { echo "$OUT"; exit 1; }
-ID=$(printf '%s' "$OUT" | grep -o 'id=[a-f0-9-]*' | head -1 | cut -d= -f2 || true)
+# The upload times out on Railway's side often enough to be routine ("error sending request
+# … operation timed out"), and it used to end the deploy. Retry — but never blindly: a client
+# timeout does not prove the upload failed, so first look for a deployment that appeared after
+# PREV. If one is there, adopt it; only otherwise upload again.
+ID=""
+for i in 1 2 3; do
+  OUT=$(railway up --detach 2>&1) && { ID=$(printf '%s' "$OUT" | grep -o 'id=[a-f0-9-]*' | head -1 | cut -d= -f2 || true); break; }
+  echo "$OUT"
+  sleep 10
+  ID=$(railway deployment list --json 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+new = [x for x in d if x.get('id') != '${PREV}' and x.get('status') in ('BUILDING','DEPLOYING','INITIALIZING','QUEUED','SUCCESS')]
+print(new[0]['id'] if new else '')" 2>/dev/null || true)
+  [ -n "$ID" ] && { echo "deploy: the upload timed out but Railway did receive it (deployment $ID)"; break; }
+  [ "$i" = 3 ] && { echo "deploy: railway up failed three times — nothing was deployed"; exit 1; }
+  echo "deploy: upload attempt $i timed out, retrying"
+done
 echo "deploy: uploaded${ID:+ (deployment $ID)}"
 # Wait for Railway's own verdict before probing — the old build answers until the new one is up.
 for i in $(seq 1 60); do

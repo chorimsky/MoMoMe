@@ -74,7 +74,7 @@ const NAV: Array<{ group: string | null; items: Array<[Key, string]> }> = [
   { group: "Payments", items: [["payments", "Payments"], ["delivery", "Delivery"]] },
   { group: "Treasury", items: [["liquidity", "Liquidity"], ["pricing", "Rates & Pricing"]] },
   { group: "Rails", items: [["mobilemoney", "Mobile Money"], ["rails", "Payment Rails"], ["interop", "Interoperability"]] },
-  { group: "Network", items: [["merchants", "Merchant Graph"], ["identities", "Identities"], ["customers", "Customers"]] },
+  { group: "Network", items: [["merchants", "Merchants"], ["identities", "Identities"], ["customers", "Customers"]] },
   { group: "Risk", items: [["compliance", "Compliance"], ["peex", "Peex"]] },
   { group: "Insights", items: [["reports", "Reports"], ["audience", "Audience"], ["notifications", "Notifications"], ["testing", "Testing"]] },
   { group: "System", items: [["health", "System Health"], ["settings", "Settings"], ["platform", "API Platform"], ["developers", "Developers"], ["administration", "Administration"], ["readiness", "Go-live readiness"]] },

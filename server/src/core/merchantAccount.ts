@@ -106,6 +106,24 @@ export function activateUnverified(id: string): StoredMerchant | undefined {
   return m;
 }
 
+/** Operator: suspend an acceptance account. Its links stop paying (getLink callers check
+ *  status), it leaves the directory, and the owner sees why in the app. */
+export function suspendMerchant(id: string, reason?: string): StoredMerchant | undefined {
+  const m = merchants.get(id); if (!m) return undefined;
+  m.status = "suspended"; m.suspendedReason = reason?.slice(0, 200); m.updatedAt = new Date().toISOString();
+  touch("merchants2"); return m;
+}
+export function reactivateMerchant(id: string): StoredMerchant | undefined {
+  const m = merchants.get(id); if (!m || m.status !== "suspended") return undefined;
+  m.status = "active"; delete m.suspendedReason; m.updatedAt = new Date().toISOString();
+  touch("merchants2"); return m;
+}
+export function listMerchantAccounts(): StoredMerchant[] { return [...merchants.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
+export function linkStats(merchantId: string): { total: number; active: number; invoices: number } {
+  const ls = [...links.values()].filter((l) => l.merchantId === merchantId);
+  return { total: ls.length, active: ls.filter((l) => !l.disabledAt).length, invoices: ls.filter((l) => l.kind === "invoice").length };
+}
+
 /** Opt a merchant into (or out of) the public "Pay with MoMo›Me" directory. */
 /** Who pays the fee on this merchant's checkouts. */
 export function setFeeMode(id: string, mode: "customer" | "merchant"): StoredMerchant | undefined {

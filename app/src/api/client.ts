@@ -3,6 +3,7 @@
    Every network call lives here; swap the base URL to repoint.
    ============================================================ */
 import type { ProviderInfo, RailInfo, PaymentEvent, ReconciliationReport, PaymentAddress, PaymentIntent, PaymentRoute } from "@shared/interop.js";
+import type { AdminMerchantAccount } from "@shared/types.js";
 export interface Observability {
   generatedAt: string;
   api: Array<{ route: string; count: number; p50: number; p95: number; p99: number; errors5xx: number; errors4xx: number }>;
@@ -694,10 +695,15 @@ export const api = {
   peexTest: () => req<{ ok: boolean; detail: string }>("/admin/peex/test", { method: "POST" }),
 
   adminMerchants: () => req<MerchantGraph>("/admin/merchants"),
+  adminMerchantSearch: (q: string) => req<{ merchants: Merchant[] }>(`/admin/merchants/search?q=${encodeURIComponent(q)}`),
+  unflagMerchant: (id: string, reason?: string) => req<Merchant>(`/admin/merchants/${id}/unflag`, { method: "POST", body: JSON.stringify({ reason }) }),
+  adminMerchantAccounts: (q = "") => req<{ accounts: AdminMerchantAccount[]; stats: { total: number; active: number; pending: number; suspended: number; verified: number; listed: number; business: number } }>(`/admin/merchant-accounts${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  adminMerchantAccount: (id: string) => req<AdminMerchantAccount & { links: MerchantLink[]; recent: Payment[] }>(`/admin/merchant-accounts/${id}`),
+  adminMerchantAccountAction: (id: string, action: "suspend" | "reactivate" | "verify" | "unlist", reason?: string) => req<AdminMerchantAccount>(`/admin/merchant-accounts/${id}/${action}`, { method: "POST", body: JSON.stringify({ reason }) }),
   adminRouting: () => req<RoutingSnapshot>("/admin/routing"),
   validateMerchant: (id: string, displayName?: string) =>
     req<Merchant>(`/admin/merchants/${id}/validate`, { method: "POST", body: JSON.stringify({ displayName }) }),
-  flagMerchant: (id: string) => req<Merchant>(`/admin/merchants/${id}/flag`, { method: "POST" }),
+  flagMerchant: (id: string, reason?: string) => req<Merchant>(`/admin/merchants/${id}/flag`, { method: "POST", body: JSON.stringify({ reason }) }),
   mergeMerchants: (keepId: string, dupeId: string) =>
     req<Merchant>("/admin/merchants/merge", { method: "POST", body: JSON.stringify({ keepId, dupeId }) }),
 

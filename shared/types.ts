@@ -544,6 +544,9 @@ export interface Merchant {
   txCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Operator actions on this identity (validate / flag / unflag / merge), newest last. Optional:
+   *  records written before it existed simply have none. */
+  history?: Array<{ at: string; action: "validated" | "flagged" | "unflagged" | "merged" | "learned"; by: string; note?: string }>;
 }
 export interface ResolveMerchantResult {
   inputType: MerchantInputType;
@@ -568,6 +571,18 @@ export interface MerchantGraph {
   resolutionLog: ResolutionLogEntry[];
 }
 
+/** Admin → Merchants: a self-onboarded acceptance account with what the operator needs to
+ *  decide (never the owner device id). */
+export interface AdminMerchantAccount {
+  merchant: MerchantAccount;
+  sales: { count: number; xaf: number; last30dXaf: number; last30dCount: number; lastAt: string | null };
+  links: { total: number; active: number; invoices: number };
+  identity: { mpi: string | null; orgId: string | null };
+  graph: { internalId: string; status: MerchantStatus; trustScore: number } | null;
+  /** Other accounts settling to the same number — duplicates or one business, several codes. */
+  sameNumber: Array<{ id: string; code: string; businessName: string; status: MerchantAccountStatus }>;
+}
+
 /* ---------- Merchant Ecosystem (self-onboarded acceptance accounts) ----------
    Distinct from the resolution-graph `Merchant` above (auto-discovered payee intel):
    a MerchantAccount is a business that signed up to ACCEPT payments. See
@@ -588,6 +603,8 @@ export interface MerchantAccount {
   status: MerchantAccountStatus;
   verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
   listed?: boolean;           // opted into the public "Pay with MoMo›Me" directory
+  /** Set by an operator on suspension; shown to the owner in the app. */
+  suspendedReason?: string;
   /** Who pays the platform fee on this merchant's checkouts. "customer" (default) adds the
    *  fee on top of the price; "merchant" absorbs it — customers pay the exact price and the
    *  merchant receives price − fee (a merchant discount rate, like card acceptance). */

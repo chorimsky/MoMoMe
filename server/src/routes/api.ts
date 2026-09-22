@@ -11,6 +11,9 @@ import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName, warmIdentity } from "../core/nameResolver.js";
 import { authenticate as authenticateV1 } from "../core/platform/credentials.js";
 import { platformAdmin } from "./platformAdmin.js";
+import { audit as platformAudit } from "../core/platform/audit.js";
+import { findByAlias as findMpiByAlias } from "../core/connect/identities.js";
+import type { AdminMerchantAccount } from "../../../shared/types.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
@@ -56,7 +59,7 @@ import * as momoTransfer from "../core/momoTransfer.js";
 import * as networkSaga from "../core/network/saga.js";
 import { platformFee, contractedPayoutFee, paymentCost } from "../core/pricing.js";
 import { floatPlan } from "../core/floatPlan.js";
-import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant, suspendMerchant, reactivateMerchant, listMerchantAccounts, linkStats } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
@@ -200,7 +203,7 @@ function sectionForPath(sub: string): Section | null {
   const map: Record<string, Section> = {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",
     liquidity: "liquidity", treasury: "liquidity", pricing: "pricing", rates: "pricing",
-    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", network: "rails", merchants: "merchants", customers: "customers",
+    "mobile-money": "mobilemoney", momo: "mobilemoney", rails: "rails", routing: "rails", network: "rails", merchants: "merchants", "merchant-accounts": "merchants", customers: "customers",
     identities: "identities", "identity-resolution": "identities", upi: "interop", compliance: "compliance", regulatory: "compliance", peex: "peex", reports: "reports",
     revenue: "reports", // revenue intelligence = finance/reporting data
     analytics: "audience", // product analytics: where, how long, what
@@ -310,6 +313,7 @@ api.use("/admin", (req, res, next) => {
     /^\/platform\/organizations\/[^/]+\/credit$/,    // credits an organization balance (money we then owe)
     /^\/platform\/settlements\/[^/]+\/(approve|submit|complete)$/, // pays an organization's balance out
     /^\/platform\/connect\/settlements\/[^/]+\/(submit|settle|execute)$/, // moves an identity's balance to a bank / rail
+    /^\/merchant-accounts\/[^/]+\/(verify|suspend)$/,   // vouches for a settlement number / stops a business accepting
     /^\/platform\/organizations\/[^/]+$/,            // live activation / suspension of an API customer
     /^\/rails\/egress(?!\/recheck)(\/|$)/,           // repoints the IP allowlist a rail trusts (a re-check only re-reads it)
   ];
@@ -824,21 +828,76 @@ api.post("/admin/routing/:aggregator", async (req, res) => {
   setAggregatorUp(name, (req.body ?? {}).up !== false);
   res.json({ ok: true, routing: routingSnapshot() });
 });
+const adminUid = (req: ExpressRequest) => (req as unknown as AdminReq).session?.uid ?? "console";
 api.post("/admin/merchants/:id/validate", async (req, res) => {
-  const m = merchant.validateMerchant(req.params.id, (req.body ?? {}).displayName);
+  const m = merchant.validateMerchant(req.params.id, (req.body ?? {}).displayName, adminUid(req));
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant not found." });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "merchant_graph.validated", target: { type: "graph_merchant", id: m.internalId }, ip: clientIp(req) });
   res.json(m);
 });
 api.post("/admin/merchants/:id/flag", async (req, res) => {
-  const m = merchant.flagMerchant(req.params.id);
+  const m = merchant.flagMerchant(req.params.id, adminUid(req), cleanText((req.body ?? {}).reason, 200) || undefined);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant not found." });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "merchant_graph.flagged", target: { type: "graph_merchant", id: m.internalId }, details: { reason: (req.body ?? {}).reason }, ip: clientIp(req) });
+  res.json(m);
+});
+api.post("/admin/merchants/:id/unflag", async (req, res) => {
+  const m = merchant.unflagMerchant(req.params.id, adminUid(req), cleanText((req.body ?? {}).reason, 200) || undefined);
+  if (!m) return res.status(409).json({ error: "not_flagged", message: "This merchant is not flagged." });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "merchant_graph.unflagged", target: { type: "graph_merchant", id: m.internalId }, ip: clientIp(req) });
   res.json(m);
 });
 api.post("/admin/merchants/merge", async (req, res) => {
   const { keepId, dupeId } = (req.body ?? {}) as { keepId?: string; dupeId?: string };
-  const m = merchant.mergeMerchants(String(keepId), String(dupeId));
+  const m = merchant.mergeMerchants(String(keepId), String(dupeId), adminUid(req));
   if (!m) return res.status(400).json({ error: "bad_merge", message: "Could not merge those merchants." });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "merchant_graph.merged", target: { type: "graph_merchant", id: m.internalId }, details: { absorbed: dupeId }, ip: clientIp(req) });
   res.json(m);
+});
+api.get("/admin/merchants/search", async (req, res) => { res.json({ merchants: merchant.searchMerchants(String(req.query.q ?? "")).slice(0, 100) }); });
+
+/* ---------- Admin → Merchants: the self-onboarded ACCEPTANCE accounts (distinct from the graph) ---------- */
+async function adminMerchantAccountView(m: ReturnType<typeof merchantByOwner> & object, salesAll?: Payment[]): Promise<AdminMerchantAccount> {
+  const sales = (salesAll ?? await salesFor(m)).filter((p) => p.displayStatus === "Completed");
+  const since = Date.now() - 30 * 86_400_000;
+  const recent = sales.filter((p) => Date.parse(p.createdAt) >= since);
+  const mpi = findMpiByAlias("merchant_code", m.code);
+  const g = merchant.findByPhone(m.settlementPhone, m.country);
+  return {
+    merchant: publicMerchant(m),
+    sales: { count: sales.length, xaf: sales.reduce((s, p) => s + p.xaf, 0), last30dXaf: recent.reduce((s, p) => s + p.xaf, 0), last30dCount: recent.length, lastAt: sales[0]?.createdAt ?? null },
+    links: linkStats(m.id),
+    identity: { mpi: mpi?.id ?? null, orgId: mpi?.orgId ?? null },
+    graph: g ? { internalId: g.internalId, status: g.status, trustScore: g.trustScore } : null,
+    sameNumber: listMerchantAccounts().filter((o) => o.id !== m.id && o.country === m.country && o.settlementPhone === m.settlementPhone).map((o) => ({ id: o.id, code: o.code, businessName: o.businessName, status: o.status })),
+  };
+}
+api.get("/admin/merchant-accounts", async (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase(); const dig = q.replace(/\D/g, "");
+  const all = listMerchantAccounts().filter((m) => !q || m.businessName.toLowerCase().includes(q) || m.code.toLowerCase().includes(q) || (dig.length >= 4 && m.settlementPhone.includes(dig)));
+  const payments = await store().listPayments();
+  const byMerchant = new Map<string, Payment[]>(); for (const p of payments) if (p.merchantId) (byMerchant.get(p.merchantId) ?? byMerchant.set(p.merchantId, []).get(p.merchantId)!).push(p);
+  const rows: AdminMerchantAccount[] = [];
+  for (const m of all.slice(0, 500)) rows.push(await adminMerchantAccountView(m, (byMerchant.get(m.id) ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt))));
+  res.json({ accounts: rows, stats: { total: all.length, active: all.filter((m) => m.status === "active").length, pending: all.filter((m) => m.status === "pending").length, suspended: all.filter((m) => m.status === "suspended").length, verified: all.filter((m) => m.verifiedPhone).length, listed: all.filter((m) => m.listed && m.verifiedPhone).length, business: all.filter((m) => m.tier === "business").length } });
+});
+api.get("/admin/merchant-accounts/:id", async (req, res) => {
+  const m = merchantById(req.params.id); if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant account not found." });
+  const view = await adminMerchantAccountView(m);
+  res.json({ ...view, links: linksForMerchant(m.id), recent: (await salesFor(m)).slice(0, 30) });
+});
+api.post("/admin/merchant-accounts/:id/:action", async (req, res) => {
+  const m = merchantById(req.params.id); if (!m) return res.status(404).json({ error: "no_merchant", message: "Merchant account not found." });
+  const a = req.params.action; const b = req.body ?? {};
+  let out: typeof m | undefined;
+  if (a === "suspend") out = suspendMerchant(m.id, cleanText(b.reason, 200));
+  else if (a === "reactivate") out = reactivateMerchant(m.id);
+  else if (a === "verify") out = activateMerchant(m.id); // an operator confirmed ownership of the settlement number out of band
+  else if (a === "unlist") out = setListed(m.id, false);
+  else return res.status(400).json({ error: "bad_action", message: "action must be suspend, reactivate, verify or unlist." });
+  if (!out) return res.status(409).json({ error: "bad_transition", message: `Cannot ${a} this account in its current state.` });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: `merchant_account.${a}`, target: { type: "merchant_account", id: m.id }, details: { reason: b.reason }, ip: clientIp(req) });
+  res.json(await adminMerchantAccountView(out));
 });
 
 /** The person's channel preference for a one-time code, from the request body. Absent →

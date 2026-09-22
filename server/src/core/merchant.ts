@@ -84,7 +84,7 @@ function findByCode(code: string): Merchant | undefined {
   const c = code.toUpperCase();
   return [...byId.values()].find((m) => m.merchantCode?.toUpperCase() === c);
 }
-function findByPhone(phone: string, country: CountryCode = "CM"): Merchant | undefined {
+export function findByPhone(phone: string, country: CountryCode = "CM"): Merchant | undefined {
   const k = phoneKey(phone, country);
   return [...byId.values()].find((m) => {
     if (!m.phone) return false;
@@ -260,7 +260,8 @@ export function recordSuccessfulPayout(opts: { phone: string; name: string; prov
 }
 
 /* ---------- admin actions ---------- */
-export function validateMerchant(internalId: string, displayName?: string): Merchant | null {
+const note = (m: Merchant, action: NonNullable<Merchant["history"]>[number]["action"], by: string, text?: string) => { (m.history ??= []).push({ at: new Date().toISOString(), action, by, note: text }); if (m.history.length > 50) m.history.splice(0, m.history.length - 50); };
+export function validateMerchant(internalId: string, displayName?: string, by = "admin"): Merchant | null {
   const m = byId.get(internalId);
   if (!m) return null;
   if (displayName) m.displayName = displayName;
@@ -268,23 +269,44 @@ export function validateMerchant(internalId: string, displayName?: string): Merc
   m.status = "active";
   m.trustScore = Math.max(m.trustScore, 0.9);
   m.updatedAt = new Date().toISOString();
+  note(m, "validated", by, displayName ? `name set to ${displayName}` : undefined);
   touch("merchants");
   return m;
 }
-export function flagMerchant(internalId: string): Merchant | null {
+export function flagMerchant(internalId: string, by = "admin", reason?: string): Merchant | null {
   const m = byId.get(internalId);
   if (!m) return null;
   m.status = "flagged";
   m.trustScore = Math.min(m.trustScore, 0.1);
   m.updatedAt = new Date().toISOString();
+  note(m, "flagged", by, reason);
   touch("merchants");
   return m;
 }
+/** Lift a flag: back to pending with a neutral trust score (the operator decides whether to
+ *  validate on top). Payouts to the number resume (payoutBlocked reads status + score). */
+export function unflagMerchant(internalId: string, by = "admin", reason?: string): Merchant | null {
+  const m = byId.get(internalId);
+  if (!m || m.status !== "flagged") return null;
+  m.status = m.verificationSource === "admin" || m.verificationSource === "aggregator" ? "active" : "pending";
+  m.trustScore = Math.max(m.trustScore, 0.5);
+  m.updatedAt = new Date().toISOString();
+  note(m, "unflagged", by, reason);
+  touch("merchants");
+  return m;
+}
+/** Search the graph by name, code or phone digits (case-insensitive substring). */
+export function searchMerchants(q: string): Merchant[] {
+  const needle = q.trim().toLowerCase(); const dig = needle.replace(/\D/g, "");
+  if (!needle) return listMerchants();
+  return listMerchants().filter((m) => m.displayName.toLowerCase().includes(needle) || (m.merchantCode ?? "").toLowerCase().includes(needle) || (dig.length >= 4 && (m.phone ?? "").includes(dig)));
+}
 /** Merge `dupeId` into `keepId`, combining code/phone/aggregator and tx counts. */
-export function mergeMerchants(keepId: string, dupeId: string): Merchant | null {
+export function mergeMerchants(keepId: string, dupeId: string, by = "admin"): Merchant | null {
   const keep = byId.get(keepId);
   const dupe = byId.get(dupeId);
   if (!keep || !dupe || keepId === dupeId) return null;
+  note(keep, "merged", by, `absorbed ${dupe.displayName} (${dupe.merchantCode ?? dupe.phone ?? dupe.internalId})`);
   keep.merchantCode ??= dupe.merchantCode;
   keep.phone ??= dupe.phone;
   keep.provider ??= dupe.provider;

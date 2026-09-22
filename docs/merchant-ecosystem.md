@@ -101,3 +101,17 @@ Developer-API partners get the same via their API key (`ownerOf` already resolve
 - Merchant sales attribution = **`Payment.merchantId` tag** (set on link-paid payments),
   falling back to settlement-phone match for direct/QR-less pays. ✔
 - Payment-link amounts: **fixed OR open** (customer enters) — both supported. ✔
+
+## Admin → Merchants (2026-09-22 review)
+
+The operator view now has two areas. **Accounts** — the self-onboarded acceptance accounts
+(`/api/admin/merchant-accounts[?q=]`, `…/:id`, `…/:id/{suspend|reactivate|verify|unlist}`): status,
+verified number, tier, 30-day and all-time sales, links, the bridged payment identity / API
+organization, the graph record's trust state ("Payouts held" when flagged), and other accounts that
+settle to the same number. `verify` and `suspend` require admin step-up; every action is audited.
+Suspension makes `/merchant/pay/:code` and `/merchant/by-code` answer 404 and drops checkout
+attribution — no engine change. **Identity graph** — the learned payee network, now with search,
+`unflag` (restores `pending`/`active` and a neutral trust score; lifts the payout hold), a confirmed
+merge with a searchable duplicate picker, and a per-record `history` (validated / flagged / unflagged
+/ merged, by whom, why) written by the core functions. No existing behaviour changed: validate, flag
+and merge keep their signatures with optional `by`/`reason`.

@@ -8,7 +8,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import type {
-  CountryCode, ProviderId, MerchantAccount, MerchantTier, MerchantLink, MerchantLinkKind, Payment,
+  CountryCode, ProviderId, MerchantAccount, MerchantTier, MerchantLink, MerchantLinkKind, MerchantSale, Payment,
 } from "../../../shared/types.js";
 import { register, touch } from "./persist.js";
 import { store } from "../db/store.js";
@@ -211,4 +211,32 @@ export async function salesFor(m: MerchantAccount): Promise<Payment[]> {
   return (await store().listPayments())
     .filter((p) => p.merchantId === m.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/* ---------- merchant-safe sale projection ---------- */
+/** What a merchant may see of a payment made to them. The engine `Payment` carries the
+ *  payer's device id, coarse location, the inbound pay instruction and payout ids — none of
+ *  that is the merchant's to see; this is the only shape the merchant surfaces return. */
+export function merchantSaleView(p: Payment, link?: MerchantLink): MerchantSale {
+  const delivered = p.events.find((e) => e.state === "DELIVERED");
+  return {
+    id: p.id, ref: p.ref, state: p.state, displayStatus: p.displayStatus, method: p.method, source: p.source,
+    xaf: p.xaf, feeXaf: p.feeXaf, totalXaf: p.totalXaf, feeBy: p.feeBy,
+    linkCode: p.merchantLinkCode, label: link?.label, linkKind: link?.kind, clientName: link?.clientName,
+    recipient: { name: p.recipient.name, phone: p.recipient.phone },
+    createdAt: p.createdAt, deliveredAt: delivered?.at,
+  };
+}
+/** Completed sales of a merchant as merchant-safe rows, newest first (link labels attached). */
+export async function salesViewFor(m: MerchantAccount, opts: { completedOnly?: boolean; limit?: number } = {}): Promise<MerchantSale[]> {
+  const all = await salesFor(m);
+  const rows = (opts.completedOnly ? all.filter((p) => p.displayStatus === "Completed") : all).slice(0, opts.limit ?? all.length);
+  return rows.map((p) => merchantSaleView(p, p.merchantLinkCode ? links.get(p.merchantLinkCode) : undefined));
+}
+/** Sales as a CSV the merchant can open in a spreadsheet (accounting, reconciliation). */
+export function salesCsv(rows: MerchantSale[]): string {
+  const esc = (v: unknown) => { const s = v === undefined || v === null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ["date", "reference", "status", "received_xaf", "fee_xaf", "customer_paid_xaf", "fee_paid_by", "method", "link", "label", "client", "delivered_at"];
+  const lines = rows.map((r) => [r.createdAt, r.ref, r.displayStatus, r.xaf, r.feeXaf, r.totalXaf, r.feeBy ?? "customer", r.method, r.linkCode ?? "", r.label ?? "", r.clientName ?? "", r.deliveredAt ?? ""].map(esc).join(","));
+  return [head.join(","), ...lines].join("\n") + "\n";
 }

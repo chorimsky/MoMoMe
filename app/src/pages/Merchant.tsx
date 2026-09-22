@@ -3,7 +3,7 @@
    then a dashboard: today's sales, recent transactions, and payment tools
    (shareable links + QR that open /pay/:code). See docs/merchant-ecosystem.md.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { MerchantAccount, MerchantLink, MerchantSummary, CountryCode } from "@shared/types.js";
 import { COUNTRIES, MIN_XAF, PROVIDER_PAYOUT_MAX } from "@shared/domain.js";
@@ -246,9 +246,47 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
   const [listed, setListed] = useState(!!merchant.listed);
   const [poster, setPoster] = useState(false);
 
-  const reloadSummary = () => api.merchantSummary().then(setSum).catch(() => {});
+  // A counter is a live place: the dashboard refreshes itself while it is on screen (and
+  // stops when the tab is hidden), so a sale shows up without a reload. A sale that was not
+  // in the previous read is marked "new" for a few seconds; the links reload with it so an
+  // invoice flips to PAID at the same moment.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const seenRef = useRef<Set<string> | null>(null);
+  const reloadSummary = () => api.merchantSummary().then((next) => {
+    const seen = seenRef.current;
+    if (seen) {
+      const added = next.recent.filter((p) => !seen.has(p.id)).map((p) => p.id);
+      if (added.length) { setFresh(new Set(added)); setTimeout(() => setFresh(new Set()), 6000); }
+    }
+    seenRef.current = new Set(next.recent.map((p) => p.id));
+    setSum(next);
+    return next;
+  }).catch(() => undefined);
   const reloadLinks = () => api.merchantLinks().then((r) => setLinks(r.links)).catch(() => {});
   useEffect(() => { void reloadSummary(); void reloadLinks(); }, []);
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let lastCount = -1;
+    const tick = async () => { const n = await reloadSummary(); if (n && n.all.count !== lastCount) { if (lastCount !== -1) void reloadLinks(); lastCount = n.all.count; } };
+    const start = () => { if (!timer) timer = setInterval(() => { void tick(); }, 6000); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const onVis = () => { if (document.visibilityState === "visible") { void tick(); start(); } else stop(); };
+    onVis(); document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  const [flash, setFlash] = useState<string | null>(null);
+  const say = (m: string) => { setFlash(m); setTimeout(() => setFlash(null), 2200); };
+  const exportCsv = async () => {
+    try {
+      const csv = await api.merchantSalesCsv();
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a"); a.href = url; a.download = `momome-sales-${merchant.code}.csv`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000); say(t("mrc_d_export_done"));
+    } catch { say(t("error_generic")); }
+  };
+  const copyRef = async (ref: string) => { try { await navigator.clipboard.writeText(ref); say(t("mrc_d_ref_copied")); } catch { /* clipboard unavailable */ } };
+  const [open, setOpen] = useState<string | null>(null);
+  const weekMax = Math.max(1, ...(sum?.week ?? []).map((d) => d.salesXaf));
   const toggleListed = async () => { const next = !listed; setListed(next); try { await api.setMerchantListing(next); } catch { setListed(!next); } };
   // Who pays the fee: the customer (on top of the price) or the business (absorbed).
   const [feeMode, setFeeMode] = useState<"customer" | "merchant">(merchant.feeMode ?? "customer");
@@ -300,23 +338,62 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
             </div>
           ))}
         </div>
+        {/* Seven-day trend: one bar per day, today last. Reads at a glance whether the week is up. */}
+        {sum && sum.week.some((d) => d.count > 0) && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line-2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--ink-3)", marginBottom: 6 }}><span>{t("mrc_d_week")}</span><span className="num">{fmt(sum.week.reduce((a, d) => a + d.salesXaf, 0))} XAF</span></div>
+            <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 34 }} aria-hidden="true">
+              {sum.week.map((d, i) => (
+                <div key={d.date} title={`${d.date} · ${fmt(d.salesXaf)} XAF · ${d.count}`} style={{ flex: 1, height: `${Math.max(3, Math.round((100 * d.salesXaf) / weekMax))}%`, borderRadius: 3, background: i === 6 ? "var(--recv)" : "var(--line)", transition: "height .3s" }} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Core action — accept a payment. */}
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />
 
       <div style={{ ...cardStyle, padding: 0 }}>
-        <div style={{ padding: "16px 18px 8px", fontSize: 13, fontWeight: 700 }}>{t("mrc_d_recent")}</div>
+        <div style={{ padding: "14px 18px 8px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{t("mrc_d_recent")}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--ink-3)" }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_d_live")}</span>
+          {flash && <span role="status" style={{ fontSize: 11.5, color: "var(--recv)", fontWeight: 700 }}>{flash}</span>}
+          {(sum?.all.count ?? 0) > 0 && (
+            <button type="button" onClick={() => { void exportCsv(); }} style={{ marginLeft: "auto", background: "transparent", border: "1px solid var(--line)", borderRadius: 8, padding: "5px 10px", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 700, color: "var(--ink-2)" }}>{t("mrc_d_export")}</button>
+          )}
+        </div>
         {(sum?.recent.length ?? 0) === 0 && <div style={{ padding: "8px 18px 18px", fontSize: 13, color: "var(--ink-3)" }}>{t("mrc_d_no_payments")}</div>}
-        {sum?.recent.map((p) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderTop: "1px solid var(--line-2)" }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="num" style={{ fontSize: 13.5, fontWeight: 700 }}>{fmt(p.xaf)} XAF</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{p.method === "LIGHTNING" ? "Instant" : p.method === "ONCHAIN" ? "Bitcoin" : "US Dollars"} · {new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+        {sum?.recent.map((p) => {
+          const via = p.linkKind === "invoice" ? t("mrc_d_via_invoice") : p.linkKind === "qr" ? t("mrc_d_via_qr") : p.linkKind === "link" ? t("mrc_d_via_link") : p.source === "lnurl" ? t("mrc_d_via_address") : t("mrc_d_via_code");
+          const when = new Date(p.createdAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+          const isOpen = open === p.id; const isNew = fresh.has(p.id);
+          return (
+            <div key={p.id} style={{ borderTop: "1px solid var(--line-2)", background: isNew ? "var(--recv-wash, rgba(20,160,90,.08))" : "transparent", transition: "background .6s" }}>
+              <button type="button" onClick={() => setOpen(isOpen ? null : p.id)} aria-expanded={isOpen} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", background: "transparent", border: "none", cursor: "pointer", font: "inherit", color: "var(--ink)", textAlign: "left" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                    <span className="num" style={{ fontSize: 13.5, fontWeight: 700 }}>{fmt(p.xaf)} XAF</span>
+                    {p.label && <span style={{ fontSize: 12, color: "var(--ink-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.label}</span>}
+                    {isNew && <span style={{ fontSize: 10, fontWeight: 800, color: "var(--recv)", letterSpacing: ".04em" }}>{t("mrc_d_new_sale").toUpperCase()}</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{via}{p.clientName ? ` · ${p.clientName}` : ""} · {when}</div>
+                </div>
+                <span style={{ fontSize: 11.5, fontWeight: 700, flex: "none", color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--warn-ink)" }}>{p.displayStatus === "Completed" ? t("completed") : p.displayStatus === "Failed" ? t("failed") : t("pending")}</span>
+              </button>
+              {isOpen && (
+                <div style={{ padding: "0 18px 12px", fontSize: 12, color: "var(--ink-2)", display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 4 }}>
+                  <span style={{ color: "var(--ink-3)" }}>{t("reference")}</span>
+                  <span><span className="num">{p.ref}</span> <button type="button" onClick={() => { void copyRef(p.ref); }} style={{ background: "transparent", border: "none", padding: "0 4px", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 700, color: "var(--accent)" }}>{t("copy")}</button></span>
+                  <span style={{ color: "var(--ink-3)" }}>{t("fee")}</span>
+                  <span className="num">{fmt(p.feeXaf)} XAF {p.feeBy === "merchant" ? `· ${t("mrc_d_fee_absorbed")}` : `· ${t("mrc_d_customer_paid")} ${fmt(p.totalXaf)} XAF`}</span>
+                  {p.deliveredAt && (<><span style={{ color: "var(--ink-3)" }}>{t("mrc_d_delivered_at")}</span><span>{new Date(p.deliveredAt).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span></>)}
+                  {p.linkCode && (<><span style={{ color: "var(--ink-3)" }}>{t("mrc_lt_link")}</span><span className="num">/pay/{p.linkCode}</span></>)}
+                </div>
+              )}
             </div>
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: p.displayStatus === "Completed" ? "var(--recv)" : p.displayStatus === "Failed" ? "var(--bad)" : "var(--warn-ink)" }}>{p.displayStatus === "Completed" ? t("completed") : p.displayStatus === "Failed" ? t("failed") : t("pending")}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Grow — de-emphasized setup actions (poster + directory listing). */}

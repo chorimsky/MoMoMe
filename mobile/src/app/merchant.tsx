@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { Stack } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 const BRAND_MARK = require('../../assets/images/icon.png') as number;
@@ -50,6 +50,22 @@ export default function MerchantScreen() {
   useEffect(() => {
     refreshMerchant();
   }, [refreshMerchant]);
+  // The counter is live: while this screen is focused and the app is in the foreground, the
+  // sales summary (and the links, so an invoice flips to Paid) refresh every 6 s.
+  useFocusEffect(
+    useCallback(() => {
+      let timer: ReturnType<typeof setInterval> | null = null;
+      const tick = () => {
+        api.merchantSummary().then(setSummary).catch(() => {});
+        api.merchantLinks().then((r) => setLinks(r.links)).catch(() => {});
+      };
+      const start = () => { if (!timer) timer = setInterval(tick, 6000); };
+      const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+      if (AppState.currentState === 'active') start();
+      const sub = AppState.addEventListener('change', (st) => { if (st === 'active') { tick(); start(); } else stop(); });
+      return () => { stop(); sub.remove(); };
+    }, []),
+  );
 
   if (loading) {
     return (
@@ -412,11 +428,13 @@ function Dashboard({
             return (
               <View key={p.id} style={[styles.txRow, { borderTopColor: t.line2 }]}>
                 <View style={{ flex: 1 }}>
-                  <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }}>
-                    {p.recipient.name || p.recipient.phone}
+                  {/* The row names the sale, not the merchant: the link's label when it came
+                      through one, else how it arrived. The recipient is the merchant itself. */}
+                  <Body style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 14 }} numberOfLines={1}>
+                    {p.label || p.clientName || p.ref}
                   </Body>
                   <Body muted style={{ fontSize: 12 }}>
-                    {METHOD_LABEL[p.method]} · {new Date(p.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB')}
+                    {p.linkKind === 'invoice' ? tr('sale_via_invoice') : p.linkKind === 'qr' ? tr('sale_via_qr') : p.linkKind === 'link' ? tr('sale_via_link') : p.source === 'lnurl' ? tr('sale_via_address') : tr('sale_via_code')} · {METHOD_LABEL[p.method]} · {new Date(p.createdAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB')}
                   </Body>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 2 }}>

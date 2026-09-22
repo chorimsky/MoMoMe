@@ -206,7 +206,7 @@ const deviceReady: Promise<void> = (async () => {
   } catch { /* never block the app on enrolment */ }
 })();
 
-async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = false): Promise<T> {
+async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = false, as: "json" | "text" = "json"): Promise<T> {
   await deviceReady; // returning/persisted devices settle here; brand-new ones resolve instantly
 
   let res: Response;
@@ -282,12 +282,12 @@ async function req<T>(path: string, init?: RequestInit, retriedAfterElevation = 
       const password = await elevationPrompt();
       if (password) {
         await api.adminElevate(password); // throws (bad password / rate-limited) → surfaces below
-        return req<T>(path, init, true);
+        return req<T>(path, init, true, as);
       }
     }
     throw new ApiError(message, res.status, code, payload as Record<string, unknown> | undefined);
   }
-  return res.json() as Promise<T>;
+  return (as === "text" ? res.text() : res.json()) as Promise<T>;
 }
 
 /** The raw request function, for feature modules that keep their own typed service layer
@@ -456,6 +456,8 @@ export const api = {
     req<OtpSent>("/merchant/verify/request", { method: "POST", body: JSON.stringify(opts) }),
   merchantVerify: (code: string) => req<{ merchant: MerchantAccount }>("/merchant/verify", { method: "POST", body: JSON.stringify({ code }) }),
   merchantSummary: () => req<MerchantSummary>("/merchant/me/summary"),
+  /** The merchant's completed sales as CSV text (device-signed like every merchant read). */
+  merchantSalesCsv: () => req<string>("/merchant/me/sales.csv", undefined, false, "text"),
   merchantLinks: () => req<{ links: MerchantLink[] }>("/merchant/links"),
   createMerchantLink: (body: { amountXaf?: number; label?: string; kind?: MerchantLink["kind"]; clientName?: string; dueDate?: string }) =>
     req<{ link: MerchantLink }>("/merchant/links", { method: "POST", body: JSON.stringify(body) }),

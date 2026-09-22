@@ -649,6 +649,11 @@ export const STRINGS = {
   paid_times: ['Paid ×{n}', 'Payé ×{n}'],
   due_prefix: ['due {d}', 'échéance {d}'],
   recent_payments: ['Recent payments', 'Paiements récents'],
+  sale_via_link: ['via link', 'via lien'],
+  sale_via_qr: ['via QR', 'via QR'],
+  sale_via_invoice: ['invoice', 'facture'],
+  sale_via_address: ['Lightning Address', 'Adresse Lightning'],
+  sale_via_code: ['via merchant code', 'via code marchand'],
 
   // ambassador
   refer_earn: ['Refer & earn', 'Parrainez et gagnez'],

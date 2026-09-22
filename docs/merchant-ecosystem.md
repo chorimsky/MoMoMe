@@ -115,3 +115,15 @@ attribution — no engine change. **Identity graph** — the learned payee netwo
 merge with a searchable duplicate picker, and a per-record `history` (validated / flagged / unflagged
 / merged, by whom, why) written by the core functions. No existing behaviour changed: validate, flag
 and merge keep their signatures with optional `by`/`reason`.
+
+### Merchant dashboard (2026-09-22 review)
+`GET /merchant/me/summary` no longer returns raw engine `Payment`s: `recent` is `MerchantSale[]`
+(`core/merchantAccount.ts` `merchantSaleView`) — amount, fee, who carried it, method, reference,
+the link it came through (code, label, kind, client), created / delivered times — never the payer's
+device id, coarse location, pay instruction or payout ids. The summary also carries a 7-day `week`
+trend. `GET /merchant/me/sales.csv` exports completed sales (device-signed, same owner guard).
+Web and mobile dashboards refresh every 6 s while visible / focused (web marks a sale that was not
+in the previous read as NEW for a few seconds and reloads the links so an invoice flips to PAID
+at the same moment); a row expands to reference (copy), fee breakdown, delivery time and link.
+Mobile rows name the sale (label / client / reference + channel) instead of the merchant's own name.
+`POST /merchant/links` coerces non-string free text and an unknown `kind` instead of throwing.

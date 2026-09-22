@@ -59,7 +59,7 @@ import * as momoTransfer from "../core/momoTransfer.js";
 import * as networkSaga from "../core/network/saga.js";
 import { platformFee, contractedPayoutFee, paymentCost } from "../core/pricing.js";
 import { floatPlan } from "../core/floatPlan.js";
-import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, publicMerchant, forgetMerchant, suspendMerchant, reactivateMerchant, listMerchantAccounts, linkStats } from "../core/merchantAccount.js";
+import { createMerchant, merchantByOwner, activateMerchant, activateUnverified, merchantById, merchantByCode, setListed, setFeeMode, directory, createLink, getLink, linksForMerchant, disableLink, salesFor, salesViewFor, salesCsv, publicMerchant, forgetMerchant, suspendMerchant, reactivateMerchant, listMerchantAccounts, linkStats } from "../core/merchantAccount.js";
 import { geocodeLabel } from "../core/geo.js";
 import { refCodeFor, recordReferral, referralsOf, forgetReferrals } from "../core/referral.js";
 import { openApiSpec } from "../openapi.js";
@@ -1872,17 +1872,35 @@ api.get("/merchant/me/summary", async (req, res) => {
   if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
   const m = merchantByOwner(owner);
   if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
-  const sales = (await salesFor(m)).filter((p) => p.displayStatus === "Completed");
+  const sales = await salesViewFor(m, { completedOnly: true });
   const today = todayISO();
   const todays = sales.filter((p) => p.createdAt.slice(0, 10) === today);
   const sum = (ps: typeof sales) => ps.reduce((s, p) => s + p.xaf, 0);
   const allXaf = sum(sales), todayXaf = sum(todays);
+  // Seven-day trend, oldest first (the dashboard's small bar row).
+  const week = Array.from({ length: 7 }, (_, i) => new Date(Date.now() - (6 - i) * 86_400_000).toISOString().slice(0, 10)).map((date) => {
+    const day = sales.filter((p) => p.createdAt.slice(0, 10) === date);
+    return { date, salesXaf: sum(day), count: day.length };
+  });
   res.json({
     merchant: publicMerchant(m),
     today: { salesXaf: todayXaf, count: todays.length, avgXaf: todays.length ? Math.round(todayXaf / todays.length) : 0 },
     all: { salesXaf: allXaf, count: sales.length },
+    week,
     recent: sales.slice(0, 30),
   });
+});
+
+/** All completed sales as CSV — accounting / reconciliation for the business. */
+api.get("/merchant/me/sales.csv", async (req, res) => {
+  const owner = await ownerOf(req);
+  if (!owner) return res.status(401).json({ error: "no_device", message: "Unrecognised device." });
+  const m = merchantByOwner(owner);
+  if (!m) return res.status(404).json({ error: "no_merchant", message: "No merchant account." });
+  const rows = await salesViewFor(m, { completedOnly: true });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="momome-sales-${m.code}-${todayISO()}.csv"`);
+  res.send(salesCsv(rows));
 });
 
 /* ---- payment links / QR ---- */
@@ -1922,7 +1940,10 @@ api.post("/merchant/links", rateLimitMiddleware("merchant_write", 60, 60_000), a
       return res.status(400).json({ error: "bad_amount", message: `A payment link amount must be between ${MIN_XAF.toLocaleString("en")} and ${cap.toLocaleString("en")} XAF (the maximum a ${m.provider} Mobile Money account can receive in one payment).` });
     }
   }
-  res.status(201).json({ link: createLink(m.id, { amountXaf, label: b.label, kind: b.kind, clientName: b.clientName, dueDate: b.dueDate }) });
+  // Free-text fields are strings or nothing; the kind is one of the three the product knows.
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : undefined);
+  const kind: MerchantLinkKind = b.kind === "invoice" || b.kind === "qr" ? b.kind : "link";
+  res.status(201).json({ link: createLink(m.id, { amountXaf, label: str(b.label), kind, clientName: str(b.clientName), dueDate: str(b.dueDate) }) });
 });
 api.delete("/merchant/links/:code", async (req, res) => {
   const owner = await ownerOf(req);

@@ -159,6 +159,23 @@ async function main() {
     const again = await post("/api/payments", { quoteId: q2.id, recipient: { phone: "677000789", country: "CM", provider: "MTN", name: "Chez Alice" }, merchantLinkCode: inv.link.code }, buyer);
     ok("a second payment on the same invoice is refused", again.status === 409 && (await again.json()).error === "invoice_paid", String(again.status));
 
+    /* ---- what the merchant sees of a sale: the money and the link, never the payer ---- */
+    const sum = await (await get("/api/merchant/me/summary")).json();
+    const sale = sum.recent?.[0] ?? {};
+    ok("the dashboard lists the sale with its amount and reference", sale.xaf === 15000 && typeof sale.ref === "string" && sale.displayStatus === "Completed", JSON.stringify({ xaf: sale.xaf, ref: sale.ref }));
+    ok("…named after the invoice it came through", sale.linkCode === inv.link.code && sale.linkKind === "invoice" && sale.label === "INV-1", JSON.stringify({ code: sale.linkCode, kind: sale.linkKind, label: sale.label }));
+    ok("…with the delivery time", typeof sale.deliveredAt === "string", sale.deliveredAt);
+    ok("…and NOTHING about the payer: no device id, location, pay instruction or payout ids",
+      !("senderId" in sale) && !("senderLocation" in sale) && !("payInstruction" in sale) && !("payoutRef" in sale) && !("events" in sale), Object.keys(sale).join(","));
+    ok("the summary carries a 7-day trend ending today", Array.isArray(sum.week) && sum.week.length === 7 && sum.week[6].salesXaf === 15000, JSON.stringify(sum.week?.[6]));
+    const csv = await get("/api/merchant/me/sales.csv");
+    const csvText = await csv.text();
+    ok("the sales export is a CSV", csv.status === 200 && /^text\/csv/.test(csv.headers.get("content-type") ?? ""), csv.headers.get("content-type") ?? "");
+    ok("…with a header row and the sale", csvText.startsWith("date,reference,status,received_xaf") && csvText.includes(`,${sale.ref},Completed,15000,`), csvText.split("\n")[1]);
+    ok("a stranger gets no export", (await get("/api/merchant/me/sales.csv", "stranger-device")).status === 404);
+    const junk = await post("/api/merchant/links", { label: 12345, kind: "banana" });
+    ok("junk link input is coerced, not a crash", junk.status === 201 && (await junk.json()).link.kind === "link", String(junk.status));
+
     const open = await (await post("/api/merchant/links", { label: "Counter" })).json();
     const pubOpen = await (await fetch(`${base}/api/merchant/pay/${open.link.code}`)).json();
     ok("an open link never reports paid — it is meant to be paid many times", pubOpen.paid === undefined && pubOpen.amountXaf === undefined);

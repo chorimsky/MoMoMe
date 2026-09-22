@@ -662,12 +662,40 @@ export interface MerchantLinkPublic {
   merchant: { code: string; businessName: string; category: string; country: CountryCode; settlementPhone: string; provider: ProviderId; verifiedPhone: boolean; feeMode?: "customer" | "merchant" };
 }
 
+/** One sale as the MERCHANT may see it: the money, the method, the link it came through and
+ *  the reference — never the payer's device id, location, pay instruction or payout ids. The
+ *  `recipient` is the merchant's own settlement identity (kept for older mobile builds). */
+export interface MerchantSale {
+  id: string;
+  ref: string;
+  state: PaymentState;
+  displayStatus: DisplayStatus;
+  method: Method;
+  source?: "app" | "lnurl";
+  /** What the business received / the fee on the sale / what the customer paid. */
+  xaf: number;
+  feeXaf: number;
+  totalXaf: number;
+  feeBy?: "customer" | "merchant";
+  linkCode?: string;
+  /** The link's label ("Table 4", invoice reference) and kind, when the sale came through one. */
+  label?: string;
+  linkKind?: MerchantLinkKind;
+  clientName?: string;
+  recipient: { name: string; phone: string };
+  createdAt: string;
+  /** When the value reached the settlement number (the DELIVERED event), if it has. */
+  deliveredAt?: string;
+}
+
 /** Merchant dashboard read-model. */
 export interface MerchantSummary {
   merchant: MerchantAccount;
   today: { salesXaf: number; count: number; avgXaf: number };
   all: { salesXaf: number; count: number };
-  recent: Payment[];
+  /** Last 7 days, oldest first — the dashboard's small trend bar. */
+  week: Array<{ date: string; salesXaf: number; count: number }>;
+  recent: MerchantSale[];
 }
 
 /* ---------- Referrals / ambassadors (Growth Engine) ---------- */

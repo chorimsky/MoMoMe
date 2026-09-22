@@ -16,7 +16,7 @@ import { register, touch } from "../persist.js";
 import { COUNTRIES, checkPhone, splitDialed, lightningAddress } from "../../../../shared/domain.js";
 import type { CountryCode, ProviderId } from "../../../../shared/types.js";
 import { getOrganization } from "../platform/orgs.js";
-import { merchantByCode, merchantById } from "../merchantAccount.js";
+import { merchantByCode, merchantById, onMerchantChange, type StoredMerchant } from "../merchantAccount.js";
 import { enqueueEvent } from "../interop/outbound.js";
 
 export type MpiType = "individual" | "business" | "merchant" | "institution" | "mfi" | "bank" | "fintech" | "marketplace" | "branch" | "application" | "government";
@@ -139,10 +139,45 @@ export function mpiForMerchant(codeOrId: string): Mpi | undefined {
   const mer = merchantByCode(codeOrId) ?? merchantById(codeOrId); if (!mer) return undefined;
   const exByCode = findByAlias("merchant_code", mer.code); if (exByCode) return exByCode;
   const phoneMpi = findByAlias("phone", mer.settlementPhone, mer.country);
-  if (phoneMpi) { addAlias(phoneMpi.id, "merchant_code", mer.code, true); updateProfiles(phoneMpi.id, { type: "merchant", displayName: mer.businessName }); phoneMpi.links.merchantId = mer.id; return phoneMpi; }
+  if (phoneMpi) { addAlias(phoneMpi.id, "merchant_code", mer.code, true); updateProfiles(phoneMpi.id, { type: "merchant", displayName: mer.businessName }); phoneMpi.links.merchantId = mer.id; touch("connect_mpis"); return phoneMpi; }
   const r = createMpi({ type: "merchant", displayName: mer.businessName, country: mer.country, aliases: [{ type: "merchant_code", value: mer.code, verified: true }, { type: "phone", value: mer.settlementPhone, verified: mer.verifiedPhone }], links: { merchantId: mer.id } });
   return r.ok ? r.mpi : undefined;
 }
+
+/** Keep a merchant's MPI in step with the merchant account — only when one exists (creation
+ *  stays lazy). The merchant's verified number is the MPI's verified phone alias and its
+ *  settlement destination; a changed number retires the old alias (and the Lightning Address
+ *  built on it) so a number that now belongs to someone else is no longer this identity's;
+ *  a suspended merchant is a suspended identity (the API refuses to route to it). */
+export function syncMerchantMpi(mer: StoredMerchant, change: "verified" | "updated" | "suspended" | "reactivated" | "forgotten"): Mpi | undefined {
+  const m = findByAlias("merchant_code", mer.code); if (!m) return undefined;
+  const phone = normalizeAlias("phone", mer.settlementPhone, mer.country);
+  if (change === "forgotten") {
+    m.status = "closed";
+    for (const a of m.aliases.filter((a) => a.type === "phone" || a.type === "lightning_address" || a.type === "merchant_code")) byAlias.delete(aliasKey(a.type, a.value));
+    m.aliases = m.aliases.filter((a) => a.type !== "phone" && a.type !== "lightning_address" && a.type !== "merchant_code");
+    m.updatedAt = now(); touch("connect_mpis"); return m;
+  }
+  if (phone) {
+    const sp = splitDialed(`+${phone}`, mer.country); const ln = lightningAddress(sp.local, sp.country);
+    // Retire phone / Lightning aliases that are not the current settlement number.
+    const stale = m.aliases.filter((a) => (a.type === "phone" && a.value !== phone) || (a.type === "lightning_address" && a.value !== ln));
+    for (const a of stale) byAlias.delete(aliasKey(a.type, a.value));
+    if (stale.length) m.aliases = m.aliases.filter((a) => !stale.includes(a));
+    const holder = byAlias.get(aliasKey("phone", phone));
+    if (!holder) { m.aliases.push({ type: "phone", value: phone, verified: mer.verifiedPhone, addedAt: now() }); byAlias.set(aliasKey("phone", phone), m.id); }
+    if (!byAlias.has(aliasKey("lightning_address", ln))) { m.aliases.push({ type: "lightning_address", value: ln, verified: true, addedAt: now() }); byAlias.set(aliasKey("lightning_address", ln), m.id); }
+    for (const a of m.aliases) if (a.type === "phone" && a.value === phone) a.verified = mer.verifiedPhone;
+    m.settlement.destination = { ...(m.settlement.destination ?? {}), phone, country: sp.country };
+  }
+  m.displayName = mer.businessName.trim().slice(0, 120); m.type = "merchant"; m.links.merchantId = mer.id;
+  m.status = mer.status === "suspended" ? "suspended" : "active";
+  m.payment.businessStatus = mer.status === "suspended" ? "suspended" : "active";
+  m.updatedAt = now(); touch("connect_mpis");
+  if (m.orgId) enqueueEvent(`org:${m.orgId}`, "identity.updated", publicMpi(m));
+  return m;
+}
+onMerchantChange((mer, change) => { syncMerchantMpi(mer, change); });
 
 /** What another party may see (docs/connect §33): reachability and capabilities, never balances or destinations. */
 export function publicMpi(m: Mpi) {

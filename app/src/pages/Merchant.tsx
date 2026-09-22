@@ -8,7 +8,7 @@ import { Link } from "react-router-dom";
 import type { MerchantAccount, MerchantLink, MerchantSummary, CountryCode } from "@shared/types.js";
 import { COUNTRIES, MIN_XAF, PROVIDER_PAYOUT_MAX } from "@shared/domain.js";
 import { SiteHeader } from "../components/nav.js";
-import { Spinner, QR, Logo } from "../components/atoms.js";
+import { Spinner, QR, Logo, CopyField } from "../components/atoms.js";
 import { fmt } from "../lib/format.js";
 const fill = (s: string, vars: Record<string, string>): string => s.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
 import { useI18n } from "../lib/i18n.js";
@@ -354,6 +354,8 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
       {/* Core action — accept a payment. */}
       <LinkTools merchant={merchant} links={links} onChange={() => { void reloadLinks(); }} />
 
+      <LightningCard merchant={merchant} onVerify={onVerify} />
+
       <div style={{ ...cardStyle, padding: 0 }}>
         <div style={{ padding: "14px 18px 8px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>{t("mrc_d_recent")}</span>
@@ -449,6 +451,57 @@ function Dashboard({ merchant, onEdit, onVerify }: { merchant: MerchantAccount; 
 }
 
 /* ---------- payment tools (links + QR) ---------- */
+/* ---------- Lightning identity ----------
+   The settlement number as a Lightning Address (never the code — a code cannot receive
+   funds). What "on" means: a wallet resolving the address is shown the business by name and
+   the sale lands on this dashboard; both need a proven number and an active account. */
+function LightningCard({ merchant, onVerify }: { merchant: MerchantAccount; onVerify: () => void }) {
+  const { t } = useI18n();
+  const ln = merchant.lightning;
+  const [showQr, setShowQr] = useState(false);
+  // What the payer's wallet will show — read from the same endpoint wallets use.
+  const [payerSees, setPayerSees] = useState<string | null>(null);
+  useEffect(() => {
+    if (!ln) return; let alive = true;
+    fetch(`/.well-known/lnurlp/${encodeURIComponent(ln.address.split("@")[0])}`).then((r) => r.json())
+      .then((j: { metadata?: string }) => { if (!alive) return; const m = JSON.parse(j.metadata ?? "[]") as Array<[string, string]>; const line = m.find((x) => x[0] === "text/plain")?.[1] ?? ""; setPayerSees(line.split(" · ")[0] || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [ln?.address, ln?.enabled]);
+  if (!ln) return null;
+  return (
+    <div style={{ ...cardStyle, padding: "16px 18px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{t("mrc_ln_title")}</span>
+        {ln.enabled ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "var(--recv)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--recv)" }} />{t("mrc_ln_on")}</span>
+        ) : null}
+      </div>
+      <p style={{ color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45, margin: "6px 0 10px" }}>{t("mrc_ln_desc")}</p>
+      <CopyField label={t("rcv_copy_addr")} value={ln.address} />
+      {ln.enabled && payerSees && (
+        <p style={{ color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.45, margin: "8px 0 0" }}>{t("mrc_ln_payer_sees")} <b>{payerSees}</b></p>
+      )}
+      {!ln.enabled && (
+        <div role="note" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 12.5, lineHeight: 1.45, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ flex: 1, minWidth: 180 }}>{ln.reason === "suspended" ? t("mrc_ln_off_suspended") : t("mrc_ln_off_unverified")}</span>
+          {ln.reason === "unverified" && <button type="button" className="btn btn-primary" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={onVerify}>{t("mrc_d_verify_cta")}</button>}
+        </div>
+      )}
+      {ln.enabled && (
+        <>
+          <button type="button" className="btn btn-quiet" style={{ marginTop: 10, fontSize: 12.5 }} onClick={() => setShowQr((v) => !v)}>{showQr ? t("mrc_ln_hide_qr") : t("mrc_ln_qr")}</button>
+          {showQr && (
+            <div role="img" aria-label={`${t("mrc_ln_title")}: ${ln.address}`} style={{ display: "grid", placeItems: "center", padding: 12 }}>
+              <div style={{ padding: 10, background: "#fff", borderRadius: 12, border: "1px solid var(--line)" }}><QR value={`lightning:${ln.address}`} size={160} /></div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function LinkTools({ merchant, links, onChange }: { merchant: MerchantAccount; links: MerchantLink[]; onChange: () => void }) {
   const { t } = useI18n();
   const features = useFeatures();

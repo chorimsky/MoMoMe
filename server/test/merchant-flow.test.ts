@@ -98,12 +98,43 @@ async function main() {
     // Checked against the ACTUAL code — a digit run inside the phone number is not the code.
     ok("…but NOT the code itself", !!otpRecord && !otpRecord.body.includes(code), otpRecord?.body);
 
+    /* ---- the Lightning identity: the settlement number as an address; the business behind it
+            only once the number is proven ---- */
+    const lnMeta = async () => { const j = await (await fetch(`${base}/.well-known/lnurlp/677000789`)).json(); return (JSON.parse(j.metadata ?? "[]") as Array<[string, string]>).find((x) => x[0] === "text/plain")?.[1] ?? ""; };
+    const me0 = (await (await get("/api/merchant/me")).json()).merchant;
+    ok("the account carries its Lightning Address — the settlement number, never the code", me0.lightning?.address === "237677000789@momome.xyz", me0.lightning?.address);
+    ok("…off until the number is proven", me0.lightning?.enabled === false && me0.lightning?.reason === "unverified", JSON.stringify(me0.lightning));
+    ok("an unproven merchant's address does NOT show the business name to a wallet", !(await lnMeta()).includes("Chez Alice"), await lnMeta());
+
     /* ---- the code verifies, and only then can they trade ---- */
     const bad = await post("/api/merchant/verify", { code: "000000" });
     ok("a wrong code is rejected", bad.status === 400, String(bad.status));
     const good = await post("/api/merchant/verify", { code });
     ok("the right code verifies the merchant", good.status === 200, String(good.status));
     ok("…and the number is now proven", (await good.json()).merchant?.verifiedPhone === true);
+
+    const me1 = (await good.json().catch(() => ({}))).merchant ?? (await (await get("/api/merchant/me")).json()).merchant;
+    ok("Lightning is on once the number is proven", me1.lightning?.enabled === true, JSON.stringify(me1.lightning));
+    ok("a wallet resolving the address now sees the BUSINESS by name", (await lnMeta()).includes("Chez Alice"), await lnMeta());
+    {
+      const { mpiForMerchant } = await import("../src/core/connect/identities.js");
+      const mpi = mpiForMerchant(me1.code);
+      ok("the Connect identity's phone alias is verified in step with the merchant", mpi?.aliases.some((a) => a.type === "phone" && a.value === "237677000789" && a.verified) === true, JSON.stringify(mpi?.aliases.map((a) => [a.type, a.value, a.verified])));
+      ok("…and it is reachable as the same Lightning Address", mpi?.aliases.some((a) => a.type === "lightning_address" && a.value === "237677000789@momome.xyz") === true);
+    }
+    const lnSender = "lnurl:237677000789@momome.xyz";
+    const cb = await (await fetch(`${base}/lnurl/pay/677000789?amount=3000000`)).json();
+    ok("a wallet gets an invoice for the address", typeof cb.pr === "string", cb.reason ?? "");
+    const lnPays = await (await get("/api/payments", lnSender)).json() as Array<{ id: string; merchantId?: string; recipient: { name: string; nameSource: string }; source?: string }>;
+    const lnPay = lnPays[0];
+    ok("the Lightning Address sale is attributed to the merchant", lnPay?.merchantId === me1.id, JSON.stringify({ merchantId: lnPay?.merchantId, id: me1.id }));
+    ok("…and recorded under the business name", lnPay?.recipient.name === "Chez Alice" && lnPay.recipient.nameSource === "internal", JSON.stringify(lnPay?.recipient));
+    await post(`/api/payments/${lnPay.id}/simulate`, {}, lnSender);
+    let lnSt = "";
+    for (let i = 0; i < 60 && lnSt !== "DELIVERED"; i++) { await new Promise((r) => setTimeout(r, 200)); lnSt = (await (await get(`/api/payments/${lnPay.id}`, lnSender)).json()).state; }
+    ok("…settles to the settlement number", lnSt === "DELIVERED", lnSt);
+    const sumLn = await (await get("/api/merchant/me/summary")).json();
+    ok("…and lands on the merchant's dashboard as a Lightning Address sale", sumLn.recent?.some((r: { id: string; source?: string }) => r.id === lnPay.id && r.source === "lnurl") === true, JSON.stringify(sumLn.recent?.map((r: { id: string; source?: string }) => [r.id, r.source])));
 
     const link = await post("/api/merchant/links", { amountXaf: 5000, label: "Coffee" });
     ok("a verified merchant CAN create a pay link", link.status === 201, String(link.status));
@@ -123,6 +154,14 @@ async function main() {
        after.merchant?.verifiedPhone !== true, String(after.merchant?.verifiedPhone));
     const relink = await post("/api/merchant/links", { amountXaf: 100, label: "x" });
     ok("…and pay links are blocked again until it is re-proven", relink.status === 403, String(relink.status));
+    ok("…the Lightning identity moves to the new number and is off again", after.merchant?.lightning?.address === "237699111222@momome.xyz" && after.merchant?.lightning?.enabled === false, JSON.stringify(after.merchant?.lightning));
+    ok("…and the OLD number's address no longer names the business", !(await lnMeta()).includes("Chez Alice"), await lnMeta());
+    {
+      const { mpiForMerchant, findByAlias } = await import("../src/core/connect/identities.js");
+      const mpi = mpiForMerchant(after.merchant.code);
+      ok("the Connect identity retired the old number and its Lightning Address", !mpi?.aliases.some((a) => a.value === "237677000789" || a.value === "237677000789@momome.xyz") && !findByAlias("phone", "677000789", "CM"), JSON.stringify(mpi?.aliases.map((a) => [a.type, a.value, a.verified])));
+      ok("…and carries the new one, unverified, as its settlement destination", mpi?.aliases.some((a) => a.type === "phone" && a.value === "237699111222" && !a.verified) === true && mpi?.settlement.destination?.phone === "237699111222", JSON.stringify(mpi?.settlement.destination));
+    }
 
     /* ---- receive-payment flow: what the customer sees, what a link may ask for ---- */
     console.log("\nReceive payment — the customer's side\n");
@@ -167,7 +206,7 @@ async function main() {
     ok("…with the delivery time", typeof sale.deliveredAt === "string", sale.deliveredAt);
     ok("…and NOTHING about the payer: no device id, location, pay instruction or payout ids",
       !("senderId" in sale) && !("senderLocation" in sale) && !("payInstruction" in sale) && !("payoutRef" in sale) && !("events" in sale), Object.keys(sale).join(","));
-    ok("the summary carries a 7-day trend ending today", Array.isArray(sum.week) && sum.week.length === 7 && sum.week[6].salesXaf === 15000, JSON.stringify(sum.week?.[6]));
+    ok("the summary carries a 7-day trend ending today", Array.isArray(sum.week) && sum.week.length === 7 && sum.week[6].salesXaf >= 15000 && sum.week[6].count >= 1, JSON.stringify(sum.week?.[6]));
     const csv = await get("/api/merchant/me/sales.csv");
     const csvText = await csv.text();
     ok("the sales export is a CSV", csv.status === 200 && /^text\/csv/.test(csv.headers.get("content-type") ?? ""), csv.headers.get("content-type") ?? "");

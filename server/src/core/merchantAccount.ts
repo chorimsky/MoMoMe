@@ -11,10 +11,11 @@ import type {
   CountryCode, ProviderId, MerchantAccount, MerchantTier, MerchantLink, MerchantLinkKind, MerchantSale, Payment,
 } from "../../../shared/types.js";
 import { register, touch } from "./persist.js";
+import { lightningAddress, samePhone } from "../../../shared/domain.js";
 import { store } from "../db/store.js";
 
 /** Stored shape = public account + the owning id (never returned to clients). */
-interface StoredMerchant extends MerchantAccount { owner: string }
+export interface StoredMerchant extends MerchantAccount { owner: string }
 
 const merchants = new Map<string, StoredMerchant>();  // id -> account
 const ownerIndex = new Map<string, string>();         // owner -> merchant id
@@ -33,8 +34,36 @@ register(
 );
 
 const digits = (s: string) => s.replace(/\D/g, "");
-/** Public projection — strip the internal `owner`. */
-export function publicMerchant({ owner: _o, ...m }: StoredMerchant): MerchantAccount { return m; }
+
+/* ---------- change hook ----------
+   Anything that mirrors a merchant elsewhere (the Connect payment identity: aliases,
+   verification, settlement destination, suspension) subscribes here rather than being
+   called from every route. Fired after verify / edit / suspend / reactivate / forget. */
+type MerchantChange = "verified" | "updated" | "suspended" | "reactivated" | "forgotten";
+const listeners: Array<(m: StoredMerchant, change: MerchantChange) => void> = [];
+export function onMerchantChange(fn: (m: StoredMerchant, change: MerchantChange) => void): void { listeners.push(fn); }
+function emit(m: StoredMerchant, change: MerchantChange): void { for (const fn of listeners) { try { fn(m, change); } catch (e) { console.error("merchant change listener", e); } } }
+
+/** The merchant whose settlement number is this Mobile Money number, if any — the join the
+ *  Lightning Address surface uses to show a BUSINESS to a payer instead of a masked person. */
+export function merchantBySettlementPhone(phone: string, country: CountryCode): StoredMerchant | undefined {
+  for (const m of merchants.values()) if (m.country === country && samePhone(m.settlementPhone, phone, country)) return m;
+  return undefined;
+}
+/** The merchant's Lightning identity: its settlement number as a Lightning Address (never the
+ *  code — the code cannot receive funds). `enabled` = a wallet resolving it is shown the
+ *  business by name and the sale lands on the dashboard: that needs an active account and a
+ *  proven number. The address itself is reachable for any valid number; what verification
+ *  turns on is the identity behind it. */
+export function lightningIdentity(m: MerchantAccount): { address: string; enabled: boolean; reason?: "unverified" | "suspended" | "pending" } {
+  const address = lightningAddress(m.settlementPhone, m.country);
+  if (m.status === "suspended") return { address, enabled: false, reason: "suspended" };
+  if (!m.verifiedPhone) return { address, enabled: false, reason: "unverified" };
+  if (m.status !== "active") return { address, enabled: false, reason: "pending" };
+  return { address, enabled: true };
+}
+/** Public projection — strip the internal `owner`; add the derived Lightning identity. */
+export function publicMerchant({ owner: _o, ...m }: StoredMerchant): MerchantAccount { return { ...m, lightning: lightningIdentity(m) }; }
 
 /** Create (or, if the owner already has one, update) a merchant account. */
 export function createMerchant(owner: string, input: {
@@ -59,6 +88,7 @@ export function createMerchant(owner: string, input: {
     Object.assign(m, fields);
     if (phoneChanged && m.verifiedPhone) { m.verifiedPhone = false; m.status = "pending"; }
     touch("merchants2");
+    emit(m, "updated");
     return m;
   }
   const id = `mrc_${crypto.randomBytes(8).toString("hex")}`;
@@ -90,6 +120,7 @@ export function activateMerchant(id: string): StoredMerchant | undefined {
   if (m.status === "pending") m.status = "active";
   m.updatedAt = new Date().toISOString();
   touch("merchants2");
+  emit(m, "verified");
   return m;
 }
 
@@ -111,12 +142,12 @@ export function activateUnverified(id: string): StoredMerchant | undefined {
 export function suspendMerchant(id: string, reason?: string): StoredMerchant | undefined {
   const m = merchants.get(id); if (!m) return undefined;
   m.status = "suspended"; m.suspendedReason = reason?.slice(0, 200); m.updatedAt = new Date().toISOString();
-  touch("merchants2"); return m;
+  touch("merchants2"); emit(m, "suspended"); return m;
 }
 export function reactivateMerchant(id: string): StoredMerchant | undefined {
   const m = merchants.get(id); if (!m || m.status !== "suspended") return undefined;
   m.status = "active"; delete m.suspendedReason; m.updatedAt = new Date().toISOString();
-  touch("merchants2"); return m;
+  touch("merchants2"); emit(m, "reactivated"); return m;
 }
 export function listMerchantAccounts(): StoredMerchant[] { return [...merchants.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
 export function linkStats(merchantId: string): { total: number; active: number; invoices: number } {
@@ -197,6 +228,7 @@ export function forgetMerchant(owner: string): { merchant: boolean; links: numbe
   merchants.delete(id); ownerIndex.delete(owner);
   if (m) codeIndex.delete(m.code);
   touch("merchants2");
+  if (m) emit(m, "forgotten");
   return { merchant: true, links: n };
 }
 

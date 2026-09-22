@@ -15,6 +15,7 @@ import { getSettings } from "../core/settings.js";
 import { resolveRecipient } from "../core/nameResolver.js";
 import { isVerifiedNumber } from "../core/account.js";
 import { getIdentityByDigits } from "../core/identity.js";
+import { merchantBySettlementPhone, lightningIdentity } from "../core/merchantAccount.js";
 import { maskName } from "../../../shared/domain.js";
 import { rateFor, formatAmount } from "../core/fx.js";
 import { liveMoney } from "../config.js";
@@ -61,7 +62,15 @@ export function pinnedMetadata(national: string): string | undefined {
    the full name when the holder has proved the number is theirs (OTP anchor, or a claimed
    identity — they hand this address out themselves); a masked one (R***** C** C**)
    otherwise. The payment record itself always carries the full registered name. */
+/* A merchant whose Lightning identity is on (active account, proven settlement number) is
+   shown to the payer as the BUSINESS — the name on its pay page and in the directory, which
+   it hands out itself — never as the masked person behind the SIM. */
+function merchantFor(r: { national: string; country: "CM" | "GA" | "TD" | "CG" | "CF" }) {
+  const m = merchantBySettlementPhone(r.national, r.country);
+  return m && lightningIdentity(m).enabled ? m : undefined;
+}
 function publicName(r: { national: string; country: "CM" | "GA" | "TD" | "CG" | "CF" }, name?: string | null): string | undefined {
+  const mer = merchantFor(r); if (mer) return mer.businessName;
   const n = name?.trim();
   if (!n || n.replace(/\D/g, "") === r.national) return undefined;
   const policy = getSettings().messages.lightningAddress.nameDisplay;
@@ -123,7 +132,10 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
 
   const rq = rateFor("LIGHTNING");
   const resolved = await resolveRecipient(r.national, r.country).catch(() => null);
-  const name = resolved?.name;
+  const mer = merchantFor(r);
+  // A sale to a merchant's number IS a merchant sale: the record carries the business name
+  // (as a pay-link sale does) and the merchant id, so it lands on the merchant's dashboard.
+  const name = mer ? mer.businessName : resolved?.name;
   const now = new Date().toISOString();
   const ref = await nextRef();
 
@@ -164,9 +176,10 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
     recipient: {
       phone: r.national, country: r.country, provider: r.provider,
       name: name && name.trim() ? name : r.national,
-      nameSource: name && name.trim() ? (resolved?.status ?? "provider") : "unknown",
+      nameSource: mer ? "internal" : name && name.trim() ? (resolved?.status ?? "provider") : "unknown",
     },
     senderId: `lnurl:${lnAddress(r)}`,
+    ...(mer ? { merchantId: mer.id } : {}),
     xaf, feeXaf, totalXaf, usd: quote.usd, spreadBps: rq.spreadBps,
     payInstruction: instruction,
     source: "lnurl",

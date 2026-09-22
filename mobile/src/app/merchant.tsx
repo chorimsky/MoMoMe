@@ -379,6 +379,7 @@ function Dashboard({
       {merchant.verifiedPhone ? <FeeModeToggle merchant={merchant} onChange={onChange} setError={setError} /> : null}
 
       <Poster merchant={merchant} />
+      <LightningCard merchant={merchant} />
 
       <Card padded>
         <Label>{linkKind === 'invoice' ? tr('new_invoice') : tr('new_link')}</Label>
@@ -451,6 +452,48 @@ function Dashboard({
 }
 
 /* ---------------- counter poster ---------------- */
+/* The settlement number as a Lightning Address (never the code). "On" = a wallet resolving it
+   is shown the business by name and the sale lands on this screen; needs a proven number. */
+function LightningCard({ merchant }: { merchant: MerchantAccount }) {
+  const t = useTheme();
+  const { t: tr } = useI18n();
+  const ln = merchant.lightning;
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (!ln) return null;
+  const copy = async () => { await Clipboard.setStringAsync(ln.address); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  return (
+    <Card padded>
+      <Pressable onPress={() => setOpen((v) => !v)} style={styles.posterHead}>
+        <Ionicons name="flash" size={20} color={ln.enabled ? t.accent : t.muted} />
+        <View style={{ flex: 1 }}>
+          <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('ln_title')}</Body>
+          <Body muted style={{ fontSize: 12.5 }}>{ln.enabled ? tr('ln_on') : ln.reason === 'suspended' ? tr('ln_off_suspended') : tr('ln_off_unverified')}</Body>
+        </View>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.muted} />
+      </Pressable>
+      {open ? (
+        <View style={{ marginTop: Spacing.two, gap: Spacing.two }}>
+          <Body muted style={{ fontSize: 12.5 }}>{tr('ln_desc')}</Body>
+          <Pressable onPress={copy} style={[styles.lnAddr, { borderColor: t.line }]}>
+            <Mono style={{ fontSize: 13, flex: 1 }}>{ln.address}</Mono>
+            <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={t.accent} />
+          </Pressable>
+          {copied ? <Body muted style={{ fontSize: 12 }}>{tr('ln_copied')}</Body> : null}
+          {ln.enabled ? (
+            <>
+              <View style={styles.posterQr}>
+                <QRCode value={`lightning:${ln.address}`} size={170} backgroundColor="#fff" color="#111" ecl="M" />
+              </View>
+              <Button title={tr('ln_share')} variant="ghost" size="md" icon="share-outline" onPress={() => Share.share({ message: `${tr('ln_share_text', { name: merchant.businessName })}${ln.address}` })} />
+            </>
+          ) : null}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
 function Poster({ merchant }: { merchant: MerchantAccount }) {
   const t = useTheme();
   const { t: tr } = useI18n();
@@ -640,5 +683,6 @@ const styles = StyleSheet.create({
   txRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderTopWidth: 1, paddingTop: Spacing.three, marginTop: Spacing.three },
   posterHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   poster: { alignItems: 'center', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.four, marginTop: Spacing.three },
+  lnAddr: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 10 },
   posterQr: { padding: Spacing.three, backgroundColor: '#fff', borderRadius: Radius.md, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
 });

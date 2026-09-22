@@ -602,6 +602,10 @@ export interface MerchantAccount {
   tier: MerchantTier;
   status: MerchantAccountStatus;
   verifiedPhone: boolean;     // settlement-number ownership confirmed via OTP
+  /** Derived (read-model): the settlement number as a Lightning Address any wallet can pay,
+   *  and whether the identity behind it is on — a wallet is shown the business by name and
+   *  the sale lands on the dashboard once the number is proven and the account is active. */
+  lightning?: { address: string; enabled: boolean; reason?: "unverified" | "suspended" | "pending" };
   listed?: boolean;           // opted into the public "Pay with MoMo›Me" directory
   /** Set by an operator on suspension; shown to the owner in the app. */
   suspendedReason?: string;

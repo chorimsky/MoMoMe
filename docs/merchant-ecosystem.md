@@ -127,3 +127,24 @@ in the previous read as NEW for a few seconds and reloads the links so an invoic
 at the same moment); a row expands to reference (copy), fee breakdown, delivery time and link.
 Mobile rows name the sale (label / client / reference + channel) instead of the merchant's own name.
 `POST /merchant/links` coerces non-string free text and an unknown `kind` instead of throwing.
+
+### Merchant Lightning identity (2026-09-22 review)
+A merchant's Lightning identity is its **settlement number** as `<dial><number>@momome.xyz`
+(never the code — a code cannot receive funds). `publicMerchant()` now carries
+`lightning: { address, enabled, reason }` (`core/merchantAccount.ts` `lightningIdentity`):
+the address is reachable for any valid number; what a proven number + active account turn ON
+is the identity behind it. Before this review nothing joined the LNURL surface to merchant
+accounts: a wallet resolving a verified merchant's address saw the masked person behind the SIM
+(`R***** C**`), and the resulting payment carried no `merchantId`, so a Lightning Address sale
+never reached the merchant's dashboard. Now `routes/lnurl.ts` consults
+`merchantBySettlementPhone` + `lightningIdentity`: an enabled merchant is shown to the payer as
+the **business** (the name on its pay page), and the payment is recorded under the business
+name with `merchantId` set — it lands in Recent as a "Lightning Address" sale.
+`onMerchantChange` (verified / updated / suspended / reactivated / forgotten) is a hook in
+`merchantAccount.ts`; `connect/identities.ts` subscribes with `syncMerchantMpi`, which keeps an
+existing MPI in step (phone alias verified flag, a changed settlement number retires the old
+phone + Lightning aliases and adds the new one unverified, settlement destination, display
+name, suspension → identity suspended, forgotten → closed). MPI creation stays lazy.
+Web + mobile dashboards gained a Lightning card: address, copy, wallet QR, "a wallet paying
+this address sees: <business>" (read from the same LNURL endpoint wallets use), and a
+verify CTA when off. Tests: merchant-flow (+16).

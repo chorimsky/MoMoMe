@@ -401,7 +401,8 @@ function Dashboard({
             onChangeText={setAmount}
             style={{ flex: 1 }}
           />
-          <Button title={tr('create')} size="md" icon="add" onPress={newLink} loading={busy} disabled={linkKind === 'invoice' && !amount.trim()} />
+          {/* A link is one field + a button; an invoice is a form, so its button comes last. */}
+          {linkKind === 'link' ? <Button title={tr('create')} size="md" icon="add" onPress={newLink} loading={busy} /> : null}
         </View>
         <Field
           label={linkKind === 'invoice' ? tr('reference_field') : tr('label_optional')}
@@ -423,6 +424,7 @@ function Dashboard({
               })}
             </View>
             <Field placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} keyboardType="numbers-and-punctuation" style={{ marginTop: Spacing.two }} hint={dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? 'YYYY-MM-DD' : undefined} />
+            <Button title={tr('create_invoice')} icon="add" onPress={newLink} loading={busy} disabled={!amount.trim()} style={{ marginTop: Spacing.three }} />
           </>
         ) : null}
         {links.length === 0 ? (

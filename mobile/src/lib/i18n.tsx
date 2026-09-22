@@ -659,6 +659,7 @@ export const STRINGS = {
   client_name: ['Client name', 'Nom du client'],
   due_date_optional: ['Due date (optional)', 'Échéance (facultatif)'],
   create: ['Create', 'Créer'],
+  create_invoice: ['Create invoice', 'Créer la facture'],
   no_links: ['No links yet. Create one to share or show as a QR.', 'Aucun lien pour le moment. Créez-en un à partager ou à afficher en QR.'],
   open_amount: ['Open amount', 'Montant libre'],
   paid_times: ['Paid ×{n}', 'Payé ×{n}'],

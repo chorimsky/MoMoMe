@@ -59,7 +59,9 @@ export function androidLinksReady(): boolean {
 /** The path prefixes a link may open in the app. Everything else — the marketing pages,
  *  the admin console — stays in the browser, which is what a person tapping a link to
  *  those actually wants. */
-const APP_PATHS = ["/pay/*", "/send"];  // exactly the routes the app has (pay/[code], send)
+// Exactly the routes the app has: pay/[code], m/[code] (the counter-poster QR — a poster
+// scanned with the phone camera must open the app, not a browser tab), send.
+const APP_PATHS = ["/pay/*", "/m/*", "/send"];
 
 applinks.get("/.well-known/apple-app-site-association", (_req: Request, res: Response) => {
   if (!appleLinksReady()) {

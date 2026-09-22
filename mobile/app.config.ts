@@ -97,7 +97,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         // every merchant QR encodes `${origin}/pay/${code}` (see the web Merchant page).
         // `/send` too: a receive link shared on WhatsApp (momome.xyz/send?to=…&amount=…)
         // must land in the app, not a browser tab, or the chat → pay loop breaks.
-        data: WEB_HOSTS.flatMap((host) => [{ scheme: 'https', host, pathPrefix: '/pay' }, { scheme: 'https', host, pathPrefix: '/send' }]),
+        // `/m` is the counter poster (momome.xyz/m/MOM-CM-…): the QR a customer scans with the
+        // phone camera at the till — it must land in the app like a payment link does.
+        data: WEB_HOSTS.flatMap((host) => [{ scheme: 'https', host, pathPrefix: '/pay' }, { scheme: 'https', host, pathPrefix: '/m' }, { scheme: 'https', host, pathPrefix: '/send' }]),
         category: ['BROWSABLE', 'DEFAULT'],
       },
     ],

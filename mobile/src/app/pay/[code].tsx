@@ -10,6 +10,7 @@ import { mintIntent } from '@/lib/navIntent';
 import { useTheme } from '@/hooks/use-theme';
 import { xaf } from '@/lib/format';
 import { useI18n } from '@/lib/i18n';
+import { categoryLabel } from '@/lib/categories';
 import type { MerchantLinkPublic } from '@shared/types';
 
 export default function PayLinkScreen() {
@@ -26,7 +27,9 @@ export default function PayLinkScreen() {
     let alive = true;
     (async () => {
       try {
-        const l = await api.resolvePayLink(code).catch(() => api.resolveMerchantByCode(code));
+        // A merchant code goes straight to the directory lookup; a link code to the link. The
+        // old "try the link, then the code" cost a merchant-code scan a wasted round trip.
+        const l = /^MOM-/i.test(code) ? await api.resolveMerchantByCode(code.toUpperCase()) : await api.resolvePayLink(code).catch(() => api.resolveMerchantByCode(code));
         if (alive) setLink(l);
       } catch (e) {
         if (alive) setError(errMessage(e));
@@ -66,10 +69,19 @@ export default function PayLinkScreen() {
         <Card style={{ marginTop: Spacing.five, alignItems: 'center', gap: Spacing.three }} padded>
           <IconCircle name="alert-circle" color={t.bad} bg={t.badWash} size={56} />
           <Body center>{error}</Body>
+          {/* A code that did not resolve was almost always just scanned or typed: offer that
+              again first, and the way home second. */}
+          <Button
+            title={tr('scan_again')}
+            icon="scan"
+            onPress={() => router.replace('/(tabs)/scan')}
+            style={{ alignSelf: 'stretch' }}
+          />
           <Button
             title={tr('pay_link_go_home')}
-            variant="outline"
-            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            variant="ghost"
+            size="md"
+            onPress={() => router.replace('/')}
             style={{ alignSelf: 'stretch' }}
           />
         </Card>
@@ -110,6 +122,7 @@ export default function PayLinkScreen() {
       <Card style={{ marginTop: Spacing.four, alignItems: 'center', gap: Spacing.three }} padded elevated>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={68} />
         <H2 style={{ textAlign: 'center' }}>{link.merchant.businessName}</H2>
+        {link.merchant.category ? <Body muted center style={{ fontSize: 13, marginTop: -Spacing.two }}>{categoryLabel(link.merchant.category, lang)}</Body> : null}
         {link.merchant.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" style={{ alignSelf: 'center' }} /> : null}
         {link.label ? <Body muted center>{link.label}</Body> : null}
         {/* An invoice says who it bills and when it is due — the same lines the web shows. */}

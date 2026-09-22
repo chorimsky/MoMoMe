@@ -513,8 +513,11 @@ export const STRINGS: Dict = {
   mt_done_btn: ["Done", "Terminé"],
   scan_wallet_code: ["That's a crypto wallet code (an invoice or an address). MoMo›Me pays Mobile Money numbers: scan a MoMo›Me code, or enter the number you want to pay.", "C'est un code de portefeuille crypto (une facture ou une adresse). MoMo›Me paie des numéros Mobile Money : scannez un code MoMo›Me, ou saisissez le numéro à payer."],
   scan_not_momome: ["That QR isn't a MoMo›Me code — try again.", "Ce QR n'est pas un code MoMo›Me — réessayez."],
-  scan_enter_code: ["Enter merchant code (e.g. MOM-CM-004522)", "Entrez le code marchand (ex. MOM-CM-004522)"],
+  scan_enter_code: ["Code, link or number (e.g. MOM-CM-004522)", "Code, lien ou numéro (ex. MOM-CM-004522)"],
   scan_go: ["Pay", "Payer"],
+  scan_paste: ["Paste", "Coller"],
+  scan_torch_on: ["Light on", "Lampe"],
+  scan_torch_off: ["Light off", "Éteindre"],
   scan_retry: ["Enable camera", "Activer la caméra"],
   // ---- Ambassador ----
   amb_title: ["Ambassador program", "Programme ambassadeur"],

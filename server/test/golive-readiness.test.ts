@@ -65,6 +65,9 @@ async function main() {
     ok("the appID is teamId.bundleId", aasaBody.applinks?.details?.[0]?.appIDs?.[0] === "A1B2C3D4E5.com.momome.app",
        aasaBody.applinks?.details?.[0]?.appIDs?.[0]);
     ok("payment paths are claimed", JSON.stringify(aasaBody).includes("/pay/*"));
+    // A counter poster encodes /m/<MOM-code>: scanned with the phone camera it must open the
+    // app, not a browser tab, so the path has to be claimed alongside /pay.
+    ok("counter-poster paths are claimed too", JSON.stringify(aasaBody).includes("/m/*"));
 
     const al2 = await fetch(`${base}/.well-known/assetlinks.json`);
     const alBody = (await al2.json()) as any;

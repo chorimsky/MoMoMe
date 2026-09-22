@@ -148,3 +148,20 @@ name, suspension → identity suspended, forgotten → closed). MPI creation sta
 Web + mobile dashboards gained a Lightning card: address, copy, wallet QR, "a wallet paying
 this address sees: <business>" (read from the same LNURL endpoint wallets use), and a
 verify CTA when off. Tests: merchant-flow (+16).
+
+### Scan-to-pay review (2026-09-22)
+`/m/<MOM-code>` (the counter poster) is now claimed by the apps: `APP_PATHS` in
+`server/src/routes/applinks.ts` and the Android `intentFilters` list it beside `/pay`, and
+`mobile/src/app/m/[code].tsx` redirects to the pay screen — a poster scanned with the phone
+camera opens the app instead of a browser tab (golive-readiness asserts the AASA path).
+Mobile scan screen: the camera mounts only while the tab is focused (battery, and returning
+to the tab with the same QR in frame no longer re-pushes the pay page), a torch toggle, the
+reticle turns green on a read, one notice and one analytics event per physical code, Paste
+(only when the clipboard holds something — `hasStringAsync` does not trigger iOS's prompt),
+`autoCapitalize="none"` so a pasted case-sensitive link code survives, and a
+"denied for good" state that opens Settings instead of a button that does nothing. The field
+takes a code, a link or a number. Web `/scan` got the same case fix, a Paste button and a
+torch where the browser exposes the capability. A merchant code resolves straight through
+`resolveMerchantByCode` (no wasted link lookup), the pay card shows the merchant's category,
+its error state offers "Scan again" first, and a merchant checkout can be left through
+"Not this business?" — scanning the wrong poster used to lock the Send tab to that business.

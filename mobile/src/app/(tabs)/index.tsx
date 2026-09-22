@@ -735,6 +735,11 @@ export default function SendScreen() {
                 </View>
                 <Ionicons name="checkmark-circle" size={20} color={t.recv} />
               </View>
+              {/* The way out. Scanning the wrong poster used to lock the Send tab to that
+                  business with no exit but killing the app. */}
+              <Pressable onPress={reset} hitSlop={8} accessibilityRole="button" style={{ alignSelf: 'flex-start' }}>
+                <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('not_this_business')}</Body>
+              </Pressable>
             </Card>
           ) : (
           <Card padded>

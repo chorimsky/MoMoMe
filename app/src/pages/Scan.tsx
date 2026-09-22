@@ -39,6 +39,14 @@ export function Scan() {
   const [status, setStatus] = useState<"scanning" | "denied" | "unsupported" | "bad" | "wallet">(hasCamera ? "scanning" : "unsupported");
   const [code, setCode] = useState("");
   const [attempt, setAttempt] = useState(0); // bump to re-request the camera after a denial
+  // Torch (Android Chrome exposes it as a track capability): a printed poster on a dim counter.
+  const trackRef = useRef<MediaStreamTrack | null>(null);
+  const [torchable, setTorchable] = useState(false);
+  const [torch, setTorch] = useState(false);
+  const toggleTorch = async () => {
+    const tk = trackRef.current; if (!tk) return;
+    try { await tk.applyConstraints({ advanced: [{ torch: !torch } as MediaTrackConstraintSet] }); setTorch((v) => !v); } catch { /* not supported after all */ }
+  };
 
   useEffect(() => {
     if (!hasCamera || status === "unsupported") return;
@@ -79,6 +87,8 @@ export function Scan() {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         if (stopped || !videoRef.current) { stream.getTracks().forEach((tk) => tk.stop()); return; }
         setStatus("scanning");
+        const tk = stream.getVideoTracks()[0] ?? null; trackRef.current = tk;
+        try { setTorchable(!!(tk?.getCapabilities?.() as { torch?: boolean } | undefined)?.torch); } catch { setTorchable(false); }
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         const tick = async () => {
@@ -92,10 +102,12 @@ export function Scan() {
       } catch { setStatus("denied"); }
     })();
 
-    return () => { stopped = true; cancelAnimationFrame(raf); stream?.getTracks().forEach((tk) => tk.stop()); };
+    return () => { stopped = true; cancelAnimationFrame(raf); stream?.getTracks().forEach((tk) => tk.stop()); trackRef.current = null; setTorch(false); };
   }, [hasCamera, navigate, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const submitCode = () => { const p = payPathFromScan(code); if (p) navigate(p); else setStatus(classifyScan(code).kind === "wallet" ? "wallet" : "bad"); };
+  const submitCode = (v = code) => { const p = payPathFromScan(v); if (p) navigate(p); else setStatus(classifyScan(v).kind === "wallet" ? "wallet" : "bad"); };
+  // A link shared on WhatsApp is pasted, not typed.
+  const paste = async () => { try { const v = (await navigator.clipboard.readText()).trim(); if (v) { setCode(v); submitCode(v); } } catch { /* clipboard blocked: the field is still there */ } };
   const showCamera = status === "scanning" || status === "bad" || status === "wallet";
 
   return (
@@ -110,6 +122,9 @@ export function Scan() {
             {/* scan reticle */}
             <div aria-hidden="true" style={{ position: "absolute", inset: "18%", border: "3px solid rgba(255,255,255,0.9)", borderRadius: 18, boxShadow: "0 0 0 100vmax rgba(0,0,0,0.35)" }} />
             <div style={{ position: "absolute", left: 0, right: 0, bottom: 12, textAlign: "center", color: "#fff", fontSize: 13, fontWeight: 600, textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{t("scan_hint")}</div>
+            {torchable && (
+              <button type="button" onClick={() => { void toggleTorch(); }} aria-pressed={torch} style={{ position: "absolute", right: 10, top: 10, padding: "6px 10px", borderRadius: 999, border: "none", background: torch ? "var(--brand)" : "rgba(0,0,0,.5)", color: torch ? "var(--brand-ink, #111)" : "#fff", font: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{torch ? t("scan_torch_off") : t("scan_torch_on")}</button>
+            )}
           </div>
         )}
 
@@ -126,10 +141,14 @@ export function Scan() {
         {/* Manual merchant-code entry — always available, and the fallback path. */}
         <div style={{ marginTop: 18 }}>
           <div style={{ display: "flex", gap: 8 }}>
+            {/* Link codes are case-sensitive: auto-capitalising a pasted /pay/qPcW3Cko broke it. */}
             <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitCode(); }}
-              placeholder={t("scan_enter_code")} autoCapitalize="characters" aria-label={t("scan_enter_code")}
+              placeholder={t("scan_enter_code")} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-label={t("scan_enter_code")}
               style={{ flex: 1, padding: "13px 14px", borderRadius: "var(--r)", border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--ink)", outline: "none", minWidth: 0 }} />
-            <button className="btn btn-primary" onClick={submitCode} disabled={!code.trim()} style={{ flex: "none" }}>{t("scan_go")}</button>
+            {!code.trim() && typeof navigator !== "undefined" && !!navigator.clipboard?.readText && (
+              <button type="button" className="btn btn-quiet" onClick={() => { void paste(); }} style={{ flex: "none" }}>{t("scan_paste")}</button>
+            )}
+            <button className="btn btn-primary" onClick={() => submitCode()} disabled={!code.trim()} style={{ flex: "none" }}>{t("scan_go")}</button>
           </div>
         </div>
       </div>

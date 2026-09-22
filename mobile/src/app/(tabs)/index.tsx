@@ -205,15 +205,26 @@ export default function SendScreen() {
   }, []);
 
   // "Send again" — people this device has paid before.
+  const [recentsLoaded, setRecentsLoaded] = useState(false);
   useEffect(() => {
-    api.recentRecipients().then(setRecents).catch(() => {});
+    api.recentRecipients().then(setRecents).catch(() => {}).finally(() => setRecentsLoaded(true));
   }, []);
+  // First run: a person with no history sees three lines on what happens next, once. It goes
+  // away on "Got it" or the first delivered payment — a returning sender never sees it again.
+  const HIW_KEY = 'mm.hiwDismissed';
+  const [hiwDismissed, setHiwDismissed] = useState(true);
+  useEffect(() => { SecureStore.getItemAsync(HIW_KEY).then((v) => setHiwDismissed(v === '1')).catch(() => setHiwDismissed(false)); }, []);
+  const dismissHiw = () => { setHiwDismissed(true); SecureStore.setItemAsync(HIW_KEY, '1').catch(() => {}); };
+  const showHiw = recentsLoaded && recents.length === 0 && !hiwDismissed && !merchantCode;
 
   const pickRecent = (r: { phone: string; country: CountryCode; provider: ProviderId; name: string }) => {
     setCountry(r.country);
     setPhone(r.phone);
     setRecipientName(r.name);
     setNameSource('internal');
+    // Same rule as a contact or a scanned code: if the operator then names a different
+    // person, the screen says so instead of swapping the name in silently.
+    setOpenedAs(r.name);
     setResolvedProvider(r.provider);
   };
 
@@ -659,6 +670,23 @@ export default function SendScreen() {
       {/* ---------------- DETAILS ---------------- */}
       {step === 'details' && (
         <View style={{ gap: Spacing.four }}>
+          {showHiw ? (
+            <View style={[styles.hiw, { backgroundColor: t.surface, borderColor: t.line }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Label>{tr('hiw_title')}</Label>
+                <Pressable onPress={dismissHiw} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('hiw_dismiss')}>
+                  <Text style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('hiw_dismiss')}</Text>
+                </Pressable>
+              </View>
+              {(['hiw_1', 'hiw_2', 'hiw_3'] as const).map((k, i) => (
+                <View key={k} style={{ flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start' }}>
+                  <View style={[styles.hiwNum, { backgroundColor: t.brandWash }]}><Text style={{ color: t.warn, fontFamily: Fonts.bodyBold, fontSize: 12 }}>{i + 1}</Text></View>
+                  <Body style={{ flex: 1, fontSize: 14, lineHeight: 20 }}>{tr(k)}</Body>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           {/* Send again — recent recipients */}
           {recents.length && !merchantCode ? (
             <View style={{ gap: Spacing.two }}>
@@ -1244,8 +1272,6 @@ function PayStep({
         <Text style={[styles.payAmount, { color: t.text }]}>{xaf(payment.totalXaf)}</Text>
         <Body muted center>{tr('send_exactly')} {pi.amountLabel} · ≈ ${payment.usd.toFixed(2)}</Body>
           {pi.method === 'LIGHTNING' ? <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }} center>{satsLabel(pi.amount)}</Body> : null}
-          {ADDRESS_METHODS.has(pi.method) ? <Body muted center style={{ fontSize: 12.5 }}>{tr('exact_amount_hint')}</Body> : null}
-          {pi.method === 'USDT' || pi.method === 'USDC' ? <Body muted center style={{ fontSize: 12 }}>{tr('either_stable_hint')}</Body> : null}
       </View>
 
       {/* DEMO MODE: the instruction is simulated, so its address/invoice is fabricated.
@@ -1278,6 +1304,14 @@ function PayStep({
           ) : null}
         </>
       )}
+
+      {/* The fine print sits under the code, not above it: the action first, the caveats after. */}
+      {ADDRESS_METHODS.has(pi.method) && !expired ? (
+        <View style={{ alignSelf: 'stretch', gap: 4 }}>
+          <Body muted center style={{ fontSize: 12.5 }}>{tr('exact_amount_hint')}</Body>
+          {pi.method === 'USDT' || pi.method === 'USDC' ? <Body muted center style={{ fontSize: 12 }}>{tr('either_stable_hint')}</Body> : null}
+        </View>
+      ) : null}
 
       {/* The copyable code is fabricated in demo mode too, so it is hidden along with the
           QR — otherwise the notice above says "not a real invoice" while the screen still
@@ -1540,6 +1574,8 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   countryChipText: { fontFamily: Fonts.bodyBold, fontSize: 13 },
+  hiw: { borderWidth: 1, borderRadius: Radius.xl, padding: Spacing.four, gap: Spacing.three },
+  hiwNum: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   recentChip: { width: 118, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.three, gap: Spacing.one, justifyContent: 'space-between' },
   recentAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   recentInitials: { fontFamily: Fonts.bodyBold, fontSize: 16 },

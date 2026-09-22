@@ -169,10 +169,11 @@ function Onboard({
 
   return (
     <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
+      {/* Editing an existing account is not onboarding: no pitch, a plain title. */}
       <View style={{ alignItems: 'center', gap: Spacing.two }}>
-        <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={60} />
-        <H2 style={{ textAlign: 'center' }}>{tr('onboard_title')}</H2>
-        <Body center>{tr('onboard_sub')}</Body>
+        <IconCircle name={initial ? 'create' : 'storefront'} color={t.accent} bg={t.accentWash} size={60} />
+        <H2 style={{ textAlign: 'center' }}>{tr(initial ? 'edit_merchant_title' : 'onboard_title')}</H2>
+        <Body center>{tr(initial ? 'edit_merchant_sub' : 'onboard_sub')}</Body>
       </View>
 
       <Card padded>
@@ -208,6 +209,9 @@ function Onboard({
           right={provider ? <Pill label={PROVIDERS[provider].short} tone={provider === 'MTN' ? 'brand' : 'accent'} /> : undefined}
         />
         {phoneIssue ? <Body style={{ color: t.bad, fontSize: 13 }}>{phoneIssue}</Body> : null}
+        {initial?.verifiedPhone && localDigits(phone, 'CM') !== localDigits(initial.settlementPhone, 'CM') ? (
+          <Body style={{ color: t.warn, fontSize: 12.5 }}>{tr('edit_phone_hint')}</Body>
+        ) : null}
         <Button title={initial ? tr('save') : tr('create_merchant')} icon="checkmark" onPress={create} loading={busy} disabled={!valid} />
         {onCancel ? <Button title={tr('cancel')} variant="ghost" size="md" onPress={onCancel} /> : null}
       </Card>
@@ -409,7 +413,16 @@ function Dashboard({
         {linkKind === 'invoice' ? (
           <>
             <Field label={tr('bill_to')} placeholder={tr('client_name')} value={clientName} onChangeText={setClientName} style={{ marginTop: Spacing.two }} />
-            <Field label={tr('due_date_optional')} placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} style={{ marginTop: Spacing.two }} />
+            {/* A due date is picked, not typed: the common choices as chips, the field for anything else. */}
+            <Label style={{ marginTop: Spacing.two, marginBottom: Spacing.two }}>{tr('due_date_optional')}</Label>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two }}>
+              <Chip label={tr('due_none')} active={!dueDate} onPress={() => setDueDate('')} />
+              {[7, 14, 30].map((n) => {
+                const d = new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+                return <Chip key={n} label={tr('due_in_days', { n })} active={dueDate === d} onPress={() => setDueDate(d)} />;
+              })}
+            </View>
+            <Field placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} keyboardType="numbers-and-punctuation" style={{ marginTop: Spacing.two }} hint={dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? 'YYYY-MM-DD' : undefined} />
           </>
         ) : null}
         {links.length === 0 ? (

@@ -23,6 +23,11 @@ const KEY = 'momome.lang';
 export const STRINGS = {
   // tabs
   tab_send: ['Send', 'Envoyer'],
+  hiw_title: ['How it works', 'Comment ça marche'],
+  hiw_1: ['Enter the Mobile Money number and the amount in XAF.', 'Entrez le numéro Mobile Money et le montant en XAF.'],
+  hiw_2: ['Pay from any Bitcoin, Lightning or USDT wallet — the rate is locked for you.', 'Payez depuis n’importe quel portefeuille Bitcoin, Lightning ou USDT — le taux est bloqué pour vous.'],
+  hiw_3: ['They receive Mobile Money in seconds. No account needed on either side.', 'Ils reçoivent du Mobile Money en quelques secondes. Aucun compte requis, ni pour vous ni pour eux.'],
+  hiw_dismiss: ['Got it', 'Compris'],
   tab_scan: ['Scan', 'Scanner'],
   tab_discover: ['Discover', 'Découvrir'],
   tab_receive: ['Receive', 'Recevoir'],
@@ -140,7 +145,7 @@ export const STRINGS = {
   verified_by: ['Verified by', 'Vérifié par'],
   id_gate_blocked: ['The recipient must be verified before you can continue.', 'Le destinataire doit être vérifié avant de continuer.'],
   nm_sent_before: ['You’ve paid this number before', 'Vous avez déjà payé ce numéro'],
-  name_mismatch: ['You have this number saved as {n}. The operator lists a different name — make sure this is the person you mean.', 'Vous avez enregistré ce numéro sous {n}. L’opérateur indique un autre nom — vérifiez qu’il s’agit bien de la bonne personne.'],
+  name_mismatch: ['You know this number as {n}. The operator lists a different name — make sure this is the person you mean.', 'Vous connaissez ce numéro sous {n}. L’opérateur indique un autre nom — vérifiez qu’il s’agit bien de la bonne personne.'],
   you_send: ['You send', 'Vous envoyez'],
   network: ['Network', 'Réseau'],
   cr_title: ['Is this the right number?', 'Est-ce le bon numéro ?'],
@@ -601,6 +606,9 @@ export const STRINGS = {
   // merchant — onboarding
   merchant: ['Merchant', 'Marchand'],
   become_merchant: ['Become a merchant', 'Devenir marchand'],
+  edit_merchant_title: ['Edit your details', 'Modifier vos infos'],
+  edit_merchant_sub: ['Your code, links and QR stay the same.', 'Votre code, vos liens et votre QR restent les mêmes.'],
+  edit_phone_hint: ['Changing the settlement number switches Verified off until the new number is proven again.', 'Changer le numéro de règlement désactive « Vérifié » jusqu’à ce que le nouveau numéro soit prouvé à nouveau.'],
   onboard_title: ['Accept payments, get Mobile Money', 'Acceptez des paiements, recevez du Mobile Money'],
   onboard_sub: [
     'Create a free merchant account. Customers pay however they like; you receive XAF instantly in your Mobile Money.',
@@ -654,6 +662,8 @@ export const STRINGS = {
   no_links: ['No links yet. Create one to share or show as a QR.', 'Aucun lien pour le moment. Créez-en un à partager ou à afficher en QR.'],
   open_amount: ['Open amount', 'Montant libre'],
   paid_times: ['Paid ×{n}', 'Payé ×{n}'],
+  due_in_days: ['In {n} days', 'Dans {n} jours'],
+  due_none: ['No due date', 'Sans échéance'],
   due_prefix: ['due {d}', 'échéance {d}'],
   recent_payments: ['Recent payments', 'Paiements récents'],
   ln_title: ['Get paid from any Bitcoin wallet', "Encaissez depuis n'importe quel portefeuille Bitcoin"],

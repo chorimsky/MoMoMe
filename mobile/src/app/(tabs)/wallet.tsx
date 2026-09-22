@@ -9,7 +9,7 @@ import QRCode from 'react-native-qrcode-svg';
 // recover 30%, the mark covers ~4%: always scannable.
 const BRAND_MARK = require('../../../assets/images/icon.png') as number;
 
-import { getMyNumber, setMyNumber } from '@/api/client';
+import { API_BASE, getMyNumber, setMyNumber } from '@/api/client';
 import { Body, Button, Card, Field, Flag, H1, IconCircle, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -68,6 +68,19 @@ export default function ReceiveScreen() {
   };
 
   const address = number ? lightningAddress(number, 'CM') : '';
+  // What a payer's wallet will show for this address — the registered name, masked until the
+  // holder has verified the number. Read from the same endpoint wallets use (parity with web).
+  const [payerSees, setPayerSees] = useState<string | null>(null);
+  const [showLnQr, setShowLnQr] = useState(false);
+  useEffect(() => {
+    setPayerSees(null);
+    if (!number) return;
+    let alive = true;
+    fetch(`${API_BASE.replace(/\/api\/?$/, '')}/.well-known/lnurlp/${encodeURIComponent(number)}`).then((r) => r.json())
+      .then((j: { metadata?: string }) => { if (!alive) return; const m = JSON.parse(j.metadata ?? '[]') as [string, string][]; const line = m.find((x) => x[0] === 'text/plain')?.[1] ?? ''; setPayerSees(line.split(' · ')[0] || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [number]);
   const [amountDraft, setAmountDraft] = useState('');
   const amountXaf = Math.min(Number(amountDraft.replace(/\D/g, '')) || 0, MAX_XAF);
   // The amount asked for must be one a payer can send: below the minimum the payer's form
@@ -205,6 +218,20 @@ export default function ReceiveScreen() {
               <Mono style={{ flex: 1 }} numberOfLines={1}>{address}</Mono>
               <Ionicons name={copiedWhat === 'address' ? 'checkmark' : 'copy-outline'} size={18} color={copiedWhat === 'address' ? t.recv : t.accent} />
             </Pressable>
+            {payerSees ? (
+              <Body muted style={{ fontSize: 12.5 }}>
+                {tr('rcv_payer_sees')} <Body style={{ fontFamily: Fonts.bodyBold, fontSize: 12.5, color: t.text }}>{payerSees}</Body>
+                {/\*/.test(payerSees) ? ` — ${tr('rcv_payer_sees_masked')}` : ''}
+              </Body>
+            ) : null}
+            <Pressable onPress={() => setShowLnQr((v) => !v)} hitSlop={8}>
+              <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{showLnQr ? tr('rcv_hide_ln_qr') : tr('rcv_show_ln_qr')}</Body>
+            </Pressable>
+            {showLnQr ? (
+              <View style={[styles.qrCard, { alignSelf: 'center' }]} accessibilityRole="image" accessibilityLabel={`${tr('rcv_ln_section')}: ${address}`}>
+                <QRCode value={`lightning:${address}`} size={160} backgroundColor="#fff" color="#111" quietZone={6} ecl="M" />
+              </View>
+            ) : null}
           </View>
           {/* Closing the loop: the person who shared a code wants to know when it was paid. */}
           <View style={{ alignSelf: 'stretch', borderTopWidth: 1, borderTopColor: t.line, paddingTop: Spacing.three, gap: Spacing.two, alignItems: 'center' }}>

@@ -14,7 +14,7 @@ import type { MerchantLinkPublic } from '@shared/types';
 
 export default function PayLinkScreen() {
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const { code } = useLocalSearchParams<{ code: string }>();
   const [link, setLink] = useState<MerchantLinkPublic | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +112,13 @@ export default function PayLinkScreen() {
         <H2 style={{ textAlign: 'center' }}>{link.merchant.businessName}</H2>
         {link.merchant.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" /> : null}
         {link.label ? <Body muted center>{link.label}</Body> : null}
+        {/* An invoice says who it bills and when it is due — the same lines the web shows. */}
+        {link.kind === 'invoice' && (link.clientName || link.dueDate) ? (
+          <View style={{ alignSelf: 'stretch', gap: 4, paddingTop: Spacing.one }}>
+            {link.clientName ? <Body muted center style={{ fontSize: 13 }}>{tr('bill_to')}: <Body style={{ fontSize: 13, color: t.text }}>{link.clientName}</Body></Body> : null}
+            {link.dueDate ? <Body muted center style={{ fontSize: 13 }}>{tr('inv_due_on')}: <Body style={{ fontSize: 13, color: t.text }}>{new Date(link.dueDate + 'T00:00:00').toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Body></Body> : null}
+          </View>
+        ) : null}
         <View style={{ alignItems: 'center', gap: 2, paddingVertical: Spacing.two }}>
           {link.amountXaf ? (
             <>
@@ -126,6 +133,7 @@ export default function PayLinkScreen() {
         <Body muted center style={{ fontSize: 12.5 }}>
           <Ionicons name="lock-closed" size={11} color={t.muted} /> {tr('settles_instantly')}
         </Body>
+        {link.merchant.feeMode === 'merchant' && link.amountXaf ? <Body muted center style={{ fontSize: 12.5 }}>{tr('inv_fee_included')}</Body> : null}
       </Card>
     </Screen>
   );

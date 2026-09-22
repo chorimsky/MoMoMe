@@ -482,7 +482,7 @@ function LightningCard({ merchant }: { merchant: MerchantAccount }) {
           {copied ? <Body muted style={{ fontSize: 12 }}>{tr('ln_copied')}</Body> : null}
           {ln.enabled ? (
             <>
-              <View style={styles.posterQr}>
+              <View style={[styles.posterQr, { alignSelf: 'center' }]}>
                 <QRCode value={`lightning:${ln.address}`} size={170} backgroundColor="#fff" color="#111" ecl="M" />
               </View>
               <Button title={tr('ln_share')} variant="ghost" size="md" icon="share-outline" onPress={() => Share.share({ message: `${tr('ln_share_text', { name: merchant.businessName })}${ln.address}` })} />

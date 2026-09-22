@@ -8,6 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Body, Button, Divider, Label, Mono } from '@/components/ui';
 import { Fonts, Radius, Shadow, Spacing } from '@/constants/theme';
@@ -94,6 +95,7 @@ export function ReceiptModal({
 }) {
   const t = useTheme();
   const { t: tr, lang } = useI18n();
+  const insets = useSafeAreaInsets();
   const [showHow, setShowHow] = useState(false);
   const dial = COUNTRIES[payment.recipient.country]?.dial ?? '';
 
@@ -183,7 +185,8 @@ export function ReceiptModal({
             </Body>
           </ScrollView>
 
-          <View style={styles.actions}>
+          {/* The sheet's buttons clear the home indicator — they sat on it before. */}
+          <View style={[styles.actions, { paddingBottom: Math.max(Spacing.four, insets.bottom + Spacing.two) }]}>
             <Button title={tr('share')} icon="share-outline" variant="outline" onPress={share} style={{ flex: 1 }} />
             <Button title={tr('close')} onPress={onClose} style={{ flex: 1 }} />
           </View>

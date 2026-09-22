@@ -2,23 +2,29 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { API_BASE } from '@/api/client';
-import { Body, Card, H3, Label, Mono, Screen } from '@/components/ui';
+import { Body, Button, Card, H3, Label, Mono, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/lib/i18n';
 import { WEB_ORIGIN } from '@/lib/config';
+import { LN_ADDRESS_DOMAIN } from '@shared/domain';
 
-const LN_DOMAIN = WEB_ORIGIN.replace(/^https?:\/\//, '');
+/* The public API is /v1 at the same origin as the app API (/api). The Lightning Address
+   domain is the shared constant — the one the LNURL server serves — never the web origin. */
+const V1_BASE = API_BASE.replace(/\/api\/?$/, '') + '/v1';
 
 const ENDPOINTS: { method: string; path: string; desc: string }[] = [
   { method: 'POST', path: '/quotes', desc: 'Price a transfer (amount, method, country)' },
-  { method: 'POST', path: '/payments', desc: 'Create a payment from a quote' },
-  { method: 'GET', path: '/payments/:id', desc: 'Poll a payment to delivery' },
+  { method: 'POST', path: '/payments', desc: 'Create a payment from a quote; ?wait long-polls it' },
+  { method: 'GET', path: '/payments/:id', desc: 'Read a payment to delivery' },
   { method: 'GET', path: '/recipients/resolve', desc: 'Resolve a number → name + operator' },
-  { method: 'GET', path: '/discover', desc: 'Public merchant directory' },
+  { method: 'POST', path: '/webhooks', desc: 'Subscribe to payment.* / settlement.* events' },
+  { method: 'POST', path: '/identities', desc: 'Payment identities (Connect): aliases + settlement' },
+  { method: 'POST', path: '/invoices', desc: 'Invoices, links, QR, request-to-pay' },
+  { method: 'POST', path: '/payouts', desc: 'Pay out to Mobile Money or a Lightning Address' },
 ];
 
 function CopyRow({ value }: { value: string }) {
@@ -45,24 +51,19 @@ export default function DevelopersScreen() {
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('developers') }} />
       <View style={{ gap: Spacing.four, paddingVertical: Spacing.four }}>
-        <Body>
-          MoMo›Me is payment infrastructure. Accept Bitcoin, Lightning or USDT and settle to any
-          MTN / Orange Money number over a simple JSON API.
-        </Body>
+        <Body>{tr('dev_intro')}</Body>
 
         <Card padded>
           <Label>{tr('base_url')}</Label>
-          <CopyRow value={API_BASE} />
-          <Body muted style={{ fontSize: 13 }}>All endpoints are JSON. XAF amounts are integers.</Body>
+          <CopyRow value={V1_BASE} />
+          <Body muted style={{ fontSize: 13 }}>{tr('dev_json_note')}</Body>
+          <Body muted style={{ fontSize: 13, marginTop: Spacing.one }}>{tr('dev_auth_note')}</Body>
         </Card>
 
         <Card padded>
           <Label>{tr('lightning_address')}</Label>
-          <Body>
-            Every Mobile Money number is reachable as a Lightning Address. Paying it converts sats
-            to XAF and delivers to that number.
-          </Body>
-          <CopyRow value={`<number>@${LN_DOMAIN}`} />
+          <Body>{tr('dev_ln_note')}</Body>
+          <CopyRow value={`<number>@${LN_ADDRESS_DOMAIN}`} />
         </Card>
 
         <Card padded style={{ gap: Spacing.three }}>
@@ -80,14 +81,16 @@ export default function DevelopersScreen() {
               </View>
             </View>
           ))}
+          <Pressable onPress={() => Linking.openURL(`${V1_BASE}/openapi.json`)} hitSlop={8}>
+            <Body style={{ color: t.accent, fontFamily: Fonts.bodyBold, fontSize: 13 }}>{tr('dev_openapi')} →</Body>
+          </Pressable>
         </Card>
 
-        <Card padded>
+        <Card padded style={{ gap: Spacing.two }}>
           <H3>{tr('get_api_key')}</H3>
-          <Body muted>
-            Production API keys are issued from the operator console. Contact support to onboard
-            your business or request access.
-          </Body>
+          <Body muted>{tr('dev_keys_note')}</Body>
+          <Button title={tr('dev_open_dashboard')} size="md" icon="open-outline" onPress={() => Linking.openURL(`${WEB_ORIGIN}/developers/dashboard`)} />
+          <Button title={tr('dev_open_docs')} variant="ghost" size="md" icon="book-outline" onPress={() => Linking.openURL(`${WEB_ORIGIN}/developers`)} />
         </Card>
       </View>
     </Screen>

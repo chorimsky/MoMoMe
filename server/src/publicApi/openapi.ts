@@ -24,7 +24,7 @@ export function openApiV1(baseUrl: string) {
         "", "**Idempotency.** Every `POST` that creates or changes something requires an `Idempotency-Key` header. Retrying with the same key and body returns the original response (`Idempotent-Replayed: true`); the same key with a different body is refused (`409 idempotency_key_reused`).",
         "", "**Rate limits.** Per organization and plan (`X-RateLimit-Limit`, `X-RateLimit-Remaining`; `429` carries `Retry-After`). Payment endpoints have a stricter ceiling.",
       ].join("\n"),
-      contact: { name: "MoMo›Me developers", url: "https://momome.xyz/developers", email: "developers@momome.xyz" },
+      contact: { name: "MoMo›Me developers", url: "https://www.momome.xyz/developers", email: "developers@momome.xyz" },
     },
     servers: [{ url: live, description: "Production (mm_live_ credentials)" }, { url: sandbox, description: "Sandbox (mm_test_ credentials)" }],
     security: [{ bearerAuth: [] }],

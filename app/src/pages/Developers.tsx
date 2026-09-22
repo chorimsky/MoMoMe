@@ -228,7 +228,7 @@ export function verify(rawBody, signatureHeader, secret) {
               <p>Every invoice, link, QR and request-to-pay owns one payment intent and one hosted checkout URL. An invoice is paid once, in full (<code>partial_payments: false</code>). A <b>request-to-pay</b> is an invoice with a known payer.</p>
               <Tabs label="POST /invoices" samples={samples(base, "POST", "/invoices", { kind: "invoice", amount: { value: "45000" }, description: "Order #4471", reference: "ORD-4471", due_date: "2026-10-15", payer: { name: "Someone", phone: "+237655000303" } }, "ord-4471")} />
               <Code label="Response">{`{ "data": { "id": "inv_…", "number": "MM-2026-1002", "status": "issued", "payment_intent": "pi_…",
-            "payment_url": "https://momome.xyz/p/pi_…", "qr": { "text": "https://momome.xyz/p/pi_…" }, "accepted_methods": ["lightning", "stablecoin", "mobile_money", "momo_me"], "partial_payments": false } }`}</Code>
+            "payment_url": "https://www.momome.xyz/p/pi_…", "qr": { "text": "https://www.momome.xyz/p/pi_…" }, "accepted_methods": ["lightning", "stablecoin", "mobile_money", "momo_me"], "partial_payments": false } }`}</Code>
               <p>Listen for <code>invoice.paid</code> (and <code>payment.completed</code> / <code>settlement.completed</code> on the intent). <code>kind</code> is <code>invoice</code>, <code>payment_link</code> or <code>qr</code>; <code>POST /requests</code> creates a request-to-pay.</p>
             </section>
 

@@ -48,7 +48,7 @@ export function Receive() {
       .catch(() => {});
     return () => { alive = false; };
   }, [number]);
-  const origin = typeof window !== "undefined" ? window.location.origin : "https://momome.xyz";
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://www.momome.xyz";
   const link = number ? receiveLink(origin, number, amountXaf) : "";
   const shareLine = number ? `${t("rcv_share_text")}${amountXaf ? ` · ${new Intl.NumberFormat("fr-FR").format(amountXaf)} XAF` : ""}` : "";
   const who = number ? `${COUNTRIES.CM.dial} ${number.replace(/(\d)(?=(\d{2})+$)/g, "$1 ")}` : "";

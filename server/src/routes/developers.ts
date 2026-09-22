@@ -63,7 +63,7 @@ developers.post("/signup", rateLimitDurableMiddleware("dev_signup", 10, 3_600_00
 const dashboardUrl = (req?: Request) => {
   if (process.env.DASHBOARD_URL) return process.env.DASHBOARD_URL.replace(/\/$/, "");
   const origin = req ? str(req.headers.origin) : "";
-  return isOwnOrigin(origin) ? `${origin}/developers/dashboard` : "https://momome.xyz/developers/dashboard";
+  return isOwnOrigin(origin) ? `${origin}/developers/dashboard` : `${config.webOrigin}/developers/dashboard`;
 };
 async function sendVerification(userId: string, email: string, req?: Request) {
   const token = issueActionToken("verify_email", userId);

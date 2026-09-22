@@ -18,7 +18,11 @@ import { dirname, join } from "node:path";
 import { renderOgImages } from "./og.mjs";
 
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
-const SITE = (process.env.SITE_URL || "https://momome.xyz").replace(/\/$/, "");
+// The apex 308-redirects to www, so www is the canonical host: a canonical, an hreflang or
+// a sitemap entry pointing at the apex names a URL that redirects, which is a weaker signal
+// than naming the host that actually serves. Normalised here so the value holds whatever
+// SITE_URL is set to in the build environment.
+const SITE = (process.env.SITE_URL || "https://www.momome.xyz").replace(/\/$/, "").replace(/^https:\/\/momome\.xyz$/, "https://www.momome.xyz");
 const APP = "/send";
 // lastmod: pin with SEO_DATE for a reproducible build, else stamp today so the
 // sitemap never ships a stale date (it was hard-coded to a fixed past date).
@@ -30,8 +34,16 @@ const BRAND = "MoMo›Me";
 const GSC = process.env.GSC_VERIFICATION || "";
 // Public SPA routes worth indexing — served by the app shell, same URL in EN/FR
 // (language is a client toggle, so no separate /fr/ path and no hreflang pair).
+// Kept in sync with INDEXABLE in app/src/lib/seo.ts — a route marked index,follow that is
+// missing here is a page we tell crawlers to index and then never tell them exists.
 const APP_PAGES = [
   { path: "/send", priority: 0.9, changefreq: "weekly" },
+  { path: "/receive", priority: 0.8, changefreq: "weekly" },
+  { path: "/discover", priority: 0.7, changefreq: "weekly" },
+  { path: "/merchant", priority: 0.7, changefreq: "weekly" },
+  { path: "/developers", priority: 0.6, changefreq: "monthly" },
+  { path: "/diaspora", priority: 0.6, changefreq: "monthly" },
+  { path: "/ambassador", priority: 0.5, changefreq: "monthly" },
   { path: "/claim", priority: 0.5, changefreq: "monthly" },
   { path: "/contact", priority: 0.5, changefreq: "monthly" },
   { path: "/terms", priority: 0.3, changefreq: "yearly" },

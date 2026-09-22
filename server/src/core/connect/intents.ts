@@ -193,7 +193,9 @@ export function syncCollections(): number {
 export function expireIntents(now = Date.now()): number { let n = 0; for (const i of intents.values()) if (!TERMINAL.includes(i.status) && !i.execution?.paymentId && Date.parse(i.expiresAt) <= now) { move(i, "expired"); n++; } return n; }
 export function cancelIntent(i: PaymentIntent, why: string): boolean { if (TERMINAL.includes(i.status) || i.execution?.paymentId) return false; move(i, "failed", `cancelled: ${why}`); return true; }
 
-export const checkoutUrl = (i: PaymentIntent) => `${(process.env.CHECKOUT_BASE_URL ?? (config.publicUrl.includes("localhost") ? "http://localhost:5173" : "https://momome.xyz")).replace(/\/$/, "")}/p/${i.id}`;
+// The host that SERVES the app, never the apex: the apex 308-redirects to www, and a
+// checkout link handed to a payer should not spend a round trip on a redirect.
+export const checkoutUrl = (i: PaymentIntent) => `${(process.env.CHECKOUT_BASE_URL ?? (config.publicUrl.includes("localhost") ? "http://localhost:5173" : config.webOrigin)).replace(/\/$/, "")}/p/${i.id}`;
 export function publicIntent(i: PaymentIntent) {
   const payee = getMpi(i.payee.mpi);
   return {

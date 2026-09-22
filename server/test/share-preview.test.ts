@@ -17,7 +17,7 @@ async function main() {
     ok("title says how much and to which number, no name", /<meta property="og:title" content="Pay 500 XAF to \+237 6 80 34 44 85 · MoMo›Me">/.test(html), html.match(/og:title" content="([^"]+)"/)?.[1]);
     ok("og:image is the QR of that link, country-coded", /og:image" content="[^"]*\/share\/qr\.png\?to=237680344485&amp;amount=500"/.test(html));
     ok("og:url is the canonical country-coded link", /og:url" content="[^"]*\/send\?to=237680344485&amp;amount=500"/.test(html));
-    ok("the page is noindex and sends a human on to the app", /noindex/.test(html) && /location\.replace\("[^"]*\/send\?to=237680344485&amount=500"\)/.test(html));
+    ok("the page is noindex and sends a human on to the app", /noindex/.test(html) && /http-equiv="refresh" content="0; url=[^"]*\/send\?to=237680344485&amp;amount=500"/.test(html));
     r = await fetch(`${root}/share/send?to=237680344485`, { redirect: "manual" }); const h2 = await r.text();
     ok("an already country-coded number is not doubled and has no amount", /og:title" content="Pay \+237 6 80 34 44 85 · MoMo›Me"/.test(h2) && !/amount=/.test(h2));
     r = await fetch(`${root}/share/qr.png?to=680344485&amount=500`);
@@ -29,6 +29,25 @@ async function main() {
     ok("…and no QR is drawn for it (404)", r.status === 404);
     r = await fetch(`${root}/share/pay/NOPE-000`, { redirect: "manual" });
     ok("an unknown business link goes to its page on the app (302)", r.status === 302 && /\/pay\/NOPE-000$/.test(r.headers.get("location") ?? ""));
+
+    /* ---- the counter poster (/m/<merchant code>) and the hosted checkout (/p/<intent>) ---- */
+    const { createMerchant, activateMerchant } = await import("../src/core/merchantAccount.js");
+    const mer = createMerchant("share-owner", { businessName: "Chez Partage", category: "Restaurant", country: "CM", settlementPhone: "677000123", tier: "business" });
+    activateMerchant(mer.id);
+    r = await fetch(`${root}/share/m/${mer.code}`, { redirect: "manual" }); const hm = await r.text();
+    ok("a counter poster previews with the business name", r.status === 200 && /og:title" content="Pay Chez Partage · MoMo›Me"/.test(hm), hm.match(/og:title" content="([^"]+)"/)?.[1]);
+    ok("…its og:image is the QR of the poster link", new RegExp(`og:image" content="[^"]*/share/m/${mer.code}/qr\\.png"`).test(hm));
+    ok("…and it says the payer chooses the amount", /you choose the amount/.test(hm));
+    r = await fetch(`${root}/share/m/${mer.code}/qr.png`);
+    const qm = Buffer.from(await r.arrayBuffer());
+    ok("…the poster QR is a real PNG", r.status === 200 && qm.subarray(1, 4).toString() === "PNG" && qm.length > 1000, `${qm.length} bytes`);
+    r = await fetch(`${root}/share/m/MOM-CM-000000`, { redirect: "manual" });
+    ok("an unknown merchant code goes to its page on the app (302)", r.status === 302 && /\/m\/MOM-CM-000000$/.test(r.headers.get("location") ?? ""));
+    r = await fetch(`${root}/share/p/pi_nope`, { redirect: "manual" });
+    ok("an unknown checkout goes to its page on the app (302)", r.status === 302 && /\/p\/pi_nope$/.test(r.headers.get("location") ?? ""));
+    r = await fetch(`${root}/share/p/pi_nope/qr.png`);
+    ok("…and no QR is drawn for it (404)", r.status === 404);
+    ok("a merchant preview still reveals no personal name or number", !new RegExp("677000123").test(hm));
     ok("no personal name appears anywhere in a preview", !/displayName|nameVerified/.test(html));
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`); process.exit(fail === 0 ? 0 : 1);

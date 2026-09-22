@@ -18,7 +18,9 @@ import type { Request, Response } from "express";
 import QRCode from "qrcode";
 import { config } from "../config.js";
 import { COUNTRIES, MAX_XAF, receiveLink, splitDialed, checkPhone } from "../../../shared/domain.js";
-import { getLink, merchantById } from "../core/merchantAccount.js";
+import { getLink, merchantById, merchantByCode } from "../core/merchantAccount.js";
+import { getIntent } from "../core/connect/intents.js";
+import { getMpi } from "../core/connect/identities.js";
 
 export const share = Router();
 
@@ -58,7 +60,12 @@ function page(res: Response, o: { title: string; description: string; url: strin
 <meta name="twitter:description" content="${esc(o.description)}">
 <meta name="twitter:image" content="${esc(o.image)}">
 <meta name="robots" content="noindex">
-<script>location.replace(${JSON.stringify(o.url)})</script>
+<link rel="canonical" href="${esc(o.canonical)}">
+<!-- A human who lands here (some in-app browsers send a crawler UA) is forwarded to the app.
+     meta-refresh rather than an inline script: the site's CSP allows no unhashed inline
+     script, and the URL differs per link so no hash can cover it — the script silently did
+     nothing and left the person on this stub. -->
+<meta http-equiv="refresh" content="0; url=${esc(o.url)}">
 </head><body style="font-family:system-ui;margin:40px;text-align:center">
 <p><a href="${esc(o.url)}">Open MoMo›Me to pay</a></p>
 <img src="${esc(o.image)}" width="320" height="320" alt="QR code">
@@ -115,4 +122,48 @@ share.get("/share/pay/:code/qr.png", async (req, res) => {
   const link = getLink(code);
   if (!link || link.disabledAt) { res.status(404).end(); return; }
   await qrPng(res, `${WEB}/pay/${encodeURIComponent(code)}`);
+});
+
+/* ---- counter poster: /m/:code (a merchant code, not a link code) ---- */
+share.get("/share/m/:code", (req, res) => {
+  const code = String(req.params.code).slice(0, 40).toUpperCase();
+  const url = `${WEB}/m/${encodeURIComponent(code)}`;
+  const m = merchantByCode(code);
+  if (!m || m.status !== "active") { res.redirect(302, url); return; }
+  page(res, {
+    title: `Pay ${m.businessName} · MoMo›Me`,
+    description: `Scan the code or open the link to pay ${m.businessName} with Mobile Money — you choose the amount. Mobile Money, made simple.`,
+    url, canonical: url,
+    image: `${WEB}/share/m/${encodeURIComponent(code)}/qr.png`,
+  });
+});
+share.get("/share/m/:code/qr.png", async (req, res) => {
+  const code = String(req.params.code).slice(0, 40).toUpperCase();
+  const m = merchantByCode(code);
+  if (!m || m.status !== "active") { res.status(404).end(); return; }
+  await qrPng(res, `${WEB}/m/${encodeURIComponent(code)}`);
+});
+
+/* ---- hosted checkout: /p/:id (MoMo›Me Connect payment intent) ---- */
+share.get("/share/p/:id", (req, res) => {
+  const id = String(req.params.id).slice(0, 60);
+  const url = `${WEB}/p/${encodeURIComponent(id)}`;
+  const i = getIntent(id);
+  if (!i) { res.redirect(302, url); return; }
+  const payee = getMpi(i.payee.mpi)?.displayName ?? "a MoMo›Me business";
+  const amt = i.amount.value > 0 ? `${fmt(i.amount.value)} ${i.amount.currency}` : null;
+  const settled = ["completed", "reversed"].includes(i.status);
+  page(res, {
+    title: settled ? `Paid · ${payee} · MoMo›Me` : amt ? `Pay ${amt} to ${payee} · MoMo›Me` : `Pay ${payee} · MoMo›Me`,
+    description: settled
+      ? `This payment to ${payee} is already settled. Mobile Money, made simple.`
+      : `${i.purpose ? `${i.purpose}. ` : ""}Open the link to pay ${payee} — Mobile Money, Lightning or stablecoins. Mobile Money, made simple.`,
+    url, canonical: url,
+    image: `${WEB}/share/p/${encodeURIComponent(id)}/qr.png`,
+  });
+});
+share.get("/share/p/:id/qr.png", async (req, res) => {
+  const id = String(req.params.id).slice(0, 60);
+  if (!getIntent(id)) { res.status(404).end(); return; }
+  await qrPng(res, `${WEB}/p/${encodeURIComponent(id)}`);
 });

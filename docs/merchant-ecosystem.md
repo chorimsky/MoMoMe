@@ -165,3 +165,24 @@ torch where the browser exposes the capability. A merchant code resolves straigh
 `resolveMerchantByCode` (no wasted link lookup), the pay card shows the merchant's category,
 its error state offers "Scan again" first, and a merchant checkout can be left through
 "Not this business?" — scanning the wrong poster used to lock the Send tab to that business.
+
+### URL / link review (2026-09-22)
+**One canonical host.** The apex 308-redirects to `www`, but `index.html` and the SEO
+generator hard-coded `https://momome.xyz` — every canonical, hreflang, og:url, JSON-LD @id
+and sitemap entry named a URL that redirects. All of them now name `www` (the generator
+normalises whatever `SITE_URL` is set to), as do the hosted-checkout URL
+(`connect/intents.checkoutUrl`, which fell back to the apex), the developer-dashboard email
+fallback and the OpenAPI contact links.
+**Sitemap ↔ INDEXABLE.** `app/src/lib/seo.ts` marked /developers, /merchant, /ambassador,
+/discover and /diaspora index,follow while the sitemap listed none of them, and /receive was
+in neither. Both lists now agree.
+**Share previews** exist for `/m/:code` (the counter poster — business name + its QR, "you
+choose the amount") and `/p/:id` (a Connect hosted checkout — payee, amount, purpose, and
+"Paid" once settled), with crawler-UA rewrites in `app/vercel.json` beside /send and
+/pay/:code. The stub forwards a human with a meta-refresh rather than an inline script: the
+site's CSP allows no unhashed inline script and the URL differs per link, so the script was
+silently doing nothing.
+**CSP vs JSON-LD.** `script-src` hashed the theme and service-worker scripts but not the
+JSON-LD block, so a CSP-enforcing crawler dropped the structured data. The hash is now in
+the policy and `app/scripts/check-csp.mjs` fails the build if any inline script in
+`dist/index.html` is not covered — a hash goes stale the moment its script changes.

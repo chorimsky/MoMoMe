@@ -16,7 +16,7 @@ export function openApiSpec(publicUrl: string) {
         "Turn Bitcoin, Lightning and stablecoins into instant Mobile Money payouts (MTN & Orange, XAF) across Cameroon/CEMAC. " +
         "The flow is: create a **quote** (locks the rate), create a **payment** from it (returns a crypto pay instruction), " +
         "pay the instruction, then poll the payment or receive a webhook until it is `DELIVERED`.",
-      contact: { name: "MoMo›Me", url: "https://momome.xyz/developers" },
+      contact: { name: "MoMo›Me", url: "https://www.momome.xyz/developers" },
     },
     servers: [{ url: base, description: "Live API" }],
     security: [{ apiKey: [] }, { bearerAuth: [] }],

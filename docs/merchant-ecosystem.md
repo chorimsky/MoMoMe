@@ -186,3 +186,52 @@ silently doing nothing.
 JSON-LD block, so a CSP-enforcing crawler dropped the structured data. The hash is now in
 the policy and `app/scripts/check-csp.mjs` fails the build if any inline script in
 `dist/index.html` is not covered — a hash goes stale the moment its script changes.
+
+### Security audit (2026-09-22) — findings and fixes
+Reviewed: authentication (admin, developer, device, API credential), authorization and
+cross-tenant reads, the money path (quote→payment binding, idempotency, replay), inbound and
+outbound webhooks, injection (SQL/XSS), transport and CORS headers, secrets in code, logs and
+git history, dependency advisories, and rate limiting.
+
+**Fixed**
+1. *A signed device request was replayable* for the whole ±5-minute clock-skew window — the
+   signature covered method, path, timestamp and body, but nothing made it single-use. A
+   signature on a state-changing method is now consumed ONCE PER HTTP REQUEST, in middleware
+   ahead of routing (`app.ts signatureReplayGuard`) — not inside the signature check, because
+   a route may legitimately ask who is calling more than once (the UPI execute path resolves
+   the actor, then hands the same request to the V1 core, and that second question must not
+   read as a replay of the first). GET/HEAD are exempt so client retries still work. The
+   native client also signs HEDGED rather than RFC-6979 deterministic
+   (`mobile/src/lib/deviceSign.ts`): a deterministic signer emits byte-identical signatures
+   for two requests sharing a method, path, body and millisecond, which the server cannot
+   tell apart from a replay. WebCrypto (the web client) was already random-k.
+2. *Webhook SSRF.* `validCallbackUrl` refused literal private IPs but not a public hostname
+   RESOLVING to one (169.254.169.254, 10/8, ::1 …), and delivery followed redirects straight
+   past the check. Delivery now resolves the host on every attempt and refuses private
+   addresses (`isPrivateAddress`), and uses `redirect: "manual"`. Sandbox loopback receivers
+   stay allowed exactly where `validCallbackUrl` already allowed them.
+3. *An admin password change left other sessions alive* for the rest of the 12-hour token
+   life — the one action an operator takes when a token or laptop is compromised. Tokens now
+   carry the password generation they were issued under (`pwVersion`), the guard refuses a
+   stale one, and the operator making the change is handed a fresh token so they are not
+   signed out by their own action.
+4. *The wrong-recipient interlock token had a hard-coded fallback secret* (`"mm-risk"`) when
+   `ADMIN_SESSION_SECRET` was unset, so its acknowledgement was forgeable on such a
+   deployment. It now uses the server's persisted signing secret.
+5. *CORS allowed `localhost` on a live-money deployment*; now only where no real money moves.
+6. *`POST /momo/transfers/resolve` was unauthenticated and unthrottled* — a free oracle for
+   probing which addresses route. Durable rate limit added.
+
+**Checked, no gap found:** SQL is fully parameterised; no `dangerouslySetInnerHTML`/`innerHTML`
+anywhere; `/v1` objects are cross-org guarded on every read; payment amounts are bound to a
+server-issued quote claimed atomically; login, OTP, elevate and resolve are throttled durably
+(per IP and per subject); rail webhooks verify signature/IP with constant-time compares; admin
+role and deletion take effect immediately (the guard re-reads the user); no stack traces or
+secrets reach clients; no secret has ever been committed (full-history scan); `pnpm audit`
+reports no known vulnerabilities; the live deployment sends HSTS, nosniff, DENY, no-referrer
+and a deny-all CSP, and boots fail-closed on a default admin password, an unkeyed compliance
+chain or a world-triggerable cron.
+
+**Left deliberately:** unsigned device ids are still accepted as bearer credentials until
+`LEGACY_SENDER_UNTIL` (2026-11-01) — closing it early would lock out installs that have not
+yet enrolled a key.

@@ -17,7 +17,7 @@ const b64url = (u8: Uint8Array) => b64(u8).replace(/\+/g, "-").replace(/\//g, "_
 const jwk = (priv: Uint8Array) => { const pub = p256.getPublicKey(priv, false); return { kty: "EC", crv: "P-256", x: b64url(pub.slice(1, 33)), y: b64url(pub.slice(33, 65)) }; };
 const sign = (priv: Uint8Array, method: string, path: string, body: string, ts = String(Date.now())) => {
   const msg = new TextEncoder().encode(`${method}\n${path}\n${ts}\n${b64(sha256(new TextEncoder().encode(body)))}`);
-  return { ts, sig: b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true })) };
+  return { ts, sig: b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true, extraEntropy: true })) };
 };
 
 async function main() {

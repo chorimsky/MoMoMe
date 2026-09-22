@@ -54,7 +54,7 @@ async function main() {
     if (priv) {
       const ts = String(Date.now()), body = typeof init?.body === "string" ? init.body : "";
       const msg = new TextEncoder().encode(`${(init?.method ?? "GET").toUpperCase()}\n${p}\n${ts}\n${b64(sha256(new TextEncoder().encode(body)))}`);
-      headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true }));
+      headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true, extraEntropy: true }));
     }
     const r = await fetch(`${base}${p}`, { ...init, headers });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };

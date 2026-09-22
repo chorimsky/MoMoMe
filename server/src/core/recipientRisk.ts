@@ -18,6 +18,7 @@
    specific warning, so "I saw it" cannot be a constant a caller sets once and forgets.
    ============================================================ */
 import crypto from "node:crypto";
+import { signingSecret } from "./adminAuth.js";
 import type { CountryCode, Payment } from "../../../shared/types.js";
 import { phoneKey, localDigits, isRealName } from "../../../shared/domain.js";
 import { store } from "../db/store.js";
@@ -67,7 +68,11 @@ function oneInsertion(shorter: string, longer: string): boolean {
 /** Stable per (sender, recipient, amount, reason). A caller cannot pre-compute a blanket
  *  "yes" — the token only opens the door for the exact payment it was issued about. */
 function tokenFor(senderId: string, key: string, xaf: number, code: string): string {
-  const secret = (process.env.ADMIN_SESSION_SECRET ?? "mm-risk").slice(0, 64);
+  // Never a hard-coded default: the old "mm-risk" fallback meant that a deployment without
+  // ADMIN_SESSION_SECRET had a publicly-known key for this token, and anyone could mint the
+  // acknowledgement that waves a payment past the wrong-recipient interlock. signingSecret()
+  // is the configured secret, or a random one persisted with the rest of the store.
+  const secret = signingSecret().slice(0, 64);
   return crypto.createHmac("sha256", secret).update(`${senderId}|${key}|${xaf}|${code}`).digest("hex").slice(0, 16);
 }
 

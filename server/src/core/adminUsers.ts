@@ -17,6 +17,11 @@ interface AdminUser {
   hash: string;
   createdAt: string;
   lastLogin?: string;
+  /** Bumped whenever this account's password changes. A session token carries the value it
+   *  was issued under, so changing a password — the thing an operator does the moment they
+   *  suspect a stolen laptop or token — ends every other session at once instead of leaving
+   *  it valid for the rest of the 12-hour window. */
+  pwVersion?: number;
 }
 
 const byId = new Map<string, AdminUser>();
@@ -97,6 +102,7 @@ export function setPassword(uid: string, password: string): boolean {
   if (!u) return false;
   const { salt, hash } = makeHash(password);
   u.salt = salt; u.hash = hash;
+  u.pwVersion = (u.pwVersion ?? 1) + 1;
   touch("admin_users");
   return true;
 }
@@ -108,6 +114,9 @@ export function changeOwnPassword(uid: string, current: string, next: string): {
   setPassword(uid, next);
   return { ok: true };
 }
+
+/** The password generation a token must have been issued under to still be valid. */
+export const passwordVersion = (uid: string): number => byId.get(uid)?.pwVersion ?? 1;
 
 export function setRole(uid: string, role: AdminRole): boolean {
   const u = byId.get(uid);

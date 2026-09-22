@@ -40,7 +40,10 @@ async function main() {
   await new Promise<void>((r) => hook.once("listening", () => r()));
   const hookUrl = `http://127.0.0.1:${(hook.address() as AddressInfo).port}/h`;
   const dev = async (p: string, body?: unknown, token?: string) => (await fetch(`${base}/api/developers${p}`, { method: body ? "POST" : "GET", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined })).json() as Promise<J>;
-  const v1 = async (p: string, o: { method?: string; body?: unknown; key?: string; idem?: string } = {}) => { const r = await fetch(`${base}/v1${p}`, { method: o.method ?? (o.body ? "POST" : "GET"), headers: { "content-type": "application/json", ...(o.key ? { authorization: `Bearer ${o.key}` } : {}), ...(o.idem ? { "idempotency-key": o.idem } : {}) }, body: o.body ? JSON.stringify(o.body) : undefined }); return { status: r.status, body: (await r.json()) as J }; };
+  const v1 = async (p: string, o: { method?: string; body?: unknown; key?: string; idem?: string } = {}) => {
+    const r = await fetch(`${base}/v1${p}`, { method: o.method ?? (o.body ? "POST" : "GET"), headers: { "content-type": "application/json", ...(o.key ? { authorization: `Bearer ${o.key}` } : {}), ...(o.idem ? { "idempotency-key": o.idem } : {}) }, body: o.body ? JSON.stringify(o.body) : undefined });
+    return { status: r.status, body: (await r.json()) as J };
+  };
   const idem = () => `k_${crypto.randomBytes(6).toString("hex")}`;
   const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const until = async (id: string, states: string[], ms = 12_000) => { const t0 = Date.now(); let cur = await store().getPayment(id); while (cur && !states.includes(cur.state) && Date.now() - t0 < ms) { await settle(120); cur = await store().getPayment(id); } return cur!; };
@@ -210,6 +213,9 @@ async function main() {
     const piDNow = (await v1(`/payment-intents/${piD.body.data.id}`, { key: A.key })).body.data;
     ok("operator confirms → settled, and the payment intent's settlement_status follows", stl.status === "settled" && piDNow.settlement_status === "settled" && piDNow.status === "completed");
     const piE = await v1("/payment-intents", { key: A.key, idem: idem(), body: { payee: { identity: mpiE }, amount: { value: "20000" } } });
+    // Assert the intent exists before using it: this line once failed inside a full chain run
+    // and surfaced as "cannot read properties of undefined", which says nothing about why.
+    ok("an intent payable to E is created", !!piE.body.data?.id, `${piE.status} ${JSON.stringify(piE.body.error ?? "")}`);
     await v1(`/payment-intents/${piE.body.data.id}/execute`, { key: A.key, idem: idem(), body: {} });
     await settle(500);
     const siE = (await v1("/settlement-intents", { key: E.key })).body.data.data.find((x: J) => x.payment_intent === piE.body.data.id);

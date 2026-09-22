@@ -140,7 +140,7 @@ async function main() {
   const call = async (method: "POST" | "GET", p: string, dev: string | null, body?: unknown) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
     const bodyStr = body === undefined ? "" : JSON.stringify(body);
-    if (dev) { headers["x-mm-sender"] = dev; const priv = keys.get(dev); if (priv) { const ts = String(Date.now()); const msg = new TextEncoder().encode(`${method}\n${p}\n${ts}\n${b64(sha256(new TextEncoder().encode(bodyStr)))}`); headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true })); } }
+    if (dev) { headers["x-mm-sender"] = dev; const priv = keys.get(dev); if (priv) { const ts = String(Date.now()); const msg = new TextEncoder().encode(`${method}\n${p}\n${ts}\n${b64(sha256(new TextEncoder().encode(bodyStr)))}`); headers["x-mm-ts"] = ts; headers["x-mm-sig"] = b64(p256.sign(sha256(msg), priv, { prehash: false, lowS: true, extraEntropy: true })); } }
     const r = await fetch(`${base}${p}`, { method, headers, body: body === undefined ? undefined : bodyStr });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };
   };

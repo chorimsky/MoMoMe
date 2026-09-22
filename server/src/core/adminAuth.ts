@@ -16,7 +16,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
  *  moments ago, so a walked-away laptop or a stolen token cannot move money or change
  *  who has access. It is a claim inside the signed token (not server state), so it
  *  survives serverless instances without a session store, and it EXPIRES on its own. */
-export interface Session { uid: string; role: AdminRole; elevatedUntil?: number; }
+export interface Session { uid: string; role: AdminRole; elevatedUntil?: number; /** Password generation the token was issued under (see adminUsers.passwordVersion). */ pwv?: number; }
 
 /** How long a step-up lasts. Short on purpose: long enough to complete a task, short
  *  enough that an unattended console is not a standing authorisation. */
@@ -33,6 +33,11 @@ function secret(): string {
   if (!persistedSecret) { persistedSecret = crypto.randomBytes(32).toString("hex"); touch("admin_secret"); }
   return persistedSecret;
 }
+/** The server's general-purpose signing secret: the configured one, else a persisted random
+ *  one. Shared with other internal integrity tokens (see recipientRisk) so none of them has
+ *  to invent a fallback — a hard-coded default secret is a forgeable one. */
+export const signingSecret = (): string => secret();
+
 function sign(payload: string): string {
   return crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
 }
@@ -43,7 +48,7 @@ export function issueToken(session: Session): { token: string; expiresAt: string
   // `elv` is capped at the session expiry — elevation can never outlive the session it
   // belongs to, even if a longer value were somehow passed in.
   const elv = session.elevatedUntil ? Math.min(session.elevatedUntil, exp) : undefined;
-  const payload = Buffer.from(JSON.stringify({ uid: session.uid, role: session.role, exp, ...(elv ? { elv } : {}) })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ uid: session.uid, role: session.role, exp, ...(elv ? { elv } : {}), ...(session.pwv ? { pwv: session.pwv } : {}) })).toString("base64url");
   return { token: `${payload}.${sign(payload)}`, expiresAt: new Date(exp).toISOString() };
 }
 
@@ -59,12 +64,12 @@ export function verifyToken(token: unknown): Session | null {
   const b = Buffer.from(expect);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const d = JSON.parse(Buffer.from(payload, "base64url").toString()) as { uid?: string; role?: AdminRole; exp?: number; elv?: number };
+    const d = JSON.parse(Buffer.from(payload, "base64url").toString()) as { uid?: string; role?: AdminRole; exp?: number; elv?: number; pwv?: number };
     if (typeof d.exp !== "number" || d.exp <= Date.now() || !d.uid || !d.role) return null;
     // An expired elevation is simply dropped — the session stays valid, it is just no
     // longer elevated, so the operator is asked to re-authenticate rather than logged out.
     const elevatedUntil = typeof d.elv === "number" && d.elv > Date.now() ? d.elv : undefined;
-    return { uid: d.uid, role: d.role, ...(elevatedUntil ? { elevatedUntil } : {}) };
+    return { uid: d.uid, role: d.role, ...(elevatedUntil ? { elevatedUntil } : {}), ...(typeof d.pwv === "number" ? { pwv: d.pwv } : {}) };
   } catch {
     return null;
   }

@@ -17,6 +17,8 @@
    Nothing here is on the money path: emit() only enqueues.
    ============================================================ */
 import { createHmac, randomBytes } from "node:crypto";
+import { lookup as dnsLookupCb } from "node:dns";
+import { promisify } from "node:util";
 import type { Payment } from "../../../../shared/types.js";
 import { toCanonicalStatus } from "../../../../shared/interop.js";
 import { register, touch } from "../persist.js";
@@ -28,6 +30,8 @@ export interface Subscription { id: string; owner: string; url: string; secretHi
 interface StoredSub extends Subscription { secret: string }
 export interface OutboundEvent { id: string; subscriptionId: string; owner: string; type: string; body: string; createdAt: string; attempts: number; nextAt: string; lastStatus?: number; lastError?: string; deliveredAt?: string; dead?: boolean }
 
+const dnsLookup = promisify(dnsLookupCb) as (h: string, o: { all: true; verbatim: boolean }) => Promise<Array<{ address: string }>>;
+
 const subs = new Map<string, StoredSub>();
 const queue: OutboundEvent[] = [];
 const QUEUE_CAP = 5000;
@@ -35,6 +39,29 @@ register("outbound_webhooks", () => ({ subs: [...subs.values()], queue: queue.sl
 
 const PUBLIC_HOST = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const PRIVATE_HOST = /(^|\.)(localhost|internal|local|home|lan|railway\.internal|test)$|^\d+\.\d+\.\d+\.\d+$/i;
+
+/* SSRF. Refusing literal private IPs in the URL is only half the check: a subscriber can
+   point a perfectly ordinary public hostname at 169.254.169.254 (cloud metadata), 10.x or
+   127.0.0.1, and nothing in the name gives that away. So the address the name RESOLVES to
+   is checked at delivery time, every time — DNS can change between subscribe and send. */
+export function isPrivateAddress(ip: string): boolean {
+  const v4 = ip.match(/^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) // CGNAT
+      || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19)) || a >= 224; // benchmark, multicast, reserved
+  }
+  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  return v6 === "::" || v6 === "::1" || /^f[cd]/.test(v6) /* unique-local */ || /^fe[89ab]/.test(v6) /* link-local */ || /^ff/.test(v6) /* multicast */;
+}
+/** Every address this hostname resolves to must be public, or we do not send. */
+async function resolvesPublicly(hostname: string): Promise<boolean> {
+  try {
+    const addrs = await dnsLookup(hostname, { all: true, verbatim: true });
+    return addrs.length > 0 && addrs.every((a) => !isPrivateAddress(a.address));
+  } catch { return false; }
+}
 export function validCallbackUrl(u: string, allowInsecure = false): string | null {
   let url: URL;
   try { url = new URL(u); } catch { return "not a URL"; }
@@ -139,7 +166,21 @@ export async function flush(now = Date.now()): Promise<void> {
       if (!s || s.disabledAt) { ev.dead = true; ev.lastError = "subscription gone"; continue; }
       ev.attempts++;
       try {
-        const res = await fetchT(s.url, { method: "POST", headers: { "content-type": "application/json", "x-momome-signature": sign(s.secret, ev.body), "x-momome-event-id": ev.id, "user-agent": "MoMoMe-Webhooks/1" }, body: ev.body }, 10_000);
+        // Re-check where this hostname points, on every attempt: a subscriber can move the
+        // record to a private address after the URL passed validation at subscribe time.
+        const host = (() => { try { return new URL(s.url).hostname; } catch { return ""; } })();
+        // A sandbox/test subscription may legitimately target a loopback receiver — that is
+        // the same exception validCallbackUrl grants at subscribe time, and it never applies
+        // where real money moves.
+        const loopbackOk = !liveMoney() && (host === "localhost" || host === "127.0.0.1" || host === "::1");
+        if (!host || (!loopbackOk && !(await resolvesPublicly(host)))) {
+          ev.dead = true; ev.lastError = "endpoint does not resolve to a public address";
+          s.failures++; console.warn(`[outbound] refused ${s.url}: host resolves to a private or unresolvable address`);
+          continue;
+        }
+        // A redirect is never a legitimate webhook response, and following one would walk
+        // straight past the host checks above into whatever the redirect names.
+        const res = await fetchT(s.url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-momome-signature": sign(s.secret, ev.body), "x-momome-event-id": ev.id, "user-agent": "MoMoMe-Webhooks/1" }, body: ev.body }, 10_000);
         ev.lastStatus = res.status;
         if (res.ok) { ev.deliveredAt = new Date().toISOString(); s.failures = 0; continue; }
         ev.lastError = `HTTP ${res.status}`;

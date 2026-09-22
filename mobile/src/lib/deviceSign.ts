@@ -55,7 +55,12 @@ export async function signRequest(method: string, path: string, bodyStr: string)
   const ts = String(Date.now());
   const bodyHash = sha256(new TextEncoder().encode(bodyStr));
   const msg = new TextEncoder().encode(`${method.toUpperCase()}\n${path}\n${ts}\n${b64(bodyHash)}`);
-  const sig = p256.sign(sha256(msg), auth, { prehash: false, lowS: true });
+  // `extraEntropy` makes the signature HEDGED rather than RFC-6979 deterministic. The
+  // server now accepts a signature once per state-changing request (replay protection), and
+  // a deterministic signer produces byte-identical signatures for two requests that share a
+  // method, path, body and millisecond — which the server cannot tell apart from a replay.
+  // WebCrypto (the web client) is random-k already; this brings the native client in line.
+  const sig = p256.sign(sha256(msg), auth, { prehash: false, lowS: true, extraEntropy: true });
   return { ts, sig: b64(sig) };
 }
 

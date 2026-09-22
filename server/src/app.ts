@@ -32,8 +32,10 @@ import { seedAdminUsers } from "./core/adminUsers.js";
  *  Non-browser callers (Lightning wallets hitting LNURL, provider webhooks,
  *  curl) send no Origin header and are allowed through. */
 const ALLOWED_ORIGIN: RegExp[] = [
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  // Developer origins, and only where no real money moves: on a live deployment a page on
+  // someone's own machine has no business calling this API cross-origin, and allowing it
+  // widened the surface for nothing. `liveMoney()` is the same switch the payout rails use.
+  ...(liveMoney() ? [] : [/^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/]),
   // Only THIS project's Vercel deployments. The project is `mo-mo-me-app`; its own
   // preview URLs are `mo-mo-me-app-<hash>-<team>.vercel.app` (namespace owned by the
   // project). The earlier `momome[a-z0-9-]*` matched attacker-registrable names like
@@ -46,6 +48,36 @@ export const isOwnOrigin = (origin: string | undefined): boolean => !!origin && 
 function corsOrigin(origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void): void {
   if (!origin) return cb(null, true);
   cb(null, ALLOWED_ORIGIN.some((re) => re.test(origin)));
+}
+
+/* ONE SIGNATURE, ONE REQUEST.
+   A device signature covers the method, path, timestamp and body hash — but nothing made it
+   single-use, so anyone who captured a signed write could resend the exact bytes until the
+   timestamp aged out (±5 minutes). This consumes the signature once per HTTP request, before
+   routing: a repeat of the same signature on a state-changing method is refused, while the
+   route itself may still ask "who is calling?" as many times as it needs (the UPI execute
+   path resolves the actor and then hands the same request to the V1 core).
+   Reads are exempt: replaying a GET changes nothing, and remembering them would only cost
+   memory. Process-local by design — a signature is consumed by the instance that received it
+   first, and any other instance still holds it to the same five-minute skew window. */
+const SIG_TTL_MS = 300_000;
+const seenSignatures = new Map<string, number>();
+export function _resetSignatureReplayCache(): void { seenSignatures.clear(); }
+function signatureReplayGuard(req: Request, res: Response, next: NextFunction): void {
+  const method = req.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
+  const raw = req.headers["x-mm-sig"];
+  const sig = Array.isArray(raw) ? raw[0] : raw;
+  if (!sig) return next();
+  const now = Date.now();
+  if (seenSignatures.size > 20_000) for (const [k, exp] of seenSignatures) if (exp <= now) seenSignatures.delete(k);
+  const seen = seenSignatures.get(sig);
+  if (seen !== undefined && seen > now) {
+    res.status(401).json({ error: "signature_replayed", message: "This request was already sent. Reopen the app and try again." });
+    return;
+  }
+  seenSignatures.set(sig, now + SIG_TTL_MS);
+  next();
 }
 
 /** Baseline security headers. The API serves only JSON, so a deny-all CSP is
@@ -128,6 +160,8 @@ export function createApp() {
   // a tight limit everywhere else caps unauthenticated large-body DoS.
   app.use("/api/admin/settings", express.json({ limit: "768kb", verify: keepRaw }));
   app.use(express.json({ limit: "32kb", verify: keepRaw }));
+  // After the body parsers (so a signed request is fully formed) and before every router.
+  app.use(signatureReplayGuard);
   // MAP BODY-PARSER FAILURES TO 4xx. express.json() calls next(err) on a body it cannot
   // parse, and with no handler here that fell through to the terminal 500 — so a request
   // the CLIENT got wrong was reported as a server fault. That is not cosmetic: a TRUNCATED

@@ -70,7 +70,7 @@ import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
 import { issueToken, verifyToken, tokenFromHeaders, isElevated, ELEVATION_TTL_MS, type Session } from "../core/adminAuth.js";
 import {
-  verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword,
+  verifyCredentials, getUser, listUsers, createUser, deleteUser, setRole, setPassword, passwordVersion,
   changeOwnPassword, findByUsername, masterRecoveryMatches, passwordIssue, USERNAME_RE,
 } from "../core/adminUsers.js";
 import { canAccess, isReadOnly, isSuperAdmin, canMovePaymentFunds, canFileReports, ADMIN_ROLES, type AdminRole, type Section } from "../../../shared/roles.js";
@@ -131,7 +131,7 @@ api.post("/admin/login", async (req, res) => {
   if (!user) return res.status(401).json({ error: "bad_credentials", message: "Incorrect username or password." });
   // Successful auth — clear this user's counter so a legit operator isn't locked.
   await rateLimitResetDurable(`login:user:${uname}`);
-  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role });
+  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role, pwv: passwordVersion(user.id) });
   res.json({ token, expiresAt, user: { id: user.id, username: user.username, role: user.role } });
 });
 
@@ -174,6 +174,13 @@ api.post("/admin/elevate", async (req, res) => {
   const session = verifyToken(tokenFromHeaders(req.headers));
   const user = session ? getUser(session.uid) : undefined;
   if (!session || !user) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+  // A password change ends every session issued before it — the one action an operator takes
+  // when they think a token or a laptop is in the wrong hands. Tokens minted before this
+  // claim existed carry no `pwv` and are treated as generation 1, so nobody is logged out by
+  // the deploy itself.
+  if ((session.pwv ?? 1) !== passwordVersion(user.id)) {
+    return res.status(401).json({ error: "password_changed", message: "Your password changed — please sign in again." });
+  }
   // Throttled per user AND per IP: this endpoint takes a password, so it is an oracle for
   // guessing one. Durable so the limit holds across serverless instances.
   const [ipRl, userRl] = await Promise.all([
@@ -192,7 +199,7 @@ api.post("/admin/elevate", async (req, res) => {
   }
   await rateLimitResetDurable(`elevate:user:${user.id}`);
   const elevatedUntil = Date.now() + ELEVATION_TTL_MS;
-  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role, elevatedUntil });
+  const { token, expiresAt } = issueToken({ uid: user.id, role: user.role, elevatedUntil, pwv: passwordVersion(user.id) });
   res.json({ token, expiresAt, elevatedUntil });
 });
 
@@ -242,7 +249,9 @@ api.get("/momo/transfers/quote", (req, res) => {
   if (!Number.isFinite(xaf) || xaf <= 0) return res.status(400).json({ error: "bad_amount", message: "xaf required." });
   res.json(momoTransfer.quote(xaf));
 });
-api.post("/momo/transfers/resolve", (req, res) => {
+// Unauthenticated by design (a payer resolves a destination before anything exists), so it
+// is throttled: without a limit it is a free oracle for probing which addresses route.
+api.post("/momo/transfers/resolve", rateLimitDurableMiddleware("momo_resolve", 60, 60_000), (req, res) => {
   if (transferDenied(req, res)) return;
   const b = (req.body ?? {}) as { to?: unknown; country?: unknown };
   if (typeof b.to !== "string") return res.status(400).json({ error: "bad_recipient", message: "to required." });
@@ -287,6 +296,13 @@ api.use("/admin", (req, res, next) => {
   const session = verifyToken(tokenFromHeaders(req.headers));
   const user = session ? getUser(session.uid) : undefined;
   if (!session || !user) return res.status(401).json({ error: "unauthorized", message: "Admin login required." });
+  // A password change ends every session issued before it — the one action an operator takes
+  // when they think a token or a laptop is in the wrong hands. A token minted before this
+  // claim existed carries no `pwv` and counts as generation 1, so the deploy itself logs
+  // nobody out.
+  if ((session.pwv ?? 1) !== passwordVersion(user.id)) {
+    return res.status(401).json({ error: "password_changed", message: "Your password changed — please sign in again." });
+  }
   // Use the live role from the store (a role change takes effect immediately).
   const role = user.role;
   (req as unknown as AdminReq).session = { uid: user.id, role };
@@ -397,7 +413,12 @@ api.post("/admin/password", async (req, res) => {
     if (r.reason === "bad_current") return res.status(403).json({ error: "bad_current", message: "Current password is incorrect." });
     return res.status(404).json({ error: "not_found", message: "Account not found." });
   }
-  res.json({ ok: true });
+  // The change just ended every session of this account — including this one. Hand back a
+  // fresh token so the operator who made the change stays signed in, while every OTHER
+  // session (a stolen token, a forgotten laptop) is now dead. Elevation is not carried over:
+  // proving the old password is not proof for the new one.
+  const { token, expiresAt } = issueToken({ uid: session.uid, role: session.role, pwv: passwordVersion(session.uid) });
+  res.json({ ok: true, token, expiresAt });
 });
 
 /* ---------- user administration (Super Admin) ---------- */
@@ -452,6 +473,8 @@ function senderOf(req: { headers: Record<string, string | string[] | undefined> 
 }
 
 const SIG_SKEW_MS = 300_000; // ±5 min tolerance (real phone clocks drift)
+
+
 function hdr(req: ReqLike, name: string): string | undefined {
   const v = req.headers[name];
   const s = Array.isArray(v) ? v[0] : v;

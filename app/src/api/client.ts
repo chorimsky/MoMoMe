@@ -374,8 +374,13 @@ export const api = {
     req<{ ok: boolean }>("/admin/forgot", { method: "POST", body: JSON.stringify({ username, recoveryKey, newPassword }) }),
 
   // Change the signed-in user's own password.
-  adminChangePassword: (currentPassword: string, newPassword: string) =>
-    req<{ ok: boolean }>("/admin/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
+  // Changing the password ends every session of this account server-side; the reply carries
+  // a fresh token for THIS one, so the operator who made the change is not signed out by it.
+  adminChangePassword: async (currentPassword: string, newPassword: string) => {
+    const r = await req<{ ok: boolean; token?: string; expiresAt?: string }>("/admin/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
+    if (r.token) setAdminToken(r.token);
+    return r;
+  },
 
   // User administration (Super Admin only).
   adminUsers: () => req<{ users: AdminUserView[]; roles: AdminRole[] }>("/admin/users"),

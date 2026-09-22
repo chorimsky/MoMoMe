@@ -25,6 +25,8 @@ import { fundingAvailable } from "../core/connect/routing.js";
 import { rateLimitDurable } from "../core/ratelimit.js";
 import { meter } from "../core/platform/usage.js";
 import type { CountryCode } from "../../../shared/types.js";
+import { store } from "../db/store.js";
+import { cancelPayment } from "../core/stateMachine.js";
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
 const num = (v: unknown) => { const n = Number(str(v)); return Number.isFinite(n) ? n : NaN; };
@@ -158,14 +160,21 @@ route("get", "/payouts", { scope: "payouts:read", cls: "payouts" }, async (ctx) 
 route("get", "/payouts/:id", { scope: "payouts:read", cls: "payouts" }, async (ctx) => { const p = getPayout(ctx.params.id); if (!p || p.orgId !== ctx.orgId) throw err(404, "not_found", "No such payout."); return publicPayout(p); });
 
 /* ---------- hosted checkout (public: the payer holds nothing but the link) ---------- */
-const checkoutView = (id: string) => {
+const checkoutView = async (id: string) => {
   const i = getIntent(id); if (!i) throw err(404, "payment_not_found", "This payment link does not exist.");
+  // A lapsed Lightning invoice is retired the moment the checkout notices it, not on the next
+  // reconcile sweep: cancelling an unfunded engine payment lets the intent drop the instruction
+  // (onEnginePayment) and the payer picks a method again. Funded payments are never touched.
+  if (i.execution?.kind === "external_payment" && i.execution.paymentId && !["completed", "failed", "expired", "reversed"].includes(i.status)) {
+    const p = await store().getPayment(i.execution.paymentId);
+    if (p && p.state === "AWAITING_INBOUND" && p.method === "LIGHTNING" && Date.parse(p.payInstruction.expiresAt) <= Date.now()) await cancelPayment(p, "checkout: funding instruction expired unpaid");
+  }
   const payee = getMpi(i.payee.mpi); const avail = fundingAvailable();
   const methods = i.permittedMethods.filter((m) => m !== "momo_me" && m !== "bank_transfer" && avail[m]);
   return { id: i.id, status: i.status, settlement_status: i.settlementStatus, payee: { display_name: payee?.displayName ?? "MoMo›Me merchant", type: payee?.type ?? null, verified: !!payee?.aliases.some((a) => a.verified && a.type === "phone") }, amount: { value: String(i.amount.value), currency: i.amount.currency }, purpose: i.purpose, methods, execution: i.execution ? { method: i.execution.method, payment_id: i.execution.paymentId ?? null, payment_instructions: i.execution.instruction ?? null } : null, expires_at: i.expiresAt, livemode: i.env === "live" };
 };
 route("get", "/checkout/:id", { public: true, cls: "checkout" }, async (ctx) => checkoutView(ctx.params.id));
-route("get", "/checkout/:id/status", { public: true, cls: "checkout" }, async (ctx) => { const v = checkoutView(ctx.params.id); return { id: v.id, status: v.status, settlement_status: v.settlement_status }; });
+route("get", "/checkout/:id/status", { public: true, cls: "checkout" }, async (ctx) => { const v = await checkoutView(ctx.params.id); return { id: v.id, status: v.status, settlement_status: v.settlement_status, has_instruction: !!v.execution?.payment_instructions }; });
 route("post", "/checkout/:id/pay", { public: true, cls: "checkout" }, async (ctx) => wrap(async () => {
   const rl = await rateLimitDurable(`v1:checkout:${ctx.ip}`, 30, 600_000);
   if (!rl.ok) throw err(429, "rate_limited", "Too many attempts. Retry shortly.", { retry_after_seconds: rl.retryAfterSec });

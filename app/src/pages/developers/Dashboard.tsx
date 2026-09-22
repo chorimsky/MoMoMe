@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { SiteHeader } from "../../components/nav.js";
-import { dev, devToken, setDevToken, V1_BASE, type DevOrg, type DevCredential, type DevMember, type DevRequest, DevError } from "../../api/developers.js";
+import { dev, devToken, setDevToken, V1_BASE, type DevOrg, type DevCredential, type DevMember, type DevRequest, type ConnectOverview, DevError } from "../../api/developers.js";
+import { QR } from "../../components/atoms.js";
 import "../Developers.css";
 import "./dashboard.css";
 
@@ -91,8 +92,8 @@ function Auth({ onDone, params }: { onDone: () => void; params: URLSearchParams 
 }
 
 /* ---------- shell ---------- */
-type Tab = "overview" | "keys" | "webhooks" | "transactions" | "settlements" | "golive" | "team" | "billing" | "security" | "audit";
-const TABS: Array<[Tab, string]> = [["overview", "Overview"], ["keys", "API keys"], ["webhooks", "Webhooks"], ["transactions", "Transactions"], ["settlements", "Settlements"], ["golive", "Go live"], ["team", "Team"], ["billing", "Billing"], ["security", "Security"], ["audit", "Audit log"]];
+type Tab = "overview" | "identity" | "invoices" | "payouts" | "keys" | "webhooks" | "transactions" | "settlements" | "golive" | "team" | "billing" | "security" | "audit";
+const TABS: Array<[Tab, string]> = [["overview", "Overview"], ["identity", "Identity"], ["invoices", "Invoices & links"], ["payouts", "Payouts"], ["keys", "API keys"], ["webhooks", "Webhooks"], ["transactions", "Transactions"], ["settlements", "Settlements"], ["golive", "Go live"], ["team", "Team"], ["billing", "Billing"], ["security", "Security"], ["audit", "Audit log"]];
 const tabFromHash = (): Tab => { const h = window.location.hash.replace("#", "") as Tab; return TABS.some(([k]) => k === h) ? h : "overview"; };
 
 export function DeveloperDashboard() {
@@ -136,6 +137,9 @@ export function DeveloperDashboard() {
         <main className="dd-main">
           {!org && <Skeleton rows={4} />}
           {org && tab === "overview" && <Overview org={org} me={me!} go={setTab} />}
+          {org && tab === "identity" && <Identity org={org} />}
+          {org && tab === "invoices" && <Invoices org={org} />}
+          {org && tab === "payouts" && <Payouts org={org} />}
           {org && tab === "keys" && <Keys org={org} />}
           {org && tab === "webhooks" && <Webhooks org={org} />}
           {org && tab === "transactions" && <Transactions org={org} />}
@@ -424,4 +428,102 @@ function Audit({ org }: { org: DevOrg }) {
   return <Panel title="Audit log" sub="Every credential, dashboard and operator action on this organization." action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => void q.reload()}>Refresh</button>}>{q.loading && !q.data ? <Skeleton /> : q.data?.events.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>Details</th></tr></thead><tbody>
     {q.data.events.map((e) => <tr key={e.id}><td className="small" title={when(e.at)}>{ago(e.at)}</td><td>{e.action}</td><td className="small">{e.actor.type} {e.actor.label ?? e.actor.id}</td><td className="small">{e.target ? `${e.target.type} ${e.target.id}` : ""}</td><td className="small">{e.details ? JSON.stringify(e.details).slice(0, 120) : ""}</td></tr>)}
   </tbody></table></div> : <Empty>Nothing yet.</Empty>}</Panel>;
+}
+
+/* ---------- Connect: identity ---------- */
+function Identity({ org }: { org: DevOrg }) {
+  const q = useAsync(() => dev.connect(org.id), [org.id]); const d = q.data; const m = d?.identity;
+  const [f, setF] = useState<{ display_name: string; preferred: string; phone: string; bank: string; account: string; lightning_address: string }>({ display_name: "", preferred: "", phone: "", bank: "", account: "", lightning_address: "" });
+  const [alias, setAlias] = useState({ type: "phone", value: "" }); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  useEffect(() => { if (m) setF({ display_name: m.display_name ?? "", preferred: m.settlement?.preferred ?? "momo_me", phone: m.settlement?.destination?.phone ? `+${m.settlement.destination.phone}` : "", bank: m.settlement?.destination?.bank ?? "", account: m.settlement?.destination?.account ?? "", lightning_address: m.settlement?.destination?.lightning_address ?? "" }); }, [m?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => { setBusy(true); setMsg(null); try { await dev.connectIdentity(org.id, { display_name: f.display_name, settlement: { preferred: f.preferred, destination: { phone: f.phone, bank: f.bank, account: f.account, lightning_address: f.lightning_address } } }); setMsg("Saved."); await q.reload(); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); } };
+  const addAlias = async () => { setMsg(null); try { await dev.connectAlias(org.id, alias); setAlias({ type: "phone", value: "" }); await q.reload(); } catch (e) { setMsg(errMsg(e)); } };
+  if (!d || !m) return <Skeleton />;
+  const ln = (m.aliases as Array<{ type: string; value: string }>).find((a) => a.type === "lightning_address")?.value;
+  return (
+    <>
+      <div className="dd-kpis"><Kpi label="Payment identity" value={<code style={{ fontSize: 14 }}>{m.id}</code>} sub={`${m.type} · ${m.country}`} /><Kpi label="MoMo›Me balance" value={`${fmt(d.balance.available)} XAF`} sub="internal rail — instant transfers between connected identities" /><Kpi label="Lightning" value={m.lightning_enabled ? "enabled" : "off"} sub={ln ?? "add a phone alias to get an address"} /></div>
+      <div className="callout">Your identity is how other MoMo›Me-connected businesses reach you: by phone, email, merchant code or Lightning Address. Payments between connected identities settle instantly on the MoMo›Me ledger; everyone else reaches you through the hosted checkout.</div>
+      <Panel title="Aliases" sub="Ways others can address you. The same alias cannot belong to two identities.">
+        <div className="dd-chips">{(m.aliases as Array<{ type: string; value: string; verified: boolean }>).map((a) => <span key={`${a.type}:${a.value}`} className="dd-st" title={a.verified ? "verified" : "unverified"}>{a.type.replace("_", " ")}: {a.value}{a.verified ? " ✓" : ""}</span>)}</div>
+        <div className="dd-row" style={{ marginTop: 10 }}><label>Type<select value={alias.type} onChange={(e) => setAlias({ ...alias, type: e.target.value })}><option value="phone">phone</option><option value="email">email</option><option value="merchant_code">merchant code</option><option value="external_id">external id</option></select></label><label>Value<input value={alias.value} onChange={(e) => setAlias({ ...alias, value: e.target.value })} placeholder={alias.type === "phone" ? "+237 6XX XXX XXX" : ""} /></label><button type="button" className="btn btn-ghost btn-sm" onClick={addAlias} disabled={!alias.value}>Add alias</button></div>
+      </Panel>
+      <Panel title="Settlement profile" sub="How you want to be paid. Externally funded payments (Lightning, stablecoins, Mobile Money) settle to your Mobile Money number; internal transfers land on your MoMo›Me balance.">
+        <div className="dd-grid2">
+          <label>Display name<input value={f.display_name} onChange={(e) => setF({ ...f, display_name: e.target.value })} /></label>
+          <label>Preferred settlement<select value={f.preferred} onChange={(e) => setF({ ...f, preferred: e.target.value })}><option value="momo_me">MoMo›Me balance</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank transfer (operator-settled)</option><option value="lightning">Lightning</option></select></label>
+          <label>Mobile Money number<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} inputMode="tel" placeholder="+237 6XX XXX XXX" /></label>
+          <label>Lightning Address (for Lightning settlement)<input value={f.lightning_address} onChange={(e) => setF({ ...f, lightning_address: e.target.value })} placeholder="you@wallet.com" /></label>
+          <label>Bank<input value={f.bank} onChange={(e) => setF({ ...f, bank: e.target.value })} /></label>
+          <label>Account<input value={f.account} onChange={(e) => setF({ ...f, account: e.target.value })} /></label>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "…" : "Save profile"}</button>
+        </div>
+        {msg && <div className="callout small" role="status" style={{ marginTop: 8 }}>{msg}</div>}
+      </Panel>
+      <Panel title="Accepted payment methods" sub={`Available on this deployment now: ${Object.entries(d.funding).filter(([, v]) => v).map(([k]) => k).join(", ")}`}><div className="dd-chips">{(m.payment_methods as string[]).map((x) => <span key={x} className={`dd-st ${d.funding[x] ? "COMPLETED" : ""}`}>{x}</span>)}</div></Panel>
+    </>
+  );
+}
+
+/* ---------- Connect: invoices & links ---------- */
+function Invoices({ org }: { org: DevOrg }) {
+  const q = useAsync(() => dev.connect(org.id), [org.id]); const d = q.data;
+  const [f, setF] = useState({ kind: "invoice", amount: "", description: "", reference: "", due_date: "", payer_name: "", payer_phone: "" });
+  const [created, setCreated] = useState<Record<string, any> | null>(null); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false); const [open, setOpen] = useState<Record<string, any> | null>(null);
+  const create = async () => { setBusy(true); setMsg(null); try { const inv = await dev.connectInvoice(org.id, { ...f, amount: Number(f.amount) }); setCreated(inv); setF({ ...f, amount: "", description: "", reference: "" }); await q.reload(); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); } };
+  const KIND: Record<string, string> = { invoice: "Invoice", payment_link: "Payment link", qr: "QR code", request_to_pay: "Request to pay" };
+  return (
+    <>
+      {created && <div className="dd-secret" role="status"><b>{KIND[created.kind]} {created.number} — {fmt(Number(created.amount.value))} XAF</b><code>{created.payment_url}</code><div className="dd-row"><button type="button" className="btn btn-primary btn-sm" onClick={() => copyText(created.payment_url)}>Copy link</button><a className="btn btn-ghost btn-sm" href={created.payment_url} target="_blank" rel="noreferrer">Open checkout ↗</a><button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreated(null)}>Done</button></div>{created.kind === "qr" && <div style={{ display: "grid", placeItems: "center", paddingTop: 8 }}><QR value={created.payment_url} size={180} /></div>}</div>}
+      <Panel title="Create" sub="Every one of these is a hosted checkout the payer opens with no account. An invoice is paid once, in full.">
+        <div className="dd-grid2">
+          <label>Type<select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>{Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          <label>Amount (XAF)<input value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} inputMode="numeric" placeholder="25000" /></label>
+          <label>Description<input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Order #4471" /></label>
+          <label>Your reference<input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="ORD-4471" /></label>
+          {f.kind !== "qr" && <label>Due date<input type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></label>}
+          {(f.kind === "invoice" || f.kind === "request_to_pay") && <><label>Payer name{f.kind === "request_to_pay" ? "" : " (optional)"}<input value={f.payer_name} onChange={(e) => setF({ ...f, payer_name: e.target.value })} /></label><label>Payer phone{f.kind === "request_to_pay" ? " *" : " (optional)"}<input value={f.payer_phone} onChange={(e) => setF({ ...f, payer_phone: e.target.value })} inputMode="tel" placeholder="+237 6XX XXX XXX" /></label></>}
+          <button type="button" className="btn btn-primary" disabled={busy || !(Number(f.amount) > 0)} onClick={create}>{busy ? "…" : `Create ${KIND[f.kind].toLowerCase()}`}</button>
+        </div>
+        {msg && <div className="dd-err" role="alert">{msg}</div>}
+      </Panel>
+      <Panel title="Invoices, links and requests" sub={d ? `${d.invoices.length} in ${d.environment}` : undefined} action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => void q.reload()}>Refresh</button>}>
+        {q.loading && !d ? <Skeleton /> : d?.invoices.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Number</th><th>Type</th><th>Description</th><th>Payer</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+          {d.invoices.map((inv) => <tr key={inv.id} className="click" onClick={() => setOpen(inv)}><td><code>{inv.number}</code></td><td>{KIND[inv.kind]}</td><td>{inv.description ?? inv.reference ?? "—"}</td><td className="small">{inv.payer?.name ?? "anyone"}</td><td>{fmt(Number(inv.amount.value))} XAF</td><td><Status s={inv.status} /></td><td className="dd-actions" onClick={(e) => e.stopPropagation()}><button type="button" onClick={() => copyText(inv.payment_url)}>Copy link</button>{["issued", "pending", "draft"].includes(inv.status) && <button type="button" onClick={() => { if (confirm("Cancel this invoice?")) dev.connectCancelInvoice(org.id, inv.id).then(q.reload).catch((e) => setMsg(errMsg(e))); }}>Cancel</button>}</td></tr>)}
+        </tbody></table></div> : <Empty>Nothing yet — create your first payment link above.</Empty>}
+      </Panel>
+      {open && <div className="dd-drawer" onClick={() => setOpen(null)} role="dialog" aria-modal="true"><div onClick={(e) => e.stopPropagation()}><h3>{open.number} <Status s={open.status} /></h3><div className="dd-kv"><span>Amount</span><span>{fmt(Number(open.amount.value))} XAF</span><span>Payment link</span><code>{open.payment_url}</code><span>Intent</span><code>{open.payment_intent}</code><span>Accepted</span><span>{open.accepted_methods.join(", ")}</span>{open.paid_at && <><span>Paid</span><span>{when(open.paid_at)}</span></>}</div><div style={{ display: "grid", placeItems: "center" }}><QR value={open.payment_url} size={160} /></div><div className="dd-row"><a className="btn btn-ghost btn-sm" href={open.payment_url} target="_blank" rel="noreferrer">Open ↗</a><button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(null)}>Close</button></div></div></div>}
+    </>
+  );
+}
+
+/* ---------- Connect: payouts ---------- */
+function Payouts({ org }: { org: DevOrg }) {
+  const q = useAsync(() => dev.connect(org.id), [org.id]); const d = q.data;
+  const [f, setF] = useState({ to: "phone", phone: "", lightning_address: "", name: "", amount: "", reference: "" }); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const [review, setReview] = useState(false);
+  const send = async () => { setBusy(true); setMsg(null); setReview(false); try { const p = await dev.connectPayout(org.id, { amount: Number(f.amount), phone: f.to === "phone" ? f.phone : undefined, lightning_address: f.to === "lightning" ? f.lightning_address : undefined, name: f.name, reference: f.reference }); setMsg(`Payout ${p.id}: ${p.status}.`); setF({ ...f, amount: "", reference: "" }); await q.reload(); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); } };
+  return (
+    <>
+      <div className="dd-kpis"><Kpi label="Available balance" value={d ? `${fmt(d.balance.available)} XAF` : "…"} sub="what you can pay out now" /><Kpi label="Payouts" value={d ? d.payouts.length : "…"} sub={d ? `${d.payouts.filter((p) => p.status === "completed").length} completed` : undefined} /></div>
+      <Panel title="Send from your balance" sub="To any Mobile Money number, or to a Lightning Address anywhere in the world — you send XAF, MoMo›Me handles the rest.">
+        <div className="dd-grid2">
+          <label>Destination<select value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })}><option value="phone">Mobile Money number</option><option value="lightning">Lightning Address</option></select></label>
+          {f.to === "phone" ? <label>Number<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} inputMode="tel" placeholder="+237 6XX XXX XXX" /></label> : <label>Lightning Address<input value={f.lightning_address} onChange={(e) => setF({ ...f, lightning_address: e.target.value })} placeholder="name@wallet.com" /></label>}
+          <label>Amount (XAF)<input value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} inputMode="numeric" /></label>
+          <label>Recipient name (optional)<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label>Reference<input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="PAYROLL-09" /></label>
+          {!review ? <button type="button" className="btn btn-primary" disabled={busy || !(Number(f.amount) > 0) || !(f.to === "phone" ? f.phone : f.lightning_address)} onClick={() => setReview(true)}>Review payout</button>
+            : <div className="dd-secret" style={{ gridColumn: "1 / -1" }}><b>Send {fmt(Number(f.amount))} XAF to {f.to === "phone" ? f.phone : f.lightning_address}{f.name ? ` (${f.name})` : ""}?</b><span className="muted small">Mobile Money payouts cannot be reversed once the operator confirms them.</span><div className="dd-row"><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={send}>{busy ? "…" : "Confirm & send"}</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setReview(false)}>Back</button></div></div>}
+        </div>
+        {msg && <div className="callout small" role="status" style={{ marginTop: 8 }}>{msg}</div>}
+        {d && d.balance.available === 0 && <p className="muted small">Your balance is 0 XAF. It grows with internal payments from other connected identities.{d.environment === "test" && <> Sandbox: <button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => dev.connectSandboxCredit(org.id).then(q.reload).catch((e) => setMsg(errMsg(e)))}>credit 100 000 XAF to try payouts</button>.</>}</p>}
+      </Panel>
+      <Panel title="History" action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => void q.reload()}>Refresh</button>}>
+        {q.loading && !d ? <Skeleton /> : d?.payouts.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>When</th><th>Destination</th><th>Amount</th><th>Fee</th><th>Status</th><th>Reference</th></tr></thead><tbody>
+          {d.payouts.map((p) => <tr key={p.id}><td className="small" title={when(p.created_at)}>{ago(p.created_at)}</td><td>{p.destination.type === "lightning" ? `⚡ ${p.destination.address}` : `${p.destination.operator} ${p.destination.phone}${p.destination.name ? ` · ${p.destination.name}` : ""}`}</td><td>{fmt(Number(p.amount.value))} XAF</td><td className="small">{p.fee.value} XAF</td><td><Status s={p.status} />{p.failure_reason ? <span className="muted small"> {p.failure_reason}</span> : null}</td><td className="small">{p.reference ?? p.provider_reference ?? "—"}</td></tr>)}
+        </tbody></table></div> : <Empty>No payouts yet.</Empty>}
+      </Panel>
+    </>
+  );
 }

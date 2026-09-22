@@ -46,7 +46,7 @@ export function cancelInvoice(inv: Invoice): boolean { if (!["draft", "issued", 
 /** Intent status → invoice lifecycle (from the same hook that follows the engine). */
 export function syncInvoice(i: PaymentIntent): void {
   const inv = invoiceOfIntent(i.id); if (!inv || inv.status === "cancelled") return;
-  const next: InvoiceStatus = i.status === "completed" ? "paid" : i.status === "reversed" ? "refunded" : i.status === "expired" ? "expired" : ["authorized", "pending", "processing"].includes(i.status) ? "pending" : inv.status;
+  const next: InvoiceStatus = i.status === "completed" ? "paid" : i.status === "reversed" ? "refunded" : i.status === "expired" ? "expired" : ["authorized", "pending", "processing"].includes(i.status) ? "pending" : i.status === "created" && inv.status === "pending" ? "issued" : inv.status;
   if (next !== inv.status) { inv.status = next; inv.updatedAt = now(); if (next === "paid") { inv.paidAt = now(); enqueueEvent(`org:${inv.orgId}`, "invoice.paid", publicInvoice(inv)); } if (next === "expired") enqueueEvent(`org:${inv.orgId}`, "invoice.expired", publicInvoice(inv)); touch("connect_invoices"); }
 }
 export function publicInvoice(inv: Invoice) {

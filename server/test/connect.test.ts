@@ -153,6 +153,18 @@ async function main() {
     const i6 = await untilIntent(A.key, pi6.body.data.id, ["completed", "failed", "reversed", "processing"], 4000);
     ok("the collection's lifecycle is mirrored into the intent (neither company touches Bitcoin)", ["processing", "completed", "pending"].includes(i6.status), i6.status);
 
+    console.log("\n9b. A lapsed Lightning invoice does not kill the payment link\n");
+    const invR = await v1("/invoices", { key: A.key, idem: idem(), body: { kind: "payment_link", amount: { value: "6000" }, description: "Retry me" } });
+    const rid = invR.body.data.payment_intent as string;
+    const first = await v1(`/checkout/${rid}/pay`, { body: { method: "lightning" } });
+    const enginePid = first.body.data.execution.payment_id as string;
+    const pEng = await store().getPayment(enginePid); pEng!.payInstruction.expiresAt = new Date(Date.now() - 1000).toISOString(); await store().putPayment(pEng!);
+    const after = await v1(`/checkout/${rid}`);
+    ok("the checkout retires the expired instruction and the intent is back to created", after.body.data.status === "created" && after.body.data.execution === null, `${after.body.data.status}`);
+    const second = await v1(`/checkout/${rid}/pay`, { body: { method: "lightning" } });
+    ok("the payer gets a fresh instruction on the same link", second.status === 200 && second.body.data.execution.payment_id !== enginePid && second.body.data.status === "pending");
+    ok("the invoice is still issued (not expired)", (await v1(`/invoices/${invR.body.data.id}`, { key: A.key })).body.data.status === "pending" || (await v1(`/invoices/${invR.body.data.id}`, { key: A.key })).body.data.status === "issued");
+
     console.log("\n10. Webhooks, idempotency, statuses\n");
     await v1("/webhooks", { key: A.key, idem: idem(), body: { url: hookUrl, events: ["*"] } });
     const k = idem();

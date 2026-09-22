@@ -51,12 +51,17 @@ function sdkCall(path: string, method: string): [string, string, string | null] 
   if (path === "/webhooks" && method === "POST") return ["endpoint", "webhooks.create", null];
   if (path.startsWith("/sandbox/payments/")) return ["payment", "sandbox.pay", path.split("/")[3]];
   if (path === "/settlements" && method === "POST") return ["settlement", "settlements.create", null];
+  if (path === "/resolve") return ["party", "identities.resolve", null];
+  if (path === "/payment-intents" && method === "POST") return ["intent", "paymentIntents.create", null];
+  if (path === "/invoices" && method === "POST") return ["invoice", "invoices.create", null];
+  if (path === "/payouts" && method === "POST") return ["payout", "payouts.create", null];
   return ["result", "request", null];
 }
 
 const NAV: Array<{ grp: string; items: Array<[string, string]> }> = [
   { grp: "Getting started", items: [["intro", "Introduction"], ["quickstart", "Quick start"], ["auth", "Authentication"], ["environments", "Sandbox & live"]] },
   { grp: "Guides", items: [["quote", "Create a quote"], ["payment", "Create a payment"], ["track", "Track a payment"], ["webhooks", "Webhooks"], ["idempotency", "Idempotency"], ["sandbox", "Sandbox scenarios"]] },
+  { grp: "Connect", items: [["connect", "Identities & reach"], ["invoices", "Invoices, links & QR"], ["checkout", "Hosted checkout"], ["payouts", "Payouts & Lightning"]] },
   { grp: "Reference", items: [["reference", "API reference"], ["states", "Payment states"], ["errors", "Error reference"], ["countries", "Countries & assets"], ["sdks", "SDKs"], ["limits", "Rate limits"]] },
 ];
 
@@ -205,6 +210,39 @@ export function verify(rawBody, signatureHeader, secret) {
               <p>Pay a reserved recipient number to rehearse an outcome; any other valid number succeeds. <code>GET /sandbox/scenarios</code> lists them.</p>
               <Params rows={[["+237 670 000 001", "PAYMENT_FAILED", "Payout rejected on every provider → REFUNDED with refund.status = awaiting_destination; POST /payments/{id}/refund with a Lightning invoice"], ["+237 670 100 002", "MANUAL_REVIEW", "Held for an operator after the funds arrive"], ["+237 670 200 003", "INSUFFICIENT_LIQUIDITY", "503 at creation"], ["+237 670 300 004", "PROVIDER_UNAVAILABLE", "503 at creation"], ["+237 670 400 005", "PAYMENT_TIMEOUT", "The instruction expires in 60 s → EXPIRED"], ["+237 670 500 006", "PAYMENT_DELAYED", "Completes ~20 s after payment"], ["an expired quote", "QUOTE_EXPIRED", "410"], ["a reused Idempotency-Key", "DUPLICATE_PAYMENT", "Replay, or 409 on a different body"], ["+237 670 12", "INVALID_RECIPIENT", "422 recipient_invalid"]]} />
               <p><code>POST /sandbox/payments/{"{id}"}/pay</code> simulates the customer's wallet paying the instruction.</p>
+            </section>
+
+            <section id="connect" className="dev-sec">
+              <h2>Identities & reach</h2>
+              <p><b>Connect once. Pay anyone. Settle anywhere.</b> Every organization has a MoMo›Me Payment Identity (<code>mpi_…</code>) with aliases — phone numbers, emails, merchant codes, a Lightning Address — and a settlement profile. You say <i>"pay 100 000 XAF to Company B"</i>; MoMo›Me decides whether that is an instant ledger transfer (B is connected), a Lightning-funded payment, a stablecoin, or a Mobile Money collection — and settles B the way B asked.</p>
+              <Tabs label="POST /resolve — is this party reachable?" samples={samples(base, "POST", "/resolve", { phone: "+237699000202" }, undefined)} />
+              <Code label="Response">{`{ "data": { "reachable": true, "identity": "mpi_…", "identity_type": "business", "connected": true,
+            "payment_capabilities": ["momo_me", "lightning", "stablecoin", "mobile_money"], "lightning_address": "237699000202@momome.xyz" } }`}</Code>
+              <Tabs label="POST /payment-intents — pay a connected party" samples={samples(base, "POST", "/payment-intents", { payee: { identity: "mpi_…" }, amount: { value: "100000", currency: "XAF" }, purpose: { type: "invoice", reference: "INV-29381" } }, "inv-29381")} />
+              <p>Then <code>POST /payment-intents/{"{id}"}/execute</code>. When both parties are connected and your balance covers it, the response is already <code>completed</code> with <code>settlement_status: settled</code> — no external rail, no Bitcoin, instant. Otherwise you get a funding instruction, exactly like a payment.</p>
+              <Params rows={[["GET /identities/me", "identity", "Your MPI, aliases, settlement profile, balance"], ["POST /identities · POST /identities/{id}/aliases · PATCH /identities/{id}", "identity", "Branches, sub-merchants, customers you manage; settlement profile (mobile_money · momo_me · bank_transfer · lightning)"], ["POST /counterparties", "identity", "A party with no MoMo›Me presence yet; auto-linked when they join"], ["POST /payment-intents · …/execute · …/cancel", "payment", "The canonical intent; route_preview at creation, route_explanation at execution"]]} />
+            </section>
+
+            <section id="invoices" className="dev-sec">
+              <h2>Invoices, payment links & QR</h2>
+              <p>Every invoice, link, QR and request-to-pay owns one payment intent and one hosted checkout URL. An invoice is paid once, in full (<code>partial_payments: false</code>). A <b>request-to-pay</b> is an invoice with a known payer.</p>
+              <Tabs label="POST /invoices" samples={samples(base, "POST", "/invoices", { kind: "invoice", amount: { value: "45000" }, description: "Order #4471", reference: "ORD-4471", due_date: "2026-10-15", payer: { name: "Someone", phone: "+237655000303" } }, "ord-4471")} />
+              <Code label="Response">{`{ "data": { "id": "inv_…", "number": "MM-2026-1002", "status": "issued", "payment_intent": "pi_…",
+            "payment_url": "https://momome.xyz/p/pi_…", "qr": { "text": "https://momome.xyz/p/pi_…" }, "accepted_methods": ["lightning", "stablecoin", "mobile_money", "momo_me"], "partial_payments": false } }`}</Code>
+              <p>Listen for <code>invoice.paid</code> (and <code>payment.completed</code> / <code>settlement.completed</code> on the intent). <code>kind</code> is <code>invoice</code>, <code>payment_link</code> or <code>qr</code>; <code>POST /requests</code> creates a request-to-pay.</p>
+            </section>
+
+            <section id="checkout" className="dev-sec">
+              <h2>Hosted checkout</h2>
+              <p>Send the payer to <code>payment_url</code>. The page needs no account: it shows the payee, the amount, and only the methods the routing engine allows for that payee and amount; it renders the instruction (QR, copy, open-in-wallet), counts down, retires a lapsed Lightning invoice and offers a fresh one, and updates by itself until it says <b>Paid</b>. Embed it in an iframe or build your own on the same public endpoints:</p>
+              <Params rows={[["GET /checkout/{intent}", "public", "Payee, amount, purpose, available methods, current execution"], ["POST /checkout/{intent}/pay { method, payer_phone?, payer_name? }", "public", "Start funding; returns payment_instructions"], ["GET /checkout/{intent}/status", "public", "Lightweight poll: status, settlement_status, has_instruction"]]} />
+            </section>
+
+            <section id="payouts" className="dev-sec">
+              <h2>Payouts & Lightning enablement</h2>
+              <p>From your MoMo›Me balance, pay any Mobile Money number or any Lightning Address in the world. You send XAF; MoMo›Me buys the sats, pays the address and reconciles — you never hold Bitcoin, run a node or see a channel. <code>lightning_send</code> is a capability flag on your identity, nothing more.</p>
+              <Tabs label="POST /payouts" samples={samples(base, "POST", "/payouts", { amount: { value: "25000" }, destination: { lightning_address: "alice@wallet.com" }, reference: "PAYROLL-09" }, "payroll-09-alice")} />
+              <p>Or <code>destination: {"{ phone: \"+237…\" }"}</code> for Mobile Money, or <code>{"{ identity: \"mpi_…\" }"}</code> to let MoMo›Me pick the recipient's own settlement destination. A payout that cannot be delivered is <code>reversed</code> and your balance is restored; events: <code>payout.created · processing · completed · failed · reversed</code>.</p>
             </section>
 
             <section id="reference" className="dev-sec">

@@ -335,3 +335,81 @@ developers.post("/orgs/:org/requests", guard("org.update"), (req, res) => {
   audit({ orgId: req.params.org, actor: actor(req), action: `request.${kind}.submitted`, target: { type: "request", id: r.request.id }, ip: clientIp(req) });
   res.status(201).json(r.request);
 });
+
+/* ---------- MoMo›Me Connect from the dashboard (docs/connect): identity, invoices, payouts, counterparties ---------- */
+import { mpiForOrganization, getMpi, addAlias, updateProfiles, ownerMpi, normalizeAlias, type AliasType, type SettlementProfile, type PaymentMethodId } from "../core/connect/identities.js";
+import { balanceOf, creditBalance } from "../core/connect/ledger.js";
+import { invoicesOf as connectInvoicesOf, createInvoice, getInvoice, cancelInvoice, publicInvoice } from "../core/connect/invoices.js";
+import { intentsOf, getIntent, cancelIntent, publicIntent } from "../core/connect/intents.js";
+import { payoutsOf, createPayout, publicPayout, PayoutError } from "../core/connect/payouts.js";
+import { counterpartiesOf, createCounterparty, publicCounterparty } from "../core/connect/counterparties.js";
+import { fundingAvailable } from "../core/connect/routing.js";
+const cenv = () => (liveMoney() ? "live" : "test") as "live" | "test";
+developers.get("/orgs/:org/connect", guard("org.read"), (req, res) => {
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  res.json({ identity: ownerMpi(m), balance: { available: balanceOf(m.id), currency: "XAF" }, funding: fundingAvailable(), environment: cenv(), invoices: connectInvoicesOf(req.params.org, cenv(), 100).map(publicInvoice), intents: intentsOf(req.params.org, cenv(), 100).map(publicIntent), payouts: payoutsOf(req.params.org, cenv(), 100).map(publicPayout), counterparties: counterpartiesOf(req.params.org).map(publicCounterparty) });
+});
+developers.patch("/orgs/:org/connect/identity", guard("org.update"), (req, res) => {
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  const b = req.body ?? {}; const s = (b.settlement ?? {}) as Record<string, unknown>;
+  const dest: NonNullable<SettlementProfile["destination"]> = {};
+  if (s.destination && typeof s.destination === "object") { const d = s.destination as Record<string, unknown>; if (str(d.phone)) { const n = normalizeAlias("phone", str(d.phone), m.country); if (!n) return bad(res, 400, "bad_request", "That is not a valid Mobile Money number."); dest.phone = n; dest.country = m.country; } if (str(d.bank)) dest.bank = str(d.bank); if (str(d.account)) dest.account = str(d.account); if (str(d.lightning_address)) dest.lightning_address = str(d.lightning_address).toLowerCase(); }
+  const preferred = str(s.preferred) as SettlementProfile["preferred"] | "";
+  if (preferred === "stablecoin") return bad(res, 400, "bad_request", "Stablecoin settlement is not offered (pass-through model).");
+  const out = updateProfiles(m.id, { displayName: str(b.display_name) || undefined, settlement: { ...(preferred ? { preferred } : {}), ...(Object.keys(dest).length ? { destination: dest } : {}), ...(typeof s.allowLightning === "boolean" ? { allowLightning: s.allowLightning } : {}) }, payment: Array.isArray(b.methods) ? { methods: (b.methods as unknown[]).map(str).filter((x): x is PaymentMethodId => ["momo_me", "mobile_money", "lightning", "stablecoin", "bank_transfer"].includes(x)) } : undefined });
+  audit({ orgId: req.params.org, actor: actor(req), action: "identity.updated", target: { type: "identity", id: m.id }, ip: clientIp(req) });
+  res.json(ownerMpi(out!));
+});
+developers.post("/orgs/:org/connect/identity/aliases", guard("org.update"), (req, res) => {
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  const type = str((req.body ?? {}).type) as AliasType;
+  if (!["phone", "email", "merchant_code", "external_id"].includes(type)) return bad(res, 400, "bad_request", "type must be phone, email, merchant_code or external_id.");
+  const r = addAlias(m.id, type, str((req.body ?? {}).value), false);
+  if (!r.ok) return bad(res, r.error === "alias_taken" ? 409 : 400, r.error, r.error === "alias_taken" ? "That alias already belongs to another identity." : "Invalid alias.");
+  audit({ orgId: req.params.org, actor: actor(req), action: "identity.alias_added", target: { type: "identity", id: m.id }, details: { type }, ip: clientIp(req) });
+  res.json(ownerMpi(r.mpi));
+});
+developers.post("/orgs/:org/connect/invoices", guard("apps.manage"), (req, res) => {
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  const b = req.body ?? {}; const kind = (["invoice", "payment_link", "qr", "request_to_pay"].includes(str(b.kind)) ? str(b.kind) : "invoice") as "invoice" | "payment_link" | "qr" | "request_to_pay";
+  const amount = Number(b.amount); if (!Number.isFinite(amount) || amount <= 0) return bad(res, 400, "bad_request", "Amount must be a positive number of XAF.");
+  const payer = str(b.payer_phone) || str(b.payer_name) || str(b.payer_email) ? { phone: str(b.payer_phone) || undefined, name: str(b.payer_name) || undefined, email: str(b.payer_email) || undefined, counterparty: str(b.counterparty) || undefined } : undefined;
+  if (kind === "request_to_pay" && !payer) return bad(res, 400, "bad_request", "A request-to-pay needs the payer's phone or a counterparty.");
+  try {
+    const inv = createInvoice({ orgId: req.params.org, env: cenv(), kind, payee: m, amountXaf: amount, description: str(b.description) || undefined, reference: str(b.reference) || undefined, dueDate: /^\d{4}-\d{2}-\d{2}$/.test(str(b.due_date)) ? str(b.due_date) : undefined, payer, acceptedMethods: Array.isArray(b.accepted_methods) ? (b.accepted_methods as unknown[]).map(str).filter((x): x is PaymentMethodId => ["lightning", "stablecoin", "mobile_money", "momo_me"].includes(x)) : undefined });
+    audit({ orgId: req.params.org, actor: actor(req), action: "invoice.created", target: { type: "invoice", id: inv.id }, details: { kind, amount }, ip: clientIp(req) });
+    res.status(201).json(publicInvoice(inv));
+  } catch (e) { bad(res, 400, "bad_request", e instanceof Error ? e.message : "Could not create."); }
+});
+developers.post("/orgs/:org/connect/invoices/:id/cancel", guard("apps.manage"), (req, res) => {
+  const inv = getInvoice(req.params.id); if (!inv || inv.orgId !== req.params.org) return bad(res, 404, "not_found", "No such invoice.");
+  if (!cancelInvoice(inv)) return bad(res, 409, "bad_transition", `An invoice in ${inv.status} cannot be cancelled.`);
+  const i = getIntent(inv.intentId); if (i) cancelIntent(i, "invoice cancelled from the dashboard");
+  audit({ orgId: req.params.org, actor: actor(req), action: "invoice.cancelled", target: { type: "invoice", id: inv.id }, ip: clientIp(req) });
+  res.json(publicInvoice(inv));
+});
+developers.post("/orgs/:org/connect/payouts", guard("settlements.write"), async (req, res) => {
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  const b = req.body ?? {};
+  try {
+    const p = await createPayout({ orgId: req.params.org, env: cenv(), payer: m, amountXaf: Number(b.amount), destination: { phone: str(b.phone) || undefined, lightning_address: str(b.lightning_address) || undefined, name: str(b.name) || undefined }, reference: str(b.reference) || undefined });
+    audit({ orgId: req.params.org, actor: actor(req), action: "payout.created", target: { type: "payout", id: p.id }, details: { xaf: p.amount.value, status: p.status }, ip: clientIp(req) });
+    res.status(201).json(publicPayout(p));
+  } catch (e) { if (e instanceof PayoutError) return bad(res, e.status, e.code.toLowerCase(), e.message); bad(res, 500, "error", "Payout failed."); }
+});
+developers.post("/orgs/:org/connect/counterparties", guard("apps.manage"), (req, res) => {
+  const b = req.body ?? {};
+  const contacts = [["phone", str(b.phone)], ["email", str(b.email)], ["lightning_address", str(b.lightning_address)]].filter(([, v]) => v).map(([type, value]) => ({ type: type as AliasType, value }));
+  const r = createCounterparty(req.params.org, { name: str(b.name), contacts });
+  if (!r.ok) return bad(res, 400, "bad_request", r.error === "name_required" ? "Name is required." : `Invalid contact: ${r.error}.`);
+  audit({ orgId: req.params.org, actor: actor(req), action: "counterparty.created", target: { type: "counterparty", id: r.counterparty.id }, ip: clientIp(req) });
+  res.status(201).json(publicCounterparty(r.counterparty));
+});
+developers.get("/orgs/:org/connect/intents/:id", guard("payments.read"), (req, res) => { const i = getIntent(req.params.id); if (!i || i.orgId !== req.params.org) return bad(res, 404, "not_found", "No such intent."); res.json({ ...publicIntent(i), events: i.events, route_explanation: i.route?.explanation ?? [] }); });
+developers.post("/orgs/:org/connect/sandbox-credit", guard("apps.manage"), (req, res) => {
+  if (liveMoney()) return bad(res, 404, "not_found", "Sandbox only.");
+  const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
+  const xaf = Math.min(10_000_000, Math.max(1, Math.round(Number((req.body ?? {}).amount) || 100_000)));
+  creditBalance(`sandbox:${Date.now()}`, m.id, xaf);
+  res.json({ available: balanceOf(m.id) });
+});

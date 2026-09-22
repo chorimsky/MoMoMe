@@ -34,7 +34,17 @@ export interface UsageBlock { summary: UsageSummary; days: Array<{ day: string; 
 
 export interface DevPlan { id: string; name: string; description?: string; platformFeePct: number; rateLimitRpm: number; tiers: Array<{ fromXaf: number; feePct: number }> }
 export interface DevRequest { id: string; orgId: string; kind: "kyb" | "plan_change" | "live_access"; status: "open" | "approved" | "rejected"; createdAt: string; updatedAt: string; payload: Record<string, unknown>; decisionNote?: string }
+export interface ConnectOverview { identity: Record<string, any>; balance: { available: number; currency: string }; funding: Record<string, boolean>; environment: "live" | "test"; invoices: Array<Record<string, any>>; intents: Array<Record<string, any>>; payouts: Array<Record<string, any>>; counterparties: Array<Record<string, any>> }
 export const dev = {
+  connect: (id: string) => req<ConnectOverview>(`/orgs/${id}/connect`),
+  connectIdentity: (id: string, b: Record<string, unknown>) => patch<Record<string, any>>(`/orgs/${id}/connect/identity`, b),
+  connectAlias: (id: string, b: { type: string; value: string }) => post<Record<string, any>>(`/orgs/${id}/connect/identity/aliases`, b),
+  connectInvoice: (id: string, b: Record<string, unknown>) => post<Record<string, any>>(`/orgs/${id}/connect/invoices`, b),
+  connectCancelInvoice: (id: string, inv: string) => post<Record<string, any>>(`/orgs/${id}/connect/invoices/${inv}/cancel`, {}),
+  connectPayout: (id: string, b: Record<string, unknown>) => post<Record<string, any>>(`/orgs/${id}/connect/payouts`, b),
+  connectCounterparty: (id: string, b: Record<string, unknown>) => post<Record<string, any>>(`/orgs/${id}/connect/counterparties`, b),
+  connectSandboxCredit: (id: string, amount = 100000) => post<{ available: number }>(`/orgs/${id}/connect/sandbox-credit`, { amount }),
+  connectIntent: (id: string, pi: string) => req<Record<string, any>>(`/orgs/${id}/connect/intents/${pi}`),
   signup: (b: { email: string; name: string; password: string; organization: string; country?: string; plan?: string; note?: string; expected_monthly_volume_xaf?: string }) => post<{ user: DevUser; organization: DevOrg; token: string; expiresAt: string; email_verification?: { sent: boolean; dev_link?: string } }>("/signup", b),
   login: (b: { email: string; password: string }) => post<{ user: DevUser; token: string; expiresAt: string }>("/login", b),
   logout: (everywhere = false) => post<{ ok: boolean }>("/logout", { everywhere }),

@@ -21,10 +21,19 @@ export function Checkout() {
   const { id = "" } = useParams();
   const [c, setC] = useState<Checkout | null>(null); const [err, setErr] = useState<string | null>(null);
   const [method, setMethod] = useState<string>(""); const [phone, setPhone] = useState(""); const [name, setName] = useState(""); const [busy, setBusy] = useState(false);
-  const load = async () => { const r = await fetch(`${V1_BASE}/checkout/${id}`); const j = await r.json(); if (!r.ok) { setErr(j.error?.message ?? "This payment link is not available."); return; } setC(j.data); if (!method && j.data.methods?.length) setMethod(j.data.methods[0]); };
+  const load = async () => { let r: Response; try { r = await fetch(`${V1_BASE}/checkout/${id}`); } catch { setErr("Network error — check your connection and reload."); return; } const j = await r.json().catch(() => ({})); if (!r.ok) { setErr(j.error?.message ?? "This payment link is not available right now."); return; } setC((prev) => ({ ...j.data, retried: !!prev?.execution && !j.data.execution })); if (!method && j.data.methods?.length) setMethod(j.data.methods[0]); };
   useEffect(() => { void load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Follow the status while something is in flight.
-  useEffect(() => { if (!c || ["completed", "failed", "expired", "reversed"].includes(c.status) || !c.execution) return; const t = setInterval(() => void load(), 2500); return () => clearInterval(t); }, [c?.status, c?.execution?.payment_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!c || ["completed", "failed", "expired", "reversed"].includes(c.status) || !c.execution) return;
+    const t = setInterval(async () => { try { const r = await fetch(`${V1_BASE}/checkout/${id}/status`); const j = await r.json().catch(() => ({})); if (j.data && (j.data.status !== c.status || j.data.settlement_status !== c.settlement_status || j.data.has_instruction === false)) void load(); } catch { /* next tick */ } }, 2000);
+    return () => clearInterval(t);
+  }, [c?.status, c?.settlement_status, c?.execution?.payment_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Countdown on the funding instruction; when it lapses the page reloads and offers a new one.
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => { const exp = c?.execution?.payment_instructions?.expires_at; if (!exp) { setLeft(null); return; } const tick = () => { const s = Math.max(0, Math.round((Date.parse(exp) - Date.now()) / 1000)); setLeft(s); if (s === 0) void load(); }; tick(); const t = setInterval(tick, 1000); return () => clearInterval(t); }, [c?.execution?.payment_instructions?.expires_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const STEPS = ["pending", "authorized", "processing", "completed"]; const stepIdx = Math.max(0, STEPS.indexOf(c?.status ?? "pending"));
   const pay = async () => { setBusy(true); setErr(null); try { const r = await fetch(`${V1_BASE}/checkout/${id}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method, payer_phone: phone || undefined, payer_name: name || undefined }) }); const j = await r.json(); if (!r.ok) setErr(j.error?.message ?? "Could not start the payment."); else setC(j.data); } catch { setErr("Network error — try again."); } finally { setBusy(false); } };
   if (err && !c) return <Shell><div className="dd-auth-card"><h1>Payment link</h1><div className="dd-err">{err}</div></div></Shell>;
   if (!c) return <Shell><div className="dd-auth-card"><Spinner /> Loading…</div></Shell>;
@@ -40,6 +49,7 @@ export function Checkout() {
         {dead && <div className="dd-err" role="alert">This payment is {c.status}. Ask {c.payee.display_name} for a new link.</div>}
         {!done && !dead && !ins && (
           <div className="dd-form">
+            {c.status === "created" && (c as Checkout & { retried?: boolean }).retried && <div className="callout small">The previous payment code expired unpaid. Choose a method to get a fresh one.</div>}
             <div className="dd-plans" role="radiogroup" aria-label="Payment method">{c.methods.map((m) => <label key={m} className={method === m ? "on" : ""}><input type="radio" name="m" checked={method === m} onChange={() => setMethod(m)} /><b>{METHOD_COPY[m]?.[0] ?? m}</b><span>{METHOD_COPY[m]?.[1] ?? ""}</span></label>)}</div>
             {method === "mobile_money" && <label>Your Mobile Money number<input inputMode="tel" placeholder="+237 6XX XXX XXX" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>}
             <label>Your name (optional)<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
@@ -52,9 +62,11 @@ export function Checkout() {
           <div className="dd-form">
             {ins.uri && <div style={{ display: "grid", placeItems: "center" }}><QR value={ins.uri} size={200} /></div>}
             {ins.code && <CopyField value={ins.code} label={ins.method === "lightning_invoice" ? "Lightning invoice" : ins.method === "erc20_address" ? "Address (Ethereum)" : "Payment code"} />}
-            {ins.amount_label && <p className="muted small">Send exactly <b>{ins.amount_label}</b>{ins.expires_at ? ` · valid until ${new Date(ins.expires_at).toLocaleTimeString()}` : ""}</p>}
+            {ins.uri && <a className="btn btn-primary btn-block" href={ins.uri}>{ins.method === "lightning_invoice" ? "Open in a Lightning wallet" : "Open in a wallet"}</a>}
+            {ins.amount_label && <p className="muted small">Send exactly <b>{ins.amount_label}</b>{left !== null ? <> · <b>{left > 0 ? `${mmss(left)} left` : "expired"}</b></> : ""}</p>}
             {ins.message && <p className="muted">{ins.message}</p>}
-            <p className="muted small"><Spinner size={14} /> Waiting for your payment — this page updates by itself. Status: {c.status}</p>
+            <ol className="dd-stages" aria-label="Progress">{["Waiting for payment", "Payment seen", "Confirming & paying out", "Done"].map((label, i) => <li key={label} className={i < stepIdx ? "done" : i === stepIdx ? "now" : ""}><span>{i < stepIdx ? "✓" : i + 1}</span>{label}</li>)}</ol>
+            <p className="muted small"><Spinner size={14} /> This page updates by itself — keep it open until it says <b>Paid</b>.</p>
             {!c.livemode && c.execution?.payment_id && <button type="button" className="btn btn-ghost btn-sm" onClick={() => fetch(`/api/payments/${c.execution!.payment_id}/simulate`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": `connect:${c.id}` } }).then(() => load())}>Sandbox: simulate paying</button>}
           </div>
         )}

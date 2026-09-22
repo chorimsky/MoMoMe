@@ -157,7 +157,16 @@ export function onEnginePayment(p: Payment): void {
   if (s === "INBOUND_DETECTED") move(i, "authorized", "funds detected");
   else if (["INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED"].includes(s)) move(i, "processing", `engine ${s}`);
   else if (s === "DELIVERED") { move(i, "completed", "payout confirmed by the provider"); setSettlement(i, "settled", "delivered to the payee's Mobile Money"); updateMeta(p.id, { lastPublicState: "COMPLETED" }); }
-  else if (s === "FAILED") { const expired = p.events.some((e) => e.state === "FAILED" && /expired|cancel/i.test(e.note ?? "")); move(i, expired ? "expired" : "failed", [...p.events].reverse().find((e) => e.note)?.note); setSettlement(i, "failed"); }
+  else if (s === "FAILED") {
+    const note = [...p.events].reverse().find((e) => e.note)?.note;
+    const expired = p.events.some((e) => e.state === "FAILED" && /expired|cancel/i.test(e.note ?? ""));
+    const funded = p.events.some((e) => e.state === "INBOUND_DETECTED" || e.state === "INBOUND_CONFIRMED");
+    // A payer who let a Lightning invoice lapse has not failed the INVOICE: the link stays payable
+    // until the intent itself expires. The funding instruction is dropped and the checkout offers
+    // a fresh one; nothing was received, so there is nothing to settle or reverse.
+    if (expired && !funded && Date.parse(i.expiresAt) > Date.now()) { byPayment.delete(p.id); i.execution = undefined; i.route = undefined; i.status = "created"; i.updatedAt = now(); i.events.push({ at: i.updatedAt, status: "created", note: "funding instruction expired unpaid — a new one can be requested" }); touch("connect_intents"); return; }
+    move(i, expired ? "expired" : "failed", note); setSettlement(i, "failed");
+  }
   else if (s === "REFUND_PENDING" || s === "REFUNDED") { move(i, "reversed", "funds are being returned to the payer"); setSettlement(i, "reversed"); }
   else if (s === "MANUAL_REVIEW") move(i, "processing", "held for review");
 }

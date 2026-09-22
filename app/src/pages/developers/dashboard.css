@@ -121,3 +121,7 @@
 /* hosted checkout (/p/:id) reuses the auth card */
 .dd-auth-card { min-width: 0; overflow: hidden; }
 .dd-auth-card .dd-form > * { min-width: 0; }
+
+.dd-st.completed, .dd-st.settled { background: color-mix(in oklab, var(--recv) 18%, transparent); color: var(--recv); }
+.dd-st.processing, .dd-st.created, .dd-st.issued, .dd-st.pending { background: var(--brand-wash); color: var(--brand); }
+.dd-st.reversed, .dd-st.failed, .dd-st.expired, .dd-st.cancelled { background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); }

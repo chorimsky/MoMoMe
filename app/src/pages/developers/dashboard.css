@@ -117,3 +117,7 @@
 .dd-st.dead, .dd-st.rejected { background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); }
 .dd-st.pending, .dd-st.open, .dd-st.draft, .dd-st.issued { background: var(--brand-wash); color: var(--brand); }
 @media (max-width: 640px) { .dd-top { padding-top: 12px; } .dd-title { font-size: 22px; } .dd-steps li { grid-template-columns: 26px 1fr; } .dd-steps li > button { grid-column: 2; justify-self: start; } .dd-kv { grid-template-columns: 1fr; gap: 2px 0; } .dd-kv > span:nth-child(odd) { margin-top: 6px; } }
+
+/* hosted checkout (/p/:id) reuses the auth card */
+.dd-auth-card { min-width: 0; overflow: hidden; }
+.dd-auth-card .dd-form > * { min-width: 0; }

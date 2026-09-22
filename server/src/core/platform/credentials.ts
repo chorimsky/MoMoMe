@@ -19,8 +19,9 @@ import { register, touch } from "../persist.js";
 import { getOrganization, getApplication, type Organization } from "./orgs.js";
 
 export type Environment = "live" | "test";
-export type Scope = "quotes:write" | "payments:read" | "payments:write" | "refunds:write" | "webhooks:manage" | "settlements:read" | "settlements:write" | "account:read" | "usage:read" | "recipients:validate";
-export const ALL_SCOPES: Scope[] = ["quotes:write", "payments:read", "payments:write", "refunds:write", "webhooks:manage", "settlements:read", "settlements:write", "account:read", "usage:read", "recipients:validate"];
+export type Scope = "quotes:write" | "payments:read" | "payments:write" | "refunds:write" | "webhooks:manage" | "settlements:read" | "settlements:write" | "account:read" | "usage:read" | "recipients:validate"
+  | "identities:read" | "identities:write" | "invoices:read" | "invoices:write" | "payouts:read" | "payouts:write" | "balances:read";
+export const ALL_SCOPES: Scope[] = ["quotes:write", "payments:read", "payments:write", "refunds:write", "webhooks:manage", "settlements:read", "settlements:write", "account:read", "usage:read", "recipients:validate", "identities:read", "identities:write", "invoices:read", "invoices:write", "payouts:read", "payouts:write", "balances:read"];
 
 export interface Credential {
   id: string; orgId: string; appId: string; env: Environment; label: string;

@@ -114,4 +114,6 @@ export function eventTypeFor(state: PublicState): string {
     case "MANUAL_REVIEW": return "payment.manual_review";
   }
 }
-export const EVENT_TYPES = ["payment.created", "payment.awaiting_payment", "payment.detected", "payment.confirmed", "payment.processing", "payment.payout_submitted", "payment.completed", "payment.failed", "payment.expired", "payment.cancelled", "payment.refunded", "payment.manual_review", "settlement.created", "settlement.completed", "settlement.failed"] as const;
+export const EVENT_TYPES = ["payment.created", "payment.awaiting_payment", "payment.detected", "payment.confirmed", "payment.processing", "payment.payout_submitted", "payment.completed", "payment.failed", "payment.expired", "payment.cancelled", "payment.refunded", "payment.manual_review", "settlement.created", "settlement.completed", "settlement.failed",
+  // MoMo›Me Connect (docs/connect §26): intents, invoices, payouts, identities, settlement statuses.
+  "payment.authorized", "payment.pending", "payment.reversed", "settlement.pending", "settlement.processing", "settlement.reversed", "invoice.created", "invoice.paid", "invoice.expired", "payout.created", "payout.processing", "payout.completed", "payout.failed", "payout.reversed", "identity.created", "identity.updated"] as const;

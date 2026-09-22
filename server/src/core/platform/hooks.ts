@@ -17,7 +17,9 @@ let installed = false;
 export function installPlatformHooks(): void {
   if (installed) return; installed = true;
   setV1Projector((p: Payment) => {
-    if (!metaOf(p.id)) return null; // not an API v1 payment — the legacy payment.status event still goes out
+    const meta = metaOf(p.id);
+    if (!meta) return null; // not an API v1 payment — the legacy payment.status event still goes out
+    if (meta.credentialId === "connect") return null; // a Connect intent announces its own lifecycle (core/connect/intents)
     const state = publicState(p);
     return { state, type: eventTypeFor(state), data: publicPayment(p) };
   });

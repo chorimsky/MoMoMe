@@ -15,6 +15,7 @@ import { Contact } from "./pages/legal/Contact.js";
 import { DeleteAccount } from "./pages/legal/DeleteAccount.js";
 import { NotFound } from "./pages/legal/NotFound.js";
 import { Developers } from "./pages/Developers.js";
+const Checkout = lazy(() => import("./pages/Checkout.js").then((m) => ({ default: m.Checkout })));
 const DeveloperDashboard = lazy(() => import("./pages/developers/Dashboard.js").then((m) => ({ default: m.DeveloperDashboard })));
 import { Merchant } from "./pages/Merchant.js";
 import { Ambassador } from "./pages/Ambassador.js";
@@ -102,6 +103,7 @@ export function App() {
       <Route path="/diaspora" element={<Diaspora />} />
       <Route path="/scan" element={<Suspense fallback={<ChunkFallback />}><Scan /></Suspense>} />
       <Route path="/pay/:code" element={<Pay />} />
+      <Route path="/p/:id" element={<Suspense fallback={null}><Checkout /></Suspense>} />
       <Route path="/m/:code" element={<Pay mode="merchant" />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />

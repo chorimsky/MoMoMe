@@ -8,11 +8,14 @@ import "./payments.js";
 import "./recipients.js";
 import "./webhooks.js";
 import "./account.js";
+import "./connect.js"; // MoMo›Me Connect: identities, resolve, intents, invoices, payouts, checkout (docs/connect)
 import { installPlatformHooks } from "../core/platform/hooks.js";
+import { installConnectHooks } from "../core/connect/hooks.js";
 import { openApiV1 } from "./openapi.js";
 import { config } from "../config.js";
 
 installPlatformHooks();
+installConnectHooks();
 // The contract, public: the portal renders it and the SDKs are generated from it.
 v1Public.get("/openapi.json", (_req, res) => { res.setHeader("cache-control", "public, max-age=300"); res.json(openApiV1(config.publicUrl)); });
 mountFallback();

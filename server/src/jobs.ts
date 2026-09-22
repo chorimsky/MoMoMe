@@ -13,6 +13,7 @@ import { reconcileTransfers } from "./core/momoTransfer.js";
 import { flush as flushOutbound } from "./core/interop/outbound.js";
 import { expireReservations } from "./core/platform/liquidity.js";
 import { pruneIdempotency } from "./core/platform/idempotency.js";
+import { connectTick } from "./core/connect/hooks.js";
 import { shadowTick } from "./core/network/shadow.js";
 import { refreshPublicFx, publicFxFresh } from "./core/network/fx.js";
 import { networkTick } from "./core/network/monitor.js";
@@ -110,6 +111,7 @@ async function reconcileOnce(): Promise<void> {
   // API v1 platform housekeeping: reservations that never saw an inbound, idempotency records past their day.
   try { await expireReservations(); } catch (e) { console.error("expire reservations", e); }
   try { pruneIdempotency(); } catch (e) { console.error("prune idempotency", e); }
+  try { await connectTick(); } catch (e) { console.error("connect tick", e); }
   try { await store().pruneRateLimits(); } catch (e) { console.error("prune rate limits", e); }
   try { pruneIdentityRecords(); } catch (e) { console.error("prune identity records", e); } // data minimisation (IDENTITY_RECORD_RETENTION_DAYS)
   try { await chainTick(); } catch (e) { console.error("upi chain", e); } // stablecoin transfer lifecycle: observe, never re-send

@@ -652,7 +652,7 @@ api.post("/quotes", rateLimitDurableMiddleware("quotes", 60, 60_000), async (req
  *  what a real rail can serve on this deployment (methodServable). Two independent gates,
  *  one answer — so /config, the send flow and the quote endpoint can never disagree about
  *  whether a method is available. */
-function offeredMethods(): AdminSettings["methods"] {
+export function offeredMethods(): AdminSettings["methods"] {
   const on = getSettings().methods;
   return Object.fromEntries(
     (Object.keys(on) as Array<keyof AdminSettings["methods"]>).map((m) => [m, on[m] && methodServable(m as Method)]),
@@ -886,13 +886,15 @@ api.post("/identities/claim/verify", rateLimitDurableMiddleware("claim_verify", 
 /** Create a payment from a quote. The /payments route AND the v1 route-execution layer call
  *  this: every gate (owner, recipient, name match, quote validity, float, rail, mint) lives
  *  here once. `req` supplies identity headers; `bodyIn` the request body. */
-export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown): Promise<Reply> {
+export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown, opts: { owner?: string } = {}): Promise<Reply> {
   const reqBody = (bodyIn ?? {}) as Record<string, unknown> & CreatePaymentRequest & { merchantLinkCode?: string; merchantCode?: string; riskToken?: string };
   await refreshSettingsIfStale(); // kill-switch / approval threshold must reflect a cross-instance change
   // WHO is paying. The header alone is not identity: an enrolled device must sign, or a
   // stolen id could open payments (and read them back) as someone else. An un-enrolled id
   // is still accepted as a bearer during the migration window (ownerOf).
-  const owner = await ownerOf(req);
+  // MoMo›Me Connect (docs/connect) passes the owner explicitly: a hosted checkout is paid by
+  // someone with no device and no key — the intent itself is the authenticated context.
+  const owner = opts.owner ?? await ownerOf(req);
   if (senderOf(req) && !owner) return { status: 401, body: { error: "device_unverified", message: "This device could not be verified. Reopen the app and try again." } };
   const { quoteId, recipient } = (reqBody ?? {}) as CreatePaymentRequest;
   // Validate the recipient before touching the quote (prevents unhandled crashes

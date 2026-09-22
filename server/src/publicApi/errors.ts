@@ -10,7 +10,9 @@ export type ErrorCode =
   | "limit_exceeded" | "compliance_blocked" | "compliance_review" | "insufficient_liquidity" | "provider_unavailable" | "service_paused"
   | "webhook_not_found" | "webhook_url_invalid" | "webhook_limit"
   | "settlement_not_found" | "settlement_invalid" | "insufficient_balance"
-  | "not_found" | "internal_error";
+  | "not_found" | "internal_error"
+  // MoMo›Me Connect (docs/connect §41) — the same vocabulary, lower-cased for consistency.
+  | "invalid_request" | "invalid_identity" | "identity_not_found" | "payment_method_unavailable" | "route_unavailable" | "payment_expired" | "payment_failed" | "settlement_failed" | "compliance_rejected" | "duplicate_request" | "provider_error" | "temporary_unavailable";
 
 export class ApiV1Error extends Error {
   constructor(public status: number, public code: ErrorCode, message: string, public details: Record<string, unknown> = {}) { super(message); }

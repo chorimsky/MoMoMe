@@ -46,7 +46,7 @@ function titleFor(pathname: string, fr: boolean): string {
   if (exact) return exact[fr ? 1 : 0];
   // A merchant checkout link. The business name isn't known until the link resolves, so
   // this is the honest generic — better than inheriting the previous page's title.
-  if (pathname.startsWith("/pay/") || pathname.startsWith("/m/")) {
+  if (pathname.startsWith("/pay/") || pathname.startsWith("/m/") || pathname.startsWith("/p/")) {
     return fr ? "Payer · MoMo›Me" : "Pay · MoMo›Me";
   }
   // Capital Intelligence / Investor OS / portal: the module shell owns the precise title

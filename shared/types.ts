@@ -375,7 +375,13 @@ export type LedgerAccount =
    *  on its behalf, debited by its settlements. The suffix is the organization id. */
   | `org_balance:${string}`
   /** XAF owed to organizations for settlements requested and not yet paid out. */
-  | "settlement_payable";
+  | "settlement_payable"
+  /** MoMo›Me Connect (docs/connect): a payment identity's internal balance — the internal rail.
+   *  A liability of ours; credits raise it. Suffix = the MPI id. */
+  | `mpi_balance:${string}`
+  /** Value received for a payee that settles to its MoMo›Me balance, between the payment
+   *  completing and the balance credit (same transaction, kept explicit for audit). */
+  | "connect_clearing";
 
 /** Crypto that arrived with no payment to attach it to.
  *

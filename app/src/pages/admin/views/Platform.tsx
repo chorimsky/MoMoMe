@@ -13,7 +13,7 @@ const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("en-GB
 const inp: React.CSSProperties = { padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)" };
 const small: React.CSSProperties = { padding: "5px 10px", fontSize: 12 };
 
-type Tab = "queue" | "orgs" | "settlements" | "plans" | "limits" | "usage" | "emails" | "audit";
+type Tab = "queue" | "connect" | "orgs" | "settlements" | "plans" | "limits" | "usage" | "emails" | "audit";
 
 export function PlatformView() {
   const [tab, setTab] = useState<Tab>("queue");
@@ -32,9 +32,10 @@ export function PlatformView() {
         <AKpi label="Available to new payments" value={fmt(treasury.available)} unit="XAF" tone="recv" />
       </Grid>
       <div style={{ display: "flex", gap: 6, margin: "16px 0", flexWrap: "wrap" }}>
-        {(["queue", "orgs", "settlements", "plans", "limits", "usage", "emails", "audit"] as Tab[]).map((k) => <button key={k} type="button" className={`btn ${tab === k ? "btn-primary" : "btn-ghost"}`} style={small} onClick={() => setTab(k)}>{{ queue: "Activation queue", orgs: "Organizations", settlements: "Settlements", plans: "Pricing plans", limits: "Limit rules", usage: "API usage", emails: "Emails", audit: "Audit" }[k]}</button>)}
+        {(["queue", "connect", "orgs", "settlements", "plans", "limits", "usage", "emails", "audit"] as Tab[]).map((k) => <button key={k} type="button" className={`btn ${tab === k ? "btn-primary" : "btn-ghost"}`} style={small} onClick={() => setTab(k)}>{{ queue: "Activation queue", connect: "Connect network", orgs: "Organizations", settlements: "Settlements", plans: "Pricing plans", limits: "Limit rules", usage: "API usage", emails: "Emails", audit: "Audit" }[k]}</button>)}
       </div>
       {tab === "queue" && <Queue />}
+      {tab === "connect" && <ConnectNetwork />}
       {tab === "orgs" && <Orgs />}
       {tab === "emails" && <Emails />}
       {tab === "settlements" && <Settlements />}
@@ -201,4 +202,44 @@ function Emails() {
       {(d?.outbox ?? []).map((e) => <tr key={e.id}><td>{when(e.at)}</td><td>{e.kind}</td><td>{e.to}</td><td>{e.subject}</td><td>{e.status}{e.error ? ` · ${e.error}` : ""}</td></tr>)}
     </tbody></table>
   </Card>;
+}
+
+function ConnectNetwork() {
+  const [m, setM] = useState<Record<string, any> | null>(null); const [t, setT] = useState<Record<string, any> | null>(null); const [q, setQ] = useState<Array<Record<string, any>> | null>(null); const [all, setAll] = useState(false); const [msg, setMsg] = useState<string | null>(null); const [refFor, setRefFor] = useState<{ id: string; ref: string } | null>(null);
+  const load = useCallback(() => Promise.all([api.platformConnectMetrics(30).then(setM), api.platformConnectTreasury().then(setT), api.platformConnectSettlements(all).then((r) => setQ(r.settlements))]).catch((e) => setMsg(e instanceof Error ? e.message : "Failed.")), [all]);
+  useEffect(() => { void load(); }, [load]);
+  const act = async (id: string, a: "submit" | "settle" | "fail" | "execute" | "retry", b: Record<string, string> = {}) => { setMsg(null); try { await api.platformConnectSettlementAction(id, a, b); setRefFor(null); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
+  return <>
+    {msg && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 8 }}>{msg}</div>}
+    <SectionTitle t="Connect network" s="Reachability, not account count (§49). Identity balances are money we owe; the bank queue is what only an operator can move." />
+    {m && <Grid cols={4}>
+      <AKpi label="Connected institutions" value={m.connected_institutions} sub={`${m.connected_businesses} businesses · ${m.payment_identities} identities`} />
+      <AKpi label="Reachable external endpoints" value={m.reachable_external_endpoints} sub="numbers & counterparties not yet connected" />
+      <AKpi label="Successful routes (30 d)" value={m.successful_routes} sub={Object.entries(m.routes_by_kind ?? {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"} tone="recv" />
+      <AKpi label="Internal transactions" value={`${m.internal_transaction_pct}%`} sub="settled on the MoMo›Me ledger, no external rail" />
+      <AKpi label="Lightning volume (30 d)" value={fmt(m.lightning_volume_xaf)} unit="XAF" tone="lightning" />
+      <AKpi label="External settlement volume" value={fmt(m.external_settlement_volume_xaf)} unit="XAF" />
+      <AKpi label="Avg payment latency" value={m.average_payment_latency_ms == null ? "—" : m.average_payment_latency_ms < 1000 ? `${m.average_payment_latency_ms} ms` : `${Math.round(m.average_payment_latency_ms / 1000)} s`} sub="created → completed" />
+      <AKpi label="Avg routing cost" value={m.average_routing_cost_xaf == null ? "—" : fmt(m.average_routing_cost_xaf)} unit="XAF" sub={`${m.intents?.completed ?? 0} completed · ${m.intents?.failed ?? 0} failed · ${m.intents?.expired ?? 0} expired`} />
+    </Grid>}
+    {t && <Grid cols={3} style={{ marginTop: 12 }}>
+      <Card title="Treasury over identity balances" sub="Liabilities to connected identities vs the XAF float that backs them.">
+        <div style={{ display: "grid", gap: 6, fontSize: 13 }}><KV k="Identity balances (owed)" v={`${fmt(t.identity_balances_total_xaf)} XAF`} tone="warn" /><KV k="Identities with a balance" v={t.identities_with_balance} /><KV k="Settlements pending" v={`${fmt(t.settlement_pending_xaf)} XAF · ${t.settlement_pending_count} (${t.bank_queue} bank)`} /><KV k="XAF float (rails)" v={`${fmt(t.float?.total)} XAF`} /><KV k="Reserved by open API payments" v={`${fmt(t.float?.reserved)} XAF`} /><KV k="Coverage (float / owed)" v={t.coverage_pct == null ? "—" : `${t.coverage_pct}%`} tone={t.coverage_pct != null && t.coverage_pct < 100 ? "bad" : "recv"} /></div>
+      </Card>
+      <Card title="Largest balances" sub="Top identities by MoMo›Me balance.">{(t.top ?? []).slice(0, 10).map((x: Record<string, any>) => <div key={x.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{x.name} <span style={{ color: "var(--ink-3)" }}>{x.type} · settles {x.settlement}/{x.frequency}</span></span><b>{fmt(x.balance)} XAF</b></div>)}{!t.top?.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>No balances.</div>}</Card>
+      <Card title="How settlement works" sub="Per payment, from the payee's profile."><div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>momo_me → settled on the balance · mobile_money / lightning → automatic fee-free payout (instant, daily or weekly) · bank_transfer → this queue: pay from treasury, record the reference (moves balance → float), confirm.</div></Card>
+    </Grid>}
+    <Card title="Settlement queue" sub="Bank transfers wait for an operator; automatic ones appear while processing or after failing." action={<button type="button" className="btn btn-ghost" style={small} onClick={() => setAll(!all)}>{all ? "Open only" : "Show all"}</button>}>
+      <table style={{ width: "100%", fontSize: 13 }}><thead><tr><th>When</th><th>Payee</th><th>Method</th><th>Destination</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        {(q ?? []).map((s) => <tr key={s.id}><td>{when(s.created_at)}</td><td>{s.payee_name}<div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{s.organization}</div></td><td>{s.method}</td><td className="small">{s.destination.type === "bank" ? `${s.destination.bank ?? ""} ${s.destination.account ?? ""}` : s.destination.type === "lightning" ? s.destination.address : s.destination.phone ?? "—"}{s.provider_reference ? <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>ref {s.provider_reference}</div> : null}</td><td>{fmt(s.amount.value)} XAF</td><td><Pill status={s.status} tone={s.status === "settled" ? "recv" : ["failed", "reversed"].includes(s.status) ? "bad" : "warn"} />{s.failure_reason ? <div style={{ fontSize: 11.5, color: "var(--bad)" }}>{s.failure_reason}</div> : null}</td><td style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {s.method === "bank_transfer" && ["pending", "processing"].includes(s.status) && (refFor && refFor.id === s.id ? <><input value={refFor.ref} onChange={(e) => setRefFor({ id: s.id, ref: e.target.value })} placeholder="Bank reference" style={inp} /><button type="button" className="btn btn-primary" style={small} disabled={!refFor.ref} onClick={() => act(s.id, "submit", { reference: refFor.ref })}>Record transfer</button><button type="button" className="btn btn-ghost" style={small} onClick={() => setRefFor(null)}>Cancel</button></> : <button type="button" className="btn btn-primary" style={small} onClick={() => setRefFor({ id: s.id, ref: "" })}>Paid from treasury…</button>)}
+          {s.status === "submitted" && <button type="button" className="btn btn-primary" style={small} onClick={() => act(s.id, "settle")}>Confirm settled</button>}
+          {s.status === "pending" && s.method !== "bank_transfer" && <button type="button" className="btn btn-ghost" style={small} onClick={() => act(s.id, "execute")}>Execute now</button>}
+          {s.status === "failed" && <button type="button" className="btn btn-ghost" style={small} onClick={() => act(s.id, "retry")}>Retry</button>}
+          {["pending", "processing", "submitted"].includes(s.status) && <button type="button" className="btn btn-ghost" style={small} onClick={() => { const r = prompt("Reason:"); if (r) void act(s.id, "fail", { reason: r }); }}>Fail</button>}
+        </td></tr>)}
+        {q && !q.length && <tr><td colSpan={7} style={{ color: "var(--ink-3)" }}>Nothing waiting.</td></tr>}
+      </tbody></table>
+    </Card>
+  </>;
 }

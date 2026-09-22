@@ -34,7 +34,7 @@ export interface UsageBlock { summary: UsageSummary; days: Array<{ day: string; 
 
 export interface DevPlan { id: string; name: string; description?: string; platformFeePct: number; rateLimitRpm: number; tiers: Array<{ fromXaf: number; feePct: number }> }
 export interface DevRequest { id: string; orgId: string; kind: "kyb" | "plan_change" | "live_access"; status: "open" | "approved" | "rejected"; createdAt: string; updatedAt: string; payload: Record<string, unknown>; decisionNote?: string }
-export interface ConnectOverview { identity: Record<string, any>; balance: { available: number; currency: string }; funding: Record<string, boolean>; environment: "live" | "test"; invoices: Array<Record<string, any>>; intents: Array<Record<string, any>>; payouts: Array<Record<string, any>>; counterparties: Array<Record<string, any>> }
+export interface ConnectOverview { identity: Record<string, any>; balance: { available: number; currency: string }; funding: Record<string, boolean>; environment: "live" | "test"; invoices: Array<Record<string, any>>; intents: Array<Record<string, any>>; payouts: Array<Record<string, any>>; counterparties: Array<Record<string, any>>; settlement_intents: Array<Record<string, any>> }
 export const dev = {
   connect: (id: string) => req<ConnectOverview>(`/orgs/${id}/connect`),
   connectIdentity: (id: string, b: Record<string, unknown>) => patch<Record<string, any>>(`/orgs/${id}/connect/identity`, b),

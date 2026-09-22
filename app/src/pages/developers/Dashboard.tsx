@@ -330,12 +330,19 @@ function PaymentDrawer({ p, onClose }: { p: Record<string, any>; onClose: () => 
 /* ---------- settlements ---------- */
 function Settlements({ org }: { org: DevOrg }) {
   const q = useAsync(() => dev.settlements(org.id), [org.id]);
+  const c = useAsync(() => dev.connect(org.id), [org.id]);
   const d = q.data;
+  const si = c.data?.settlement_intents ?? [];
   return (
     <>
+      <Panel title="Settlement of your payments" sub="One settlement per completed payment, driven by your settlement profile (Identity tab). Payment status and settlement status are separate." action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => void c.reload()}>Refresh</button>}>
+        {c.loading && !c.data ? <Skeleton /> : si.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>When</th><th>Payment</th><th>Method</th><th>Destination</th><th>Amount</th><th>Status</th><th>Reference</th></tr></thead><tbody>
+          {si.map((s) => <tr key={s.id}><td className="small" title={when(s.created_at)}>{ago(s.created_at)}</td><td><code>{s.payment_intent}</code></td><td>{s.method.replace("_", " ")}</td><td className="small">{s.destination.type === "bank" ? `${s.destination.bank ?? ""} ${s.destination.account ?? ""}` : s.destination.type === "lightning" ? s.destination.address : s.destination.type === "mobile_money" ? s.destination.phone : "MoMo›Me balance"}</td><td>{fmt(Number(s.amount.value))} XAF</td><td><Status s={s.status} />{s.failure_reason ? <span className="muted small"> {s.failure_reason}</span> : null}</td><td className="small">{s.provider_reference ?? s.note ?? "—"}</td></tr>)}
+        </tbody></table></div> : <Empty>No completed payments yet.</Empty>}
+      </Panel>
       <div className="dd-kpis"><Kpi label="Available balance" value={d ? `${fmt(d.balance.available)} XAF` : "…"} /><Kpi label="Pending settlement" value={d ? `${fmt(d.balance.pending)} XAF` : "…"} /></div>
       <div className="callout">MoMo›Me settles pass-through: each payment's XAF goes straight to the recipient's Mobile Money. A balance appears only for products that collect on your behalf. Request a settlement with <code>POST {v1Abs()}/settlements</code>; an operator approves and pays it, and <code>settlement.completed</code> reaches your webhook.</div>
-      <Panel title="Settlements">{q.loading && !d ? <Skeleton /> : d?.settlements.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Requested</th><th>Reference</th><th>Amount</th><th>Destination</th><th>Status</th><th>Provider ref</th></tr></thead><tbody>
+      <Panel title="Balance settlements (organization requests)" sub="Requests to pay out your organization balance, approved by an operator.">{q.loading && !d ? <Skeleton /> : d?.settlements.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Requested</th><th>Reference</th><th>Amount</th><th>Destination</th><th>Status</th><th>Provider ref</th></tr></thead><tbody>
         {d.settlements.map((s) => <tr key={s.id}><td className="small">{when(s.requested_at)}</td><td>{s.reference ?? <code>{s.id}</code>}</td><td>{fmt(Number(s.amount))} XAF</td><td className="small">{s.destination.type === "bank" ? `${s.destination.bank} ${s.destination.account}` : `${s.destination.operator} ${s.destination.phone}`}</td><td><Status s={s.status} /></td><td className="small">{s.provider_reference ?? "—"}</td></tr>)}
       </tbody></table></div> : <Empty>No settlements.</Empty>}</Panel>
     </>

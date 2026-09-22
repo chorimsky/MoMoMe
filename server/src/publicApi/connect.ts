@@ -26,6 +26,7 @@ import { rateLimitDurable } from "../core/ratelimit.js";
 import { meter } from "../core/platform/usage.js";
 import type { CountryCode } from "../../../shared/types.js";
 import { store } from "../db/store.js";
+import { settlementIntentsOf, getSettlementIntent, publicSettlementIntent } from "../core/connect/settlements.js";
 import { cancelPayment } from "../core/stateMachine.js";
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
@@ -195,3 +196,7 @@ route("post", "/sandbox/identities/:id/credit", { scope: "identities:write", cls
   creditBalance(`sandbox:${Date.now()}`, m.id, Math.round(xaf));
   return { identity: m.id, currency: "XAF", available: String(balanceOf(m.id)), sandbox: true };
 });
+
+/* ---------- settlement intents (per payment; §20) ---------- */
+route("get", "/settlement-intents", { scope: "settlements:read", cls: "settlements" }, async (ctx) => ({ object: "list", data: settlementIntentsOf(ctx.orgId, ctx.env).map(publicSettlementIntent) }));
+route("get", "/settlement-intents/:id", { scope: "settlements:read", cls: "settlements" }, async (ctx) => { const s = getSettlementIntent(ctx.params.id); if (!s || s.orgId !== ctx.orgId) throw err(404, "settlement_not_found", "No such settlement intent."); return publicSettlementIntent(s); });

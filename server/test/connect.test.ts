@@ -183,6 +183,47 @@ async function main() {
     ok("payment status and settlement status are separate fields", st.status === "completed" && st.settlement_status === "settled");
     const openapi = await (await fetch(`${base}/v1/openapi.json`)).json() as J;
     ok("the contract lists the Connect events", Object.keys(openapi.webhooks).includes("invoice.paid") && Object.keys(openapi.webhooks).includes("payout.completed"));
+
+    console.log("\n11. Settlement intents per payment: bank (operator) and Mobile Money (automatic)\n");
+    const { issueToken } = await import("../src/core/adminAuth.js"); const { createUser: createAdmin } = await import("../src/core/adminUsers.js");
+    const admin = createAdmin("Ops", "ops-password-1234", "Super Admin"); const atok = issueToken({ uid: admin.id, role: "Super Admin", elevatedUntil: Date.now() + 600_000 }).token;
+    const AD = { "content-type": "application/json", authorization: `Bearer ${atok}` };
+    // Company D settles to a BANK; Company E settles to Mobile Money.
+    const D = await mk("Company D", "d@example.com"); const mpiD = (await v1("/identities/me", { key: D.key })).body.data.id as string;
+    await v1(`/identities/${mpiD}`, { key: D.key, method: "PATCH", body: { settlement: { preferred: "bank_transfer", destination: { bank: "Afriland First Bank", account: "10005-00021-12345678901-23" } } } });
+    const E = await mk("Company E", "e@example.com"); const mpiE = (await v1("/identities/me", { key: E.key })).body.data.id as string;
+    await v1(`/identities/${mpiE}/aliases`, { key: E.key, idem: idem(), body: { type: "phone", value: "+237651000404" } });
+    await v1(`/identities/${mpiE}`, { key: E.key, method: "PATCH", body: { settlement: { preferred: "mobile_money" } } });
+    const piD = await v1("/payment-intents", { key: A.key, idem: idem(), body: { payee: { identity: mpiD }, amount: { value: "50000" } } });
+    const exD = await v1(`/payment-intents/${piD.body.data.id}/execute`, { key: A.key, idem: idem(), body: {} });
+    await settle(200);
+    const siD = (await v1("/settlement-intents", { key: D.key })).body.data.data.find((x: J) => x.payment_intent === piD.body.data.id);
+    ok("A pays D internally → payment completed, settlement PENDING/processing: a bank settlement intent is queued for the operator", exD.body.data.status === "completed" && siD && siD.method === "bank_transfer" && ["pending", "processing"].includes(siD.status) && siD.destination.type === "bank" && siD.destination.account === "…1-23", JSON.stringify(siD));
+    ok("D's balance holds the value until the operator pays the bank", balanceOf(mpiD) === 49250, String(balanceOf(mpiD)));
+    const queue = await (await fetch(`${base}/api/admin/platform/connect/settlements`, { headers: AD })).json() as J;
+    ok("Admin → Connect lists the bank queue with payee, organization and account", queue.settlements.some((x: J) => x.id === siD.id && x.payee_name === "Company D"));
+    const badSubmit = await fetch(`${base}/api/admin/platform/connect/settlements/${siD.id}/submit`, { method: "POST", headers: AD, body: JSON.stringify({}) });
+    ok("submitting without a bank reference is refused", badSubmit.status === 400);
+    const sub = await (await fetch(`${base}/api/admin/platform/connect/settlements/${siD.id}/submit`, { method: "POST", headers: AD, body: JSON.stringify({ reference: "AFB-2026-000912" }) })).json() as J;
+    ok("operator records the bank transfer → submitted; the ledger moves the value from D's balance to the float", sub.status === "submitted" && sub.provider_reference === "AFB-2026-000912" && balanceOf(mpiD) === 0, `${sub.status} bal=${balanceOf(mpiD)}`);
+    const stl = await (await fetch(`${base}/api/admin/platform/connect/settlements/${siD.id}/settle`, { method: "POST", headers: AD, body: "{}" })).json() as J;
+    const piDNow = (await v1(`/payment-intents/${piD.body.data.id}`, { key: A.key })).body.data;
+    ok("operator confirms → settled, and the payment intent's settlement_status follows", stl.status === "settled" && piDNow.settlement_status === "settled" && piDNow.status === "completed");
+    const piE = await v1("/payment-intents", { key: A.key, idem: idem(), body: { payee: { identity: mpiE }, amount: { value: "20000" } } });
+    await v1(`/payment-intents/${piE.body.data.id}/execute`, { key: A.key, idem: idem(), body: {} });
+    await settle(500);
+    const siE = (await v1("/settlement-intents", { key: E.key })).body.data.data.find((x: J) => x.payment_intent === piE.body.data.id);
+    ok("E settles to Mobile Money instantly: an automatic fee-free payout from E's balance → settled, balance back to 0", siE && siE.method === "mobile_money" && siE.status === "settled" && siE.payout_id && balanceOf(mpiE) === 0, `${siE?.status} bal=${balanceOf(mpiE)}`);
+    const poE = (await v1(`/payouts/${siE.payout_id}`, { key: E.key })).body.data;
+    ok("…the settlement payout carries no platform fee (already charged on the payment)", poE.fee.value === "0" && poE.reference === `settlement:${siE.id}`);
+    const failD = await (await fetch(`${base}/api/admin/platform/connect/settlements/${siD.id}/fail`, { method: "POST", headers: AD, body: JSON.stringify({ reason: "x" }) })).json() as J;
+    ok("a settled settlement cannot be failed", failD.error === "bad_transition");
+
+    console.log("\n12. Treasury over identity balances and §49 network metrics\n");
+    const tre = await (await fetch(`${base}/api/admin/platform/connect/treasury`, { headers: AD })).json() as J;
+    ok("treasury: total identity balances (liabilities), top identities, pending settlements, float coverage", typeof tre.identity_balances_total_xaf === "number" && tre.identity_balances_total_xaf === balanceOf(mpiA) + balanceOf(mpiB) + balanceOf(meC.id) && Array.isArray(tre.top) && "float" in tre, JSON.stringify(tre).slice(0, 160));
+    const met = await (await fetch(`${base}/api/admin/platform/connect/metrics`, { headers: AD })).json() as J;
+    ok("metrics: connected institutions/businesses, identities, reachable endpoints, successful routes by kind, internal %, Lightning volume, latency", met.connected_institutions >= 5 && met.payment_identities >= 7 && met.reachable_external_endpoints >= 1 && met.successful_routes >= 4 && met.routes_by_kind.internal >= 3 && met.internal_transaction_pct > 0 && met.lightning_volume_xaf > 0 && typeof met.average_payment_latency_ms === "number", JSON.stringify(met).slice(0, 200));
     void updateOrganization;
   } finally { server.close(); hook.close(); }
   console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);

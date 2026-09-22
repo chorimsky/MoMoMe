@@ -125,3 +125,25 @@ platformAdmin.post("/requests/:id/:decision", async (req, res) => {
   res.json(r);
 });
 platformAdmin.get("/emails", (_req, res) => res.json({ configured: emailConfigured(), outbox: emailOutbox(100) }));
+
+/* ---------- MoMo›Me Connect: treasury over identity balances, settlement queue (bank), network metrics ---------- */
+import { networkMetrics, connectTreasury } from "../core/connect/metrics.js";
+import { allSettlementIntents, getSettlementIntent, operatorSubmit, operatorSettle, operatorFail, operatorExecuteNow, retrySettlement, publicSettlementIntent } from "../core/connect/settlements.js";
+import { getMpi } from "../core/connect/identities.js";
+platformAdmin.get("/connect/metrics", (req, res) => res.json(networkMetrics(Math.max(1, Number(req.query.days ?? 30)) * 86_400_000)));
+platformAdmin.get("/connect/treasury", async (_req, res) => res.json(await connectTreasury()));
+platformAdmin.get("/connect/settlements", (req, res) => { const all = str(req.query.all) === "1"; res.json({ settlements: allSettlementIntents(500).filter((s) => all || ["pending", "processing", "submitted"].includes(s.status)).map((s) => ({ ...publicSettlementIntent(s), payee_name: getMpi(s.payee)?.displayName ?? s.payee, org_id: s.orgId, organization: getOrganization(s.orgId)?.name ?? s.orgId, operator: s.operator ?? null, events: s.events })) }); });
+platformAdmin.post("/connect/settlements/:id/:action", async (req, res) => {
+  const s = getSettlementIntent(req.params.id); if (!s) return res.status(404).json({ error: "not_found", message: "No such settlement intent." });
+  const by = (req as AdminReq).session?.uid ?? "console"; const a = req.params.action; const b = req.body ?? {};
+  let ok = false;
+  if (a === "submit") { if (!str(b.reference)) return res.status(400).json({ error: "bad_request", message: "The bank transfer reference is required." }); ok = operatorSubmit(s, by, str(b.reference)); }
+  else if (a === "settle") ok = operatorSettle(s, by);
+  else if (a === "fail") ok = operatorFail(s, by, str(b.reason) || "failed by operator");
+  else if (a === "execute") ok = await operatorExecuteNow(s);
+  else if (a === "retry") ok = retrySettlement(s);
+  else return res.status(400).json({ error: "bad_request", message: "action must be submit, settle, fail, execute or retry." });
+  if (!ok) return res.status(409).json({ error: "bad_transition", message: `Cannot ${a} a ${s.method} settlement in ${s.status}.` });
+  audit({ orgId: s.orgId, actor: who(req), action: `settlement_intent.${a}`, target: { type: "settlement_intent", id: s.id }, details: { reference: str(b.reference) || undefined }, ip: clientIp(req) });
+  res.json(publicSettlementIntent(s));
+});

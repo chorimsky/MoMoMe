@@ -344,10 +344,11 @@ import { intentsOf, getIntent, cancelIntent, publicIntent } from "../core/connec
 import { payoutsOf, createPayout, publicPayout, PayoutError } from "../core/connect/payouts.js";
 import { counterpartiesOf, createCounterparty, publicCounterparty } from "../core/connect/counterparties.js";
 import { fundingAvailable } from "../core/connect/routing.js";
+import { settlementIntentsOf, publicSettlementIntent } from "../core/connect/settlements.js";
 const cenv = () => (liveMoney() ? "live" : "test") as "live" | "test";
 developers.get("/orgs/:org/connect", guard("org.read"), (req, res) => {
   const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");
-  res.json({ identity: ownerMpi(m), balance: { available: balanceOf(m.id), currency: "XAF" }, funding: fundingAvailable(), environment: cenv(), invoices: connectInvoicesOf(req.params.org, cenv(), 100).map(publicInvoice), intents: intentsOf(req.params.org, cenv(), 100).map(publicIntent), payouts: payoutsOf(req.params.org, cenv(), 100).map(publicPayout), counterparties: counterpartiesOf(req.params.org).map(publicCounterparty) });
+  res.json({ identity: ownerMpi(m), balance: { available: balanceOf(m.id), currency: "XAF" }, funding: fundingAvailable(), environment: cenv(), invoices: connectInvoicesOf(req.params.org, cenv(), 100).map(publicInvoice), intents: intentsOf(req.params.org, cenv(), 100).map(publicIntent), payouts: payoutsOf(req.params.org, cenv(), 100).map(publicPayout), counterparties: counterpartiesOf(req.params.org).map(publicCounterparty), settlement_intents: settlementIntentsOf(req.params.org, cenv(), 100).map(publicSettlementIntent) });
 });
 developers.patch("/orgs/:org/connect/identity", guard("org.update"), (req, res) => {
   const m = mpiForOrganization(req.params.org); if (!m) return bad(res, 404, "not_found", "No identity.");

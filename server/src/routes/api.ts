@@ -309,6 +309,7 @@ api.use("/admin", (req, res, next) => {
     /^\/apikeys(\/|$)/,                              // partner keys authorize real payments
     /^\/platform\/organizations\/[^/]+\/credit$/,    // credits an organization balance (money we then owe)
     /^\/platform\/settlements\/[^/]+\/(approve|submit|complete)$/, // pays an organization's balance out
+    /^\/platform\/connect\/settlements\/[^/]+\/(submit|settle|execute)$/, // moves an identity's balance to a bank / rail
     /^\/platform\/organizations\/[^/]+$/,            // live activation / suspension of an API customer
     /^\/rails\/egress(?!\/recheck)(\/|$)/,           // repoints the IP allowlist a rail trusts (a re-check only re-reads it)
   ];

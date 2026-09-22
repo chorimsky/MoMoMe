@@ -25,6 +25,7 @@ import { publicPayment } from "../platform/mapping.js";
 import { store } from "../../db/store.js";
 import { config } from "../../config.js";
 import * as momoTransfer from "../momoTransfer.js";
+import { openSettlement } from "./settlements.js";
 
 export type PaymentStatus = "created" | "authorized" | "pending" | "processing" | "completed" | "failed" | "expired" | "reversed";
 export type SettlementStatus = "not_applicable" | "pending" | "processing" | "settled" | "failed" | "reversed";
@@ -51,6 +52,7 @@ export class ConnectError extends Error { constructor(public code: string, messa
 
 export function getIntent(id: string): PaymentIntent | undefined { return intents.get(id); }
 export const intentOfPayment = (paymentId: string) => { const id = byPayment.get(paymentId); return id ? intents.get(id) : undefined; };
+export const allIntentsForMetrics = () => [...intents.values()];
 export const intentsOf = (orgId: string, env: string, limit = 100) => [...intents.values()].filter((i) => i.orgId === orgId && i.env === env).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 
 function move(i: PaymentIntent, status: PaymentStatus, note?: string): void {
@@ -111,7 +113,9 @@ export async function executeIntent(i: PaymentIntent, opts: { req: Request; want
     if (!internalTransfer(i.id, payerMpi!, payee.id, i.amount.value, feeXaf)) { move(i, "failed", "payer balance insufficient at execution"); throw new ConnectError("INSUFFICIENT_LIQUIDITY", "The payer's balance no longer covers this amount.", 409); }
     i.execution = { kind: "internal_ledger", method: "momo_me", ledgerRef: i.id };
     move(i, "completed", "settled on the MoMo›Me ledger");
+    // The payee is owed the value on its balance; its Settlement Profile decides where it goes next.
     setSettlement(i, payee.settlement.preferred === "momo_me" ? "settled" : "pending", payee.settlement.preferred === "momo_me" ? "value is on the payee's MoMo›Me balance" : `payee settles by ${payee.settlement.preferred} — settlement intent opened`);
+    openSettlement({ intentId: i.id, orgId: i.orgId, env: i.env, payee: payee.id, amountXaf: i.amount.value - feeXaf });
     return i;
   }
   // External funding: the payee's Mobile Money settlement destination receives the payout
@@ -156,7 +160,7 @@ export function onEnginePayment(p: Payment): void {
   const s = p.state;
   if (s === "INBOUND_DETECTED") move(i, "authorized", "funds detected");
   else if (["INBOUND_CONFIRMED", "FX_LOCKED", "PAYOUT_REQUESTED", "PAYOUT_CONFIRMED"].includes(s)) move(i, "processing", `engine ${s}`);
-  else if (s === "DELIVERED") { move(i, "completed", "payout confirmed by the provider"); setSettlement(i, "settled", "delivered to the payee's Mobile Money"); updateMeta(p.id, { lastPublicState: "COMPLETED" }); }
+  else if (s === "DELIVERED") { move(i, "completed", "payout confirmed by the provider"); setSettlement(i, "settled", "delivered to the payee's Mobile Money"); updateMeta(p.id, { lastPublicState: "COMPLETED" }); openSettlement({ intentId: i.id, orgId: i.orgId, env: i.env, payee: i.payee.mpi, amountXaf: p.xaf, alreadySettledBy: `delivered by the engine to Mobile Money (${p.aggregator ?? "rail"} ${p.payoutRef ?? ""})` }); }
   else if (s === "FAILED") {
     const note = [...p.events].reverse().find((e) => e.note)?.note;
     const expired = p.events.some((e) => e.state === "FAILED" && /expired|cancel/i.test(e.note ?? ""));
@@ -178,7 +182,7 @@ export function syncCollections(): number {
     const t = momoTransfer.getTransfer(i.execution.paymentId); if (!t) continue;
     const before = i.status;
     if (t.state === "COLLECTED" || t.state === "PAYING_OUT" || t.state === "HELD") move(i, "processing", `collection ${t.state}`);
-    else if (t.state === "DELIVERED") { move(i, "completed", "paid out to the payee's Mobile Money"); setSettlement(i, "settled"); }
+    else if (t.state === "DELIVERED") { move(i, "completed", "paid out to the payee's Mobile Money"); setSettlement(i, "settled"); openSettlement({ intentId: i.id, orgId: i.orgId, env: i.env, payee: i.payee.mpi, amountXaf: i.amount.value, alreadySettledBy: "delivered by the Mobile Money collection product" }); }
     else if (t.state === "EXPIRED" || t.state === "CANCELLED") move(i, "expired", `collection ${t.state}`);
     else if (t.state === "FAILED") { move(i, "failed", "collection failed"); setSettlement(i, "failed"); }
     else if (t.state === "REFUND_PENDING" || t.state === "REFUNDED") { move(i, "reversed", "collected then refunded"); setSettlement(i, "reversed"); }

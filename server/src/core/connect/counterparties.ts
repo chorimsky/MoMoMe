@@ -34,6 +34,7 @@ function resolveContacts(contacts: Counterparty["contacts"], country?: CountryCo
   return undefined;
 }
 export const getCounterparty = (id: string) => rows.get(id);
+export const counterpartiesAll = () => [...rows.values()];
 export const counterpartiesOf = (orgId: string) => [...rows.values()].filter((c) => c.orgId === orgId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 /** Attach a counterparty to a verified MPI (when the counterparty joins MoMo›Me). Idempotent. */
 export function linkToMpi(id: string, mpi: Mpi): Counterparty | undefined { const cp = rows.get(id); if (!cp) return undefined; if (cp.linkedMpi !== mpi.id) { cp.linkedMpi = mpi.id; cp.linkedAt = now(); cp.updatedAt = now(); touch("connect_counterparties"); } return cp; }

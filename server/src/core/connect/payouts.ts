@@ -39,11 +39,11 @@ function move(p: Payout, s: PayoutStatus, note?: string) { if (p.status === s) r
 
 export class PayoutError extends Error { constructor(public code: string, message: string, public status = 400) { super(message); } }
 
-export interface CreatePayoutInput { orgId: string; env: "live" | "test"; payer: Mpi; amountXaf: number; destination: { phone?: string; country?: string; lightning_address?: string; identity?: string; name?: string }; reference?: string; metadata?: Record<string, string> }
+export interface CreatePayoutInput { orgId: string; env: "live" | "test"; payer: Mpi; amountXaf: number; destination: { phone?: string; country?: string; lightning_address?: string; identity?: string; name?: string }; reference?: string; metadata?: Record<string, string>; /** A settlement of already-charged value: no platform fee again. */ feeFree?: boolean }
 export async function createPayout(input: CreatePayoutInput): Promise<Payout> {
   if (!Number.isFinite(input.amountXaf) || input.amountXaf <= 0) throw new PayoutError("INVALID_REQUEST", "amount must be a positive number of XAF.", 422);
   const xaf = Math.round(input.amountXaf);
-  const { feePct } = effectiveFeePct(input.orgId, input.env); const feeXaf = Math.round((xaf * feePct) / 100);
+  const { feePct } = effectiveFeePct(input.orgId, input.env); const feeXaf = input.feeFree ? 0 : Math.round((xaf * feePct) / 100);
   let destination: Payout["destination"];
   const d = input.destination;
   if (d.identity) { const m = getMpi(d.identity); if (!m) throw new PayoutError("IDENTITY_NOT_FOUND", "Unknown destination identity.", 404); const ph = m.settlement.destination?.phone ?? m.aliases.find((a) => a.type === "phone")?.value; const ln = m.aliases.find((a) => a.type === "lightning_address")?.value; if (ph) d.phone = `+${ph}`; else if (ln) d.lightning_address = ln; else throw new PayoutError("ROUTE_UNAVAILABLE", "That identity has no payout destination.", 503); }
@@ -109,6 +109,7 @@ export async function reconcilePayouts(): Promise<number> {
   return n;
 }
 export const getPayout = (id: string) => rows.get(id);
+export const allPayoutsForMetrics = () => [...rows.values()];
 export const payoutsOf = (orgId: string, env: string, limit = 100) => [...rows.values()].filter((p) => p.orgId === orgId && p.env === env).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 export function publicPayout(p: Payout) {
   return { id: p.id, object: "payout", status: p.status, payer: { identity: p.payer }, amount: { value: String(p.amount.value), currency: "XAF" }, fee: { value: String(p.feeXaf), currency: "XAF" }, destination: p.destination.type === "mobile_money" ? { type: "mobile_money", phone: `${COUNTRIES[p.destination.country].dial}${p.destination.phone}`, operator: p.destination.operator, name: p.destination.name ?? null, identity: p.destination.mpi ?? null } : { type: "lightning", address: p.destination.address, identity: p.destination.mpi ?? null }, provider_reference: p.providerRef ?? null, failure_reason: p.failureReason ?? null, reference: p.reference ?? null, metadata: p.metadata, created_at: p.createdAt, completed_at: p.completedAt ?? null, livemode: p.env === "live" };

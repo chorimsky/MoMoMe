@@ -10,6 +10,7 @@
 | `POST /v1/invoices {kind: invoice|payment_link|qr}` · `GET` · `POST …/cancel` | invoices:* | first-class invoices, links and QR — each owns one intent, `payment_url` = hosted checkout |
 | `POST /v1/requests` | invoices:write | request-to-pay (payer required) |
 | `POST /v1/payouts {amount, destination:{phone|lightning_address|identity}}` · `GET` | payouts:* | from a MoMo›Me balance to Mobile Money or a Lightning Address (XAF in, Lightning invisible) |
+| `GET /v1/settlement-intents` · `GET /v1/settlement-intents/{id}` | settlements:read | per-payment settlement (pending · processing · submitted · settled · failed · reversed) |
 | `GET /v1/checkout/{intent}` · `POST …/pay {method, payer_phone?}` · `GET …/status` | public | the hosted checkout's backend |
 | `POST /v1/sandbox/identities/{id}/credit` | test only | fund a balance to rehearse the internal route |
 

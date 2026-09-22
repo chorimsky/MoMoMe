@@ -95,3 +95,19 @@ payment method requires the operator switch `features.momoTransfer`; Lightning s
 requires the IBEX outbound rail; stablecoin settlement is refused by design (pass-through). The
 older interop (`/api/v1/payment-intents`) and UPI (`/api/v2`) intent models keep working and are now
 documented as legacy behind the canonical intent.
+
+## Second increment (2026-09-22): settlement intents, treasury, network metrics
+
+- `core/connect/settlements.ts` — one **settlement intent per completed payment**, driven by the payee's
+  Settlement Profile: `momo_me` settled on the balance; `mobile_money` / `lightning` executed as a
+  fee-free payout from the balance (instant, or batched daily/weekly by the profile, `manual` waits for
+  the operator); `bank_transfer` queued for the operator in Admin → API Platform → **Connect network**:
+  "Paid from treasury…" records the bank reference (ledger: balance → float), "Confirm settled" closes
+  it; fail before confirmation returns the value. The payment intent's `settlement_status` mirrors the
+  settlement intent. Externally funded payments get a `settled` intent for the audit trail.
+  API: `GET /v1/settlement-intents`, `GET /v1/settlement-intents/{id}`; events `settlement.*`.
+- `core/connect/metrics.ts` — **treasury over MPI balances** (liabilities vs float, coverage, pending
+  settlements, largest balances) and the **§49 network metrics** (connected institutions/businesses,
+  identities, reachable external endpoints, successful routes by kind, internal %, Lightning volume,
+  external settlement volume, average latency, average routing cost). Admin tab + dashboard Settlements
+  tab. Tests: connect.test.ts 54.

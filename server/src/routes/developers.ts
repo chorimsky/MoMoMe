@@ -22,7 +22,8 @@ import { createUser, verifyPassword, getUser, userByEmail, setPassword, createOr
 import { createCredential, listCredentials, getCredential, revokeCredential, rotateCredential, updateCredential, ALL_SCOPES, type Scope, type Environment } from "../core/platform/credentials.js";
 import { issueDevToken, verifyDevToken } from "../core/platform/devAuth.js";
 import { audit, auditOf } from "../core/platform/audit.js";
-import { listSubscriptions, eventsOf, replayEvent } from "../core/interop/outbound.js";
+import { listSubscriptions, eventsOf, replayEvent, subscribe, updateSubscription, removeSubscription, enqueueEvent, getSubscription } from "../core/interop/outbound.js";
+import { EVENT_TYPES } from "../core/platform/mapping.js";
 import { metasOf, metaOf } from "../core/platform/paymentMeta.js";
 import { publicPayment } from "../core/platform/mapping.js";
 import { settlementsOf, publicSettlement, orgBalance } from "../core/platform/settlements.js";
@@ -255,6 +256,39 @@ developers.patch("/orgs/:org/credentials/:id", guard("credentials.read"), (req, 
 /* ---------- read models ---------- */
 const envOf = () => (liveMoney() ? "live" : "test") as "live" | "test";
 developers.get("/orgs/:org/webhooks", guard("webhooks.read"), (req, res) => res.json({ endpoints: listSubscriptions(`org:${req.params.org}`).map((s) => ({ ...s, deliveries: eventsOf(`org:${req.params.org}`, s.id, 20) })) }));
+/* Endpoint management from the dashboard (§29: create, edit, test, replay, inspect). */
+developers.post("/orgs/:org/webhooks", guard("webhooks.manage"), (req, res) => {
+  const b = req.body ?? {}; const url = str(b.url);
+  const events = Array.isArray(b.events) && b.events.length ? (b.events as unknown[]).map(str).filter((e) => e === "*" || (EVENT_TYPES as readonly string[]).includes(e)) : ["*"];
+  if (!url) return bad(res, 400, "bad_request", "url is required.");
+  if (!events.length) return bad(res, 400, "bad_request", "Pick at least one known event type.");
+  const r = subscribe(`org:${req.params.org}`, url, events, !liveMoney());
+  if (!r.ok) return bad(res, 400, "webhook_url_invalid", r.reason);
+  if (str(b.description)) updateSubscription(`org:${req.params.org}`, r.sub.id, { description: str(b.description) });
+  audit({ orgId: req.params.org, actor: actor(req), action: "webhook.created", target: { type: "webhook_endpoint", id: r.sub.id }, details: { url }, ip: clientIp(req) });
+  res.status(201).json({ endpoint: getSubscription(`org:${req.params.org}`, r.sub.id), secret: r.secret, events: EVENT_TYPES });
+});
+developers.patch("/orgs/:org/webhooks/:id", guard("webhooks.manage"), (req, res) => {
+  const b = req.body ?? {};
+  const r = updateSubscription(`org:${req.params.org}`, req.params.id, { url: str(b.url) || undefined, events: Array.isArray(b.events) && b.events.length ? (b.events as unknown[]).map(str) : undefined, enabled: typeof b.enabled === "boolean" ? b.enabled : undefined, description: typeof b.description === "string" ? b.description : undefined }, !liveMoney());
+  if (!r.ok) return bad(res, r.reason === "not found" ? 404 : 400, "bad_request", r.reason);
+  audit({ orgId: req.params.org, actor: actor(req), action: "webhook.updated", target: { type: "webhook_endpoint", id: req.params.id }, ip: clientIp(req) });
+  res.json(r.sub);
+});
+developers.delete("/orgs/:org/webhooks/:id", guard("webhooks.manage"), (req, res) => {
+  if (!removeSubscription(`org:${req.params.org}`, req.params.id)) return bad(res, 404, "not_found", "No such endpoint.");
+  audit({ orgId: req.params.org, actor: actor(req), action: "webhook.deleted", target: { type: "webhook_endpoint", id: req.params.id }, ip: clientIp(req) });
+  res.json({ ok: true });
+});
+developers.post("/orgs/:org/webhooks/:id/test", guard("webhooks.manage"), (req, res) => {
+  const owner = `org:${req.params.org}`; const s = getSubscription(owner, req.params.id);
+  if (!s) return bad(res, 404, "not_found", "No such endpoint.");
+  const data = { message: "MoMo›Me webhook test", endpoint_id: s.id, at: new Date().toISOString() };
+  let ids = enqueueEvent(owner, "ping", data, { onlySub: s.id });
+  if (!ids.length) { updateSubscription(owner, s.id, { events: [...new Set([...s.events, "ping"])] }); ids = enqueueEvent(owner, "ping", data, { onlySub: s.id }); updateSubscription(owner, s.id, { events: s.events }); }
+  res.json({ ok: true, event_ids: ids });
+});
+developers.get("/orgs/:org/webhooks/events", guard("webhooks.read"), (_req, res) => res.json({ events: EVENT_TYPES }));
 developers.post("/orgs/:org/webhooks/:id/replay", guard("webhooks.manage"), (req, res) => {
   const ok = replayEvent(`org:${req.params.org}`, str((req.body ?? {}).event_id));
   if (ok) audit({ orgId: req.params.org, actor: actor(req), action: "webhook.replayed", target: { type: "webhook_endpoint", id: req.params.id }, ip: clientIp(req) });

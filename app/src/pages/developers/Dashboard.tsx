@@ -1,18 +1,43 @@
 /* ============================================================
    Developer dashboard (/developers/dashboard) — docs/api-v1 §29.
-   Overview · API keys · Webhooks · Transactions · Settlements · Team · Billing · Audit.
-   A developer session token (not an API credential) authenticates every call.
+   Overview (onboarding checklist + KPIs) · API keys · Webhooks · Transactions · Settlements ·
+   Go live · Team · Billing · Security · Audit. Tabs live in the URL hash so a refresh and a
+   shared link land on the same view. A developer session token (never an API credential)
+   authenticates every call.
    ============================================================ */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { SiteHeader } from "../../components/nav.js";
-import { dev, devToken, setDevToken, V1_BASE, type DevOrg, type DevCredential, type DevWebhook, type DevMember, type UsageBlock, DevError } from "../../api/developers.js";
+import { dev, devToken, setDevToken, V1_BASE, type DevOrg, type DevCredential, type DevMember, type DevRequest, DevError } from "../../api/developers.js";
 import "../Developers.css";
 import "./dashboard.css";
 
 const fmt = (n: number) => n.toLocaleString("en");
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+const ago = (iso?: string | null) => { if (!iso) return "never"; const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); if (s < 60) return "just now"; if (s < 3600) return `${Math.floor(s / 60)} min ago`; if (s < 86400) return `${Math.floor(s / 3600)} h ago`; return `${Math.floor(s / 86400)} d ago`; };
 const errMsg = (e: unknown) => (e instanceof DevError ? e.message : e instanceof Error ? e.message : "Something went wrong.");
+/** Absolute /v1 base for copy-paste samples (the dev proxy makes V1_BASE relative). */
+const v1Abs = () => (V1_BASE.startsWith("http") ? V1_BASE : `${window.location.origin}${V1_BASE}`);
+const copyText = (t: string) => { void navigator.clipboard?.writeText(t); };
+
+/* ---------- small shared pieces ---------- */
+function Panel({ title, sub, action, children }: { title: string; sub?: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return <section className="dd-panel"><div className="dd-panel-head"><div><h2>{title}</h2>{sub && <p className="muted small">{sub}</p>}</div>{action}</div>{children}</section>;
+}
+function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) { return <div className="dd-kpi"><div className="muted small">{label}</div><div className="dd-kpi-v">{value}</div>{sub && <div className="muted small">{sub}</div>}</div>; }
+function Skeleton({ rows = 3 }: { rows?: number }) { return <div className="dd-skel" aria-busy="true">{Array.from({ length: rows }, (_, i) => <div key={i} />)}</div>; }
+function Empty({ children }: { children: ReactNode }) { return <div className="dd-empty">{children}</div>; }
+function CodeBlock({ code, label }: { code: string; label?: string }) {
+  const [c, setC] = useState(false);
+  return <div className="dd-codewrap">{label && <div className="dd-codebar"><span>{label}</span><button type="button" onClick={() => { copyText(code); setC(true); setTimeout(() => setC(false), 1200); }}>{c ? "Copied ✓" : "Copy"}</button></div>}<pre className="dd-code">{code}</pre></div>;
+}
+function Status({ s }: { s: string }) { return <span className={`dd-st ${s}`}>{s.replace(/_/g, " ")}</span>; }
+function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; reload: () => Promise<void>; loading: boolean } {
+  const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  const reload = useCallback(async () => { setLoading(true); try { setData(await fn()); setError(null); } catch (e) { setError(errMsg(e)); } finally { setLoading(false); } }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload(); }, [reload]);
+  return { data, error, reload, loading };
+}
 
 /* ---------- auth screen: sign in · create account (with plan) · forgot · reset · invitation ---------- */
 const PLANS_COPY: Array<[string, string, string]> = [["developer", "Developer", "Sandbox now, low-volume live. 1.5 % · 60 req/min."], ["business", "Business", "Volume tiers from 10 M XAF/month. 1.2 % → 0.9 % · 300 req/min."], ["enterprise", "Enterprise", "Negotiated fee, custom limits, IP allow-list, signing."]];
@@ -43,14 +68,14 @@ function Auth({ onDone, params }: { onDone: () => void; params: URLSearchParams 
         {mode === "invite" && inv && <p className="muted">You were added to <b>{inv.organization}</b> as {inv.email}.{inv.needs_password ? " Choose a password to finish." : ""}</p>}
         <form onSubmit={submit} className="dd-form">
           {mode === "signup" && <>
-            <label>Your name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
-            <label>Company / organization<input value={f.organization} onChange={(e) => setF({ ...f, organization: e.target.value })} placeholder="Bitbank" required /></label>
-            <div className="dd-plans">{PLANS_COPY.map(([id, name, desc]) => <label key={id} className={f.plan === id ? "on" : ""}><input type="radio" name="plan" value={id} checked={f.plan === id} onChange={() => setF({ ...f, plan: id })} /><b>{name}</b><span>{desc}</span></label>)}</div>
+            <label>Your name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required autoComplete="name" /></label>
+            <label>Company / organization<input value={f.organization} onChange={(e) => setF({ ...f, organization: e.target.value })} placeholder="Bitbank" required autoComplete="organization" /></label>
+            <div className="dd-plans" role="radiogroup" aria-label="Plan">{PLANS_COPY.map(([id, name, desc]) => <label key={id} className={f.plan === id ? "on" : ""}><input type="radio" name="plan" value={id} checked={f.plan === id} onChange={() => setF({ ...f, plan: id })} /><b>{name}</b><span>{desc}</span></label>)}</div>
             {f.plan !== "developer" && <><label>Expected monthly volume (XAF)<input value={f.volume} onChange={(e) => setF({ ...f, volume: e.target.value })} placeholder="50000000" inputMode="numeric" /></label><label>Tell us about your use case<input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Payroll for 300 riders, twice a month" /></label><p className="muted small">You start on Developer today; a {f.plan} request goes to our team and is confirmed by email.</p></>}
           </>}
           {(mode === "login" || mode === "signup" || mode === "forgot") && <label>Email<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required autoComplete="email" /></label>}
           {(mode === "login" || mode === "signup" || mode === "reset" || (mode === "invite" && inv?.needs_password)) && <label>{mode === "reset" ? "New password" : "Password"}<input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required minLength={10} autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>}
-          {err && <div className="dd-err">{err}</div>}
+          {err && <div className="dd-err" role="alert">{err}</div>}
           {info && <div className="callout small">{info}</div>}
           <button className="btn btn-primary btn-block" disabled={busy || (mode === "invite" && !inv)}>{busy ? "…" : { login: "Sign in", signup: "Create account", forgot: "Send reset link", reset: "Set password", invite: "Join" }[mode]}</button>
         </form>
@@ -68,97 +93,114 @@ function Auth({ onDone, params }: { onDone: () => void; params: URLSearchParams 
 /* ---------- shell ---------- */
 type Tab = "overview" | "keys" | "webhooks" | "transactions" | "settlements" | "golive" | "team" | "billing" | "security" | "audit";
 const TABS: Array<[Tab, string]> = [["overview", "Overview"], ["keys", "API keys"], ["webhooks", "Webhooks"], ["transactions", "Transactions"], ["settlements", "Settlements"], ["golive", "Go live"], ["team", "Team"], ["billing", "Billing"], ["security", "Security"], ["audit", "Audit log"]];
+const tabFromHash = (): Tab => { const h = window.location.hash.replace("#", "") as Tab; return TABS.some(([k]) => k === h) ? h : "overview"; };
 
 export function DeveloperDashboard() {
   const [authed, setAuthed] = useState(!!devToken());
   const [me, setMe] = useState<Awaited<ReturnType<typeof dev.me>> | null>(null);
-  const [orgId, setOrgId] = useState<string>("");
-  const [tab, setTab] = useState<Tab>("overview");
+  const [orgId, setOrgId] = useState<string>(() => { try { return localStorage.getItem("mm:dev:org") ?? ""; } catch { return ""; } });
+  const [tab, setTabState] = useState<Tab>(tabFromHash);
+  const setTab = (t: Tab) => { setTabState(t); window.history.replaceState({}, "", `#${t}`); window.scrollTo({ top: 0 }); };
+  useEffect(() => { const h = () => setTabState(tabFromHash()); window.addEventListener("hashchange", h); return () => window.removeEventListener("hashchange", h); }, []);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
-  const load = useCallback(() => dev.me().then((m) => { setMe(m); setOrgId((cur) => cur || m.organizations[0]?.id || ""); }).catch((e) => { if (e instanceof DevError && e.status === 401) setAuthed(false); else setErr(errMsg(e)); }), []);
+  const load = useCallback(() => dev.me().then((m) => { setMe(m); setOrgId((cur) => (cur && m.organizations.some((o) => o.id === cur) ? cur : m.organizations[0]?.id || "")); }).catch((e) => { if (e instanceof DevError && e.status === 401) setAuthed(false); else setErr(errMsg(e)); }), []);
   useEffect(() => { if (authed) void load(); }, [authed, load]);
-  // A verification link works whether or not the user is signed in.
+  useEffect(() => { try { if (orgId) localStorage.setItem("mm:dev:org", orgId); } catch { /* */ } }, [orgId]);
   const verifiedOnce = useRef(false);
   useEffect(() => { const v = params.get("verify"); if (v && !verifiedOnce.current) { verifiedOnce.current = true; dev.verifyEmail(v).then(() => { setNotice("Email verified — thank you."); window.history.replaceState({}, "", "/developers/dashboard"); void load(); }).catch((e) => setNotice(errMsg(e))); } }, [params, load]);
-  if (!authed) return <div className="app-bg" style={{ background: "var(--paper)" }}><div className="dev"><SiteHeader /><Auth params={params} onDone={() => { setAuthed(true); }} /></div></div>;
+  if (!authed) return <div className="app-bg" style={{ background: "var(--paper)" }}><div className="dev"><SiteHeader cta={false} /><Auth params={params} onDone={() => { setAuthed(true); }} /></div></div>;
   const org = me?.organizations.find((o) => o.id === orgId);
   const devVerifyLink = (() => { try { return sessionStorage.getItem("mm:dev:verify-link"); } catch { return null; } })();
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
-      <div className="dev">
-        <SiteHeader />
+      <div className="dev dd">
+        <SiteHeader cta={false} />
         <div className="dd-top">
-          <div>
+          <div style={{ minWidth: 0 }}>
             <span className="eyebrow">Developer dashboard</span>
-            <h1 className="dd-title">{org?.name ?? "…"} <span className={`dd-env ${me?.environment}`}>{me?.environment === "live" ? "live" : "sandbox"}</span></h1>
-            <div className="muted small">API base <code>{V1_BASE}</code>{me?.sandbox_base ? <> · sandbox <code>{me.sandbox_base}/v1</code></> : null}</div>
+            <h1 className="dd-title">{org?.name ?? <span className="dd-skel-inline" />} {me && <span className={`dd-env ${me.environment}`}>{me.environment === "live" ? "live" : "sandbox"}</span>}</h1>
+            <div className="muted small dd-base">API base <code>{v1Abs()}</code>{me?.sandbox_base ? <> · sandbox <code>{me.sandbox_base}/v1</code></> : null}</div>
           </div>
           <div className="dd-top-right">
-            {me && me.organizations.length > 1 && <select value={orgId} onChange={(e) => setOrgId(e.target.value)}>{me.organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
+            {me && me.organizations.length > 1 && <select value={orgId} onChange={(e) => setOrgId(e.target.value)} aria-label="Organization">{me.organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
             <span className="muted small">{me?.user.email}</span>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { void dev.logout(false).catch(() => {}); setDevToken(null); setAuthed(false); }}>Sign out</button>
           </div>
         </div>
-        <nav className="dd-tabs">{TABS.map(([k, l]) => <button key={k} type="button" className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}</nav>
-        {err && <div className="dd-err">{err}</div>}
-        {notice && <div className="callout">{notice}</div>}
-        {me && !me.user.emailVerified && <div className="callout"><b>Verify your email.</b> We sent a link to {me.user.email}. {devVerifyLink ? <>Sandbox (no email provider): <a href={devVerifyLink}>open the verification link</a>.</> : <button type="button" className="dd-link" onClick={() => dev.resendVerification().then((r) => setNotice(r.dev_link ? `Sandbox link: ${r.dev_link}` : "Sent again."))}>Resend</button>}</div>}
-        {org && (
-          <main className="dd-main">
-            {tab === "overview" && <Overview org={org} />}
-            {tab === "keys" && <Keys org={org} />}
-            {tab === "webhooks" && <Webhooks org={org} />}
-            {tab === "transactions" && <Transactions org={org} />}
-            {tab === "settlements" && <Settlements org={org} />}
-            {tab === "golive" && <GoLive org={org} plans={me?.plans ?? []} refresh={load} />}
-            {tab === "team" && <Team org={org} />}
-            {tab === "billing" && <Billing org={org} />}
-            {tab === "security" && <Security onSignedOut={() => { setDevToken(null); setAuthed(false); }} />}
-            {tab === "audit" && <Audit org={org} />}
-          </main>
-        )}
+        <nav className="dd-tabs" aria-label="Dashboard sections">{TABS.map(([k, l]) => <button key={k} type="button" className={tab === k ? "on" : ""} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>{l}</button>)}</nav>
+        {err && <div className="dd-err" role="alert">{err}</div>}
+        {notice && <div className="callout" role="status">{notice} <button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => setNotice(null)}>dismiss</button></div>}
+        {me && !me.user.emailVerified && <div className="callout"><b>Verify your email.</b> We sent a link to {me.user.email}. {devVerifyLink ? <>Sandbox (no email provider): <a href={devVerifyLink}>open the verification link</a>.</> : <button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => dev.resendVerification().then((r) => setNotice(r.dev_link ? `Sandbox link: ${r.dev_link}` : "Sent again."))}>Resend</button>}</div>}
+        <main className="dd-main">
+          {!org && <Skeleton rows={4} />}
+          {org && tab === "overview" && <Overview org={org} me={me!} go={setTab} />}
+          {org && tab === "keys" && <Keys org={org} />}
+          {org && tab === "webhooks" && <Webhooks org={org} />}
+          {org && tab === "transactions" && <Transactions org={org} />}
+          {org && tab === "settlements" && <Settlements org={org} />}
+          {org && tab === "golive" && <GoLive org={org} plans={me?.plans ?? []} refresh={load} />}
+          {org && tab === "team" && <Team org={org} />}
+          {org && tab === "billing" && <Billing org={org} go={setTab} />}
+          {org && tab === "security" && <Security onSignedOut={() => { setDevToken(null); setAuthed(false); }} />}
+          {org && tab === "audit" && <Audit org={org} />}
+        </main>
       </div>
     </div>
   );
 }
 
-function Panel({ title, sub, action, children }: { title: string; sub?: string; action?: ReactNode; children: ReactNode }) {
-  return <section className="dd-panel"><div className="dd-panel-head"><div><h2>{title}</h2>{sub && <p className="muted small">{sub}</p>}</div>{action}</div>{children}</section>;
-}
-function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub?: string }) { return <div className="dd-kpi"><div className="muted small">{label}</div><div className="dd-kpi-v">{value}</div>{sub && <div className="muted small">{sub}</div>}</div>; }
-
-/* ---------- overview ---------- */
-function Overview({ org }: { org: DevOrg }) {
-  const [u, setU] = useState<{ live: UsageBlock; test: UsageBlock } | null>(null);
-  const [detail, setDetail] = useState<Awaited<ReturnType<typeof dev.org>> | null>(null);
-  const [env, setEnv] = useState<"live" | "test">("test");
-  useEffect(() => { void dev.usage(org.id).then(setU); void dev.org(org.id).then(setDetail); }, [org.id]);
-  const s = u?.[env].summary;
+/* ---------- overview: onboarding checklist + KPIs ---------- */
+function Overview({ org, me, go }: { org: DevOrg; me: NonNullable<Awaited<ReturnType<typeof dev.me>>>; go: (t: Tab) => void }) {
+  const usage = useAsync(() => dev.usage(org.id), [org.id]);
+  const detail = useAsync(() => dev.org(org.id), [org.id]);
+  const creds = useAsync(() => dev.credentials(org.id), [org.id]);
+  const hooks = useAsync(() => dev.webhooks(org.id), [org.id]);
+  const [env, setEnv] = useState<"live" | "test">(org.liveEnabled ? "live" : "test");
+  const u = usage.data; const s = u?.[env].summary;
+  const test = u?.test.summary;
+  const steps = [
+    { done: me.user.emailVerified, label: "Verify your email", hint: "Click the link we sent you.", tab: undefined as Tab | undefined },
+    { done: (creds.data?.credentials.filter((c) => c.status === "active").length ?? 0) > 0, label: "Create a sandbox API key", hint: "mm_test_… — instant, no verification.", tab: "keys" as Tab },
+    { done: (test?.quotes ?? 0) > 0, label: "Make your first quote", hint: "POST /v1/quotes with your key.", tab: "keys" as Tab },
+    { done: (test?.completed ?? 0) > 0, label: "Complete a sandbox payment", hint: "Create a payment, then POST /v1/sandbox/payments/{id}/pay.", tab: "transactions" as Tab },
+    { done: (hooks.data?.endpoints.filter((h) => !h.disabledAt).length ?? 0) > 0, label: "Register a webhook", hint: "Get payment.completed instead of polling.", tab: "webhooks" as Tab },
+    { done: org.kyb === "verified" || org.kyb === "pending", label: "Submit your company details", hint: "Required for live access.", tab: "golive" as Tab },
+    { done: org.liveEnabled, label: "Go live", hint: "Create mm_live_ keys once approved.", tab: "golive" as Tab },
+  ];
+  const doneCount = steps.filter((x) => x.done).length;
+  const ready = creds.data && hooks.data && usage.data;
   return (
     <>
-      {!org.liveEnabled && <div className="callout"><b>Sandbox only for now.</b> Build and test with <code>mm_test_</code> credentials. When you are ready, submit your company details under <b>Go live</b> — live credentials are enabled once verified.</div>}
-      <div className="dd-seg"><button type="button" className={env === "test" ? "on" : ""} onClick={() => setEnv("test")}>Sandbox</button><button type="button" className={env === "live" ? "on" : ""} onClick={() => setEnv("live")}>Live</button><span className="muted small">last 30 days</span></div>
-      <div className="dd-kpis">
-        <Kpi label="Volume" value={s ? `${fmt(s.volumeXaf)} XAF` : "…"} sub={s ? `${s.completed} completed payments` : undefined} />
-        <Kpi label="Success rate" value={s ? `${s.successRatePct}%` : "…"} sub={s ? `${s.failed} failed / expired` : undefined} />
-        <Kpi label="Fees" value={s ? `${fmt(s.feesXaf)} XAF` : "…"} sub={detail ? `${detail.plan.name} plan · ${detail.plan.platformFeePct}%` : undefined} />
-        <Kpi label="API requests" value={s ? fmt(s.requests) : "…"} sub={s ? `${s.errors} errors · p̄ ${s.avgLatencyMs} ms` : undefined} />
-        <Kpi label="Webhooks" value={s ? fmt(s.webhooks) : "…"} sub={s ? `${s.webhookFailures} failed deliveries` : undefined} />
-        <Kpi label="Settled" value={s ? `${fmt(s.settledXaf)} XAF` : "…"} sub={detail ? `balance ${fmt(detail.balance.available)} XAF` : undefined} />
-      </div>
-      {u && <Panel title="Daily volume" sub="Completed payments per day (XAF)"><Bars rows={u[env].days.map((d) => ({ k: d.day.slice(5), v: d.volumeXaf, t: `${d.completed} ok · ${d.failed} failed` }))} /></Panel>}
-      <Panel title="Quick start" sub="Three calls and a webhook.">
-        <pre className="dd-code">{`# 1. quote
-curl -X POST ${V1_BASE}/quotes -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: q-1" \\
+      {ready && doneCount < steps.length && (
+        <Panel title="Getting started" sub={`${doneCount} of ${steps.length} done`}>
+          <div className="dd-progress"><div style={{ width: `${(100 * doneCount) / steps.length}%` }} /></div>
+          <ol className="dd-steps">{steps.map((x, i) => <li key={i} className={x.done ? "done" : ""}><span className="dd-step-mark">{x.done ? "✓" : i + 1}</span><span><b>{x.label}</b><span className="muted small"> — {x.hint}</span></span>{!x.done && x.tab && <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(x.tab!)}>Open</button>}</li>)}</ol>
+        </Panel>
+      )}
+      <div className="dd-seg-row"><div className="dd-seg"><button type="button" className={env === "test" ? "on" : ""} onClick={() => setEnv("test")}>Sandbox</button><button type="button" className={env === "live" ? "on" : ""} onClick={() => setEnv("live")}>Live</button></div><span className="muted small">last 30 days</span></div>
+      {!u ? <Skeleton rows={2} /> : (
+        <div className="dd-kpis">
+          <Kpi label="Volume" value={`${fmt(s!.volumeXaf)} XAF`} sub={`${s!.completed} completed`} />
+          <Kpi label="Success rate" value={s!.completed + s!.failed ? `${s!.successRatePct}%` : "—"} sub={`${s!.failed} failed / expired`} />
+          <Kpi label="Fees" value={`${fmt(s!.feesXaf)} XAF`} sub={detail.data ? `${detail.data.plan.name} · ${detail.data.plan.platformFeePct}%` : ""} />
+          <Kpi label="API requests" value={fmt(s!.requests)} sub={`${s!.errors} errors · avg ${s!.avgLatencyMs} ms`} />
+          <Kpi label="Webhooks" value={fmt(s!.webhooks)} sub={`${s!.webhookFailures} failed deliveries`} />
+          <Kpi label="Settled" value={`${fmt(s!.settledXaf)} XAF`} sub={detail.data ? `balance ${fmt(detail.data.balance.available)} XAF` : ""} />
+        </div>
+      )}
+      {u && (s!.completed > 0 ? <Panel title="Daily volume" sub="Completed payments per day (XAF)"><Bars rows={u[env].days.map((d) => ({ k: d.day.slice(5), v: d.volumeXaf, t: `${d.completed} ok · ${d.failed} failed` }))} /></Panel>
+        : <Empty>{env === "live" ? (org.liveEnabled ? "No live payments in the last 30 days." : "Live is not enabled yet — complete the steps above.") : "No sandbox payments yet. Create a key and run the quick start below."}</Empty>)}
+      <Panel title="Quick start" sub="Three calls and a webhook. Replace mm_test_… with your key." action={<Link className="btn btn-ghost btn-sm" to="/developers">Full docs →</Link>}>
+        <CodeBlock label="cURL" code={`# 1. quote
+curl -X POST ${v1Abs()}/quotes -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: q-1" \\
   -H "Content-Type: application/json" -d '{"source":{"asset":"USDT","network":"ETHEREUM"},"destination":{"country":"CM","currency":"XAF","amount":"25000"}}'
 # 2. payment
-curl -X POST ${V1_BASE}/payments -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: order-1" \\
+curl -X POST ${v1Abs()}/payments -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: order-1" \\
   -H "Content-Type: application/json" -d '{"quote_id":"q_…","reference":"ORDER-1","recipient":{"phone":"+237670123456"}}'
-# 3. sandbox: simulate the customer paying → payment.completed arrives at your webhook
-curl -X POST ${V1_BASE}/sandbox/payments/pay_…/pay -H "Authorization: Bearer mm_test_…"`}</pre>
-        <p className="muted small">Full reference: <Link to="/developers">momome.xyz/developers</Link> · OpenAPI: <a href={`${V1_BASE}/openapi.json`} target="_blank" rel="noreferrer">openapi.json</a></p>
+# 3. sandbox: simulate the customer paying → payment.completed reaches your webhook
+curl -X POST ${v1Abs()}/sandbox/payments/pay_…/pay -H "Authorization: Bearer mm_test_…"`} />
       </Panel>
     </>
   );
@@ -170,32 +212,39 @@ function Bars({ rows }: { rows: Array<{ k: string; v: number; t: string }> }) {
 
 /* ---------- keys ---------- */
 function Keys({ org }: { org: DevOrg }) {
-  const [data, setData] = useState<{ credentials: DevCredential[]; scopes: string[] } | null>(null);
+  const q = useAsync(() => dev.credentials(org.id), [org.id]);
   const [secret, setSecret] = useState<{ secret: string; label: string; env: string } | null>(null);
   const [f, setF] = useState({ label: "", environment: "test" as "test" | "live", scopes: [] as string[] });
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
-  const load = useCallback(() => dev.credentials(org.id).then(setData).catch((e) => setErr(errMsg(e))), [org.id]);
-  useEffect(() => { void load(); }, [load]);
-  const create = async () => { setBusy(true); setErr(null); try { const r = await dev.createCredential(org.id, { environment: f.environment, label: f.label || "Untitled", scopes: f.scopes.length ? f.scopes : undefined }); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); setF({ label: "", environment: f.environment, scopes: [] }); await load(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
-  const rotate = async (c: DevCredential) => { if (!confirm(`Rotate "${c.label}"? The old secret keeps working for 1 hour.`)) return; try { const r = await dev.rotateCredential(org.id, c.id, 3600); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); await load(); } catch (e) { setErr(errMsg(e)); } };
-  const revoke = async (c: DevCredential) => { if (!confirm(`Revoke "${c.label}"? Integrations using it stop immediately.`)) return; try { await dev.revokeCredential(org.id, c.id); await load(); } catch (e) { setErr(errMsg(e)); } };
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null); const [showRevoked, setShowRevoked] = useState(false);
+  const create = async () => { setBusy(true); setErr(null); try { const r = await dev.createCredential(org.id, { environment: f.environment, label: f.label || "Untitled", scopes: f.scopes.length ? f.scopes : undefined }); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); setF({ label: "", environment: f.environment, scopes: [] }); await q.reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
+  const rotate = async (c: DevCredential) => { if (!confirm(`Rotate "${c.label}"? The old secret keeps working for 1 hour.`)) return; try { const r = await dev.rotateCredential(org.id, c.id, 3600); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); await q.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const revoke = async (c: DevCredential) => { if (!confirm(`Revoke "${c.label}"? Integrations using it stop immediately.`)) return; try { await dev.revokeCredential(org.id, c.id); await q.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const rows = (q.data?.credentials ?? []).filter((c) => showRevoked || c.status === "active");
   return (
     <>
-      {secret && <div className="dd-secret"><b>{secret.label} ({secret.env}) — copy the secret now, it is shown once.</b><code>{secret.secret}</code><div><button type="button" className="btn btn-primary btn-sm" onClick={() => void navigator.clipboard?.writeText(secret.secret)}>Copy</button> <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSecret(null)}>Done</button></div></div>}
-      <Panel title="Create a credential" sub="mm_test_ works against the sandbox; mm_live_ against production (once live is enabled).">
-        <div className="dd-row">
-          <label>Label<input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="Checkout service" /></label>
-          <label>Environment<select value={f.environment} onChange={(e) => setF({ ...f, environment: e.target.value as "test" | "live" })}><option value="test">Sandbox (mm_test_)</option><option value="live" disabled={!org.liveEnabled}>Live (mm_live_){org.liveEnabled ? "" : " — not enabled"}</option></select></label>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={create}>Create</button>
+      {secret && (
+        <div className="dd-secret" role="status">
+          <b>{secret.label} ({secret.env}) — copy the secret now, it is shown once.</b>
+          <code>{secret.secret}</code>
+          <div className="dd-row"><button type="button" className="btn btn-primary btn-sm" onClick={() => copyText(secret.secret)}>Copy secret</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setSecret(null)}>Done</button></div>
+          <CodeBlock label="Try it now" code={`curl ${v1Abs()}/account -H "Authorization: Bearer ${secret.secret}"`} />
         </div>
-        <details className="dd-details"><summary>Restrict scopes (default: all)</summary><div className="dd-chips">{(data?.scopes ?? []).map((s) => <label key={s} className={f.scopes.includes(s) ? "on" : ""}><input type="checkbox" checked={f.scopes.includes(s)} onChange={(e) => setF({ ...f, scopes: e.target.checked ? [...f.scopes, s] : f.scopes.filter((x) => x !== s) })} />{s}</label>)}</div></details>
-        {err && <div className="dd-err">{err}</div>}
+      )}
+      <Panel title="Create a credential" sub={<>Sandbox keys (<code>mm_test_</code>) work now. Live keys (<code>mm_live_</code>) {org.liveEnabled ? "are enabled for this organization." : "unlock after verification — see Go live."}</>}>
+        <div className="dd-row">
+          <label>Label<input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="Checkout service" onKeyDown={(e) => e.key === "Enter" && create()} /></label>
+          <label>Environment<select value={f.environment} onChange={(e) => setF({ ...f, environment: e.target.value as "test" | "live" })}><option value="test">Sandbox (mm_test_)</option><option value="live" disabled={!org.liveEnabled}>Live (mm_live_){org.liveEnabled ? "" : " — not enabled"}</option></select></label>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={create}>{busy ? "…" : "Create key"}</button>
+        </div>
+        <details className="dd-details"><summary>Restrict scopes (default: all)</summary><div className="dd-chips">{(q.data?.scopes ?? []).map((s) => <label key={s} className={f.scopes.includes(s) ? "on" : ""}><input type="checkbox" checked={f.scopes.includes(s)} onChange={(e) => setF({ ...f, scopes: e.target.checked ? [...f.scopes, s] : f.scopes.filter((x) => x !== s) })} />{s}</label>)}</div></details>
+        {err && <div className="dd-err" role="alert">{err}</div>}
       </Panel>
-      <Panel title="Credentials">
-        <table className="dd-table"><thead><tr><th>Label</th><th>Env</th><th>Hint</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>
-          {(data?.credentials ?? []).map((c) => <tr key={c.id} className={c.status === "revoked" ? "dim" : ""}><td>{c.label}</td><td><span className={`dd-env ${c.env}`}>{c.env}</span></td><td><code>{c.hint}</code></td><td className="small">{c.scopes.length === 10 ? "all" : c.scopes.join(", ")}</td><td className="small">{when(c.lastUsedAt)}</td><td>{c.status}</td><td className="dd-actions">{c.status === "active" && <><button type="button" onClick={() => rotate(c)}>Rotate</button><button type="button" onClick={() => revoke(c)}>Revoke</button></>}</td></tr>)}
-          {data && !data.credentials.length && <tr><td colSpan={7} className="muted">No credentials yet.</td></tr>}
-        </tbody></table>
+      <Panel title="Credentials" sub={q.data ? `${rows.length} shown` : undefined} action={<label className="muted small dd-check"><input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} /> show revoked</label>}>
+        {q.loading && !q.data ? <Skeleton /> : rows.length ? (
+          <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Label</th><th>Env</th><th>Hint</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>
+            {rows.map((c) => <tr key={c.id} className={c.status === "revoked" ? "dim" : ""}><td>{c.label}</td><td><span className={`dd-env ${c.env}`}>{c.env}</span></td><td><code>{c.hint}</code></td><td className="small">{c.scopes.length >= 10 ? "all" : c.scopes.join(", ")}</td><td className="small" title={when(c.lastUsedAt)}>{ago(c.lastUsedAt)}</td><td>{c.status}</td><td className="dd-actions">{c.status === "active" && <><button type="button" onClick={() => rotate(c)}>Rotate</button><button type="button" onClick={() => revoke(c)}>Revoke</button></>}</td></tr>)}
+          </tbody></table></div>
+        ) : <Empty>No credentials yet — create your first sandbox key above.</Empty>}
       </Panel>
     </>
   );
@@ -203,146 +252,154 @@ function Keys({ org }: { org: DevOrg }) {
 
 /* ---------- webhooks ---------- */
 function Webhooks({ org }: { org: DevOrg }) {
-  const [eps, setEps] = useState<DevWebhook[] | null>(null);
-  const load = useCallback(() => dev.webhooks(org.id).then((r) => setEps(r.endpoints)), [org.id]);
-  useEffect(() => { void load(); }, [load]);
+  const q = useAsync(() => dev.webhooks(org.id), [org.id]);
+  const ev = useAsync(() => dev.webhookEvents(org.id), [org.id]);
+  const [f, setF] = useState({ url: "", description: "", events: ["payment.completed", "payment.failed", "payment.refunded", "payment.expired"] });
+  const [secret, setSecret] = useState<{ secret: string; url: string } | null>(null); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const create = async () => { setBusy(true); setMsg(null); try { const r = await dev.createWebhook(org.id, { url: f.url, events: f.events, description: f.description || undefined }); setSecret({ secret: r.secret, url: r.endpoint.url }); setF({ ...f, url: "", description: "" }); await q.reload(); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); } };
+  const act = async (fn: () => Promise<unknown>, ok?: string) => { setMsg(null); try { await fn(); if (ok) setMsg(ok); await q.reload(); } catch (e) { setMsg(errMsg(e)); } };
+  const toggleEvent = (e: string) => setF({ ...f, events: f.events.includes(e) ? f.events.filter((x) => x !== e) : [...f.events, e] });
   return (
     <>
-      <div className="callout">Endpoints are managed with your credential through the API (<code>POST {V1_BASE}/webhooks</code>) so the secret is delivered to the system that verifies signatures. This page shows every endpoint and its deliveries; a failed delivery can be replayed here.</div>
-      {(eps ?? []).map((w) => (
-        <Panel key={w.id} title={w.url} sub={`${w.events.join(", ")} · ${w.disabledAt ? "disabled" : "enabled"} · ${w.failures} consecutive failures · secret ${w.secretHint}`}>
-          <table className="dd-table"><thead><tr><th>Event</th><th>Type</th><th>When</th><th>Attempts</th><th>Status</th><th></th></tr></thead><tbody>
-            {w.deliveries.map((d) => <tr key={d.id}><td><code>{d.id}</code></td><td>{d.type}</td><td className="small">{when(d.createdAt)}</td><td>{d.attempts}{d.lastStatus ? ` · HTTP ${d.lastStatus}` : ""}</td><td>{d.deliveredAt ? "delivered" : d.dead ? "dead" : "pending"}{d.lastError && !d.deliveredAt ? <span className="muted small"> {d.lastError}</span> : null}</td><td className="dd-actions"><button type="button" onClick={() => dev.replayWebhook(org.id, w.id, d.id).then(load)}>Replay</button></td></tr>)}
-            {!w.deliveries.length && <tr><td colSpan={6} className="muted">No deliveries yet.</td></tr>}
-          </tbody></table>
+      {secret && <div className="dd-secret" role="status"><b>Signing secret for {secret.url} — shown once.</b><code>{secret.secret}</code><div className="dd-row"><button type="button" className="btn btn-primary btn-sm" onClick={() => copyText(secret.secret)}>Copy secret</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setSecret(null)}>Done</button></div><p className="muted small">Verify <code>X-MoMoMe-Signature</code> with it (see the docs or the SDK's <code>verifyWebhookSignature</code>).</p></div>}
+      <Panel title="Add an endpoint" sub="Public HTTPS in live; http://localhost is fine in the sandbox. Reply 2xx within 10 s; we retry with backoff and you can replay anything here.">
+        <div className="dd-row">
+          <label style={{ flex: "3 1 260px" }}>URL<input value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https://example.com/momome/webhook" inputMode="url" /></label>
+          <label>Description<input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Orders service" /></label>
+          <button type="button" className="btn btn-primary" disabled={busy || !f.url} onClick={create}>{busy ? "…" : "Add endpoint"}</button>
+        </div>
+        <div className="dd-chips" style={{ marginTop: 10 }}><label className={f.events.includes("*") ? "on" : ""}><input type="checkbox" checked={f.events.includes("*")} onChange={() => setF({ ...f, events: f.events.includes("*") ? [] : ["*"] })} />all events</label>{!f.events.includes("*") && (ev.data?.events ?? []).map((e) => <label key={e} className={f.events.includes(e) ? "on" : ""}><input type="checkbox" checked={f.events.includes(e)} onChange={() => toggleEvent(e)} />{e}</label>)}</div>
+        {msg && <div className="callout small" role="status">{msg}</div>}
+      </Panel>
+      {q.loading && !q.data ? <Skeleton /> : (q.data?.endpoints ?? []).length ? (q.data!.endpoints).map((w) => (
+        <Panel key={w.id} title={w.url} sub={<>{w.description ? `${w.description} · ` : ""}{w.events.join(", ")} · secret {w.secretHint}{w.failures ? ` · ${w.failures} consecutive failures` : ""}</>}
+          action={<div className="dd-actions"><span className={`dd-st ${w.disabledAt ? "FAILED" : "COMPLETED"}`}>{w.disabledAt ? "disabled" : "enabled"}</span><button type="button" onClick={() => act(() => dev.testWebhook(org.id, w.id), "Ping sent — watch the deliveries below.")}>Send test</button><button type="button" onClick={() => act(() => dev.updateWebhook(org.id, w.id, { enabled: !!w.disabledAt }))}>{w.disabledAt ? "Enable" : "Disable"}</button><button type="button" onClick={() => { if (confirm("Delete this endpoint?")) void act(() => dev.deleteWebhook(org.id, w.id)); }}>Delete</button></div>}>
+          {w.deliveries.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Event</th><th>Type</th><th>When</th><th>Attempts</th><th>Status</th><th></th></tr></thead><tbody>
+            {w.deliveries.map((d) => <tr key={d.id}><td><code>{d.id}</code></td><td>{d.type}</td><td className="small" title={when(d.createdAt)}>{ago(d.createdAt)}</td><td>{d.attempts}{d.lastStatus ? ` · HTTP ${d.lastStatus}` : ""}</td><td><Status s={d.deliveredAt ? "delivered" : d.dead ? "dead" : "pending"} />{d.lastError && !d.deliveredAt ? <span className="muted small"> {d.lastError}</span> : null}</td><td className="dd-actions"><button type="button" onClick={() => act(() => dev.replayWebhook(org.id, w.id, d.id), "Replayed.")}>Replay</button></td></tr>)}
+          </tbody></table></div> : <Empty>No deliveries yet — send a test, or complete a sandbox payment.</Empty>}
         </Panel>
-      ))}
-      {eps && !eps.length && <Panel title="No webhook endpoints yet"><pre className="dd-code">{`curl -X POST ${V1_BASE}/webhooks -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: wh-1" \\
-  -H "Content-Type: application/json" -d '{"url":"https://example.com/momome","events":["payment.completed","payment.failed","payment.refunded"]}'`}</pre></Panel>}
+      )) : <Empty>No endpoints yet. Add one above — <code>payment.completed</code> is the event most integrations need.</Empty>}
     </>
   );
 }
 
 /* ---------- transactions ---------- */
 function Transactions({ org }: { org: DevOrg }) {
-  const [env, setEnv] = useState("test"); const [q, setQ] = useState(""); const [status, setStatus] = useState("");
-  const [rows, setRows] = useState<Array<Record<string, any>> | null>(null); const [open, setOpen] = useState<Record<string, any> | null>(null);
-  useEffect(() => { const t = setTimeout(() => { void dev.payments(org.id, { environment: env, q, status }).then((r) => setRows(r.payments)); }, 250); return () => clearTimeout(t); }, [org.id, env, q, status]);
-  const csv = () => { if (!rows) return; const h = ["id", "reference", "status", "amount_xaf", "source_asset", "recipient", "operator", "created_at", "completed_at"]; const body = rows.map((p) => [p.id, p.reference ?? "", p.status, p.destination.amount, p.source.asset, p.recipient.phone, p.recipient.operator, p.created_at, p.timeline.completed_at ?? ""].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")); const blob = new Blob([[h.join(","), ...body].join("\n")], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `momome-payments-${env}.csv`; a.click(); };
+  const [env, setEnv] = useState<"live" | "test">(org.liveEnabled ? "live" : "test"); const [q, setQ] = useState(""); const [status, setStatus] = useState("");
+  const [rows, setRows] = useState<Array<Record<string, any>> | null>(null); const [open, setOpen] = useState<Record<string, any> | null>(null); const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => { setLoading(true); try { setRows((await dev.payments(org.id, { environment: env, q, status })).payments); } finally { setLoading(false); } }, [org.id, env, q, status]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 250); return () => clearTimeout(t); }, [load]);
+  const csv = () => { if (!rows) return; const h = ["id", "reference", "status", "amount_xaf", "source_asset", "source_amount", "recipient", "operator", "created_at", "completed_at"]; const body = rows.map((p) => [p.id, p.reference ?? "", p.status, p.destination.amount, p.source.asset, p.source.amount ?? "", p.recipient.phone, p.recipient.operator, p.created_at, p.timeline.completed_at ?? ""].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")); const blob = new Blob([[h.join(","), ...body].join("\n")], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `momome-payments-${env}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); };
+  const totals = useMemo(() => rows ? { n: rows.length, xaf: rows.filter((p) => p.status === "COMPLETED").reduce((s, p) => s + Number(p.destination.amount), 0) } : null, [rows]);
   return (
     <>
-      <div className="dd-row">
+      <div className="dd-row dd-filters">
         <div className="dd-seg"><button type="button" className={env === "test" ? "on" : ""} onClick={() => setEnv("test")}>Sandbox</button><button type="button" className={env === "live" ? "on" : ""} onClick={() => setEnv("live")}>Live</button></div>
-        <input placeholder="Search id, reference, phone, name" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Any status</option>{["AWAITING_PAYMENT", "PAYMENT_DETECTED", "PAYMENT_CONFIRMED", "PAYOUT_PROCESSING", "COMPLETED", "EXPIRED", "FAILED", "CANCELLED", "REFUNDED", "MANUAL_REVIEW"].map((s) => <option key={s}>{s}</option>)}</select>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={csv}>Export CSV</button>
+        <input placeholder="Search id, reference, phone, name" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
+        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status"><option value="">Any status</option>{["AWAITING_PAYMENT", "PAYMENT_DETECTED", "PAYMENT_CONFIRMED", "PAYOUT_PROCESSING", "PAYOUT_SUBMITTED", "COMPLETED", "EXPIRED", "FAILED", "CANCELLED", "REFUNDED", "MANUAL_REVIEW"].map((s) => <option key={s}>{s}</option>)}</select>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => void load()}>Refresh</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={csv} disabled={!rows?.length}>Export CSV</button>
       </div>
-      <Panel title="Payments" sub={rows ? `${rows.length} shown (latest 200)` : "…"}>
-        <table className="dd-table"><thead><tr><th>Created</th><th>Reference</th><th>Recipient</th><th>Amount</th><th>Funding</th><th>Status</th></tr></thead><tbody>
-          {(rows ?? []).map((p) => <tr key={p.id} onClick={() => setOpen(p)} className="click"><td className="small">{when(p.created_at)}</td><td>{p.reference ?? <code>{p.id}</code>}</td><td>{p.recipient.name ?? "—"} <span className="muted small">{p.recipient.phone}</span></td><td>{fmt(Number(p.destination.amount))} XAF</td><td className="small">{p.source.amount} {p.source.asset}</td><td><span className={`dd-st ${p.status}`}>{p.status}</span></td></tr>)}
-          {rows && !rows.length && <tr><td colSpan={6} className="muted">Nothing yet.</td></tr>}
-        </tbody></table>
+      <Panel title="Payments" sub={totals ? `${totals.n} shown (latest 200) · ${fmt(totals.xaf)} XAF completed` : "…"}>
+        {loading && !rows ? <Skeleton /> : rows?.length ? (
+          <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Created</th><th>Reference</th><th>Recipient</th><th>Amount</th><th>Funding</th><th>Status</th></tr></thead><tbody>
+            {rows.map((p) => <tr key={p.id} onClick={() => setOpen(p)} className="click" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setOpen(p)}><td className="small" title={when(p.created_at)}>{ago(p.created_at)}</td><td>{p.reference ?? <code>{p.id}</code>}</td><td>{p.recipient.name ?? "—"} <span className="muted small">{p.recipient.phone}</span></td><td>{fmt(Number(p.destination.amount))} XAF</td><td className="small">{p.source.amount ?? "—"} {p.source.asset}</td><td><Status s={p.status} /></td></tr>)}
+          </tbody></table></div>
+        ) : <Empty>{q || status ? "Nothing matches these filters." : env === "live" ? "No live payments yet." : "No sandbox payments yet — run the quick start on the Overview."}</Empty>}
       </Panel>
-      {open && <div className="dd-drawer" onClick={() => setOpen(null)}><div onClick={(e) => e.stopPropagation()}><h3>{open.reference ?? open.id} <span className={`dd-st ${open.status}`}>{open.status}</span></h3><pre className="dd-code">{JSON.stringify(open, null, 2)}</pre><button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(null)}>Close</button></div></div>}
+      {open && <PaymentDrawer p={open} onClose={() => setOpen(null)} />}
     </>
   );
+}
+function PaymentDrawer({ p, onClose }: { p: Record<string, any>; onClose: () => void }) {
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  const tl = Object.entries(p.timeline ?? {}).filter(([, v]) => v) as Array<[string, string]>;
+  return <div className="dd-drawer" onClick={onClose} role="dialog" aria-modal="true"><div onClick={(e) => e.stopPropagation()}>
+    <h3>{p.reference ?? p.id} <Status s={p.status} /></h3>
+    <div className="dd-kv"><span>Payment id</span><code>{p.id}</code><span>Quote</span><code>{p.quote_id}</code><span>Recipient</span><span>{p.recipient.name ?? "—"} · {p.recipient.operator} {p.recipient.phone}{p.recipient.name_verified ? " · verified" : ""}</span><span>Amount</span><span>{fmt(Number(p.destination.amount))} XAF ← {p.source.amount ?? "—"} {p.source.asset} ({p.source.network})</span><span>Fees</span><span>{p.fees?.platform?.amount} XAF</span>{p.failure?.reason && <><span>Failure</span><span>{p.failure.reason}</span></>}{p.refund && <><span>Refund</span><span>{p.refund.status}{p.refund.amount_sats ? ` · ${p.refund.amount_sats} sats` : ""}</span></>}</div>
+    {tl.length > 0 && <div><div className="muted small" style={{ marginBottom: 4 }}>Timeline</div><ol className="dd-timeline">{tl.map(([k, v]) => <li key={k}><span>{k.replace(/_at$/, "").replace(/_/g, " ")}</span><span className="small">{when(v)}</span></li>)}</ol></div>}
+    <details><summary className="muted small">Raw JSON</summary><CodeBlock code={JSON.stringify(p, null, 2)} /></details>
+    <div className="dd-row"><button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(p.id)}>Copy id</button><button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Close</button></div>
+  </div></div>;
 }
 
 /* ---------- settlements ---------- */
 function Settlements({ org }: { org: DevOrg }) {
-  const [d, setD] = useState<Awaited<ReturnType<typeof dev.settlements>> | null>(null);
-  useEffect(() => { void dev.settlements(org.id).then(setD); }, [org.id]);
+  const q = useAsync(() => dev.settlements(org.id), [org.id]);
+  const d = q.data;
   return (
     <>
       <div className="dd-kpis"><Kpi label="Available balance" value={d ? `${fmt(d.balance.available)} XAF` : "…"} /><Kpi label="Pending settlement" value={d ? `${fmt(d.balance.pending)} XAF` : "…"} /></div>
-      <div className="callout">MoMo›Me settles pass-through: each payment's XAF goes straight to the recipient's Mobile Money. A balance appears only for products that collect on your behalf. Request a settlement with <code>POST {V1_BASE}/settlements</code>; an operator approves and pays it, and <code>settlement.completed</code> reaches your webhook.</div>
-      <Panel title="Settlements"><table className="dd-table"><thead><tr><th>Requested</th><th>Reference</th><th>Amount</th><th>Destination</th><th>Status</th><th>Provider ref</th></tr></thead><tbody>
-        {(d?.settlements ?? []).map((s) => <tr key={s.id}><td className="small">{when(s.requested_at)}</td><td>{s.reference ?? <code>{s.id}</code>}</td><td>{fmt(Number(s.amount))} XAF</td><td className="small">{s.destination.type === "bank" ? `${s.destination.bank} ${s.destination.account}` : `${s.destination.operator} ${s.destination.phone}`}</td><td><span className={`dd-st ${s.status}`}>{s.status}</span></td><td className="small">{s.provider_reference ?? "—"}</td></tr>)}
-        {d && !d.settlements.length && <tr><td colSpan={6} className="muted">No settlements.</td></tr>}
-      </tbody></table></Panel>
+      <div className="callout">MoMo›Me settles pass-through: each payment's XAF goes straight to the recipient's Mobile Money. A balance appears only for products that collect on your behalf. Request a settlement with <code>POST {v1Abs()}/settlements</code>; an operator approves and pays it, and <code>settlement.completed</code> reaches your webhook.</div>
+      <Panel title="Settlements">{q.loading && !d ? <Skeleton /> : d?.settlements.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Requested</th><th>Reference</th><th>Amount</th><th>Destination</th><th>Status</th><th>Provider ref</th></tr></thead><tbody>
+        {d.settlements.map((s) => <tr key={s.id}><td className="small">{when(s.requested_at)}</td><td>{s.reference ?? <code>{s.id}</code>}</td><td>{fmt(Number(s.amount))} XAF</td><td className="small">{s.destination.type === "bank" ? `${s.destination.bank} ${s.destination.account}` : `${s.destination.operator} ${s.destination.phone}`}</td><td><Status s={s.status} /></td><td className="small">{s.provider_reference ?? "—"}</td></tr>)}
+      </tbody></table></div> : <Empty>No settlements.</Empty>}</Panel>
+    </>
+  );
+}
+
+/* ---------- go live: KYB, plan, live access ---------- */
+function GoLive({ org, plans, refresh }: { org: DevOrg; plans: Array<{ id: string; name: string; description?: string; platformFeePct: number; rateLimitRpm: number }>; refresh: () => Promise<void> }) {
+  const q = useAsync(() => dev.requests(org.id), [org.id]);
+  const [kyb, setKyb] = useState<Record<string, string>>({ legal_name: org.name, country: org.country });
+  const [plan, setPlan] = useState({ plan: plans.find((p) => p.id !== org.plan)?.id ?? "business", note: "", expected_monthly_volume_xaf: "" }); const [live, setLive] = useState({ note: "", go_live_date: "" });
+  const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const send = async (b: Record<string, string>) => { setMsg(null); setBusy(true); try { await dev.submitRequest(org.id, b); setMsg("Submitted — our team reviews within one business day and confirms by email."); await q.reload(); await refresh(); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); } };
+  const open = (k: string) => q.data?.requests.find((r) => r.kind === k && r.status === "open");
+  const label = (k: string) => ({ legal_name: "Legal name *", registration_number: "Registration number (RC / NIU) *", country: "Country *", address: "Registered address", website: "Website", business_type: "Business type", expected_monthly_volume_xaf: "Expected monthly volume (XAF)", use_case: "Use case", contact_name: "Contact name *", contact_phone: "Contact phone" }[k] ?? k);
+  const stage = org.liveEnabled ? 3 : org.kyb === "verified" ? 2 : org.kyb === "pending" ? 1 : 0;
+  return (
+    <>
+      <ol className="dd-stages">{["Company details", "Verification", "Live access"].map((s, i) => <li key={s} className={i < stage ? "done" : i === stage ? "now" : ""}><span>{i < stage ? "✓" : i + 1}</span>{s}</li>)}</ol>
+      {msg && <div className="callout" role="status">{msg}</div>}
+      <Panel title="1 · Company verification (KYB)" sub={org.kyb === "verified" ? "Verified." : open("kyb") ? "Submitted — under review. We confirm by email." : "Required before live access. Fields marked * are mandatory."}>
+        {org.kyb !== "verified" && !open("kyb") && <div className="dd-grid2">{(q.data?.kyb_fields ?? []).map((k) => <label key={k}>{label(k)}<input value={kyb[k] ?? ""} onChange={(e) => setKyb({ ...kyb, [k]: e.target.value })} inputMode={k.includes("phone") ? "tel" : k.includes("volume") ? "numeric" : undefined} /></label>)}<button type="button" className="btn btn-primary" disabled={busy} onClick={() => send({ kind: "kyb", ...kyb })}>Submit for verification</button></div>}
+      </Panel>
+      <Panel title="2 · Plan" sub={`You are on ${org.plan}.${open("plan_change") ? ` A change to ${String(open("plan_change")!.payload.plan)} is under review.` : ""}`}>
+        {!open("plan_change") && plans.some((p) => p.id !== org.plan) && <div className="dd-row"><label>Requested plan<select value={plan.plan} onChange={(e) => setPlan({ ...plan, plan: e.target.value })}>{plans.filter((p) => p.id !== org.plan).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.platformFeePct}% · {p.rateLimitRpm}/min</option>)}</select></label><label>Expected monthly volume (XAF)<input value={plan.expected_monthly_volume_xaf} onChange={(e) => setPlan({ ...plan, expected_monthly_volume_xaf: e.target.value })} inputMode="numeric" /></label><label>Note<input value={plan.note} onChange={(e) => setPlan({ ...plan, note: e.target.value })} /></label><button type="button" className="btn btn-primary" disabled={busy} onClick={() => send({ kind: "plan_change", ...plan })}>Request</button></div>}
+      </Panel>
+      <Panel title="3 · Live access" sub={org.liveEnabled ? "Enabled — create mm_live_ credentials under API keys." : open("live_access") ? "Requested — enabled once verification completes." : org.kyb === "not_started" || org.kyb === "rejected" ? "Submit your company details first." : "Ask for live credentials."}>
+        {!org.liveEnabled && !open("live_access") && (org.kyb === "pending" || org.kyb === "verified") && <div className="dd-row"><label>Planned go-live date<input type="date" value={live.go_live_date} onChange={(e) => setLive({ ...live, go_live_date: e.target.value })} /></label><label>Note<input value={live.note} onChange={(e) => setLive({ ...live, note: e.target.value })} /></label><button type="button" className="btn btn-primary" disabled={busy} onClick={() => send({ kind: "live_access", ...live })}>Request live access</button></div>}
+      </Panel>
+      <Panel title="Requests">{q.loading && !q.data ? <Skeleton /> : q.data?.requests.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>When</th><th>Request</th><th>Status</th><th>Note from MoMo›Me</th></tr></thead><tbody>
+        {q.data.requests.map((r: DevRequest) => <tr key={r.id}><td className="small">{when(r.createdAt)}</td><td>{r.kind === "kyb" ? "Company verification" : r.kind === "plan_change" ? `Plan → ${String(r.payload.plan)}` : "Live access"}</td><td><Status s={r.status === "approved" ? "COMPLETED" : r.status === "rejected" ? "FAILED" : "REQUESTED"} /></td><td className="small">{r.decisionNote ?? "—"}</td></tr>)}
+      </tbody></table></div> : <Empty>Nothing submitted yet.</Empty>}</Panel>
     </>
   );
 }
 
 /* ---------- team ---------- */
 function Team({ org }: { org: DevOrg }) {
-  const [d, setD] = useState<{ members: DevMember[]; roles: string[] } | null>(null); const [f, setF] = useState({ email: "", name: "", role: "developer" }); const [msg, setMsg] = useState<string | null>(null);
-  const load = useCallback(() => dev.members(org.id).then(setD), [org.id]);
-  useEffect(() => { void load(); }, [load]);
-  const add = async () => { setMsg(null); try { const r = await dev.addMember(org.id, f); setMsg(r.invitation?.sent ? `Invitation emailed to ${f.email}.` : r.invitation?.dev_link ? `Sandbox (no email provider): share this link — ${r.invitation.dev_link}` : "Added."); setF({ email: "", name: "", role: "developer" }); await load(); } catch (e) { setMsg(errMsg(e)); } };
+  const q = useAsync(() => dev.members(org.id), [org.id]); const [f, setF] = useState({ email: "", name: "", role: "developer" }); const [msg, setMsg] = useState<string | null>(null);
+  const add = async () => { setMsg(null); try { const r = await dev.addMember(org.id, f); setMsg(r.invitation?.sent ? `Invitation emailed to ${f.email}.` : r.invitation?.dev_link ? `Sandbox (no email provider): share this link — ${r.invitation.dev_link}` : "Added."); setF({ email: "", name: "", role: "developer" }); await q.reload(); } catch (e) { setMsg(errMsg(e)); } };
+  const ROLE_HINT: Record<string, string> = { owner: "everything, incl. billing & settlements", admin: "keys, webhooks, members", developer: "sandbox keys, webhooks, read", finance: "settlements & invoices", viewer: "read-only" };
   return (
     <>
-      <Panel title="Invite a team member" sub="owner · admin · developer · finance · viewer">
-        <div className="dd-row"><label>Email<input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label><label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label><label>Role<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{(d?.roles ?? ["developer"]).map((r) => <option key={r}>{r}</option>)}</select></label><button type="button" className="btn btn-primary" onClick={add}>Add</button></div>
-        {msg && <div className="muted small" style={{ marginTop: 8 }}>{msg}</div>}
+      <Panel title="Invite a team member" sub={<>{(q.data?.roles ?? []).map((r) => <span key={r}><b>{r}</b> — {ROLE_HINT[r]} · </span>)}</>}>
+        <div className="dd-row"><label>Email<input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label><label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label><label>Role<select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{(q.data?.roles ?? ["developer"]).map((r) => <option key={r}>{r}</option>)}</select></label><button type="button" className="btn btn-primary" onClick={add} disabled={!f.email}>Invite</button></div>
+        {msg && <div className="callout small" role="status">{msg}</div>}
       </Panel>
-      <Panel title="Members"><table className="dd-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Since</th><th></th></tr></thead><tbody>
-        {(d?.members ?? []).map((m) => <tr key={m.user.id}><td>{m.user.name}</td><td>{m.user.email}</td><td>{m.role}</td><td className="small">{when(m.since)}</td><td className="dd-actions"><button type="button" onClick={() => dev.removeMember(org.id, m.user.id).then(load).catch((e) => setMsg(errMsg(e)))}>Remove</button></td></tr>)}
-      </tbody></table></Panel>
+      <Panel title="Members">{q.loading && !q.data ? <Skeleton /> : <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Since</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+        {(q.data?.members ?? []).map((m: DevMember) => <tr key={m.user.id}><td>{m.user.name}</td><td>{m.user.email}</td><td>{m.role}</td><td className="small">{when(m.since)}</td><td className="small">{m.user.lastLoginAt ? ago(m.user.lastLoginAt) : "invited"}</td><td className="dd-actions"><button type="button" onClick={() => { if (confirm(`Remove ${m.user.email}?`)) dev.removeMember(org.id, m.user.id).then(q.reload).catch((e) => setMsg(errMsg(e))); }}>Remove</button></td></tr>)}
+      </tbody></table></div>}</Panel>
     </>
   );
 }
 
 /* ---------- billing ---------- */
-function Billing({ org }: { org: DevOrg }) {
-  const [d, setD] = useState<Awaited<ReturnType<typeof dev.invoices>> | null>(null);
-  useEffect(() => { void dev.invoices(org.id).then(setD); }, [org.id]);
+function Billing({ org, go }: { org: DevOrg; go: (t: Tab) => void }) {
+  const q = useAsync(() => dev.invoices(org.id), [org.id]); const d = q.data;
   return (
     <>
-      <Panel title="Plan" sub={d ? `${d.plan.name} — ${d.plan.description ?? ""}` : "…"}>
+      <Panel title="Plan" sub={d ? `${d.plan.name} — ${d.plan.description ?? ""}` : "…"} action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => go("golive")}>Change plan</button>}>
         {d && <div className="dd-kpis"><Kpi label="Platform fee" value={`${d.plan.negotiatedFeePct ?? d.plan.platformFeePct}%`} sub={`min ${d.plan.minFeeXaf} XAF`} /><Kpi label="Rate limit" value={`${d.plan.rateLimitRpm}/min`} sub={`${d.plan.paymentEndpointRpm}/min on payments`} /><Kpi label="Volume tiers" value={d.plan.tiers?.length ? d.plan.tiers.map((t: { fromXaf: number; feePct: number }) => `≥${fmt(t.fromXaf)} → ${t.feePct}%`).join(" · ") : "—"} /></div>}
-        <p className="muted small">Other plans: {d?.plans.filter((p) => p.id !== d.plan.id).map((p) => `${p.name} (${p.platformFeePct}%, ${p.rateLimitRpm}/min)`).join(" · ")} — request a change under <b>Go live</b>.</p>
       </Panel>
-      <Panel title="Invoices"><table className="dd-table"><thead><tr><th>Period</th><th>Status</th><th>Total</th><th>Lines</th></tr></thead><tbody>
-        {(d?.invoices ?? []).map((i) => <tr key={i.id}><td>{i.period}</td><td>{i.status}</td><td>{fmt(i.totalXaf)} XAF</td><td className="small">{i.lines.map((l: { description: string; amountXaf: number }) => `${l.description}: ${fmt(l.amountXaf)}`).join(" · ")}</td></tr>)}
-        {d && !d.invoices.length && <tr><td colSpan={4} className="muted">No invoices yet — the first is issued at month end once there is live volume.</td></tr>}
-      </tbody></table></Panel>
+      <Panel title="Invoices" sub="Issued monthly on live volume.">{q.loading && !d ? <Skeleton /> : d?.invoices.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Period</th><th>Status</th><th>Total</th><th>Lines</th></tr></thead><tbody>
+        {d.invoices.map((i) => <tr key={i.id}><td>{i.period}</td><td><Status s={i.status} /></td><td>{fmt(i.totalXaf)} XAF</td><td className="small">{i.lines.map((l: { description: string; amountXaf: number }) => `${l.description}: ${fmt(l.amountXaf)}`).join(" · ")}</td></tr>)}
+      </tbody></table></div> : <Empty>No invoices yet — the first is issued at month end once there is live volume.</Empty>}</Panel>
     </>
   );
 }
-
-/* ---------- audit ---------- */
-function Audit({ org }: { org: DevOrg }) {
-  const [ev, setEv] = useState<Awaited<ReturnType<typeof dev.audit>>["events"] | null>(null);
-  useEffect(() => { void dev.audit(org.id).then((r) => setEv(r.events)); }, [org.id]);
-  const rows = useMemo(() => ev ?? [], [ev]);
-  return <Panel title="Audit log" sub="Every credential, dashboard and operator action on this organization."><table className="dd-table"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>Details</th></tr></thead><tbody>
-    {rows.map((e) => <tr key={e.id}><td className="small">{when(e.at)}</td><td>{e.action}</td><td className="small">{e.actor.type} {e.actor.label ?? e.actor.id}</td><td className="small">{e.target ? `${e.target.type} ${e.target.id}` : ""}</td><td className="small">{e.details ? JSON.stringify(e.details).slice(0, 120) : ""}</td></tr>)}
-  </tbody></table></Panel>;
-}
-
-/* ---------- go live: KYB, plan, live access ---------- */
-function GoLive({ org, plans, refresh }: { org: DevOrg; plans: Array<{ id: string; name: string; description?: string; platformFeePct: number; rateLimitRpm: number }>; refresh: () => Promise<void> }) {
-  const [d, setD] = useState<{ requests: DevRequestT[]; kyb_fields: string[] } | null>(null);
-  const [kyb, setKyb] = useState<Record<string, string>>({ legal_name: org.name, country: org.country });
-  const [plan, setPlan] = useState({ plan: "business", note: "", expected_monthly_volume_xaf: "" }); const [live, setLive] = useState({ note: "", go_live_date: "" });
-  const [msg, setMsg] = useState<string | null>(null);
-  const load = useCallback(() => dev.requests(org.id).then(setD), [org.id]);
-  useEffect(() => { void load(); }, [load]);
-  const send = async (b: Record<string, string>) => { setMsg(null); try { await dev.submitRequest(org.id, b); setMsg("Submitted — our team reviews within one business day and confirms by email."); await load(); await refresh(); } catch (e) { setMsg(errMsg(e)); } };
-  const open = (k: string) => d?.requests.find((r) => r.kind === k && r.status === "open");
-  const label = (k: string) => ({ legal_name: "Legal name", registration_number: "Registration number (RC / NIU)", country: "Country", address: "Registered address", website: "Website", business_type: "Business type", expected_monthly_volume_xaf: "Expected monthly volume (XAF)", use_case: "Use case", contact_name: "Contact name", contact_phone: "Contact phone" }[k] ?? k);
-  return (
-    <>
-      <div className="dd-kpis"><Kpi label="Company verification (KYB)" value={org.kyb.replace("_", " ")} /><Kpi label="Plan" value={org.plan} /><Kpi label="Live credentials" value={org.liveEnabled ? "enabled" : "not yet"} /></div>
-      {msg && <div className="callout">{msg}</div>}
-      <Panel title="1 · Company verification" sub={org.kyb === "verified" ? "Verified." : open("kyb") ? "Submitted — under review." : "Required before live access. Legal name, registration number, country and a contact are mandatory."}>
-        {org.kyb !== "verified" && !open("kyb") && <div className="dd-grid2">{(d?.kyb_fields ?? []).map((k) => <label key={k}>{label(k)}<input value={kyb[k] ?? ""} onChange={(e) => setKyb({ ...kyb, [k]: e.target.value })} /></label>)}<button type="button" className="btn btn-primary" onClick={() => send({ kind: "kyb", ...kyb })}>Submit for verification</button></div>}
-      </Panel>
-      <Panel title="2 · Plan" sub={`You are on ${org.plan}.${open("plan_change") ? ` A change to ${String(open("plan_change")!.payload.plan)} is under review.` : ""}`}>
-        {!open("plan_change") && <div className="dd-row"><label>Requested plan<select value={plan.plan} onChange={(e) => setPlan({ ...plan, plan: e.target.value })}>{plans.filter((p) => p.id !== org.plan).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.platformFeePct}% · {p.rateLimitRpm}/min</option>)}</select></label><label>Expected monthly volume (XAF)<input value={plan.expected_monthly_volume_xaf} onChange={(e) => setPlan({ ...plan, expected_monthly_volume_xaf: e.target.value })} inputMode="numeric" /></label><label>Note<input value={plan.note} onChange={(e) => setPlan({ ...plan, note: e.target.value })} /></label><button type="button" className="btn btn-primary" onClick={() => send({ kind: "plan_change", ...plan })}>Request</button></div>}
-      </Panel>
-      <Panel title="3 · Live access" sub={org.liveEnabled ? "Enabled — create mm_live_ credentials under API keys." : open("live_access") ? "Requested — enabled once verification completes." : "Ask for live credentials once your company details are in."}>
-        {!org.liveEnabled && !open("live_access") && <div className="dd-row"><label>Planned go-live date<input type="date" value={live.go_live_date} onChange={(e) => setLive({ ...live, go_live_date: e.target.value })} /></label><label>Note<input value={live.note} onChange={(e) => setLive({ ...live, note: e.target.value })} /></label><button type="button" className="btn btn-primary" onClick={() => send({ kind: "live_access", ...live })}>Request live access</button></div>}
-      </Panel>
-      <Panel title="Requests"><table className="dd-table"><thead><tr><th>When</th><th>Request</th><th>Status</th><th>Note from MoMo›Me</th></tr></thead><tbody>
-        {(d?.requests ?? []).map((r) => <tr key={r.id}><td className="small">{when(r.createdAt)}</td><td>{r.kind === "kyb" ? "Company verification" : r.kind === "plan_change" ? `Plan → ${String(r.payload.plan)}` : "Live access"}</td><td><span className={`dd-st ${r.status === "approved" ? "COMPLETED" : r.status === "rejected" ? "FAILED" : "REQUESTED"}`}>{r.status}</span></td><td className="small">{r.decisionNote ?? "—"}</td></tr>)}
-        {d && !d.requests.length && <tr><td colSpan={4} className="muted">Nothing submitted yet.</td></tr>}
-      </tbody></table></Panel>
-    </>
-  );
-}
-type DevRequestT = import("../../api/developers.js").DevRequest;
 
 /* ---------- security ---------- */
 function Security({ onSignedOut }: { onSignedOut: () => void }) {
@@ -351,12 +408,20 @@ function Security({ onSignedOut }: { onSignedOut: () => void }) {
   return (
     <>
       <Panel title="Change password" sub="Signs out every other session.">
-        <div className="dd-row"><label>Current password<input type="password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} autoComplete="current-password" /></label><label>New password (≥10)<input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></label><button type="button" className="btn btn-primary" onClick={change}>Change</button></div>
-        {msg && <div className="muted small" style={{ marginTop: 8 }}>{msg}</div>}
+        <div className="dd-row"><label>Current password<input type="password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} autoComplete="current-password" /></label><label>New password (≥10)<input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" minLength={10} /></label><button type="button" className="btn btn-primary" onClick={change} disabled={!f.current || f.password.length < 10}>Change</button></div>
+        {msg && <div className="callout small" role="status">{msg}</div>}
       </Panel>
       <Panel title="Sessions" sub="Dashboard sessions last 12 hours. API credentials are separate — manage them under API keys.">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => dev.logout(true).then(onSignedOut)}>Sign out everywhere</button>
       </Panel>
     </>
   );
+}
+
+/* ---------- audit ---------- */
+function Audit({ org }: { org: DevOrg }) {
+  const q = useAsync(() => dev.audit(org.id), [org.id]);
+  return <Panel title="Audit log" sub="Every credential, dashboard and operator action on this organization." action={<button type="button" className="btn btn-ghost btn-sm" onClick={() => void q.reload()}>Refresh</button>}>{q.loading && !q.data ? <Skeleton /> : q.data?.events.length ? <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>Details</th></tr></thead><tbody>
+    {q.data.events.map((e) => <tr key={e.id}><td className="small" title={when(e.at)}>{ago(e.at)}</td><td>{e.action}</td><td className="small">{e.actor.type} {e.actor.label ?? e.actor.id}</td><td className="small">{e.target ? `${e.target.type} ${e.target.id}` : ""}</td><td className="small">{e.details ? JSON.stringify(e.details).slice(0, 120) : ""}</td></tr>)}
+  </tbody></table></div> : <Empty>Nothing yet.</Empty>}</Panel>;
 }

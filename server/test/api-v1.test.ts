@@ -326,6 +326,22 @@ async function main() {
     ok("the developer sees the decisions with the operator's note", mine.body.requests.every((r: J) => r.status === "approved" && r.decisionNote === "welcome"));
     const outbox = await (await fetch(`${base}/api/admin/platform/emails`, { headers: A })).json() as J;
     ok("every email is in the outbox (unconfigured provider → recorded, not sent)", outbox.configured === false && ["verify_email", "reset_password", "invitation", "request_approved"].every((k) => outbox.outbox.some((e: J) => e.kind === k)));
+
+    console.log("\n13. Dashboard webhook management\n");
+    const dwh = await dev(`/orgs/${org2}/webhooks`, { url: hookUrl, events: ["payment.completed"], description: "Orders" }, tok5);
+    ok("the dashboard can add an endpoint and gets the secret once", dwh.status === 201 && /^whsec_/.test(dwh.body.secret) && dwh.body.endpoint.description === "Orders");
+    const whid = dwh.body.endpoint.id as string;
+    const tst = await dev(`/orgs/${org2}/webhooks/${whid}/test`, {}, tok5);
+    await settle(300);
+    ok("…send a test ping that is delivered", tst.body.ok === true && received.some((r) => r.body.type === "ping" && r.body.data.endpoint_id === whid));
+    const dis = await dev(`/orgs/${org2}/webhooks/${whid}`, { enabled: false }, tok5, "PATCH");
+    ok("…disable it", dis.status === 200 && !!dis.body.disabledAt);
+    const evl = await dev(`/orgs/${org2}/webhooks/events`, undefined, tok5);
+    ok("…and list the event vocabulary", evl.body.events.includes("payment.completed"));
+    ok("…and delete it", (await dev(`/orgs/${org2}/webhooks/${whid}`, undefined, tok5, "DELETE")).body.ok === true);
+    const viewerInv = await dev(`/orgs/${org2}/members`, { email: "viewer@fintech.example", role: "viewer" }, tok5);
+    const vtok = (await dev(`/invitation/${/invite=([^&]+)/.exec(viewerInv.body.invitation.dev_link)![1]}/accept`, { password: "viewer-password-1" })).body.token as string;
+    ok("a viewer cannot add endpoints (403)", (await dev(`/orgs/${org2}/webhooks`, { url: hookUrl }, vtok)).status === 403);
   } finally { server.close(); hook.close(); }
   console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

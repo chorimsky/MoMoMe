@@ -73,7 +73,7 @@ export default function ContactsScreen() {
     router.push({ pathname: '/', params: { scanned: c.phone, country: c.country, name: c.name, t: mintIntent() } });
 
   return (
-    <Screen scroll edges={[]}>
+    <Screen scroll edges={[]} onRefresh={load}>
       <Stack.Screen options={{ title: tr('contacts_title') }} />
 
       {/* The stack header already says "Contacts"; a second heading under it was a duplicate
@@ -135,9 +135,10 @@ export default function ContactsScreen() {
                 accessibilityLabel={`${tr('a11y_pay_contact')}: ${c.name}`}
                 onPress={() => pay(c)}>
                 <Body numberOfLines={1} style={{ color: t.text, fontFamily: Fonts.bodyBold, fontSize: 15 }}>{c.name}</Body>
-                <Body muted numberOfLines={1} style={{ fontSize: 12.5 }}>
+                {/* The number never truncates; "paid N days ago" wraps to its own line instead. */}
+                <Body muted numberOfLines={2} style={{ fontSize: 12.5, lineHeight: 17 }}>
                   {COUNTRIES[c.country].dial} {c.phone} · {PROVIDERS[c.provider].short}
-                  {paidAgo(c.lastPaidAt, tr) ? ` · ${paidAgo(c.lastPaidAt, tr)}` : ''}
+                  {paidAgo(c.lastPaidAt, tr) ? `\n${paidAgo(c.lastPaidAt, tr)}` : ''}
                 </Body>
               </Pressable>
               <Pressable hitSlop={12} accessibilityRole="button" accessibilityLabel={tr('a11y_edit_contact')} onPress={() => setEditing(c)}>

@@ -16,6 +16,8 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        // Android: the tab bar otherwise rides up on top of the keyboard on every input screen.
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: t.accent,
         tabBarInactiveTintColor: t.muted,
         tabBarStyle: {

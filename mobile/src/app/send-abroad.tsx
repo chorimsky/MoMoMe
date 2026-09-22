@@ -7,10 +7,9 @@
    form → quote (what they receive, the rate, every fee, a countdown) → confirm →
    the lifecycle in money words. Nothing about sats or rails.
    ============================================================ */
-import { Ionicons } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { api, errMessage, type NetworkMarkets } from '@/api/client';
 import { track } from '@/lib/analytics';
@@ -96,15 +95,13 @@ export default function SendAbroadScreen() {
     <Screen scroll edges={[]}>
       <Stack.Screen options={{ title: tr('ab_title') }} />
       <View style={{ gap: Spacing.four }}>
-        <View>
-          <H2>{tr('ab_title')}</H2>
-          <Body muted>{tr('ab_sub')}</Body>
-        </View>
+        {/* The native header already says "Send abroad"; a second title under it read as a mistake. */}
+        <Body muted>{tr('ab_sub')}</Body>
 
         {!open ? (
-          <Card>
+          <Card padded style={{ gap: Spacing.three }}>
             <Body muted>{tr('ab_closed')}</Body>
-            <Button title={tr('tab_send')} variant="outline" size="md" onPress={() => router.replace('/(tabs)')} />
+            <Button title={tr('ab_send_local')} variant="outline" size="md" icon="flash" onPress={() => router.replace('/(tabs)')} />
           </Card>
         ) : null}
 
@@ -186,9 +183,6 @@ export default function SendAbroadScreen() {
           </Card>
         ) : null}
 
-        <Pressable onPress={() => router.back()} style={{ alignSelf: 'center', paddingVertical: Spacing.two }}>
-          <Text style={{ color: t.muted, fontSize: 13 }}><Ionicons name="chevron-back" size={12} /> {tr('back')}</Text>
-        </Pressable>
       </View>
     </Screen>
   );

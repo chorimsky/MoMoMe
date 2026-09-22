@@ -47,7 +47,7 @@ export default function AmbassadorScreen() {
             <IconCircle name="people" color={t.recv} bg={t.recvWash} size={60} />
             <H2>{tr('refer_earn')}</H2>
             <Body center>{tr('refer_sub')}</Body>
-            <Pill label={data.tier === 'rep' ? tr('tier_rep') : data.tier === 'city_lead' ? tr('tier_city') : tr('tier_regional')} tone="brand" icon="ribbon" />
+            <Pill label={data.tier === 'rep' ? tr('tier_rep') : data.tier === 'city_lead' ? tr('tier_city') : tr('tier_regional')} tone="brand" icon="ribbon" style={{ alignSelf: 'center' }} />
             <View style={[styles.codeBox, { borderColor: t.line, backgroundColor: t.surface2 }]}>
               <Text style={[styles.code, { color: t.text }]}>{data.code}</Text>
             </View>

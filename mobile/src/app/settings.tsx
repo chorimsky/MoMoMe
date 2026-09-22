@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import { Stack } from 'expo-router';
+import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { Body, Card, Label, Screen } from '@/components/ui';
+import { Body, Button, Card, Label, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { setThemeMode, ThemeMode, useThemeMode } from '@/hooks/use-theme-mode';
@@ -27,6 +29,20 @@ export default function SettingsScreen() {
   const { t: tr, lang, setLang } = useI18n();
   const version = Constants.expoConfig?.version ?? '1.0.0';
   const push = usePushState();
+  // OTA updates are how fixes reach a phone between store releases; letting a person pull
+  // one on demand beats "reinstall the app" support answers. Expo Go / dev builds have no
+  // update channel, so the row says so instead of pretending to check.
+  const [upd, setUpd] = useState<'idle' | 'checking' | 'latest' | 'ready' | 'failed'>('idle');
+  const checkUpdates = async () => {
+    if (!Updates.isEnabled) { Alert.alert(tr('upd_row'), tr('upd_unavailable')); return; }
+    setUpd('checking');
+    try {
+      const r = await Updates.checkForUpdateAsync();
+      if (!r.isAvailable) { setUpd('latest'); return; }
+      await Updates.fetchUpdateAsync();
+      setUpd('ready');
+    } catch { setUpd('failed'); }
+  };
   const togglePush = async (on: boolean) => {
     if (!on) { await disablePush(); return; }
     const r = await enablePush(lang);
@@ -66,7 +82,7 @@ export default function SettingsScreen() {
         </Card>
       </View>
 
-      <View style={{ gap: Spacing.two }}>
+      <View style={{ gap: Spacing.two, marginBottom: Spacing.four }}>
         <Label>{tr('push_title')}</Label>
         <Card padded>
           <View style={styles.aboutRow}>
@@ -108,7 +124,18 @@ export default function SettingsScreen() {
         <Card padded>
           <View style={styles.aboutRow}>
             <Body muted>{tr('app_version')}</Body>
-            <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{version}</Body>
+            <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{version}{Updates.updateId ? ` · ${Updates.updateId.slice(0, 8)}` : ''}</Body>
+          </View>
+          <View style={[styles.aboutRow, { marginTop: Spacing.three, paddingTop: Spacing.three, borderTopWidth: 1, borderTopColor: t.line }]}>
+            <View style={{ flex: 1, paddingRight: Spacing.three }}>
+              <Body muted>{tr('upd_row')}</Body>
+              {upd === 'latest' ? <Body style={{ fontSize: 12.5, color: t.recv, marginTop: 2 }}>{tr('upd_latest')}</Body> : null}
+              {upd === 'ready' ? <Body style={{ fontSize: 12.5, color: t.accent, marginTop: 2 }}>{tr('upd_ready')}</Body> : null}
+              {upd === 'failed' ? <Body style={{ fontSize: 12.5, color: t.bad, marginTop: 2 }}>{tr('upd_failed')}</Body> : null}
+            </View>
+            {upd === 'ready'
+              ? <Button title={tr('upd_restart')} size="md" onPress={() => void Updates.reloadAsync()} />
+              : <Button title={upd === 'checking' ? tr('upd_checking') : tr('upd_check')} size="md" variant="ghost" loading={upd === 'checking'} onPress={() => void checkUpdates()} />}
           </View>
         </Card>
       </View>

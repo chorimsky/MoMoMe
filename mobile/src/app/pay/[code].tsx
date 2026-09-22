@@ -110,7 +110,7 @@ export default function PayLinkScreen() {
       <Card style={{ marginTop: Spacing.four, alignItems: 'center', gap: Spacing.three }} padded elevated>
         <IconCircle name="storefront" color={t.accent} bg={t.accentWash} size={68} />
         <H2 style={{ textAlign: 'center' }}>{link.merchant.businessName}</H2>
-        {link.merchant.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" /> : null}
+        {link.merchant.verifiedPhone ? <Pill label={tr('verified')} tone="recv" icon="shield-checkmark" style={{ alignSelf: 'center' }} /> : null}
         {link.label ? <Body muted center>{link.label}</Body> : null}
         {/* An invoice says who it bills and when it is due — the same lines the web shows. */}
         {link.kind === 'invoice' && (link.clientName || link.dueDate) ? (

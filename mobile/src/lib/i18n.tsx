@@ -258,6 +258,7 @@ export const STRINGS = {
   ab_tile_net: ["Kenya, Ghana and more · they get local money", "Kenya, Ghana et plus · ils reçoivent en monnaie locale"],
   ab_tile_sub: ["From your Mobile Money to theirs, across the border.", "De votre Mobile Money au leur, au-delà de la frontière."],
   ab_sub: ["From your Mobile Money to theirs, in another country. They receive local money on their phone.", "De votre Mobile Money au leur, dans un autre pays. Ils reçoivent de l'argent local sur leur téléphone."],
+  ab_send_local: ['Send within Cameroon instead', 'Envoyer au Cameroun à la place'],
   ab_closed: ["Sending abroad isn't open yet. We'll switch it on corridor by corridor.", "L'envoi à l'étranger n'est pas encore ouvert. Nous l'activons couloir par couloir."],
   ab_to_country: ["To which country?", "Vers quel pays ?"],
   ab_their_network: ["Their network", "Leur réseau"],
@@ -710,6 +711,15 @@ export const STRINGS = {
   language: ['Language', 'Langue'],
   about: ['About', 'À propos'],
   app_version: ['App version', 'Version de l’app'],
+  upd_row: ['Updates', 'Mises à jour'],
+  upd_check: ['Check for updates', 'Rechercher une mise à jour'],
+  upd_checking: ['Checking…', 'Vérification…'],
+  upd_latest: ['You have the latest version.', 'Vous avez la dernière version.'],
+  upd_ready: ['Update ready — restart to apply.', 'Mise à jour prête — redémarrez pour l’appliquer.'],
+  upd_restart: ['Restart now', 'Redémarrer'],
+  upd_unavailable: ['Updates are delivered through the store build.', 'Les mises à jour arrivent via la version du store.'],
+  upd_failed: ['Could not check right now.', 'Impossible de vérifier pour le moment.'],
+  support_row: ['Contact & support', 'Contact et assistance'],
 } satisfies Record<string, Pair>;
 
 export type StringKey = keyof typeof STRINGS;

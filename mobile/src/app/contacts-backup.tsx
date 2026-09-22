@@ -336,6 +336,9 @@ function OtpStep({
           label={tr('six_digit_code')}
           placeholder="000000"
           keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="sms-otp"
+          autoFocus
           value={otp}
           onChangeText={(v) => setOtp(v.replace(/\D/g, '').slice(0, 6))}
           maxLength={6}

@@ -79,7 +79,7 @@ export default function MerchantScreen() {
   return (
     // Keyed on the view so the ScrollView remounts at the top: the dashboard used to open
     // wherever the onboarding form had been scrolled to, with the verify card off-screen.
-    <Screen scroll edges={[]} key={merchant && !editing ? 'dashboard' : 'form'}>
+    <Screen scroll edges={[]} key={merchant && !editing ? 'dashboard' : 'form'} onRefresh={merchant && !editing ? refreshMerchant : undefined}>
       <Stack.Screen options={{ title: merchant ? merchant.businessName : tr('become_merchant') }} />
       {/* An action's error sits ABOVE the screen it happened on. It used to replace the whole
           dashboard: a failed code request left the merchant with nothing but a red bar and no
@@ -349,7 +349,7 @@ function Dashboard({
                 </Body>
               ) : null}
               <View style={{ flexDirection: 'row', gap: Spacing.two }}>
-                <Field placeholder={tr('six_digit_code')} keyboardType="number-pad" value={code} onChangeText={setCode} style={{ flex: 1 }} />
+                <Field placeholder={tr('six_digit_code')} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="sms-otp" maxLength={6} value={code} onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))} style={{ flex: 1 }} />
                 <Button title={tr('verify')} size="md" onPress={doVerify} loading={busy} disabled={code.trim().length < 4} />
               </View>
               <Button

@@ -41,6 +41,14 @@ export default function DiscoverScreen() {
       .then((r) => setList(r.merchants))
       .catch((e) => setError(errMessage(e)));
   }, [q, cat]);
+  // Pull-to-refresh keeps the current list on screen while the new one loads.
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try { const r = await api.discover({ q: q.trim() || undefined, category: cat || undefined }); setList(r.merchants); setError(null); }
+    catch (e) { setError(errMessage(e)); }
+    finally { setRefreshing(false); }
+  }, [q, cat]);
 
   useEffect(() => {
     const id = setTimeout(load, 350);
@@ -48,7 +56,7 @@ export default function DiscoverScreen() {
   }, [load]);
 
   return (
-    <Screen scroll>
+    <Screen scroll onRefresh={refresh} refreshing={refreshing}>
       <View style={styles.head}>
         <H1>{tr('tab_discover')}</H1>
         <Body muted>{tr('discover_sub')}</Body>

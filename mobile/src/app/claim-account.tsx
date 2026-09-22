@@ -3,7 +3,7 @@ import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { api, errMessage, type ReceivedList } from '@/api/client';
+import { api, errMessage, getMyNumber, setMyNumber, type ReceivedList } from '@/api/client';
 import { xaf } from '@/lib/format';
 import { Body, Button, Card, Field, Flag, H2, IconCircle, Label, Mono, Pill, Screen } from '@/components/ui';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
@@ -21,6 +21,8 @@ export default function ClaimAccountScreen() {
   const [country, setCountry] = useState<CountryCode>('CM');
   const [pickCountry, setPickCountry] = useState(false);
   const [phone, setPhone] = useState('');
+  // The number the Receive screen already knows is the one to prove — prefilled, not retyped.
+  useEffect(() => { getMyNumber().then((n) => { if (n) setPhone((p) => p || n); }).catch(() => {}); }, []);
   const [code, setCode] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [via, setVia] = useState<'whatsapp' | 'sms' | null>(null);
@@ -64,6 +66,8 @@ export default function ClaimAccountScreen() {
     try {
       const r = await api.verifyClaim(digits, code);
       setAddress(r.identity.lightningAddress ?? null);
+      // A proven number is "my number" everywhere: the Receive screen picks it up.
+      if (country === 'CM') void setMyNumber(digits);
       setStep('done');
     } catch (e) {
       setError(errMessage(e));
@@ -158,6 +162,9 @@ export default function ClaimAccountScreen() {
               label={tr('six_digit_code')}
               placeholder="000000"
               keyboardType="number-pad"
+              textContentType="oneTimeCode"
+              autoComplete="sms-otp"
+              autoFocus
               value={code}
               onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}
               maxLength={6}

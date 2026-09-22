@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -81,6 +81,7 @@ export default function ClaimScreen() {
             <IconCircle name="cash" color={t.recv} bg={t.recvWash} size={60} />
             <H3>{tr('no_refunds')}</H3>
             <Body center>{tr('refunds_hint')}</Body>
+            <Button title={tr('activity')} variant="ghost" size="md" icon="time-outline" onPress={() => router.push('/activity')} />
           </Card>
         ) : selected ? (
           <Card padded>

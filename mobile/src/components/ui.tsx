@@ -9,6 +9,7 @@ import { KeyboardAvoidingView, Platform,
   Animated,
   DimensionValue,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -31,11 +32,17 @@ export function Screen({
   scroll = false,
   edges = ['top'],
   contentStyle,
+  onRefresh,
+  refreshing = false,
 }: {
   children: ReactNode;
   scroll?: boolean;
   edges?: Edge[];
   contentStyle?: ViewStyle;
+  /** Pull-to-refresh on a scrolling screen: lists that change behind the person's back
+   *  (directory, sales, contacts) get the gesture every phone user reaches for. */
+  onRefresh?: () => void | Promise<void>;
+  refreshing?: boolean;
 }) {
   const t = useTheme();
   // Under a native stack header (edges=[]) the content otherwise starts flush against the
@@ -61,6 +68,7 @@ export function Screen({
           // the iOS half of the same behaviour.
           automaticallyAdjustKeyboardInsets
           contentContainerStyle={styles.scrollContent}
+          refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={() => { void onRefresh(); }} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.surface} /> : undefined}
           showsVerticalScrollIndicator={false}>
           {inner}
         </ScrollView>
@@ -263,10 +271,13 @@ export function Pill({
   label,
   tone = 'neutral',
   icon,
+  style,
 }: {
   label: string;
   tone?: 'neutral' | 'brand' | 'recv' | 'bad' | 'accent';
   icon?: IconName;
+  /** e.g. `{ alignSelf: 'center' }` inside a centred card — the default hugs the left. */
+  style?: ViewStyle;
 }) {
   const t = useTheme();
   const map = {
@@ -277,7 +288,7 @@ export function Pill({
     accent: { bg: t.accentWash, fg: t.accent },
   }[tone];
   return (
-    <View style={[styles.pill, { backgroundColor: map.bg }]}>
+    <View style={[styles.pill, { backgroundColor: map.bg }, style]}>
       {icon ? <Ionicons name={icon} size={12} color={map.fg} style={{ marginRight: 4 }} /> : null}
       <Text style={[styles.pillText, { color: map.fg }]}>{label}</Text>
     </View>
@@ -533,17 +544,20 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     padding: Spacing.four,
   },
-  h1: { fontFamily: Fonts.displayBold, fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
-  h2: { fontFamily: Fonts.displayBold, fontSize: 22, lineHeight: 28, letterSpacing: -0.2 },
-  h3: { fontFamily: Fonts.display, fontSize: 17, lineHeight: 23 },
-  body: { fontFamily: Fonts.body, fontSize: 15, lineHeight: 22 },
+  // includeFontPadding: Android adds ascender/descender padding to custom fonts, which sits
+  // text low in buttons, pills and chips; off, iOS and Android centre the same way.
+  h1: { fontFamily: Fonts.displayBold, fontSize: 30, lineHeight: 36, letterSpacing: -0.3, includeFontPadding: false },
+  h2: { fontFamily: Fonts.displayBold, fontSize: 22, lineHeight: 28, letterSpacing: -0.2, includeFontPadding: false },
+  h3: { fontFamily: Fonts.display, fontSize: 17, lineHeight: 23, includeFontPadding: false },
+  body: { fontFamily: Fonts.body, fontSize: 15, lineHeight: 22, includeFontPadding: false },
   label: {
     fontFamily: Fonts.bodyBold,
     fontSize: 11.5,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
+    includeFontPadding: false,
   },
-  mono: { fontFamily: Fonts.mono, fontSize: 13, lineHeight: 19 },
+  mono: { fontFamily: Fonts.mono, fontSize: 13, lineHeight: 19, includeFontPadding: false },
   btn: {
     minHeight: 54,
     borderRadius: Radius.md,
@@ -552,7 +566,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.five,
   },
   btnRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  btnLabel: { fontFamily: Fonts.displayBold, fontSize: 17 },
+  btnLabel: { fontFamily: Fonts.displayBold, fontSize: 17, includeFontPadding: false },
   fieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -562,7 +576,7 @@ const styles = StyleSheet.create({
     minHeight: 54,
     gap: Spacing.two,
   },
-  input: { flex: 1, fontFamily: Fonts.body, fontSize: 17, paddingVertical: Spacing.three },
+  input: { flex: 1, fontFamily: Fonts.body, fontSize: 17, paddingVertical: Spacing.three, includeFontPadding: false },
   hint: { fontFamily: Fonts.body, fontSize: 12.5, marginTop: Spacing.two },
   pill: {
     flexDirection: 'row',
@@ -572,7 +586,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     alignSelf: 'flex-start',
   },
-  pillText: { fontFamily: Fonts.bodyBold, fontSize: 12 },
+  pillText: { fontFamily: Fonts.bodyBold, fontSize: 12, includeFontPadding: false },
   chip: {
     flexGrow: 1,
     alignItems: 'center',
@@ -581,7 +595,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     borderWidth: 1,
   },
-  chipText: { fontFamily: Fonts.bodyBold, fontSize: 14 },
+  chipText: { fontFamily: Fonts.bodyBold, fontSize: 14, includeFontPadding: false },
   stepHeader: {
     flexDirection: 'row',
     alignItems: 'center',

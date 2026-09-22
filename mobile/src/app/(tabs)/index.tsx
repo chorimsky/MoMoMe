@@ -674,10 +674,11 @@ export default function SendScreen() {
                     style={[styles.recentChip, { backgroundColor: t.surface, borderColor: t.line }]}>
                     <View style={[styles.recentAvatar, { backgroundColor: t.accentWash }]}>
                       <Text style={[styles.recentInitials, { color: t.accent }]}>
-                        {(r.name || '?').trim().slice(0, 1).toUpperCase()}
+                        {(r.name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0] ?? '').join('').toUpperCase() || '?'}
                       </Text>
                     </View>
-                    <Text numberOfLines={1} style={[styles.recentName, { color: t.text }]}>
+                    {/* Two lines: "TCHOUMI ARMAND" read as "TCHOUMI…" on one. */}
+                    <Text numberOfLines={2} style={[styles.recentName, { color: t.text }]}>
                       {r.name || r.phone}
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -1539,10 +1540,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   countryChipText: { fontFamily: Fonts.bodyBold, fontSize: 13 },
-  recentChip: { width: 108, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.three, gap: Spacing.one },
+  recentChip: { width: 118, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.three, gap: Spacing.one, justifyContent: 'space-between' },
   recentAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   recentInitials: { fontFamily: Fonts.bodyBold, fontSize: 16 },
-  recentName: { fontFamily: Fonts.bodyBold, fontSize: 14 },
+  recentName: { fontFamily: Fonts.bodyBold, fontSize: 13.5, lineHeight: 17, minHeight: 34 },
   recentSub: { fontSize: 11 },
   phoneInput: { flex: 1, fontFamily: Fonts.bodyBold, fontSize: 18, paddingVertical: Spacing.three, letterSpacing: 0.5 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

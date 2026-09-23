@@ -117,7 +117,7 @@ export function Developers() {
 
             <section id="quickstart" className="dev-sec">
               <h2>Quick start</h2>
-              <p>Get a sandbox credential from the <Link to="/developers/dashboard">dashboard</Link> (instant, no verification), then:</p>
+              <p>Get a sandbox credential from the <Link to="/developers/dashboard">dashboard</Link> (instant, no verification), then run these three calls — from your terminal, or in the dashboard's <Link to="/developers/dashboard#overview">sandbox console</Link>, which sends them for you and shows what comes back.</p>
               <Tabs label="1 · Create a quote" samples={samples(base, "POST", "/quotes", quoteBody, "quote-1")} />
               <Tabs label="2 · Create the payment" samples={samples(base, "POST", "/payments", paymentBody, "order-12345")} />
               <Tabs label="3 · Sandbox: simulate the customer paying" samples={samples(base, "POST", "/sandbox/payments/pay_abc123/pay", null)} />

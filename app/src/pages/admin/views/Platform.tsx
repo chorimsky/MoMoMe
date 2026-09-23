@@ -57,6 +57,11 @@ type Tab = "queue" | "connect" | "orgs" | "settlements" | "plans" | "limits" | "
 
 export function PlatformView() {
   const [tab, setTab] = useState<Tab>("queue");
+  /** A queue decision often needs the whole customer, not the row. Set by "Open organization"
+   *  on a queue row; Organizations opens straight onto it instead of making the operator
+   *  change tab and then find the name again. */
+  const [jumpOrg, setJumpOrg] = useState<string | null>(null);
+  const openOrg = (id: string) => { setJumpOrg(id); setTab("orgs"); };
   const [treasury, setTreasury] = useState<Awaited<ReturnType<typeof api.platformTreasury>> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { api.platformTreasury().then(setTreasury).catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load.")); }, []);
@@ -65,18 +70,21 @@ export function PlatformView() {
   return (
     <div>
       <SectionTitle t="Platform" s="API v1 customers — organizations, activation, plans, limits, settlements. Every action here is audited." />
+      {/* "—" on a money tile reads as broken. It means UNKNOWN — no payout rail could report a
+          balance — which is a different operational state from zero, and the one that stops
+          new API payments. Say which rail went quiet. */}
       <Grid cols={4}>
-        <AKpi label="XAF float (payout rails)" value={fmt(treasury.total)} unit="XAF" />
+        <AKpi label="XAF float (payout rails)" value={fmt(treasury.total)} unit="XAF" sub={treasury.total == null ? <span style={{ color: "var(--warn)" }}>Unknown, not zero — {treasury.float_unknown_reason?.length ? treasury.float_unknown_reason.join(" · ") : "no payout rail is registered"}</span> : undefined} />
         <AKpi label="Reserved by open API payments" value={fmt(treasury.reserved)} unit="XAF" tone="warn" />
         <AKpi label="Settlement pending (payouts in flight)" value={fmt(treasury.settlement_pending)} unit="XAF" />
-        <AKpi label="Available to new payments" value={fmt(treasury.available)} unit="XAF" tone="recv" />
+        <AKpi label="Available to new payments" value={fmt(treasury.available)} unit="XAF" tone="recv" sub={treasury.total == null ? "Cannot be computed while the float is unknown." : undefined} />
       </Grid>
       <div style={{ display: "flex", gap: 6, margin: "16px 0", flexWrap: "wrap" }}>
         {(["queue", "connect", "orgs", "settlements", "plans", "limits", "usage", "emails", "audit"] as Tab[]).map((k) => <button key={k} type="button" className={`btn ${tab === k ? "btn-primary" : "btn-ghost"}`} style={small} onClick={() => setTab(k)}>{{ queue: "Activation queue", connect: "Connect network", orgs: "Organizations", settlements: "Settlements", plans: "Pricing plans", limits: "Limit rules", usage: "API usage", emails: "Emails", audit: "Audit" }[k]}</button>)}
       </div>
-      {tab === "queue" && <Queue />}
+      {tab === "queue" && <Queue openOrg={openOrg} />}
       {tab === "connect" && <ConnectNetwork />}
-      {tab === "orgs" && <Orgs />}
+      {tab === "orgs" && <Orgs initialOrg={jumpOrg} />}
       {tab === "emails" && <Emails />}
       {tab === "settlements" && <Settlements />}
       {tab === "plans" && <Plans />}
@@ -87,13 +95,14 @@ export function PlatformView() {
   );
 }
 
-function Orgs() {
+function Orgs({ initialOrg }: { initialOrg?: string | null }) {
   const [rows, setRows] = useState<PlatformOrgRow[] | null>(null);
   const [open, setOpen] = useState<PlatformOrgDetail | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(() => api.platformOrgs().then((r) => setRows(r.organizations)), []);
   useEffect(() => { void load(); }, [load]);
   const show = (id: string) => api.platformOrg(id).then(setOpen).catch((e) => setMsg(e instanceof Error ? e.message : "Failed."));
+  useEffect(() => { if (initialOrg) show(initialOrg); }, [initialOrg]); // eslint-disable-line react-hooks/exhaustive-deps
   const update = async (id: string, b: Parameters<typeof api.platformUpdateOrg>[1]) => { setMsg(null); try { await api.platformUpdateOrg(id, b); await load(); await show(id); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
   // One inline panel at a time: which action is open, and for which target.
   const [ask, setAsk] = useState<{ kind: "credit" | "password" | "suspend" | "revoke"; id: string; label?: string } | null>(null);
@@ -115,9 +124,9 @@ function Orgs() {
   return (
     <>
       {msg && <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 8 }}>{msg}</div>}
-      <Card title="Organizations" sub="API customers. Live is enabled here once KYB is verified.">
+      <Card title="Organizations" sub={`API customers. Live is enabled here once KYB is verified.${(rows ?? []).some((o) => o.liveEnabled && o.kyb !== "verified") ? " ⚠ marks a customer that is live WITHOUT a verified company — a state the console can no longer create, so these predate the check." : ""}`}>
         <table className="tbl-plain" style={{ width: "100%", fontSize: 13 }}><thead><tr><th>Organization</th><th>Plan</th><th>KYB</th><th>Live</th><th>Status</th><th>Keys</th><th>This month (live)</th><th>Sandbox</th><th>Balance</th></tr></thead><tbody>
-          {(rows ?? []).map((o) => <tr key={o.id} onClick={() => show(o.id)} style={{ cursor: "pointer" }}><td><b>{o.name}</b><div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{o.id} · {o.country}</div></td><td>{o.plan}</td><td><Pill status={o.kyb} tone={o.kyb === "verified" ? "recv" : o.kyb === "rejected" ? "bad" : "warn"} /></td><td>{o.liveEnabled ? "on" : "off"}</td><td><Pill status={o.status} tone={o.status === "active" ? "recv" : "bad"} /></td><td>{o.credentials}</td><td>{fmt(o.live?.volumeXaf)} XAF · {o.live?.completed ?? 0} ok</td><td>{o.test?.payments ?? 0} payments</td><td>{fmt(o.balance?.available)} XAF</td></tr>)}
+          {(rows ?? []).map((o) => <tr key={o.id} onClick={() => show(o.id)} style={{ cursor: "pointer" }}><td><b>{o.name}</b><div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{o.id} · {o.country}</div></td><td>{o.plan}</td><td><Pill status={o.kyb} tone={o.kyb === "verified" ? "recv" : o.kyb === "rejected" ? "bad" : "warn"} /></td><td>{o.liveEnabled ? (o.kyb === "verified" ? "on" : <span style={{ color: "var(--bad)" }} title="Live is on but the company is not verified — granted before the check existed, or set outside the console. Verify it or turn live off.">on ⚠</span>) : "off"}</td><td><Pill status={o.status} tone={o.status === "active" ? "recv" : "bad"} /></td><td>{o.credentials}</td><td>{fmt(o.live?.volumeXaf)} XAF · {o.live?.completed ?? 0} ok</td><td>{o.test?.payments ?? 0} payments</td><td>{fmt(o.balance?.available)} XAF</td></tr>)}
           {rows && !rows.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)" }}>No API customers yet.</td></tr>}
         </tbody></table>
       </Card>
@@ -295,7 +304,7 @@ function Audit() {
   </Card>;
 }
 
-function Queue() {
+function Queue({ openOrg }: { openOrg: (id: string) => void }) {
   const [d, setD] = useState<Awaited<ReturnType<typeof api.platformRequests>> | null>(null); const [all, setAll] = useState(false); const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(() => api.platformRequests(all).then(setD), [all]);
   useEffect(() => { void load(); }, [load]);
@@ -310,7 +319,15 @@ function Queue() {
     {msg && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 8 }}>{msg}</div>}
     {(d?.requests ?? []).map((r) => <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line-2)", fontSize: 13 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><span><b>{r.organization}</b> · {kindLabel(r.kind)}{r.kind === "plan_change" ? ` → ${String(r.payload.plan)}` : ""} <span style={{ color: "var(--ink-3)" }}>· {r.requester} · {when(r.createdAt)}</span></span>
-        <span>{r.status === "open" ? <><button type="button" className="btn btn-primary" style={small} onClick={() => setAsk({ id: r.id, decision: "approve", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Approve</button> <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ id: r.id, decision: "reject", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Reject</button></> : <Pill status={r.status} tone={r.status === "approved" ? "recv" : "bad"} />}</span></div>
+        <span>{r.status === "open" ? <><button type="button" className="btn btn-primary" style={small} disabled={!!r.blocked} title={r.blocked ? "Verify the company first." : undefined} onClick={() => setAsk({ id: r.id, decision: "approve", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Approve</button> <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ id: r.id, decision: "reject", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Reject</button></> : <Pill status={r.status} tone={r.status === "approved" ? "recv" : "bad"} />}</span></div>
+      {/* What this organization looks like right now. Approving live access switches on real
+          money; the state that justifies it used to live one tab away. */}
+      {r.context && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 5, fontSize: 12 }}>
+        <span style={{ color: "var(--ink-3)" }}>KYB</span> <Pill status={r.context.kyb} tone={r.context.kyb === "verified" ? "recv" : r.context.kyb === "rejected" ? "bad" : "warn"} />
+        <span style={{ color: "var(--ink-3)" }}>· {r.context.plan} · {r.context.country} · live {r.context.liveEnabled ? "on" : "off"} · {r.context.credentials} active key{r.context.credentials === 1 ? "" : "s"} · {r.context.status}</span>
+        <button type="button" className="btn btn-ghost" style={small} onClick={() => openOrg(r.orgId)}>Open organization</button>
+      </div>}
+      {r.blocked === "kyb_not_verified" && r.status === "open" && <div style={{ fontSize: 12.5, color: "var(--warn)", marginTop: 5 }}>Live access cannot be approved yet: this company is not verified. Decide its company-verification request first — approving live access does not verify a company.</div>}
       {ask?.id === r.id && (
         <AskFields
           title={ask.decision === "approve" ? `Approve — ${ask.what}` : `Reject — ${ask.what}`}

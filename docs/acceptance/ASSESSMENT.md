@@ -148,3 +148,72 @@ approves on their own handset → the rail's authoritative `status()` → `onCol
 Everything above is managed in Admin → Payment Rails: master switch, per-operator pinned rail
 with the engine's own live answer beside it, rail on/off, global bounds, approval window,
 per-rail recorded limits, and payout preference. Every change is audited.
+
+---
+
+## Increment — API Platform, flow and UI end to end (2026-09-23)
+
+Walked the whole platform surface as its two users see it: a developer signing up at
+`/developers/dashboard`, and an operator in Admin → API Platform.
+
+### The queue was the other door into live money
+
+`decideRequest` applied a live-access approval as
+`updateOrganization(orgId, { liveEnabled: true, kyb: "verified" })`. One click therefore did
+two things: it switched on real money, and it **stamped the compliance record as verified**
+without anyone having looked at a document. `PATCH /organizations/:id` had refused exactly
+this since the previous increment — the activation queue was the same change by another
+route, and the two requests sit next to each other in the list, so approving them in the
+order they appear was enough to trigger it. It also left the company-verification request
+open forever, because nothing had decided it.
+
+Now: approving live access requires a KYB that is *already* verified, never sets `kyb`
+itself, and is refused with `409 kyb_required`. The queue marks such a row `blocked`, the
+console disables Approve and says why, and a decided request cannot be decided twice.
+
+### Deciding blind
+
+A queue row read `Bitbank · Live access · ada@bitbank.test`. Everything the decision turns on
+— KYB state, plan, country, whether live was already on, how many keys are active, whether
+the organization is suspended — lived one tab away. Each row now carries that state and an
+**Open organization** button that opens the customer in place.
+
+### "—" is not "0"
+
+The four treasury tiles showed `— XAF` whenever no payout rail could report a balance. That is
+honest (the figure is *unknown*), but on a money tile it is indistinguishable from broken, and
+it is the state that stops new API payments. `treasuryView` now returns
+`float_unknown_reason` — the per-rail reasons the float aggregator already recorded — and the
+tile says **"Unknown, not zero — peexit: not configured · pawapay: not configured"**.
+
+### The onboarding checklist dead-ended
+
+Steps 3 and 4 ("make your first quote", "complete a sandbox payment") sent the developer to
+the API keys tab, which by then had nothing left to offer: the only way to tick them off was
+to copy a cURL into a terminal. Added a **sandbox console** on the Overview that runs the
+three calls against the same public `/v1` any other client uses — a real `mm_test_`
+credential in the Authorization header, the real bodies, the real responses, with each call
+also shown as cURL. Nothing is proxied or simulated, so what the developer sees is what their
+server will see. The key is sandbox-only, held for one browser tab, and listed, rotatable and
+revocable under API keys like any other; the on-screen cURL carries only the key's hint, while
+Copy puts the real secret on the clipboard.
+
+### An IP allow-list that could not be set
+
+`verifyCredential` has refused off-list addresses with `ip_not_allowed` since API v1 shipped,
+and the Enterprise plan copy sells the feature — but no screen could set it, so it existed
+only for whoever hand-wrote the API call. The API keys tab now sets it at creation and edits
+it per credential.
+
+### Smaller, all observed in the running app
+
+- Completed checklist items were struck through and dimmed to 55%, which reads as *cancelled*
+  rather than *done*; the green tick already carries the meaning.
+- The 13-tab strip scrolls, and at phone width showed three tabs with nothing to suggest the
+  other ten existed. It now fades at the edge.
+- "No sandbox payments yet — run the quick start on the Overview" was a direction with no way
+  through; it is now a link into the console.
+- The Identity tile said Lightning was **enabled** while its own hint said an address was
+  still missing. It now distinguishes *off* / *no address yet* / *enabled*.
+
+Covered by 14 new assertions in `server/test/platform-admin.test.ts` (33 in total).

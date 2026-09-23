@@ -165,11 +165,34 @@ platformAdmin.post("/organizations/:id/invoices/:period", (req, res) => {
 platformAdmin.get("/audit", (_req, res) => res.json({ events: auditAll(300) }));
 
 /* ---------- activation queue: KYB, plan changes, live access ---------- */
-platformAdmin.get("/requests", (req, res) => res.json({ requests: (str(req.query.all) === "1" ? allRequests() : openRequests()).map((r) => ({ ...r, organization: getOrganization(r.orgId)?.name ?? r.orgId, requester: getUser(r.byUserId)?.email ?? r.byUserId })), email_configured: emailConfigured() }));
+/* Each row carries the state an operator needs to DECIDE it. Without this the queue said
+   "Bitbank · Live access" and nothing else: whether that organization's KYB had been
+   verified, what plan it was on, whether it had ever completed a sandbox payment — all of it
+   lived one tab away, so the decision was either made blind or made after a detour. */
+platformAdmin.get("/requests", (req, res) => res.json({
+  requests: (str(req.query.all) === "1" ? allRequests() : openRequests()).map((r) => {
+    const o = getOrganization(r.orgId);
+    return {
+      ...r,
+      organization: o?.name ?? r.orgId,
+      requester: getUser(r.byUserId)?.email ?? r.byUserId,
+      context: o ? { kyb: o.kyb, plan: o.plan, liveEnabled: o.liveEnabled, status: o.status, country: o.country, credentials: listCredentials(o.id).filter((c) => c.status === "active").length } : null,
+      /* live access cannot be granted until KYB is verified — the console disables Approve
+         and says so, rather than letting the click fail at the server. */
+      blocked: r.kind === "live_access" && o?.kyb !== "verified" ? "kyb_not_verified" : null,
+    };
+  }),
+  email_configured: emailConfigured(),
+}));
 platformAdmin.post("/requests/:id/:decision", async (req, res) => {
   const d = req.params.decision; if (d !== "approve" && d !== "reject") return res.status(400).json({ error: "bad_request", message: "approve or reject." });
   const r0 = getRequest(req.params.id); if (!r0) return res.status(404).json({ error: "not_found", message: "No such request." });
-  const r = decideRequest(r0.id, d === "approve" ? "approved" : "rejected", (req as AdminReq).session?.uid ?? "console", str((req.body ?? {}).note) || undefined)!;
+  const out = decideRequest(r0.id, d === "approve" ? "approved" : "rejected", (req as AdminReq).session?.uid ?? "console", str((req.body ?? {}).note) || undefined);
+  if (!out.ok) {
+    if (out.error === "kyb_required") return res.status(409).json({ error: "kyb_required", message: "Live access needs a verified KYB. Decide the company-verification request first — approving live access does not verify a company." });
+    return res.status(409).json({ error: "already_decided", message: "This request was already decided." });
+  }
+  const r = out.request;
   audit({ orgId: r.orgId, actor: who(req), action: `request.${r.kind}.${r.status}`, target: { type: "request", id: r.id }, details: { note: r.decisionNote }, ip: clientIp(req) });
   const requester = getUser(r.byUserId); const org = getOrganization(r.orgId);
   if (requester) {

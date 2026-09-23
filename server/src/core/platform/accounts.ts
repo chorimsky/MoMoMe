@@ -79,16 +79,28 @@ export function requestsOf(orgId: string): OperatorRequest[] { return [...reques
 export function openRequests(): OperatorRequest[] { return [...requests.values()].filter((r) => r.status === "open").sort((a, b) => a.createdAt.localeCompare(b.createdAt)); }
 export function allRequests(): OperatorRequest[] { return [...requests.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
 export function getRequest(id: string): OperatorRequest | undefined { return requests.get(id); }
-/** Decide a request; approval applies the change to the organization. */
-export function decideRequest(id: string, decision: "approved" | "rejected", by: string, note?: string): OperatorRequest | undefined {
-  const r = requests.get(id); if (!r || r.status !== "open") return r;
+/** Decide a request; approval applies the change to the organization.
+ *
+ *  Approving LIVE ACCESS requires a KYB that is ALREADY verified. This used to read
+ *  `updateOrganization(r.orgId, { liveEnabled: true, kyb: "verified" })` — one click both
+ *  switched on real money AND stamped the compliance record as verified, so an operator who
+ *  approved the live-access row before the KYB row (they sit next to each other in the queue,
+ *  newest first) recorded a verification nobody had performed, and left the KYB request open
+ *  forever. The PATCH /organizations route already refused exactly this; the queue was the
+ *  other door into the same change. KYB is decided on its own row, by looking at documents. */
+export function decideRequest(id: string, decision: "approved" | "rejected", by: string, note?: string): { ok: true; request: OperatorRequest } | { ok: false; error: "not_open" | "kyb_required"; request?: OperatorRequest } {
+  const r = requests.get(id); if (!r) return { ok: false, error: "not_open" };
+  if (r.status !== "open") return { ok: false, error: "not_open", request: r };
+  if (decision === "approved" && r.kind === "live_access" && getOrganization(r.orgId)?.kyb !== "verified") {
+    return { ok: false, error: "kyb_required", request: r };
+  }
   r.status = decision; r.decidedBy = by; r.decisionNote = note; r.updatedAt = new Date().toISOString();
   if (decision === "approved") {
     if (r.kind === "kyb") updateOrganization(r.orgId, { kyb: "verified" });
     if (r.kind === "plan_change") updateOrganization(r.orgId, { plan: String(r.payload.plan) });
-    if (r.kind === "live_access") updateOrganization(r.orgId, { liveEnabled: true, kyb: "verified" });
+    if (r.kind === "live_access") updateOrganization(r.orgId, { liveEnabled: true });
   } else if (r.kind === "kyb") updateOrganization(r.orgId, { kyb: "rejected" });
   touch("platform_requests");
-  return r;
+  return { ok: true, request: r };
 }
 export function _resetAccounts(): void { tokens.clear(); versions.clear(); verified.clear(); requests.clear(); }

@@ -14,7 +14,8 @@
 .dd-top-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .dd-env { font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
 .dd-env.test { background: var(--brand-wash); color: var(--brand); } .dd-env.live { background: color-mix(in oklab, var(--recv) 18%, transparent); color: var(--recv); }
-.dd-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 12px 0; border-bottom: 1px solid var(--line-2); }
+.dd-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 12px 0; border-bottom: 1px solid var(--line-2); scrollbar-width: thin; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%); }
+.dd-tabs:not(:hover) { scrollbar-color: var(--line-2) transparent; }
 .dd-tabs button { background: none; border: 0; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 8px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .dd-tabs button.on { background: var(--ink); color: var(--paper); }
 .dd-main { padding: 18px 0 40px; display: grid; gap: 18px; }
@@ -95,7 +96,7 @@
 .dd-progress > div { height: 100%; background: var(--brand); transition: width .3s; }
 .dd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .dd-steps li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; font-size: 13.5px; padding: 6px 0; }
-.dd-steps li.done { opacity: .55; } .dd-steps li.done b { text-decoration: line-through; }
+.dd-steps li.done { opacity: .72; } .dd-steps li.done b { font-weight: 600; color: var(--ink-2); }
 .dd-step-mark { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--ink-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 800; }
 .dd-steps li.done .dd-step-mark { background: color-mix(in oklab, var(--recv) 22%, transparent); color: var(--recv); }
 
@@ -126,3 +127,9 @@
 .dd-st.processing, .dd-st.created, .dd-st.issued, .dd-st.pending { background: var(--brand-wash); color: var(--brand); }
 .dd-st.reversed, .dd-st.failed, .dd-st.expired, .dd-st.cancelled { background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); }
 .dd-st.submitted { background: var(--brand-wash); color: var(--brand); }
+
+/* The sandbox console: each step owns a response block, so the row stops being one line. */
+.dd-console li { align-items: start; }
+.dd-console li > span:nth-child(2) { display: block; }
+.dd-console .dd-codewrap { margin-top: 8px; }
+.dd-console .dd-code { max-height: 260px; }

@@ -18,7 +18,7 @@
    ============================================================ */
 import crypto from "node:crypto";
 import { register, touch } from "../persist.js";
-import { aggregatorFloatXaf } from "../routing.js";
+import { aggregatorFloatXaf, balanceReasons } from "../routing.js";
 import { store } from "../../db/store.js";
 
 export type ReservationState = "RESERVED" | "CONSUMED" | "RELEASED";
@@ -39,11 +39,16 @@ async function settlementPendingXaf(): Promise<number> {
   return open.filter((p) => p.state === "PAYOUT_REQUESTED" || p.state === "PAYOUT_CONFIRMED").reduce((s, p) => s + p.xaf, 0);
 }
 
-export async function treasuryView(): Promise<{ pool: string; currency: "XAF"; total: number | null; reserved: number; settlement_pending: number; available: number | null }> {
-  const total = await aggregatorFloatXaf().catch(() => null);
+export async function treasuryView(): Promise<{ pool: string; currency: "XAF"; total: number | null; reserved: number; settlement_pending: number; available: number | null; float_unknown_reason: string[] | null }> {
+  const raw = await aggregatorFloatXaf().catch(() => null);
+  const total = raw == null || !Number.isFinite(raw) ? null : raw;
   const reserved = reservedXaf();
   const pending = await settlementPendingXaf();
-  return { pool: POOL_XAF, currency: "XAF", total, reserved, settlement_pending: pending, available: total == null ? null : Math.max(0, total - reserved - pending) };
+  /* A null total means NOBODY COULD ANSWER, which is not the same as zero — and on a KPI
+     tile the two look identical ("—" next to a currency). Carry the per-rail reasons the
+     float aggregator already records, so the console can say which rail went quiet instead
+     of leaving the operator to guess whether the treasury is empty or the screen is broken. */
+  return { pool: POOL_XAF, currency: "XAF", total, reserved, settlement_pending: pending, available: total == null ? null : Math.max(0, total - reserved - pending), float_unknown_reason: total == null ? balanceReasons() : null };
 }
 
 /** Sandbox / test override of the float figure (mirrors upi/liquidity.simulateDomesticFloat). */

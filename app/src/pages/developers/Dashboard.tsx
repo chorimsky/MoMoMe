@@ -28,9 +28,12 @@ function Panel({ title, sub, action, children }: { title: string; sub?: ReactNod
 function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) { return <div className="dd-kpi"><div className="muted small">{label}</div><div className="dd-kpi-v">{value}</div>{sub && <div className="muted small">{sub}</div>}</div>; }
 function Skeleton({ rows = 3 }: { rows?: number }) { return <div className="dd-skel" aria-busy="true">{Array.from({ length: rows }, (_, i) => <div key={i} />)}</div>; }
 function Empty({ children }: { children: ReactNode }) { return <div className="dd-empty">{children}</div>; }
-function CodeBlock({ code, label }: { code: string; label?: string }) {
+/** `copy` lets the block SHOW one thing and COPY another — used so a runnable cURL can carry
+ *  the real secret to the clipboard without leaving it on screen for the length of a session,
+ *  a screen-share or a screenshot. */
+function CodeBlock({ code, label, copy }: { code: string; label?: string; copy?: string }) {
   const [c, setC] = useState(false);
-  return <div className="dd-codewrap">{label && <div className="dd-codebar"><span>{label}</span><button type="button" onClick={() => { copyText(code); setC(true); setTimeout(() => setC(false), 1200); }}>{c ? "Copied ✓" : "Copy"}</button></div>}<pre className="dd-code">{code}</pre></div>;
+  return <div className="dd-codewrap">{label && <div className="dd-codebar"><span>{label}</span><button type="button" onClick={() => { copyText(copy ?? code); setC(true); setTimeout(() => setC(false), 1200); }}>{c ? "Copied ✓" : "Copy"}</button></div>}<pre className="dd-code">{code}</pre></div>;
 }
 function Status({ s }: { s: string }) { return <span className={`dd-st ${s}`}>{s.replace(/_/g, " ")}</span>; }
 function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; reload: () => Promise<void>; loading: boolean } {
@@ -165,13 +168,13 @@ function Overview({ org, me, go }: { org: DevOrg; me: NonNullable<Awaited<Return
   const u = usage.data; const s = u?.[env].summary;
   const test = u?.test.summary;
   const steps = [
-    { done: me.user.emailVerified, label: "Verify your email", hint: "Click the link we sent you.", tab: undefined as Tab | undefined },
-    { done: (creds.data?.credentials.filter((c) => c.status === "active").length ?? 0) > 0, label: "Create a sandbox API key", hint: "mm_test_… — instant, no verification.", tab: "keys" as Tab },
-    { done: (test?.quotes ?? 0) > 0, label: "Make your first quote", hint: "POST /v1/quotes with your key.", tab: "keys" as Tab },
-    { done: (test?.completed ?? 0) > 0, label: "Complete a sandbox payment", hint: "Create a payment, then POST /v1/sandbox/payments/{id}/pay.", tab: "transactions" as Tab },
-    { done: (hooks.data?.endpoints.filter((h) => !h.disabledAt).length ?? 0) > 0, label: "Register a webhook", hint: "Get payment.completed instead of polling.", tab: "webhooks" as Tab },
-    { done: org.kyb === "verified" || org.kyb === "pending", label: "Submit your company details", hint: "Required for live access.", tab: "golive" as Tab },
-    { done: org.liveEnabled, label: "Go live", hint: "Create mm_live_ keys once approved.", tab: "golive" as Tab },
+    { done: me.user.emailVerified, label: "Verify your email", hint: "Click the link we sent you.", tab: undefined as Tab | undefined, jump: undefined as string | undefined },
+    { done: (creds.data?.credentials.filter((c) => c.status === "active").length ?? 0) > 0, label: "Create a sandbox API key", hint: "mm_test_… — instant, no verification.", tab: "keys" as Tab, jump: undefined as string | undefined },
+    { done: (test?.quotes ?? 0) > 0, label: "Make your first quote", hint: "Run it in the sandbox console below — no terminal needed.", tab: undefined as Tab | undefined, jump: "console" },
+    { done: (test?.completed ?? 0) > 0, label: "Complete a sandbox payment", hint: "Create a payment and simulate the customer paying it.", tab: undefined as Tab | undefined, jump: "console" },
+    { done: (hooks.data?.endpoints.filter((h) => !h.disabledAt).length ?? 0) > 0, label: "Register a webhook", hint: "Get payment.completed instead of polling.", tab: "webhooks" as Tab, jump: undefined as string | undefined },
+    { done: org.kyb === "verified" || org.kyb === "pending", label: "Submit your company details", hint: "Required for live access.", tab: "golive" as Tab, jump: undefined as string | undefined },
+    { done: org.liveEnabled, label: "Go live", hint: "Create mm_live_ keys once approved.", tab: "golive" as Tab, jump: undefined as string | undefined },
   ];
   const doneCount = steps.filter((x) => x.done).length;
   const ready = creds.data && hooks.data && usage.data;
@@ -180,7 +183,7 @@ function Overview({ org, me, go }: { org: DevOrg; me: NonNullable<Awaited<Return
       {ready && doneCount < steps.length && (
         <Panel title="Getting started" sub={`${doneCount} of ${steps.length} done`}>
           <div className="dd-progress"><div style={{ width: `${(100 * doneCount) / steps.length}%` }} /></div>
-          <ol className="dd-steps">{steps.map((x, i) => <li key={i} className={x.done ? "done" : ""}><span className="dd-step-mark">{x.done ? "✓" : i + 1}</span><span><b>{x.label}</b><span className="muted small"> — {x.hint}</span></span>{!x.done && x.tab && <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(x.tab!)}>Open</button>}</li>)}</ol>
+          <ol className="dd-steps">{steps.map((x, i) => <li key={i} className={x.done ? "done" : ""}><span className="dd-step-mark">{x.done ? "✓" : i + 1}</span><span><b>{x.label}</b><span className="muted small"> — {x.hint}</span></span>{!x.done && (x.tab ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => go(x.tab!)}>Open</button> : x.jump ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => document.getElementById(x.jump!)?.scrollIntoView({ behavior: "smooth", block: "start" })}>Open</button> : null)}</li>)}</ol>
         </Panel>
       )}
       <div className="dd-seg-row"><div className="dd-seg"><button type="button" className={env === "test" ? "on" : ""} onClick={() => setEnv("test")}>Sandbox</button><button type="button" className={env === "live" ? "on" : ""} onClick={() => setEnv("live")}>Live</button></div><span className="muted small">last 30 days</span></div>
@@ -195,8 +198,9 @@ function Overview({ org, me, go }: { org: DevOrg; me: NonNullable<Awaited<Return
         </div>
       )}
       {u && (s!.completed > 0 ? <Panel title="Daily volume" sub="Completed payments per day (XAF)"><Bars rows={u[env].days.map((d) => ({ k: d.day.slice(5), v: d.volumeXaf, t: `${d.completed} ok · ${d.failed} failed` }))} /></Panel>
-        : <Empty>{env === "live" ? (org.liveEnabled ? "No live payments in the last 30 days." : "Live is not enabled yet — complete the steps above.") : "No sandbox payments yet. Create a key and run the quick start below."}</Empty>)}
-      <Panel title="Quick start" sub="Three calls and a webhook. Replace mm_test_… with your key." action={<Link className="btn btn-ghost btn-sm" to="/developers">Full docs →</Link>}>
+        : <Empty>{env === "live" ? (org.liveEnabled ? "No live payments in the last 30 days." : "Live is not enabled yet — complete the steps above.") : "No sandbox payments yet — the sandbox console below runs one for you."}</Empty>)}
+      <div id="console"><Console org={org} onRan={() => { void usage.reload(); void creds.reload(); }} /></div>
+      <Panel title="Quick start" sub="The same three calls, to copy into your own code. Replace mm_test_… with your key." action={<Link className="btn btn-ghost btn-sm" to="/developers">Full docs →</Link>}>
         <CodeBlock label="cURL" code={`# 1. quote
 curl -X POST ${v1Abs()}/quotes -H "Authorization: Bearer mm_test_…" -H "Idempotency-Key: q-1" \\
   -H "Content-Type: application/json" -d '{"source":{"asset":"USDT","network":"ETHEREUM"},"destination":{"country":"CM","currency":"XAF","amount":"25000"}}'
@@ -209,6 +213,126 @@ curl -X POST ${v1Abs()}/sandbox/payments/pay_…/pay -H "Authorization: Bearer m
     </>
   );
 }
+/* ---------- sandbox console: the quick start, actually run ----------
+   Steps 3 and 4 of the getting-started checklist ("make your first quote", "complete a
+   sandbox payment") used to send the developer to the API keys tab, which by then had
+   nothing left to offer — the only way to tick them off was to copy a cURL into a terminal.
+   This runs the same three calls against the same public /v1 as any other client: a real
+   sandbox credential in the Authorization header, the real request bodies, the real
+   responses. Nothing is proxied or faked, so what you see here is what your server will see.
+
+   The key is a SANDBOX key (mm_test_) and only ever a sandbox key: live secrets never touch
+   this panel. It is held in sessionStorage for this tab only and is listed, rotatable and
+   revocable under API keys like any other. */
+const CONSOLE_KEY = "mm:dev:console-key";
+type ConsoleKey = { orgId: string; secret: string; hint: string };
+const readConsoleKey = (orgId: string): ConsoleKey | null => { try { const v = JSON.parse(sessionStorage.getItem(CONSOLE_KEY) ?? "null") as ConsoleKey | null; return v && v.orgId === orgId ? v : null; } catch { return null; } };
+const writeConsoleKey = (v: ConsoleKey | null) => { try { if (v) sessionStorage.setItem(CONSOLE_KEY, JSON.stringify(v)); else sessionStorage.removeItem(CONSOLE_KEY); } catch { /* no storage */ } };
+
+type Call = { method: string; path: string; body?: unknown; status: number; ms: number; response: unknown };
+const asCurl = (c: Call, secret: string) => `curl -X ${c.method} ${v1Abs()}${c.path} \\\n  -H "Authorization: Bearer ${secret}"${c.body ? ` \\\n  -H "Idempotency-Key: $(uuidgen)" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(c.body)}'` : ""}`;
+
+/** Step order, so re-running a step can drop the ones that depended on it. Declared ABOVE
+ *  Console deliberately — a `const` referenced from a component reads fine today only because
+ *  nothing calls it during module evaluation. */
+const ORDER = ["quote", "payment", "pay"];
+const stepOf = (path: string) => (path === "/quotes" ? "quote" : path === "/payments" ? "payment" : "pay");
+
+function Console({ org, onRan }: { org: DevOrg; onRan: () => void }) {
+  const [key, setKey] = useState<ConsoleKey | null>(() => readConsoleKey(org.id));
+  const [amount, setAmount] = useState("25000");
+  const [phone, setPhone] = useState("+237670123456");
+  const [asset, setAsset] = useState("USDT");
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { setKey(readConsoleKey(org.id)); setCalls([]); }, [org.id]);
+
+  const quote = calls.find((c) => c.path === "/quotes");
+  const quoteId = (quote?.response as any)?.data?.id as string | undefined;
+  const payment = calls.find((c) => c.path === "/payments");
+  const paymentId = (payment?.response as any)?.data?.id as string | undefined;
+  const paid = calls.find((c) => c.path.endsWith("/pay"));
+
+  const mintKey = async () => {
+    setBusy("key"); setErr(null);
+    try {
+      const r = await dev.createCredential(org.id, { environment: "test", label: "Dashboard console" });
+      const k = { orgId: org.id, secret: r.secret, hint: r.credential.hint };
+      writeConsoleKey(k); setKey(k);
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
+  };
+
+  const call = async (step: string, method: string, path: string, body?: unknown) => {
+    if (!key) return;
+    setBusy(step); setErr(null);
+    const t0 = performance.now();
+    try {
+      const res = await fetch(`${v1Abs()}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${key.secret}`, "content-type": "application/json", "Idempotency-Key": `dash-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      const c: Call = { method, path, body, status: res.status, ms: Math.round(performance.now() - t0), response: json };
+      // Re-running a step drops everything that depended on it: a stale payment under a
+      // fresh quote would be a lie about what just happened.
+      setCalls((prev) => [...prev.filter((p) => ORDER.indexOf(stepOf(p.path)) < ORDER.indexOf(step)), c]);
+      if (res.ok) onRan();
+      else setErr(`${res.status} — ${(json as any)?.error?.message ?? (json as any)?.error?.code ?? "the request was refused"}`);
+    } catch (e) { setErr(e instanceof Error ? e.message : "The request could not be sent."); }
+    finally { setBusy(null); }
+  };
+
+  const steps: Array<{ id: string; n: number; title: string; sub: string; ready: boolean; run: () => void; call?: Call }> = [
+    { id: "quote", n: 1, title: "Quote", sub: "What the customer sends, and what lands — locked for the quote's lifetime.", ready: !!key, call: quote,
+      run: () => call("quote", "POST", "/quotes", { source: { asset, network: asset === "BTC" ? "LIGHTNING" : "ETHEREUM" }, destination: { country: org.country || "CM", currency: "XAF", amount: String(Number(amount) || 0) } }) },
+    { id: "payment", n: 2, title: "Payment", sub: "Creates the payment and returns the instruction the customer pays.", ready: !!quoteId, call: payment,
+      run: () => call("payment", "POST", "/payments", { quote_id: quoteId, reference: `DASH-${Date.now().toString(36).toUpperCase()}`, recipient: { phone } }) },
+    { id: "pay", n: 3, title: "Simulate the customer paying", sub: "Sandbox only. Your webhook receives payment.completed exactly as it would in live.", ready: !!paymentId, call: paid,
+      run: () => call("pay", "POST", `/sandbox/payments/${paymentId}/pay`) },
+  ];
+
+  return (
+    <Panel title="Sandbox console" sub="The quick start, run here against the public API — real key, real requests, real responses." action={<Link className="btn btn-ghost btn-sm" to="/developers">Full docs →</Link>}>
+      {!key ? (
+        <div className="dd-row" style={{ alignItems: "flex-end" }}>
+          <p className="muted small" style={{ flex: "1 1 320px", margin: 0 }}>The console needs a sandbox key. It creates one labelled <b>Dashboard console</b> — a normal <code>mm_test_</code> credential you can see, rotate and revoke under API keys. It is kept for this browser tab only, and live keys are never used here.</p>
+          <button type="button" className="btn btn-primary" disabled={busy === "key"} onClick={mintKey}>{busy === "key" ? "…" : "Create a console key"}</button>
+        </div>
+      ) : (
+        <>
+          <div className="dd-row dd-filters">
+            <label>You send<select value={asset} onChange={(e) => setAsset(e.target.value)}><option>USDT</option><option>USDC</option><option value="BTC">BTC (Lightning)</option></select></label>
+            <label>They receive (XAF)<input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" /></label>
+            <label>Recipient<input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" /></label>
+            <span className="muted small">key <code>{key.hint}</code></span>
+            <button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => { writeConsoleKey(null); setKey(null); setCalls([]); }}>forget key</button>
+          </div>
+          {err && <div className="dd-err" role="alert">{err}</div>}
+          <ol className="dd-steps dd-console">
+            {steps.map((s) => (
+              <li key={s.id} className={s.call ? "done" : ""}>
+                <span className="dd-step-mark">{s.call && s.call.status < 400 ? "✓" : s.n}</span>
+                <span style={{ minWidth: 0 }}>
+                  <b>{s.title}</b><span className="muted small"> — {s.sub}</span>
+                  {s.call && <>
+                    <div className="muted small" style={{ marginTop: 4 }}><code>{s.call.method} {s.call.path}</code> → <b style={{ color: s.call.status < 400 ? "var(--recv)" : "var(--bad)" }}>{s.call.status}</b> · {s.call.ms} ms</div>
+                    <CodeBlock label="Response" code={JSON.stringify(s.call.response, null, 2)} />
+                    <CodeBlock label="The same call as cURL — Copy includes the key" code={asCurl(s.call, key.hint)} copy={asCurl(s.call, key.secret)} />
+                  </>}
+                </span>
+                <button type="button" className={`btn btn-sm ${s.call ? "btn-ghost" : "btn-primary"}`} disabled={!s.ready || busy === s.id} onClick={s.run}>{busy === s.id ? "…" : s.call ? "Run again" : "Run"}</button>
+              </li>
+            ))}
+          </ol>
+          {paid && paid.status < 400 && <div className="callout small" role="status">Done — that payment is in <b>Transactions</b>, and any enabled webhook endpoint has already received <code>payment.completed</code>.</div>}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 function Bars({ rows }: { rows: Array<{ k: string; v: number; t: string }> }) {
   const max = Math.max(1, ...rows.map((r) => r.v));
   return <div className="dd-bars">{rows.slice(-30).map((r) => <div key={r.k} className="dd-bar" title={`${r.k}: ${fmt(r.v)} XAF · ${r.t}`}><div style={{ height: `${Math.max(2, (r.v / max) * 100)}%` }} /><span>{r.k}</span></div>)}</div>;
@@ -218,9 +342,13 @@ function Bars({ rows }: { rows: Array<{ k: string; v: number; t: string }> }) {
 function Keys({ org }: { org: DevOrg }) {
   const q = useAsync(() => dev.credentials(org.id), [org.id]);
   const [secret, setSecret] = useState<{ secret: string; label: string; env: string } | null>(null);
-  const [f, setF] = useState({ label: "", environment: "test" as "test" | "live", scopes: [] as string[] });
+  const [f, setF] = useState({ label: "", environment: "test" as "test" | "live", scopes: [] as string[], ips: "" });
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null); const [showRevoked, setShowRevoked] = useState(false);
-  const create = async () => { setBusy(true); setErr(null); try { const r = await dev.createCredential(org.id, { environment: f.environment, label: f.label || "Untitled", scopes: f.scopes.length ? f.scopes : undefined }); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); setF({ label: "", environment: f.environment, scopes: [] }); await q.reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
+  /** Which credential's IP allow-list is being edited, and the text being edited. */
+  const [ipEdit, setIpEdit] = useState<{ id: string; value: string } | null>(null);
+  const ipList = (t: string) => t.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean).slice(0, 20);
+  const create = async () => { setBusy(true); setErr(null); try { const ips = ipList(f.ips); const r = await dev.createCredential(org.id, { environment: f.environment, label: f.label || "Untitled", scopes: f.scopes.length ? f.scopes : undefined, ip_allowlist: ips.length ? ips : undefined }); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); setF({ label: "", environment: f.environment, scopes: [], ips: "" }); await q.reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
+  const saveIps = async (c: DevCredential, text: string) => { setErr(null); try { const ips = ipList(text); await dev.updateCredential(org.id, c.id, { ip_allowlist: ips.length ? ips : null }); setIpEdit(null); await q.reload(); } catch (e) { setErr(errMsg(e)); } };
   const rotate = async (c: DevCredential) => { if (!confirm(`Rotate "${c.label}"? The old secret keeps working for 1 hour.`)) return; try { const r = await dev.rotateCredential(org.id, c.id, 3600); setSecret({ secret: r.secret, label: r.credential.label, env: r.credential.env }); await q.reload(); } catch (e) { setErr(errMsg(e)); } };
   const revoke = async (c: DevCredential) => { if (!confirm(`Revoke "${c.label}"? Integrations using it stop immediately.`)) return; try { await dev.revokeCredential(org.id, c.id); await q.reload(); } catch (e) { setErr(errMsg(e)); } };
   const rows = (q.data?.credentials ?? []).filter((c) => showRevoked || c.status === "active");
@@ -241,12 +369,19 @@ function Keys({ org }: { org: DevOrg }) {
           <button type="button" className="btn btn-primary" disabled={busy} onClick={create}>{busy ? "…" : "Create key"}</button>
         </div>
         <details className="dd-details"><summary>Restrict scopes (default: all)</summary><div className="dd-chips">{(q.data?.scopes ?? []).map((s) => <label key={s} className={f.scopes.includes(s) ? "on" : ""}><input type="checkbox" checked={f.scopes.includes(s)} onChange={(e) => setF({ ...f, scopes: e.target.checked ? [...f.scopes, s] : f.scopes.filter((x) => x !== s) })} />{s}</label>)}</div></details>
+        {/* The API has always enforced an IP allow-list on a credential, and the plans page
+            sells one — there was simply no way to set it outside a raw API call. */}
+        <details className="dd-details"><summary>Restrict by IP (default: any address)</summary><label style={{ display: "block", marginTop: 6 }}>Allowed addresses — one per line or comma-separated, up to 20<input value={f.ips} onChange={(e) => setF({ ...f, ips: e.target.value })} placeholder="203.0.113.10, 198.51.100.4" /></label><p className="muted small">A request from any other address is refused with <code>ip_not_allowed</code>, whatever the key. Set this only where your servers have fixed addresses.</p></details>
         {err && <div className="dd-err" role="alert">{err}</div>}
       </Panel>
       <Panel title="Credentials" sub={q.data ? `${rows.length} shown` : undefined} action={<label className="muted small dd-check"><input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} /> show revoked</label>}>
         {q.loading && !q.data ? <Skeleton /> : rows.length ? (
-          <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Label</th><th>Env</th><th>Hint</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>
-            {rows.map((c) => <tr key={c.id} className={c.status === "revoked" ? "dim" : ""}><td>{c.label}</td><td><span className={`dd-env ${c.env}`}>{c.env}</span></td><td><code>{c.hint}</code></td><td className="small">{c.scopes.length >= 10 ? "all" : c.scopes.join(", ")}</td><td className="small" title={when(c.lastUsedAt)}>{ago(c.lastUsedAt)}</td><td>{c.status}</td><td className="dd-actions">{c.status === "active" && <><button type="button" onClick={() => rotate(c)}>Rotate</button><button type="button" onClick={() => revoke(c)}>Revoke</button></>}</td></tr>)}
+          <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Label</th><th>Env</th><th>Hint</th><th>Scopes</th><th>IPs</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>
+            {rows.map((c) => <tr key={c.id} className={c.status === "revoked" ? "dim" : ""}><td>{c.label}</td><td><span className={`dd-env ${c.env}`}>{c.env}</span></td><td><code>{c.hint}</code></td><td className="small">{c.scopes.length >= 10 ? "all" : c.scopes.join(", ")}</td>
+              <td className="small">{ipEdit?.id === c.id
+                ? <span className="dd-row" style={{ gap: 4 }}><input value={ipEdit.value} onChange={(e) => setIpEdit({ id: c.id, value: e.target.value })} placeholder="any address" style={{ minWidth: 150 }} /><button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => saveIps(c, ipEdit.value)}>Save</button><button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => setIpEdit(null)}>Cancel</button></span>
+                : c.ipAllowlist?.length ? <span title={c.ipAllowlist.join(", ")}>{c.ipAllowlist.length} allowed</span> : <span className="muted">any</span>}</td>
+              <td className="small" title={when(c.lastUsedAt)}>{ago(c.lastUsedAt)}</td><td>{c.status}</td><td className="dd-actions">{c.status === "active" && <><button type="button" onClick={() => setIpEdit({ id: c.id, value: (c.ipAllowlist ?? []).join(", ") })}>IPs</button><button type="button" onClick={() => rotate(c)}>Rotate</button><button type="button" onClick={() => revoke(c)}>Revoke</button></>}</td></tr>)}
           </tbody></table></div>
         ) : <Empty>No credentials yet — create your first sandbox key above.</Empty>}
       </Panel>
@@ -309,7 +444,7 @@ function Transactions({ org }: { org: DevOrg }) {
           <div className="dd-tablewrap"><table className="dd-table"><thead><tr><th>Created</th><th>Reference</th><th>Recipient</th><th>Amount</th><th>Funding</th><th>Status</th></tr></thead><tbody>
             {rows.map((p) => <tr key={p.id} onClick={() => setOpen(p)} className="click" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setOpen(p)}><td className="small" title={when(p.created_at)}>{ago(p.created_at)}</td><td>{p.reference ?? <code>{p.id}</code>}</td><td>{p.recipient.name ?? "—"} <span className="muted small">{p.recipient.phone}</span></td><td>{fmt(Number(p.destination.amount))} XAF</td><td className="small">{p.source.amount ?? "—"} {p.source.asset}</td><td><Status s={p.status} /></td></tr>)}
           </tbody></table></div>
-        ) : <Empty>{q || status ? "Nothing matches these filters." : env === "live" ? "No live payments yet." : "No sandbox payments yet — run the quick start on the Overview."}</Empty>}
+        ) : <Empty>{q || status ? "Nothing matches these filters." : env === "live" ? "No live payments yet." : <>No sandbox payments yet. <button type="button" className="dd-link" style={{ marginTop: 0 }} onClick={() => { window.location.hash = "overview"; setTimeout(() => document.getElementById("console")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120); }}>Run one in the sandbox console →</button></>}</Empty>}
       </Panel>
       {open && <PaymentDrawer p={open} onClose={() => setOpen(null)} />}
     </>
@@ -449,7 +584,7 @@ function Identity({ org }: { org: DevOrg }) {
   const ln = (m.aliases as Array<{ type: string; value: string }>).find((a) => a.type === "lightning_address")?.value;
   return (
     <>
-      <div className="dd-kpis"><Kpi label="Payment identity" value={<code style={{ fontSize: 14 }}>{m.id}</code>} sub={`${m.type} · ${m.country}`} /><Kpi label="MoMo›Me balance" value={`${fmt(d.balance.available)} XAF`} sub="internal rail — instant transfers between connected identities" /><Kpi label="Lightning" value={m.lightning_enabled ? "enabled" : "off"} sub={ln ?? "add a phone alias to get an address"} /></div>
+      <div className="dd-kpis"><Kpi label="Payment identity" value={<code style={{ fontSize: 14 }}>{m.id}</code>} sub={`${m.type} · ${m.country}`} /><Kpi label="MoMo›Me balance" value={`${fmt(d.balance.available)} XAF`} sub="internal rail — instant transfers between connected identities" /><Kpi label="Lightning" value={!m.lightning_enabled ? "off" : ln ? "enabled" : "no address yet"} sub={ln ?? (m.lightning_enabled ? "On, but nobody can pay it: add a phone alias below to get an address." : "Turn it on in the settlement profile.")} /></div>
       <div className="callout">Your identity is how other MoMo›Me-connected businesses reach you: by phone, email, merchant code or Lightning Address. Payments between connected identities settle instantly on the MoMo›Me ledger; everyone else reaches you through the hosted checkout.</div>
       <Panel title="Aliases" sub="Ways others can address you. The same alias cannot belong to two identities.">
         <div className="dd-chips">{(m.aliases as Array<{ type: string; value: string; verified: boolean }>).map((a) => <span key={`${a.type}:${a.value}`} className="dd-st" title={a.verified ? "verified" : "unverified"}>{a.type.replace("_", " ")}: {a.value}{a.verified ? " ✓" : ""}</span>)}</div>

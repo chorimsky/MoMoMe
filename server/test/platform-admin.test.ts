@@ -73,6 +73,48 @@ async function main() {
     ok("revoking it twice is refused, not a second event", r.status === 409, String(r.status));
     const audit = await call("GET", "/api/admin/platform/audit");
     ok("the revocation is in the audit trail with its reason", (audit.body.events ?? []).some((e: Record<string, any>) => e.action === "credential.revoked_by_operator" && e.details?.reason === "posted in a public repo"));
+
+    console.log("\nThe activation queue is the OTHER door into live money\n");
+    // A second organization, untouched, so its KYB is genuinely "not started".
+    const su2 = await (await fetch(`${base}/api/developers/signup`, { method: "POST", headers: J, body: JSON.stringify({ email: "two@example.com", name: "Two", password: "long-enough-password", organization: "Two Co" }) })).json() as { organization: { id: string }; token: string };
+    const org2 = su2.organization.id; const D2 = { ...J, authorization: `Bearer ${su2.token}` };
+    const submit = (b: Record<string, string>) => fetch(`${base}/api/developers/orgs/${org2}/requests`, { method: "POST", headers: D2, body: JSON.stringify(b) });
+    await submit({ kind: "kyb", legal_name: "Two Co SARL", registration_number: "RC/DLA/2026/B/1", country: "CM", contact_name: "Ada" });
+    await submit({ kind: "live_access", note: "ready" });
+    let q = await call("GET", "/api/admin/platform/requests");
+    const rowOf = (kind: string) => (q.body.requests ?? []).find((x: Record<string, any>) => x.orgId === org2 && x.kind === kind);
+    ok("a queue row carries the state the decision turns on", rowOf("live_access")?.context?.kyb === "pending" && typeof rowOf("live_access")?.context?.credentials === "number", JSON.stringify(rowOf("live_access")?.context ?? {}));
+    ok("live access is flagged as blocked while the company is unverified", rowOf("live_access")?.blocked === "kyb_not_verified", String(rowOf("live_access")?.blocked));
+    let r2 = await call("POST", `/api/admin/platform/requests/${rowOf("live_access").id}/approve`, {});
+    ok("approving live access before KYB is refused", r2.status === 409 && r2.body.error === "kyb_required", `${r2.status} ${r2.body.error ?? ""}`);
+    let o2 = await call("GET", `/api/admin/platform/organizations/${org2}`);
+    ok("…and the refusal changed nothing: not live, and NOT stamped verified", o2.body.organization.liveEnabled === false && o2.body.organization.kyb === "pending", `${o2.body.organization.liveEnabled} ${o2.body.organization.kyb}`);
+    r2 = await call("POST", `/api/admin/platform/requests/${rowOf("kyb").id}/approve`, { note: "documents checked" });
+    ok("the company-verification request is decided on its own", r2.status === 200 && r2.body.status === "approved", `${r2.status}`);
+    q = await call("GET", "/api/admin/platform/requests");
+    ok("live access is no longer blocked once the company is verified", rowOf("live_access")?.blocked === null, String(rowOf("live_access")?.blocked));
+    r2 = await call("POST", `/api/admin/platform/requests/${rowOf("live_access").id}/approve`, {});
+    ok("…and now it is granted", r2.status === 200 && r2.body.status === "approved", `${r2.status}`);
+    o2 = await call("GET", `/api/admin/platform/organizations/${org2}`);
+    ok("the organization is live, on a verification a human decided", o2.body.organization.liveEnabled === true && o2.body.organization.kyb === "verified");
+    r2 = await call("POST", `/api/admin/platform/requests/${rowOf("live_access").id}/approve`, {});
+    ok("a decided request cannot be decided twice", r2.status === 409 && r2.body.error === "already_decided", `${r2.status} ${r2.body.error ?? ""}`);
+
+    console.log("\nAn IP allow-list the dashboard can actually set\n");
+    // The API has enforced this since API v1 shipped and the plans page sells it, but there
+    // was no way to set it short of a hand-written request.
+    const pinned = await (await fetch(`${base}/api/developers/orgs/${org}/credentials`, { method: "POST", headers: { ...J, authorization: `Bearer ${su.token}` }, body: JSON.stringify({ environment: "test", label: "pinned", ip_allowlist: ["203.0.113.10"] }) })).json() as { credential: { id: string; ipAllowlist?: string[] }; secret: string };
+    ok("a credential can be created with an allow-list", pinned.credential.ipAllowlist?.[0] === "203.0.113.10", JSON.stringify(pinned.credential.ipAllowlist ?? null));
+    let v1b = await fetch(`${base}/v1/account`, { headers: { authorization: `Bearer ${pinned.secret}` } });
+    ok("a call from any other address is refused", v1b.status === 403 || v1b.status === 401, String(v1b.status));
+    await fetch(`${base}/api/developers/orgs/${org}/credentials/${pinned.credential.id}`, { method: "PATCH", headers: { ...J, authorization: `Bearer ${su.token}` }, body: JSON.stringify({ ip_allowlist: null }) });
+    v1b = await fetch(`${base}/v1/account`, { headers: { authorization: `Bearer ${pinned.secret}` } });
+    ok("clearing the allow-list lets it through again", v1b.status === 200, String(v1b.status));
+
+    console.log("\nAn unknown float is not a zero float\n");
+    const t = await call("GET", "/api/admin/platform/treasury");
+    ok("a float nobody could read comes back null, with the reason per rail", t.body.total === null && Array.isArray(t.body.float_unknown_reason) && t.body.float_unknown_reason.length > 0, JSON.stringify(t.body.float_unknown_reason ?? t.body.total));
+    ok("available is withheld rather than guessed at zero", t.body.available === null);
   } finally { server.close(); }
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`); process.exit(fail === 0 ? 0 : 1);
 }

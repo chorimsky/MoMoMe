@@ -311,5 +311,38 @@ notes that without it "the sender picks blind". The Mobile Money tile, the easie
 quote and the only one denominated in XAF, showed nothing. It now reads **"You pay 5 100 XAF
 (includes a 100 XAF fee)"**, from the same stateless quote endpoint.
 
-Covered by 22 assertions in the new `server/test/momo-lightning.test.ts`, 11 more in
-`momo-transfer.test.ts` (42 total) and 3 in `collect-rails.test.ts` (36 total).
+### Naming what the old posting left behind
+
+The ledger fix is forward-only — entries already written stay written — so the question
+"which transfers, and how much?" has to be answerable before a restatement can be decided.
+Admin → Mobile Money now carries a **Transfer ledger audit** (Super Admin, read-only): it
+walks every settled transfer, nets the ledger **per account and per currency**, and flags the
+two symptoms of the defect — a customer wallet that does not return to zero, and a recipient
+credited in more than one currency for one payment — with the total XAF booked to the
+recipient account that no payment made. It reads; it never writes. Correcting the figures is
+a decision, not something a screen should take.
+
+### An operator's "rail off" switch did not stay off
+
+Found by chasing an intermittent failure in `settle-or-refund.test.ts` — a case that switches
+the second payout rail off and expects the payment to fall through to a refund. It passed
+alone and failed inside the full chain, which is the shape of a race but was not one.
+
+`HealthTracker.eligible()` treats a rail as selectable again once the probe cooldown has
+elapsed. That is right for a rail the tracker itself took out after three failures: the probe
+exists to re-test recovery. It was also being applied to `setUp(name, false)` — the operator's
+own switch — so a rail an operator turned off returned to rotation by itself ten minutes
+later. And `setUp(false)` stamped `downSince` only when it was still `0`, so switching off a
+rail that had failed at some point earlier kept the old timestamp; if that was already past
+the cooldown, the switch did **nothing**. That is the chain-versus-isolation difference: in
+the chain the rail had earlier failures on record, so it was never actually taken out.
+
+A payout or a refund could therefore be sent to a rail an operator had explicitly disabled.
+An operator's decision is now recorded as such (`forcedDown`), is never eligible whatever the
+cooldown says, always re-stamps, and survives a reported success — only the operator switching
+it back on returns it to rotation. Four assertions in `rail-health.test.ts` pin both failure
+modes, and `settle-or-refund.test.ts` now passes repeatedly rather than intermittently.
+
+Covered by 27 assertions in the new `server/test/momo-lightning.test.ts`, 11 more in
+`momo-transfer.test.ts` (42 total), 3 in `collect-rails.test.ts` (36 total) and 5 in
+`rail-health.test.ts` (26 total).

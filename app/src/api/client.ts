@@ -642,6 +642,7 @@ export const api = {
   adminMomoTransfers: () => req<{ enabled: boolean; transfers: MomoTransfer[] }>("/admin/momo/transfers"),
   adminMomoRefund: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/refund`, { method: "POST" }),
   adminMomoRetryRefund: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/retry-refund`, { method: "POST" }),
+  adminMomoLedgerAudit: () => req<{ checked: number; affected: number; overstated_payouts_xaf: number; transfers: Array<{ id: string; ref: string; at: string; route: string; state: string; xaf: number; feeXaf: number; walletNetXaf: number; paidIn: string[]; net: Record<string, number> }> }>("/admin/momo/ledger-audit"),
   adminMomoRelease: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/release`, { method: "POST" }),
   adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[]; fees: MomoFeeInfo | null }>("/admin/momo"),
   momoCashout: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>

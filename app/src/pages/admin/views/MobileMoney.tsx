@@ -194,11 +194,56 @@ function MomoOpsPanel() {
         </div>
       )}
       <TransfersCard />
+      <LedgerAuditCard />
     </div>
   );
 }
 
 const T_TONE: Record<string, string> = { DELIVERED: "var(--recv)", FAILED: "var(--bad)", REFUNDED: "var(--bad)", REFUND_PENDING: "var(--warn)", HELD: "var(--warn)", EXPIRED: "var(--ink-3)", CANCELLED: "var(--ink-3)" };
+/** Transfers whose ledger does not add up per ACCOUNT.
+ *
+ *  Until 23 Sept 2026 `delivered()` posted the recipient's XAF leg for every route, so a
+ *  Lightning-route transfer — which had already paid the recipient in BTC out of the FX
+ *  position — was booked as paying them twice, once in each currency, and left the customer
+ *  wallet short by the whole amount. Each transaction balanced within itself, so nothing
+ *  noticed. The code is fixed going forward; entries already written are still wrong, and
+ *  this says exactly which ones and what they come to. It reads; it never writes. */
+function LedgerAuditCard() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.adminMomoLedgerAudit>> | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.adminMomoLedgerAudit().then(setD).catch((e) => setErr(e instanceof Error ? e.message : "Could not read the ledger.")); }, []);
+  if (err) return null;                          // not a Super Admin, or nothing to say
+  if (!d) return null;
+  return (
+    <Card title="Transfer ledger audit" sub={`${d.checked} settled transfer${d.checked === 1 ? "" : "s"} checked, per account and per currency — not just per transaction.`}>
+      {d.affected === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--recv)" }}>Every settled transfer nets to zero on the customer wallet and credits the recipient in exactly one currency.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, color: "var(--bad)", fontWeight: 650, marginBottom: 8 }}>
+            {d.affected} transfer{d.affected === 1 ? "" : "s"} carry a value leg that was posted twice — {fmt(d.overstated_payouts_xaf)} XAF booked to the recipient account that no payment made.
+          </div>
+          <p style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5, margin: "0 0 10px" }}>
+            No money moved wrongly: the payer paid once and the recipient was paid once. What is wrong is the record — payouts and the customer-wallet account are overstated by this amount, which feeds treasury and profitability figures. Correcting it is a restatement decision, not something this screen does.
+          </p>
+          <button type="button" className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"} the affected transfers</button>
+          {open && <table className="tbl" style={{ marginTop: 10 }}><thead><tr><th>When</th><th>Ref</th><th>Route</th><th>State</th><th>Amount</th><th>Wallet net</th><th>Recipient paid in</th></tr></thead>
+            <tbody>{d.transfers.map((x) => (
+              <tr key={x.id}>
+                <td style={{ whiteSpace: "nowrap" }}>{new Date(x.at).toLocaleString()}</td><td className="mono">{x.ref}</td>
+                <td>{x.route === "lightning" ? "⚡ Lightning" : "direct"}</td><td>{x.state}</td>
+                <td className="num">{fmt(x.xaf)}</td>
+                <td className="num" style={{ color: "var(--bad)" }}>{fmt(x.walletNetXaf)}</td>
+                <td>{x.paidIn.join(" + ")}</td>
+              </tr>
+            ))}</tbody></table>}
+        </>
+      )}
+    </Card>
+  );
+}
+
 /** Mobile Money → Mobile Money transfers: every one, its route and where it stands. */
 function TransfersCard() {
   const [d, setD] = useState<{ enabled: boolean; transfers: MomoTransfer[] } | null>(null);

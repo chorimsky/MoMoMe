@@ -66,6 +66,31 @@ console.log("\nHealthTracker — 3-strikes / probe-cooldown / recovery");
   ok("setUp(true) → up + eligible", h.isUp("a") && h.eligible("a"));
 }
 
+/* An operator's switch is not a probe candidate.
+   Both of these were live: the probe cooldown applied to a manual switch-off just as it did
+   to an automatic one, so a rail an operator took out came back by itself after ten minutes;
+   and setUp(false) only stamped downSince when it was still 0, so switching off a rail that
+   had failed earlier left a stale timestamp — often already past the cooldown, which made the
+   switch a no-op. A payout or a refund would then be sent to a rail the operator had
+   explicitly turned off. */
+{
+  const h = new HealthTracker(["a"], { probeCooldownMs: 0 });   // cooldown elapses at once
+  h.setUp("a", false);
+  ok("a rail an operator switched off does NOT come back when the cooldown elapses", !h.eligible("a"));
+  h.record("a", true, 10);
+  ok("…nor when something reports a success for it", !h.eligible("a") && !h.isUp("a"));
+  h.setUp("a", true);
+  ok("…and the operator switching it back on is what returns it to rotation", h.eligible("a") && h.isUp("a"));
+}
+{
+  const h = new HealthTracker(["a"], { probeCooldownMs: 10 * 60_000 });
+  h.record("a", false); h.record("a", false); h.record("a", false);   // an OLD automatic down
+  const old = h.dump().a.downSince;
+  h.setUp("a", false);
+  ok("switching off a rail that was already down re-stamps the cooldown", h.dump().a.downSince >= old);
+  ok("…and it stays out however long ago that first failure was", !h.eligible("a"));
+}
+
 // Success rate + latency maths.
 {
   const h = new HealthTracker(["a"], { probeCooldownMs: 10 * 60_000 });

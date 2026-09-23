@@ -20,9 +20,12 @@ export interface RailHealthState {
   up: boolean;
   /** epoch ms this rail went down (0 = up). Drives the probe cooldown. */
   downSince: number;
+  /** An OPERATOR switched this rail off. Distinct from a rail the tracker took out on its
+   *  own: the automatic kind is meant to come back after a probe, this kind is not. */
+  forcedDown?: boolean;
 }
 
-const fresh = (): RailHealthState => ({ success: 0, failure: 0, totalLatencyMs: 0, consecFail: 0, up: true, downSince: 0 });
+const fresh = (): RailHealthState => ({ success: 0, failure: 0, totalLatencyMs: 0, consecFail: 0, up: true, downSince: 0, forcedDown: false });
 
 export class HealthTracker {
   /** After a rail goes down, allow ONE probe this long after to re-test recovery. */
@@ -45,16 +48,24 @@ export class HealthTracker {
   isUp(name: string): boolean { return this.ensure(name).up; }
 
   /** A rail may be selected if it's up, OR it's been down past the probe cooldown
-   *  (one re-test attempt). A failed probe re-stamps downSince → it backs off again. */
+   *  (one re-test attempt). A failed probe re-stamps downSince → it backs off again.
+   *
+   *  A rail an OPERATOR switched off is never eligible, cooldown or no cooldown. The probe
+   *  exists to re-test a rail the tracker itself took out after three failures; applying it
+   *  to a manual switch meant the switch quietly expired after ten minutes and the rail went
+   *  back into rotation on its own. */
   eligible(name: string): boolean {
     const h = this.ensure(name);
+    if (h.forcedDown) return false;
     return h.up || (h.downSince > 0 && Date.now() - h.downSince >= this.probeCooldownMs);
   }
 
   /** Record an execution outcome. ok = the rail succeeded. */
   record(name: string, ok: boolean, latencyMs = 0): void {
     const h = this.ensure(name);
-    if (ok) { h.success += 1; h.totalLatencyMs += latencyMs; h.consecFail = 0; h.up = true; h.downSince = 0; }
+    // A success cannot un-switch an operator's switch. (It should not be reachable — a
+    // forced-down rail is never selected — but nothing else guarantees that here.)
+    if (ok) { h.success += 1; h.totalLatencyMs += latencyMs; h.consecFail = 0; h.up = !h.forcedDown; h.downSince = h.forcedDown ? h.downSince : 0; }
     // 3 strikes → out. Re-stamp downSince on every failure-while-down too, so a FAILED
     // probe (after the cooldown) re-arms the backoff instead of leaving the rail eligible.
     else { h.failure += 1; h.consecFail += 1; if (h.consecFail >= 3) { h.up = false; h.downSince = Date.now(); } }
@@ -70,12 +81,17 @@ export class HealthTracker {
     h.consecFail = Math.max(h.consecFail, 3);
   }
 
-  /** Admin/ops: force a rail up or down. Up clears the cooldown; down stamps it. */
+  /** Admin/ops: force a rail up or down.
+   *
+   *  Down used to stamp `downSince` only when it was still 0 — so switching off a rail that
+   *  had ALREADY failed earlier left the old timestamp in place, and if that was more than a
+   *  cooldown ago the rail stayed eligible: the operator's switch did nothing at all. It now
+   *  always re-stamps, and records that the decision was an operator's. */
   setUp(name: string, up: boolean): void {
     const h = this.ensure(name);
     h.up = up;
-    if (up) { h.consecFail = 0; h.downSince = 0; }
-    else if (h.downSince === 0) h.downSince = Date.now();
+    if (up) { h.consecFail = 0; h.downSince = 0; h.forcedDown = false; }
+    else { h.downSince = Date.now(); h.forcedDown = true; }
   }
 
   successRate(name: string): number { const h = this.ensure(name); const t = h.success + h.failure; return t ? h.success / t : 1; }

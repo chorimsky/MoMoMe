@@ -2659,6 +2659,50 @@ api.post("/admin/momo/transfers/:id/refund", async (req, res) => {
   if (!(await momoTransfer.refundHeldTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_refundable", message: "Only a transfer held for review can be refunded from here." });
   res.json(t);
 });
+/* ---------- ledger audit for Mobile Money transfers (Super Admin, READ ONLY) ----------
+   `delivered()` used to post the recipient's XAF leg for every route, including the Lightning
+   route, which had already paid the recipient in BTC out of the FX position. One transfer
+   therefore credited `external_recipient` twice — once in each currency — and left
+   `customer_wallet` short by the whole amount. It never showed up because each recordTxn
+   balances within itself and nothing checked per ACCOUNT.
+
+   The fix is forward-only: entries already written stay written. This names exactly which
+   transfers carry the bad posting and what it adds up to, so a restatement can be decided on
+   numbers rather than on an estimate. It reads the ledger and changes nothing. */
+api.get("/admin/momo/ledger-audit", async (req, res) => {
+  if (!isSuperAdmin(sessionOf(req)!.role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+  const SETTLED = new Set(["DELIVERED", "REFUNDED"]);
+  const rows: Array<Record<string, unknown>> = [];
+  let overstatedXaf = 0;
+  for (const t of momoTransfer.allTransfers(10_000)) {
+    if (!SETTLED.has(t.state)) continue;
+    const net = new Map<string, number>();
+    for (const e of await store().entriesFor(t.id)) {
+      const k = `${e.account}:${e.currency}`;
+      net.set(k, (net.get(k) ?? 0) + (e.direction === "debit" ? e.amount : -e.amount));
+    }
+    const wallet = net.get("customer_wallet:XAF") ?? 0;
+    // Two symptoms of the same defect: the wallet does not return to zero, and the recipient
+    // is credited in two currencies for one payment.
+    const paidCurrencies = [...net.keys()].filter((k) => k.startsWith("external_recipient:") && Math.abs(net.get(k) ?? 0) > 1e-9);
+    if (Math.abs(wallet) < 1e-9 && paidCurrencies.length <= 1) continue;
+    overstatedXaf += Math.abs(net.get("external_recipient:XAF") ?? 0) > 1e-9 && paidCurrencies.length > 1 ? t.xaf : 0;
+    rows.push({
+      id: t.id, ref: t.ref, at: t.createdAt, route: t.route, state: t.state, xaf: t.xaf, feeXaf: t.feeXaf,
+      walletNetXaf: wallet,
+      paidIn: paidCurrencies.map((k) => k.split(":")[1]),
+      net: Object.fromEntries(net),
+    });
+  }
+  res.json({
+    checked: momoTransfer.allTransfers(10_000).filter((t) => SETTLED.has(t.state)).length,
+    affected: rows.length,
+    /** XAF booked to `external_recipient` that no payment actually made. */
+    overstated_payouts_xaf: overstatedXaf,
+    transfers: rows.slice(0, 200),
+  });
+});
+
 /** Money we hold that belongs to the payer, after the automatic retries stopped. Re-submits
  *  the refund (or re-asks the rail that already took one) — idempotent at the rail on
  *  `refund_<id>`, so pressing it twice cannot pay the payer twice. */

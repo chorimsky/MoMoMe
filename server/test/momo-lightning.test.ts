@@ -108,6 +108,37 @@ async function main() {
     }
   }
 
+  console.log("\nThe audit that names what the old posting left behind\n");
+  {
+    // Entries written before the fix are still wrong; the audit has to find them. Write the
+    // extra leg the old delivered() used to write, on a transfer that is otherwise correct.
+    const { createApp } = await import("../src/app.js");
+    const { store } = await import("../src/db/store.js");
+    const server = createApp().listen(0);
+    await new Promise<void>((r) => server.once("listening", () => r()));
+    const { AddressInfo } = await import("node:net");
+    void AddressInfo;
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const J = { "content-type": "application/json" };
+    const tok = ((await (await fetch(`${base}/api/admin/login`, { method: "POST", headers: J, body: JSON.stringify({ username: "admin", password: "momome-admin" }) })).json()) as { token: string }).token;
+    const A = { authorization: `Bearer ${tok}` };
+    try {
+      let a = await (await fetch(`${base}/api/admin/momo/ledger-audit`, { headers: A })).json() as { affected: number; checked: number; overstated_payouts_xaf: number; transfers: Array<Record<string, unknown>> };
+      ok("a clean set of transfers audits clean", a.affected === 0 && a.checked > 0, `${a.affected} of ${a.checked}`);
+      // Re-create the old defect by hand on the delivered Lightning transfer.
+      await store().recordTxn(t.id, [
+        { account: "customer_wallet", direction: "debit", amount: done.xaf, currency: "XAF" },
+        { account: "external_recipient", direction: "credit", amount: done.xaf, currency: "XAF" },
+      ]);
+      a = await (await fetch(`${base}/api/admin/momo/ledger-audit`, { headers: A })).json() as typeof a;
+      ok("the audit finds the transfer that was posted twice", a.affected === 1 && (a.transfers[0] as { ref: string }).ref === done.ref, `${a.affected}`);
+      ok("…and says what the recipient account is overstated by", a.overstated_payouts_xaf === done.xaf, String(a.overstated_payouts_xaf));
+      ok("…and that the recipient appears to have been paid in two currencies", ((a.transfers[0] as { paidIn: string[] }).paidIn ?? []).sort().join("+") === "BTC+XAF", JSON.stringify((a.transfers[0] as { paidIn: string[] }).paidIn));
+      const anon = await fetch(`${base}/api/admin/momo/ledger-audit`);
+      ok("it is not readable without an admin session", anon.status === 401 || anon.status === 403, String(anon.status));
+    } finally { server.close(); }
+  }
+
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

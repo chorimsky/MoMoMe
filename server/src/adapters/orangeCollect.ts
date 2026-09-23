@@ -76,6 +76,8 @@ export function _rememberPayToken(key: string, payToken: string, xaf: number, co
  *  redirect; absent until `collect()` has run for that key. */
 const paymentUrls = new Map<string, string>();
 export function paymentUrlFor(key: string): string | undefined { return paymentUrls.get(key); }
+/** Test hook, mirroring `_rememberPayToken`: seed what Orange would have handed back. */
+export function _rememberPaymentUrl(key: string, url: string): void { paymentUrls.set(key, url); }
 
 const orangeCollector: CollectAdapter = {
   name: "orange",
@@ -87,7 +89,7 @@ const orangeCollector: CollectAdapter = {
   async collect(req: CollectRequest): Promise<CollectResult> {
     // Already created for this key → the same transaction, not a second one.
     const known = payTokens.get(req.idempotencyKey);
-    if (known) return { status: "duplicate", providerRef: known.payToken, simulated: false };
+    if (known) return { status: "duplicate", providerRef: known.payToken, simulated: false, ...(paymentUrls.get(req.idempotencyKey) ? { paymentUrl: paymentUrls.get(req.idempotencyKey) } : {}) };
     const t = await accessToken();
     if (!t) throw new Error("Orange collection unavailable: could not obtain an access token");
     const res = await fetchT(`${webpay(req.country)}/webpayment`, {
@@ -110,7 +112,9 @@ const orangeCollector: CollectAdapter = {
     if (!d.pay_token) throw new Error("Orange collection failed: no pay_token in the response");
     _rememberPayToken(req.idempotencyKey, d.pay_token, req.xaf, req.country);
     if (d.payment_url) paymentUrls.set(req.idempotencyKey, d.payment_url);
-    return { status: "accepted", providerRef: d.pay_token, simulated: false };
+    // The page the payer must complete. Handed straight back to the caller: this rail is
+    // useless without it, because nothing rings the payer's handset.
+    return { status: "accepted", providerRef: d.pay_token, simulated: false, ...(d.payment_url ? { paymentUrl: d.payment_url } : {}) };
   },
 
   async status(idempotencyKey: string): Promise<CollectStatus | null> {

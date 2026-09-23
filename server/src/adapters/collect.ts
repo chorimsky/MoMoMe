@@ -56,6 +56,11 @@ export interface CollectResult {
   providerRef: string;
   /** True when no real money can move (no credentials / sandbox): the caller simulates. */
   simulated: boolean;
+  /** HOSTED rails only (Orange Web Payment): the page the payer must open to complete the
+   *  payment. A handset-prompt rail (MTN request-to-pay, an aggregator) leaves this unset.
+   *  A caller that cannot put this in front of the payer must not use such a rail — the
+   *  payer would be waiting for a prompt that never comes. */
+  paymentUrl?: string;
 }
 
 /** The only three answers that matter. PENDING means "the payer has not decided yet" —

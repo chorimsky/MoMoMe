@@ -207,8 +207,16 @@ function TransfersCard() {
   useEffect(() => { load(); const id = setInterval(load, 20_000); return () => clearInterval(id); }, []);
   const release = async (id: string) => { setBusy(id); try { await api.adminMomoRelease(id); await load(); } finally { setBusy(null); } };
   const refundHeld = async (id: string) => { if (!window.confirm("Refund this held transfer to the payer, fee included?")) return; setBusy(id); try { await api.adminMomoRefund(id); await load(); } finally { setBusy(null); } };
+  const retryRefund = async (id: string) => { setBusy(id); try { await api.adminMomoRetryRefund(id); await load(); } finally { setBusy(null); } };
+  // Money we have taken from a payer and not yet given back. It is the only row in this
+  // table that is an outstanding debt, so it is counted at the top rather than left to be
+  // spotted among sixty rows.
+  const owed = (d?.transfers ?? []).filter((t) => t.state === "REFUND_PENDING");
   return (
     <Card title="Mobile Money → Mobile Money transfers" sub={d ? (d.enabled ? "Feature ON for users (Settings → Product features)." : "Feature OFF: users cannot see or use it; only this console can create test transfers.") : "…"} pad={false}>
+      {!!owed.length && <div style={{ padding: "10px 14px", background: "color-mix(in oklab, var(--bad) 10%, transparent)", color: "var(--bad)", fontSize: 13, fontWeight: 600 }}>
+        {owed.length} transfer{owed.length === 1 ? "" : "s"} owe{owed.length === 1 ? "s" : ""} the payer money — {fmt(owed.reduce((n, t) => n + t.collectXaf, 0))} XAF collected and not yet returned. Retry below, or refund by hand.
+      </div>}
       <table className="tbl"><thead><tr><th>When</th><th>Ref</th><th>From</th><th>To</th><th>Amount</th><th>Route</th><th>State</th><th>Last note</th><th></th></tr></thead>
         <tbody>{(d?.transfers ?? []).slice(0, 60).map((t) => (
           <tr key={t.id}>
@@ -219,7 +227,9 @@ function TransfersCard() {
             <td>{t.route === "lightning" ? "⚡ Lightning" : "direct"}</td>
             <td style={{ color: T_TONE[t.state] ?? "var(--ink)", fontWeight: 650 }}>{t.state}</td>
             <td style={{ fontSize: 12, color: "var(--ink-3)", maxWidth: 260 }}>{t.events.at(-1)?.note ?? ""}</td>
-            <td style={{ whiteSpace: "nowrap" }}>{t.state === "HELD" ? <><button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy === t.id} onClick={() => void release(t.id)}>Release</button> <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--bad)" }} disabled={busy === t.id} onClick={() => void refundHeld(t.id)}>Refund</button></> : null}</td>
+            <td style={{ whiteSpace: "nowrap" }}>{t.state === "HELD" ? <><button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={busy === t.id} onClick={() => void release(t.id)}>Release</button> <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--bad)" }} disabled={busy === t.id} onClick={() => void refundHeld(t.id)}>Refund</button></>
+              : t.state === "REFUND_PENDING" ? <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--bad)" }} disabled={busy === t.id} title={`${t.refundAttempts ?? 0} automatic attempt${t.refundAttempts === 1 ? "" : "s"} so far`} onClick={() => void retryRefund(t.id)}>Retry refund</button>
+              : null}</td>
           </tr>
         ))}{d && !d.transfers.length && <tr><td colSpan={9} style={{ color: "var(--ink-3)", padding: 16 }}>No transfers yet.</td></tr>}</tbody></table>
     </Card>

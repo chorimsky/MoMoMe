@@ -83,6 +83,21 @@ async function main() {
   ok("…while one inside them does", selectCollector({ provider: "MTN", country: "CM", xaf: 5_000 }).rail?.name === "peexit");
   updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, railLimits: {} } } });
 
+  console.log("\nA hosted rail hands back a PAGE, not a handset prompt\n");
+  // Orange's Web Payment is completed by the customer on Orange's own page. The URL is the
+  // whole rail: without it the payer is told to approve a prompt that never arrives, and
+  // the request expires. It has to survive the trip from the adapter to the transfer.
+  {
+    const { _rememberPayToken, _rememberPaymentUrl } = await import("../src/adapters/orangeCollect.js");
+    const orange = COLLECTORS.find((c) => c.name === "orange")!;
+    ok("the hosted rail exists and serves Orange in Cameroon", orange.supports("ORANGE", "CM"));
+    _rememberPayToken("mmt_hosted_probe", "pay-token-1", 5000, "CM");
+    _rememberPaymentUrl("mmt_hosted_probe", "https://webpayment.orange.cm/pay/xyz");
+    const again = await orange.collect({ idempotencyKey: "mmt_hosted_probe", provider: "ORANGE", country: "CM", phone: "699000222", xaf: 5000 });
+    ok("a repeat of a known key is a duplicate, never a second charge", again.status === "duplicate" && again.providerRef === "pay-token-1", `${again.status}`);
+    ok("…and it still carries the page the payer has to open", again.paymentUrl === "https://webpayment.orange.cm/pay/xyz", String(again.paymentUrl));
+  }
+
   console.log("\nOperator view\n");
   const health = await collectHealth();
   ok("health lists every rail with its operators and state", health.length === 3 && health.every((h) => Array.isArray(h.operators)), JSON.stringify(health.map((h) => [h.name, h.configured, h.operators.join("/")])));

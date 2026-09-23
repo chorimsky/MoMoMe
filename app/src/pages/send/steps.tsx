@@ -451,6 +451,18 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
     return () => { alive = false; };
   }, [s.xaf]);
 
+  /* The same courtesy for the Mobile Money tile. Every crypto option above says what the
+     sender parts with; this one — the only one priced in the sender's own currency, and the
+     easiest of all to quote — said nothing, so the one choice a Cameroonian can price at a
+     glance was the one shown without a price. The quote is stateless and mints nothing. */
+  const [momoQ, setMomoQ] = useState<{ collectXaf: number; feeXaf: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!onMomo || !s.xaf) { setMomoQ(null); return; }
+    api.momoQuote(s.xaf).then((q) => { if (alive) setMomoQ(q); }).catch(() => { /* the tile still works without it */ });
+    return () => { alive = false; };
+  }, [s.xaf, !!onMomo]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // THE ROUTER PICKS. One call gives the ranked routes for this destination and amount:
   // the top viable one is preselected and badged, the rest stay a tap away, and a method
   // the router cannot use right now says why instead of failing after the tap. If the
@@ -510,6 +522,7 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
               <span style={{ fontWeight: 700, fontSize: 16 }}>{t("mt_tile_name")}</span>
               <span style={{ display: "block", fontSize: 12, fontWeight: 650, color: "var(--recv)", marginTop: 2 }}>{t("mt_tile_net")}</span>
               <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-3)", marginTop: 1 }}>{t("mt_tile_sub")}</span>
+              {momoQ && <span style={{ display: "block", fontSize: 12.5, marginTop: 3 }}><b>{t("mt_tile_cost").replace("{amount}", new Intl.NumberFormat("fr-FR").format(momoQ.collectXaf))}</b> <span style={{ color: "var(--ink-3)" }}>{t("mt_tile_fee").replace("{fee}", new Intl.NumberFormat("fr-FR").format(momoQ.feeXaf))}</span></span>}
             </span>
           </button>
         )}

@@ -50,11 +50,27 @@ export function MomoStep({ s, back, done }: { s: Draft; back: () => void; done: 
     return () => clearInterval(id);
   }, [transfer?.id, transfer?.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* The request LAPSES — after the operator's approval window, which is configuration and
+     can be anything. The screen used to say "approve on your phone" and then, without
+     warning, "the request was not approved in time": the one fact that would have let
+     someone act was the one fact it withheld. */
+  const [left, setLeft] = useState<number>(0);
+  useEffect(() => {
+    if (!transfer || transfer.state !== "AWAITING_PAYER") { setLeft(0); return; }
+    const tick = () => setLeft(Math.max(0, Date.parse(transfer.expiresAt) - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [transfer?.id, transfer?.state, transfer?.expiresAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clock = `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}`;
+
   const to = `${PROVIDERS[s.provider]?.name ?? s.provider} · ${COUNTRIES[s.country].dial} ${s.phone}`;
   if (transfer) {
     const st = transfer.state;
-    const title = st === "AWAITING_PAYER" ? t("mt_approve_title") : st === "DELIVERED" ? t("mt_done_title") : st === "HELD" ? t("mt_held_title") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_title") : st === "REFUND_PENDING" || st === "REFUNDED" ? t("mt_refund_title") : t("mt_stopped_title");
-    const desc = st === "AWAITING_PAYER" ? t("mt_approve_desc").replace("{amount}", fmt(transfer.collectXaf)).replace("{op}", PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === "DELIVERED" ? t("mt_done_desc").replace("{amount}", fmt(transfer.xaf)).replace("{to}", to) : st === "HELD" ? t("mt_held_desc") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_desc") : st === "REFUND_PENDING" ? t("mt_refund_pending_desc") : st === "REFUNDED" ? t("mt_refunded_desc") : st === "EXPIRED" ? t("mt_expired_desc") : st === "CANCELLED" ? t("mt_cancelled_desc") : t("mt_failed_desc");
+    const hosted = st === "AWAITING_PAYER" && !!transfer.checkoutUrl;
+    const title = st === "AWAITING_PAYER" ? (hosted ? t("mt_checkout_title") : t("mt_approve_title")) : st === "DELIVERED" ? t("mt_done_title") : st === "HELD" ? t("mt_held_title") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_title") : st === "REFUND_PENDING" || st === "REFUNDED" ? t("mt_refund_title") : t("mt_stopped_title");
+    const opName = PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider;
+    const desc = st === "AWAITING_PAYER" ? (hosted ? t("mt_checkout_desc") : t("mt_approve_desc")).replace("{amount}", fmt(transfer.collectXaf)).replace("{op}", opName) : st === "DELIVERED" ? t("mt_done_desc").replace("{amount}", fmt(transfer.xaf)).replace("{to}", to) : st === "HELD" ? t("mt_held_desc") : st === "COLLECTED" || st === "PAYING_OUT" ? t("mt_paying_desc") : st === "REFUND_PENDING" ? t("mt_refund_pending_desc") : st === "REFUNDED" ? t("mt_refunded_desc") : st === "EXPIRED" ? t("mt_expired_desc") : st === "CANCELLED" ? t("mt_cancelled_desc") : t("mt_failed_desc");
     return (
       <FlowCard>
         <Stepper i={3} />
@@ -64,6 +80,14 @@ export function MomoStep({ s, back, done }: { s: Draft; back: () => void; done: 
           <p style={{ color: "var(--ink-2)", fontSize: 14, lineHeight: 1.5, margin: "8px 0 14px" }}>{desc}</p>
           <div className="num" style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("reference")} · {transfer.ref}</div>
         </div>
+        {/* A hosted rail (Orange's Web Payment) answers with a PAGE, not a prompt: without
+            this button the payer is told to approve something that will never appear. */}
+        {hosted && <a className="btn btn-primary btn-block" href={transfer.checkoutUrl} target="_blank" rel="noopener noreferrer" style={{ marginBottom: 8 }}>{t("mt_checkout_open")}</a>}
+        {st === "AWAITING_PAYER" && left > 0 && (
+          <p style={{ textAlign: "center", fontSize: 12.5, marginBottom: 10, color: left < 120_000 ? "var(--warn-ink)" : "var(--ink-3)" }}>
+            {(left < 120_000 ? t("mt_expires_soon") : t("mt_expires_in")).replace("{t}", clock)}
+          </p>
+        )}
         {st === "AWAITING_PAYER" && <button className="btn btn-ghost btn-block" disabled={busy} onClick={cancel}>{t("mt_cancel")}</button>}
         {["DELIVERED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED", "HELD"].includes(st) && <button className="btn btn-primary btn-block" onClick={done}>{t("mt_done_btn")}</button>}
       </FlowCard>

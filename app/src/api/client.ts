@@ -641,6 +641,7 @@ export const api = {
   momoCancel: (id: string) => req<MomoTransfer>(`/momo/transfers/${id}/cancel`, { method: "POST" }),
   adminMomoTransfers: () => req<{ enabled: boolean; transfers: MomoTransfer[] }>("/admin/momo/transfers"),
   adminMomoRefund: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/refund`, { method: "POST" }),
+  adminMomoRetryRefund: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/retry-refund`, { method: "POST" }),
   adminMomoRelease: (id: string) => req<MomoTransfer>(`/admin/momo/transfers/${id}/release`, { method: "POST" }),
   adminMomo: () => req<{ balances: MomoRailBalance[]; history: MomoOp[]; fees: MomoFeeInfo | null }>("/admin/momo"),
   momoCashout: (phone: string, amount: number, name?: string, country: CountryCode = "CM") =>

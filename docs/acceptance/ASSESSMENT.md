@@ -217,3 +217,99 @@ it per credential.
   still missing. It now distinguishes *off* / *no address yet* / *enabled*.
 
 Covered by 14 new assertions in `server/test/platform-admin.test.ts` (33 in total).
+
+---
+
+## Increment — Collection (money in), flow and UI end to end (2026-09-23)
+
+Walked the money-in path as its three participants see it: the payer in the app, the
+reconcile tick that drives it, and the operator who has to clean up after it. Ran it end to
+end in the sandbox (MTN payer → Orange recipient, `MMT-2026-371568`, delivered) and covered
+each finding with a test.
+
+### The Lightning route's accounting was wrong, and could not be seen
+
+`delivered()` posted the recipient's value leg — `customer_wallet → external_recipient` in
+XAF — for **every** route. The Lightning route had already posted its own legs: the XAF into
+the FX position, and BTC out of the FX position to the recipient. So one 5 000 XAF transfer
+credited `external_recipient` 5 000 XAF **and** 0.000127 BTC, and drove `customer_wallet` to
+−5 000.
+
+It stayed invisible because every `recordTxn` balances within itself, and the ledger check
+these tests use is per transaction. Nothing was per **account**. A probe of the route printed:
+
+```
+customer_wallet [XAF]        5000      ← should be 0
+external_recipient [XAF]    -5000      ← paid once in XAF…
+external_recipient [BTC]    -0.000127  ← …and again in BTC
+```
+
+Posting now belongs to the route that knows what moved: `postDirectDelivery()` for a direct
+payout, nothing extra for Lightning, and `delivered()` only moves state and notifies. The new
+`momo-lightning.test.ts` reaches this route for the first time (global `fetch` stubbed for
+the LNURL resolve and the IBEX call) and asserts the per-account result, as does a new
+per-account check in `momo-transfer.test.ts`.
+
+This route is only reachable where IBEX is configured — production. Figures already written
+are wrong for past Lightning-route transfers; the fix is forward-only.
+
+### A refund that could not be made was a refund that never happened
+
+`refund()` tried exactly once. No funded rail, or a rail that threw, meant a log line, one
+operator notification, and a transfer left in `REFUND_PENDING` — a state
+`reconcileTransfers` did not look at. Money taken from a payer, not paid to the recipient,
+not given back, and never tried again. And when the submit *did* succeed it moved straight to
+`REFUNDED` and posted the reversal, although a rail accepting a disbursement is not the same
+as the payer having their money.
+
+`REFUND_PENDING` now means exactly "we owe this payer and it is not confirmed back yet":
+
+- the tick submits a refund that has not been submitted, up to 20 attempts;
+- only the rail's own `COMPLETED` moves it to `REFUNDED` and posts the reversal, once;
+- a rail that refuses clears the submission so the next tick tries afresh;
+- after the cap it stops retrying but **stays** `REFUND_PENDING` — the debt is real and must
+  stay visible — and says so on the record;
+- an operator retries it from the console, idempotent at the rail on `refund_<id>`.
+
+The local sandbox proved the point on real data: `MMT-2026-864068` had been sitting in
+`REFUND_PENDING` since 13 September. The first boot with this change refunded it.
+
+Admin → Mobile Money now counts what is owed above the table ("N transfers owe the payer
+money — X XAF collected and not yet returned") and gives those rows a **Retry refund**
+button. Previously the only actions in that table were on `HELD` rows.
+
+### A payer who approved late was simply kept waiting — and kept paying
+
+Our approval window (`rails.collect.ttlMinutes`) and the rail's need not agree. A payer who
+approved a minute after we gave up was debited all the same, and nothing ever looked at an
+`EXPIRED` transfer again: the money sat in the collection account, never delivered, never
+returned, and invisible, because the payer's screen said the request lapsed and nothing was
+taken. The tick now keeps asking the rail for 24 hours after a lapse; if the rail says the
+payer paid, the collection is booked and returned in full, fee included. Paying it out
+instead would surprise a payer who was told it had expired, and the liquidity check that
+guarded that payout is long stale.
+
+### A hosted collection rail had no way to reach the payer
+
+Orange's Web Payment is completed by the customer on Orange's own page: the adapter gets a
+`payment_url` back, and that URL *is* the rail. `CollectResult` had no field for it, so it
+stopped at the adapter. The moment Orange is configured, the payer would be told to approve a
+prompt that never arrives, and the request would expire. The URL now travels
+adapter → `CollectResult.paymentUrl` → `MomoTransfer.checkoutUrl` → a **Open the payment
+page** button, with wording that says the operator handles it on its own page.
+
+### The payer could not see the clock that was running
+
+The request lapses after the approval window (`rails.collect.ttlMinutes`, 15 by default). The
+screen said "approve on your phone" and then, with no warning, "the request was not approved
+in time". It now counts down, and turns amber under two minutes. Web and mobile.
+
+### The one method priced in the sender's own currency showed no price
+
+On "Choose how to pay", every crypto option says what the sender parts with — the code there
+notes that without it "the sender picks blind". The Mobile Money tile, the easiest of all to
+quote and the only one denominated in XAF, showed nothing. It now reads **"You pay 5 100 XAF
+(includes a 100 XAF fee)"**, from the same stateless quote endpoint.
+
+Covered by 22 assertions in the new `server/test/momo-lightning.test.ts`, 11 more in
+`momo-transfer.test.ts` (42 total) and 3 in `collect-rails.test.ts` (36 total).

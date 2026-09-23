@@ -2659,6 +2659,15 @@ api.post("/admin/momo/transfers/:id/refund", async (req, res) => {
   if (!(await momoTransfer.refundHeldTransfer(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_refundable", message: "Only a transfer held for review can be refunded from here." });
   res.json(t);
 });
+/** Money we hold that belongs to the payer, after the automatic retries stopped. Re-submits
+ *  the refund (or re-asks the rail that already took one) — idempotent at the rail on
+ *  `refund_<id>`, so pressing it twice cannot pay the payer twice. */
+api.post("/admin/momo/transfers/:id/retry-refund", async (req, res) => {
+  const t = momoTransfer.getTransfer(req.params.id);
+  if (!t) return res.status(404).json({ error: "not_found", message: "Not found." });
+  if (!(await momoTransfer.retryRefund(t, (req as unknown as AdminReq).session?.uid ?? "admin"))) return res.status(409).json({ error: "not_pending", message: "Only a transfer whose refund is still outstanding can be retried." });
+  res.json(t);
+});
 
 /** Partner pricing on a key, and what it did in a month (the basis of its invoice). */
 api.patch("/admin/apikeys/:id", (req, res) => {

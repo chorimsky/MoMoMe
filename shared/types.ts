@@ -1505,9 +1505,17 @@ export interface MomoTransfer {
   state: MomoTransferState;
   collectRail: string; collectRef?: string; simulated?: boolean;
   payoutRail?: string; payoutRef?: string;
+  /** Hosted collection rails (Orange Web Payment) hand back a PAGE the payer must complete
+   *  instead of ringing their handset. Without this the payer is told to approve a prompt
+   *  that will never arrive, and the request simply expires. */
+  checkoutUrl?: string;
   /** Lightning route: sats paid and the rail's transaction id. */
   paidBtc?: number; lightningRef?: string;
-  refundRef?: string;
+  /** A refund is a payout like any other: it is SUBMITTED to a rail and then confirmed.
+   *  REFUND_PENDING means "we owe the payer and it is not confirmed back yet" — the
+   *  reconcile tick retries a refund that could not be submitted, and only the rail's own
+   *  word moves it to REFUNDED. */
+  refundRef?: string; refundRail?: string; refundAttempts?: number;
   complianceFlags?: string[];
   expiresAt: string;
   events: Array<{ at: string; state: MomoTransferState; note?: string }>;

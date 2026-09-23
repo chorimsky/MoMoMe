@@ -164,6 +164,9 @@ export async function createTransfer(input: CreateInput): Promise<CreateResult> 
   try {
     const res = await pick.rail.collect({ idempotencyKey: t.id, provider: t.from.provider, country: t.from.country, phone: t.from.phone, xaf: t.collectXaf, name: input.fromName ?? "MoMoMe transfer" });
     t.collectRef = res.providerRef; t.simulated = res.simulated;
+    // A hosted rail answers with a PAGE, not a handset prompt. Carry it through, or the
+    // payer sits waiting for a prompt that will never arrive until the request expires.
+    if (res.paymentUrl) t.checkoutUrl = res.paymentUrl;
   } catch (e) {
     console.error(`[momo-transfer] collect request failed for ${t.ref} on ${pick.rail.name}:`, e instanceof Error ? e.message : e);
     return { ok: false, status: 503, error: "collect_unavailable", message: "The payer's network did not accept the request. Please try again." };
@@ -180,8 +183,8 @@ export function cancelTransfer(t: MomoTransfer, by: string): boolean {
 }
 
 /* ---------- the lifecycle, driven by the reconcile tick ---------- */
-async function onCollected(t: MomoTransfer): Promise<void> {
-  move(t, "COLLECTED", `${t.collectXaf} XAF collected from the payer`);
+/** The payer's money arriving: into the clearing account, then our fee out of it. */
+async function postCollection(t: MomoTransfer): Promise<void> {
   await store().recordTxn(t.id, [
     { account: "momo_collect_clearing", direction: "debit", amount: t.collectXaf, currency: "XAF" },
     { account: "customer_wallet", direction: "credit", amount: t.collectXaf, currency: "XAF" },
@@ -190,6 +193,11 @@ async function onCollected(t: MomoTransfer): Promise<void> {
     { account: "customer_wallet", direction: "debit", amount: t.feeXaf, currency: "XAF" },
     { account: "fee_revenue", direction: "credit", amount: t.feeXaf, currency: "XAF" },
   ]);
+}
+
+async function onCollected(t: MomoTransfer): Promise<void> {
+  move(t, "COLLECTED", `${t.collectXaf} XAF collected from the payer`);
+  await postCollection(t);
   if (t.complianceFlags?.length) { move(t, "HELD", `held for compliance review: ${t.complianceFlags.join("; ")} — an operator releases or refunds`); return; }
   await startPayout(t);
 }
@@ -213,6 +221,8 @@ async function startPayout(t: MomoTransfer): Promise<void> {
         { account: "fx_position", direction: "debit", amount: btc, currency: "BTC" },
         { account: "external_recipient", direction: "credit", amount: btc, currency: "BTC" },
       ]);
+      // The value legs for this route are complete: the wallet paid the FX position in XAF
+      // and the FX position paid the recipient in BTC. `delivered` must NOT post again.
       await delivered(t, `paid over Lightning (${r.transactionId})`);
     } catch (e) {
       move(t, "REFUND_PENDING", `Lightning payment failed: ${e instanceof Error ? e.message : "error"}`);
@@ -227,46 +237,114 @@ async function startPayout(t: MomoTransfer): Promise<void> {
     const res = await agg.disburse({ idempotencyKey: `pay_${t.id}`, provider: to.provider, country: to.country, phone: to.phone, xaf: t.xaf, name: to.name ?? `${to.provider} ${to.phone}` });
     t.payoutRail = agg.name; t.payoutRef = res.providerRef;
     move(t, "PAYING_OUT", `payout requested via ${agg.name}`);
-    if (res.simulated) await delivered(t, "simulated payout (sandbox)");
+    if (res.simulated) { await postDirectDelivery(t); await delivered(t, "simulated payout (sandbox)"); }
   } catch (e) {
     move(t, "REFUND_PENDING", `payout refused: ${e instanceof Error ? e.message : "error"}`);
     await refund(t);
   }
 }
 
-async function delivered(t: MomoTransfer, note: string): Promise<void> {
+/** The recipient's value leg for a DIRECT payout: XAF leaves the wallet for the recipient.
+ *
+ *  This used to live inside `delivered()`, which every route called — so the Lightning route,
+ *  which has already posted its own legs (wallet → fx_position in XAF, fx_position →
+ *  recipient in BTC), posted the recipient a SECOND time in XAF. Each recordTxn balances on
+ *  its own, so the per-transaction check stayed green while `customer_wallet` went negative
+ *  by the full amount and `external_recipient` was credited once in XAF and once in BTC for
+ *  one transfer. Posting belongs to the route that knows what moved. */
+async function postDirectDelivery(t: MomoTransfer): Promise<void> {
   await store().recordTxn(t.id, [
     { account: "customer_wallet", direction: "debit", amount: t.xaf, currency: "XAF" },
     { account: "external_recipient", direction: "credit", amount: t.xaf, currency: "XAF" },
   ]);
+}
+
+/** State and notifications only. The value legs are the route's business. */
+async function delivered(t: MomoTransfer, note: string): Promise<void> {
   move(t, "DELIVERED", note);
   const toLabel = "phone" in t.to ? `${COUNTRIES[t.to.country].dial} ${t.to.phone} (${t.to.provider})` : t.to.lightningAddress;
   await notify({ kind: "transfer_delivered", audience: "sender", to: `${COUNTRIES[t.from.country].dial.replace(/\D/g, "")}${t.from.phone}`, body: `Your transfer ${t.ref} of ${t.xaf} XAF to ${toLabel} has been delivered.`, paymentRef: t.ref }).catch(() => {});
   if ("phone" in t.to) await notify({ kind: "transfer_delivered", audience: "recipient", to: `${COUNTRIES[t.to.country].dial.replace(/\D/g, "")}${t.to.phone}`, body: `You received ${t.xaf} XAF on your ${t.to.provider} number via MoMo›Me (${t.ref}).`, paymentRef: t.ref }).catch(() => {});
 }
 
-/** The payer's money comes back to the payer's number, fee included: we failed, not them. */
+/* ---------- refunds ----------
+   A refund is a payout like any other, and it was the one payout here that was neither
+   retried nor confirmed. The old version tried once: if no rail was funded, or if disburse
+   threw, it logged, notified an operator and returned — leaving the transfer in
+   REFUND_PENDING, which the reconcile tick did not look at, so a rail that was down for a
+   minute stranded the payer's money permanently with nothing but a log line. And when
+   disburse DID succeed it moved straight to REFUNDED and posted the reversal, although
+   "accepted" means the rail took the request, not that the payer got their money back.
+
+   Now REFUND_PENDING means exactly "we owe this payer and it is not confirmed back yet":
+   the tick submits it if it has not been submitted, and only the rail's own COMPLETED
+   moves it to REFUNDED and posts the reversal. */
+const REFUND_MAX_ATTEMPTS = 20;
+/** How long after a request lapses we keep asking the rail whether the payer paid anyway. */
+const LATE_APPROVAL_GRACE_MS = 24 * 60 * 60_000;
+
+/** Submit (or re-submit) the refund. Idempotent at the rail on `refund_<id>`. */
 async function refund(t: MomoTransfer): Promise<void> {
+  t.refundAttempts = (t.refundAttempts ?? 0) + 1;
+  const first = t.refundAttempts === 1;
   const agg = await selectFundedAggregator(t.from.provider, t.from.country, t.collectXaf, liveMoney()).catch(() => null);
-  if (!agg) { console.error(`[momo-transfer] ${t.ref} refund has no funded rail — operator must refund ${t.collectXaf} XAF to ${t.from.phone}`); await notify({ kind: "transfer_failed", audience: "operator", body: `Transfer ${t.ref}: ${t.collectXaf} XAF collected from ${t.from.phone} could not be paid out NOR refunded automatically — refund by hand.` }).catch(() => {}); return; }
+  if (!agg) {
+    console.error(`[momo-transfer] ${t.ref} refund attempt ${t.refundAttempts}: no funded rail for ${t.from.provider} — will retry`);
+    if (first) await notify({ kind: "transfer_failed", audience: "operator", body: `Transfer ${t.ref}: ${t.collectXaf} XAF collected from ${t.from.phone} could not be paid out, and no funded rail could refund it yet. Retrying automatically.` }).catch(() => {});
+    touch("momo_transfers");
+    return;
+  }
   try {
     const res = await agg.disburse({ idempotencyKey: `refund_${t.id}`, provider: t.from.provider, country: t.from.country, phone: t.from.phone, xaf: t.collectXaf, name: t.from.name ?? "MoMoMe refund" });
-    t.refundRef = res.providerRef;
-    // Reverse the fee: a failed transfer costs the payer nothing.
-    await store().recordTxn(t.id, [
-      { account: "fee_revenue", direction: "debit", amount: t.feeXaf, currency: "XAF" },
-      { account: "customer_wallet", direction: "credit", amount: t.feeXaf, currency: "XAF" },
-    ]);
-    await store().recordTxn(t.id, [
-      { account: "customer_wallet", direction: "debit", amount: t.collectXaf, currency: "XAF" },
-      { account: "external_recipient", direction: "credit", amount: t.collectXaf, currency: "XAF" },
-    ]);
-    move(t, "REFUNDED", `${t.collectXaf} XAF returned to the payer via ${agg.name}`);
+    t.refundRail = agg.name; t.refundRef = res.providerRef;
+    t.events.push({ at: new Date().toISOString(), state: "REFUND_PENDING", note: `refund of ${t.collectXaf} XAF submitted to ${agg.name}` });
+    touch("momo_transfers");
+    // A sandbox rail has no record to confirm against: its acceptance IS the settlement.
+    if (res.simulated) await refunded(t, `${t.collectXaf} XAF returned to the payer via ${agg.name} (simulated)`);
+    else await confirmRefund(t);
+    // Tell the payer as soon as the refund is on its way, not only once it lands.
     await notify({ kind: "transfer_failed", audience: "sender", to: `${COUNTRIES[t.from.country].dial.replace(/\D/g, "")}${t.from.phone}`, body: `Transfer ${t.ref} could not be delivered. ${t.collectXaf} XAF is being returned to your number.`, paymentRef: t.ref }).catch(() => {});
   } catch (e) {
-    console.error(`[momo-transfer] ${t.ref} refund failed:`, e instanceof Error ? e.message : e);
-    await notify({ kind: "transfer_failed", audience: "operator", body: `Transfer ${t.ref}: refund of ${t.collectXaf} XAF to ${t.from.phone} FAILED — refund by hand.` }).catch(() => {});
+    console.error(`[momo-transfer] ${t.ref} refund attempt ${t.refundAttempts} failed:`, e instanceof Error ? e.message : e);
+    if (first) await notify({ kind: "transfer_failed", audience: "operator", body: `Transfer ${t.ref}: refund of ${t.collectXaf} XAF to ${t.from.phone} was refused by the rail. Retrying automatically.` }).catch(() => {});
+    touch("momo_transfers");
   }
+}
+
+/** Ask the rail that took the refund whether the payer actually has the money back. */
+async function confirmRefund(t: MomoTransfer): Promise<void> {
+  const agg = payoutsFor(t.from.provider).find((a) => a.name === t.refundRail);
+  const s = agg ? await agg.queryStatus(`refund_${t.id}`).catch(() => null) : null;
+  if (s === "COMPLETED") { await refunded(t, `${t.collectXaf} XAF returned to the payer via ${t.refundRail}`); return; }
+  // Refused at the rail: forget the submission so the next tick submits a fresh one.
+  if (s === "FAILED") { delete t.refundRef; delete t.refundRail; touch("momo_transfers"); }
+}
+
+/** The reversal, posted ONCE, when the payer's money is confirmed back with them. */
+async function refunded(t: MomoTransfer, note: string): Promise<void> {
+  // A reconcile tick and an operator's "retry refund" can both land on the same transfer.
+  // The rail is idempotent on `refund_<id>`, so neither pays the payer twice — but the
+  // reversal must not be BOOKED twice either.
+  if (t.state === "REFUNDED") return;
+  // Reverse the fee: a failed transfer costs the payer nothing.
+  await store().recordTxn(t.id, [
+    { account: "fee_revenue", direction: "debit", amount: t.feeXaf, currency: "XAF" },
+    { account: "customer_wallet", direction: "credit", amount: t.feeXaf, currency: "XAF" },
+  ]);
+  await store().recordTxn(t.id, [
+    { account: "customer_wallet", direction: "debit", amount: t.collectXaf, currency: "XAF" },
+    { account: "external_recipient", direction: "credit", amount: t.collectXaf, currency: "XAF" },
+  ]);
+  move(t, "REFUNDED", note);
+}
+
+/** An operator's "retry refund" on a transfer whose automatic retries gave up. */
+export async function retryRefund(t: MomoTransfer, by: string): Promise<boolean> {
+  if (t.state !== "REFUND_PENDING") return false;
+  t.refundAttempts = 0;
+  t.events.push({ at: new Date().toISOString(), state: "REFUND_PENDING", note: `refund retried by ${by}` });
+  if (t.refundRef) await confirmRefund(t); else await refund(t);
+  return true;
 }
 
 /** Called each reconcile tick: collections that completed, payouts that settled, requests
@@ -281,11 +359,40 @@ export async function reconcileTransfers(now = Date.now()): Promise<void> {
         if (s === "COMPLETED") { await onCollected(t); continue; }
         if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); continue; }
         if (Date.parse(t.expiresAt) < now) move(t, "EXPIRED", "the payer did not approve in time");
+      } else if (t.state === "EXPIRED" && !t.simulated && Date.parse(t.expiresAt) > now - LATE_APPROVAL_GRACE_MS) {
+        /* A LATE APPROVAL. Our window and the rail's need not be the same, and a payer who
+           approves a minute after we gave up is debited all the same. Nothing used to look
+           at EXPIRED again, so that money stayed in the collection account: taken from the
+           payer, never delivered, never returned, and invisible because the transfer read
+           "nothing was taken". We keep asking for a day, and if the rail says the payer paid,
+           we book it and give it straight back — the payer was told the request lapsed, the
+           liquidity check that guarded the payout is long stale, and returning it is the
+           only outcome that matches what they were told. */
+        const rail = collectorByName(t.collectRail);
+        const s = rail ? await rail.status(t.id).catch(() => null) : null;
+        if (s === "COMPLETED") {
+          move(t, "REFUND_PENDING", `the payer approved after the request expired — ${t.collectXaf} XAF was collected and is being returned`);
+          await postCollection(t);
+          await refund(t);
+        }
       } else if (t.state === "PAYING_OUT" && t.route === "direct" && t.payoutRail) {
         const agg = payoutsFor((t.to as MomoParty).provider).find((a) => a.name === t.payoutRail);
         const s = agg ? await agg.queryStatus(`pay_${t.id}`).catch(() => null) : null;
-        if (s === "COMPLETED") await delivered(t, `payout confirmed by ${t.payoutRail}`);
+        if (s === "COMPLETED") { await postDirectDelivery(t); await delivered(t, `payout confirmed by ${t.payoutRail}`); }
         else if (s === "FAILED") { move(t, "REFUND_PENDING", "payout failed at the rail"); await refund(t); }
+      } else if (t.state === "REFUND_PENDING") {
+        // Money we hold that belongs to the payer. Nothing used to look at this state, so a
+        // refund that could not be submitted stayed here forever.
+        if (t.refundRef) await confirmRefund(t);
+        else if ((t.refundAttempts ?? 0) < REFUND_MAX_ATTEMPTS) await refund(t);
+        else if (t.refundAttempts === REFUND_MAX_ATTEMPTS) {
+          // Stop the loop, but stay in REFUND_PENDING: the debt is real and must stay
+          // visible. An operator retries it from the console.
+          t.refundAttempts++;
+          t.events.push({ at: new Date().toISOString(), state: "REFUND_PENDING", note: `automatic refund gave up after ${REFUND_MAX_ATTEMPTS} attempts — an operator must retry or pay it by hand` });
+          touch("momo_transfers");
+          await notify({ kind: "transfer_failed", audience: "operator", body: `Transfer ${t.ref}: ${t.collectXaf} XAF is still owed to ${t.from.phone} after ${REFUND_MAX_ATTEMPTS} automatic refund attempts. Retry it in Admin → Mobile Money, or refund by hand.` }).catch(() => {});
+        }
       }
     } catch (e) { console.error(`[momo-transfer] tick ${t.ref}:`, e instanceof Error ? e.message : e); }
   }

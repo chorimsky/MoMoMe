@@ -10,7 +10,7 @@ const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}
 async function main() {
   const { createApp } = await import("../src/app.js");
   const { updateSettings, getSettings } = await import("../src/core/settings.js");
-  const { reconcileTransfers, getTransfer } = await import("../src/core/momoTransfer.js");
+  const { reconcileTransfers, getTransfer, retryRefund } = await import("../src/core/momoTransfer.js");
   const { entriesFor } = await import("../src/core/ledger.js");
   const server = createApp().listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
@@ -18,6 +18,10 @@ async function main() {
   const H = { "content-type": "application/json", "x-mm-sender": "momo-dev-1" };
   const j = async (path: string, init?: RequestInit) => { const r = await fetch(`${root}${path}`, { headers: H, ...init, ...(init?.headers ? { headers: { ...H, ...(init.headers as Record<string, string>) } } : {}) }); return { status: r.status, body: await r.json().catch(() => ({})) as Record<string, any> }; };
   const balanced = (id: string) => { const m = new Map<string, number>(); for (const e of entriesFor(id)) m.set(e.currency, (m.get(e.currency) ?? 0) + (e.direction === "debit" ? e.amount : -e.amount)); return [...m.values()].every((v) => Math.abs(v) < 1e-9); };
+  /** Net movement per ACCOUNT, debits positive. Every recordTxn balances within itself, so
+   *  the whole-transfer check above stays green even when a value leg is posted twice — it
+   *  takes an account-level view to see a wallet driven negative or a recipient paid twice. */
+  const perAccount = (id: string) => { const m = new Map<string, number>(); for (const e of entriesFor(id)) { const k = `${e.account}:${e.currency}`; m.set(k, (m.get(k) ?? 0) + (e.direction === "debit" ? e.amount : -e.amount)); } return m; };
 
   try {
     console.log("\nGate — off until an admin turns it on\n");
@@ -92,6 +96,35 @@ async function main() {
     r = await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000555", to: "699000777", xaf: 5000 }) });
     const held2 = r.body; await reconcileTransfers();
     ok("…or refunds it → REFUNDED, fee included", (await refundHeldTransfer(getTransfer(held2.id)!, "ops")) && getTransfer(held2.id)!.state === "REFUNDED" && balanced(held2.id), getTransfer(held2.id)!.state);
+    console.log("\nEvery account nets out, not just every transaction\n");
+    const acct = perAccount(t.id);
+    ok("the delivered transfer leaves the customer wallet at zero", Math.abs(acct.get("customer_wallet:XAF") ?? 999) < 1e-9, String(acct.get("customer_wallet:XAF")));
+    ok("the recipient is credited ONCE, for the amount they were sent", acct.get("external_recipient:XAF") === -5000, String(acct.get("external_recipient:XAF")));
+    ok("the collection clearing account carries the full collected amount", acct.get("momo_collect_clearing:XAF") === t.collectXaf, String(acct.get("momo_collect_clearing:XAF")));
+
+    console.log("\nA refund is a payout: submitted, then confirmed, and retried if it is not\n");
+    ok("a refund that is confirmed posts its reversal exactly once", (() => { const a = perAccount(held2.id); return a.get("customer_wallet:XAF") === 0 && a.get("external_recipient:XAF") === -getTransfer(held2.id)!.collectXaf; })(), JSON.stringify([...perAccount(held2.id)]));
+    ok("the refunded transfer records which rail returned the money", !!getTransfer(held2.id)!.refundRail && !!getTransfer(held2.id)!.refundRef, `${getTransfer(held2.id)!.refundRail}`);
+    ok("retrying a refund on a settled transfer is refused", (await retryRefund(getTransfer(held2.id)!, "ops")) === false);
+    const rr = await j(`/admin/momo/transfers/${held2.id}/retry-refund`, { method: "POST" });
+    ok("…and the admin route says so rather than paying twice", rr.status === 409 || rr.status === 401, String(rr.status));
+
+    // A refund that could not be SUBMITTED used to sit in REFUND_PENDING forever: the
+    // reconcile tick looked only at AWAITING_PAYER and PAYING_OUT. Put a transfer back into
+    // that state by hand and prove the tick now owns it.
+    const owedT = getTransfer(held2.id)!;
+    owedT.state = "REFUND_PENDING"; owedT.refundAttempts = 0; delete owedT.refundRef; delete owedT.refundRail;
+    await reconcileTransfers();
+    ok("the tick picks up an unsubmitted refund and completes it", getTransfer(held2.id)!.state === "REFUNDED", getTransfer(held2.id)!.state);
+    owedT.state = "REFUND_PENDING"; owedT.refundAttempts = 20; delete owedT.refundRef; delete owedT.refundRail;
+    await reconcileTransfers();
+    const gaveUp = getTransfer(held2.id)!;
+    ok("after the attempt cap it stops retrying but STAYS pending — the debt is real", gaveUp.state === "REFUND_PENDING" && gaveUp.refundAttempts === 21, `${gaveUp.state} ${gaveUp.refundAttempts}`);
+    ok("…and it says so on the record, for the operator who has to act", (gaveUp.events.at(-1)?.note ?? "").includes("gave up"), gaveUp.events.at(-1)?.note);
+    await reconcileTransfers();
+    ok("a further tick does not spam the rail once it has given up", getTransfer(held2.id)!.refundAttempts === 21, String(getTransfer(held2.id)!.refundAttempts));
+    ok("an operator's retry starts it over and settles it", (await retryRefund(getTransfer(held2.id)!, "ops")) && getTransfer(held2.id)!.state === "REFUNDED", getTransfer(held2.id)!.state);
+
     updateSettings({ compliance: { ...getSettings().compliance, cddThresholdXaf: 1_000_000 } });
     updateSettings({ features: { ...getSettings().features, momoTransfer: false } });
     ok("turned off again: refused again, existing transfers still readable", (await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000111", to: "699000222", xaf: 5000 }) })).status === 403 && (await j(`/momo/transfers/${t.id}`)).status === 200);

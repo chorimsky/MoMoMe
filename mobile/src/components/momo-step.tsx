@@ -3,7 +3,7 @@
    The payer types THEIR OWN number, sees what they will be asked for, confirms; a prompt
    appears on their phone; this screen follows the transfer to the end. */
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
 
 import { api } from '@/api/client';
 import { Body, Button, Card, Field, H2, IconCircle, Label, Mono } from '@/components/ui';
@@ -45,18 +45,34 @@ export function MomoStep({ country, toPhone, toProvider, toName, xaf, back, done
     finally { setBusy(false); }
   };
   const cancel = async () => { if (!transfer) return; setBusy(true); try { setTransfer(await api.momoCancel(transfer.id)); } catch { /* moving */ } finally { setBusy(false); } };
+
+  /* How long the payer has. The request lapses after the operator's approval window, and
+     the screen used to go straight from "approve on your phone" to "not approved in time"
+     without ever showing the clock that was running. */
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (!transfer || transfer.state !== 'AWAITING_PAYER') { setLeft(0); return; }
+    const tick = () => setLeft(Math.max(0, Date.parse(transfer.expiresAt) - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [transfer?.id, transfer?.state, transfer?.expiresAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clock = `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, '0')}`;
   const to = `${PROVIDERS[toProvider]?.name ?? toProvider} · ${COUNTRIES[country].dial} ${toPhone}`;
 
   if (transfer) {
     const st = transfer.state;
-    const title = st === 'AWAITING_PAYER' ? tr('mt_approve_title') : st === 'DELIVERED' ? tr('mt_done_title') : st === 'HELD' ? tr('mt_held_title') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_title') : st === 'REFUND_PENDING' || st === 'REFUNDED' ? tr('mt_refund_title') : tr('mt_stopped_title');
-    const desc = st === 'AWAITING_PAYER' ? tr('mt_approve_desc').replace('{amount}', fmt(transfer.collectXaf)).replace('{op}', PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === 'DELIVERED' ? tr('mt_done_desc').replace('{amount}', fmt(transfer.xaf)).replace('{to}', to) : st === 'HELD' ? tr('mt_held_desc') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_desc') : st === 'REFUND_PENDING' ? tr('mt_refund_pending_desc') : st === 'REFUNDED' ? tr('mt_refunded_desc') : st === 'EXPIRED' ? tr('mt_expired_desc') : st === 'CANCELLED' ? tr('mt_cancelled_desc') : tr('mt_failed_desc');
+    const hosted = st === 'AWAITING_PAYER' && !!transfer.checkoutUrl;
+    const title = st === 'AWAITING_PAYER' ? (hosted ? tr('mt_checkout_title') : tr('mt_approve_title')) : st === 'DELIVERED' ? tr('mt_done_title') : st === 'HELD' ? tr('mt_held_title') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_title') : st === 'REFUND_PENDING' || st === 'REFUNDED' ? tr('mt_refund_title') : tr('mt_stopped_title');
+    const desc = st === 'AWAITING_PAYER' ? (hosted ? tr('mt_checkout_desc') : tr('mt_approve_desc')).replace('{amount}', fmt(transfer.collectXaf)).replace('{op}', PROVIDERS[transfer.from.provider]?.name ?? transfer.from.provider) : st === 'DELIVERED' ? tr('mt_done_desc').replace('{amount}', fmt(transfer.xaf)).replace('{to}', to) : st === 'HELD' ? tr('mt_held_desc') : st === 'COLLECTED' || st === 'PAYING_OUT' ? tr('mt_paying_desc') : st === 'REFUND_PENDING' ? tr('mt_refund_pending_desc') : st === 'REFUNDED' ? tr('mt_refunded_desc') : st === 'EXPIRED' ? tr('mt_expired_desc') : st === 'CANCELLED' ? tr('mt_cancelled_desc') : tr('mt_failed_desc');
     return (
       <Card padded elevated style={{ alignItems: 'center', gap: Spacing.three }}>
         <IconCircle size={64} name={st === 'DELIVERED' ? 'checkmark' : st === 'AWAITING_PAYER' ? 'phone-portrait-outline' : st === 'HELD' ? 'time-outline' : st === 'COLLECTED' || st === 'PAYING_OUT' ? 'hourglass-outline' : 'alert-circle-outline'} color={st === 'DELIVERED' ? t.recv : st === 'HELD' || st === 'FAILED' || st === 'EXPIRED' || st === 'CANCELLED' ? t.warn : t.text} bg={st === 'DELIVERED' ? t.recvWash : t.surface2} />
         <H2 style={{ textAlign: 'center' }}>{title}</H2>
         <Body center muted>{desc}</Body>
         <Mono style={{ color: t.muted, fontSize: 12 }}>{tr('reference')} · {transfer.ref}</Mono>
+        {hosted ? <Button title={tr('mt_checkout_open')} onPress={() => { void Linking.openURL(transfer.checkoutUrl!); }} style={{ alignSelf: 'stretch' }} /> : null}
+        {st === 'AWAITING_PAYER' && left > 0 ? <Body center muted style={left < 120_000 ? { color: t.warn } : undefined}>{(left < 120_000 ? tr('mt_expires_soon') : tr('mt_expires_in')).replace('{t}', clock)}</Body> : null}
         {st === 'AWAITING_PAYER' ? <Button title={tr('mt_cancel')} variant="ghost" onPress={cancel} disabled={busy} /> : null}
         {FINAL.includes(st) ? <Button title={tr('mt_done_btn')} onPress={done} style={{ alignSelf: 'stretch' }} /> : null}
       </Card>

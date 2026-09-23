@@ -13,6 +13,46 @@ const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("en-GB
 const inp: React.CSSProperties = { padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)" };
 const small: React.CSSProperties = { padding: "5px 10px", fontSize: 12 };
 
+/* Every operator action here used window.prompt(). It blocks the page, it is refused
+   outright by some embedded browsers (so the action silently did nothing), and for a money
+   action it offers no review before committing: you typed a number into a grey box and it
+   was booked. This is the same shape as the payouts panel — the fields stay on the page,
+   the values are visible while you check them, and Confirm is a deliberate second act. */
+function AskFields({ title, fields, confirm, tone = "primary", onSubmit, onCancel }: {
+  title: string;
+  fields: Array<{ key: string; label: string; type?: "text" | "number" | "password"; placeholder?: string; required?: boolean }>;
+  confirm: string;
+  tone?: "primary" | "bad";
+  onSubmit: (values: Record<string, string>) => Promise<void> | void;
+  onCancel: () => void;
+}) {
+  const [v, setV] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const missing = fields.some((f) => f.required !== false && !(v[f.key] ?? "").trim());
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, margin: "8px 0", background: "var(--surface-2, var(--surface))", display: "grid", gap: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>{title}</div>
+      {fields.map((f) => (
+        <label key={f.key} style={{ display: "grid", gap: 4, fontSize: 12.5, color: "var(--ink-3)" }}>
+          {f.label}
+          <input
+            type={f.type ?? "text"} placeholder={f.placeholder} value={v[f.key] ?? ""} autoComplete="off"
+            onChange={(e) => setV((x) => ({ ...x, [f.key]: e.target.value }))} style={inp}
+          />
+        </label>
+      ))}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button" className={`btn ${tone === "bad" ? "btn-ghost" : "btn-primary"}`} style={{ ...small, ...(tone === "bad" ? { color: "var(--bad)" } : {}) }}
+          disabled={busy || missing}
+          onClick={async () => { setBusy(true); try { await onSubmit(v); } finally { setBusy(false); } }}
+        >{busy ? "Working…" : confirm}</button>
+        <button type="button" className="btn btn-ghost" style={small} disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 type Tab = "queue" | "connect" | "orgs" | "settlements" | "plans" | "limits" | "usage" | "emails" | "audit";
 
 export function PlatformView() {
@@ -55,8 +95,23 @@ function Orgs() {
   useEffect(() => { void load(); }, [load]);
   const show = (id: string) => api.platformOrg(id).then(setOpen).catch((e) => setMsg(e instanceof Error ? e.message : "Failed."));
   const update = async (id: string, b: Parameters<typeof api.platformUpdateOrg>[1]) => { setMsg(null); try { await api.platformUpdateOrg(id, b); await load(); await show(id); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
-  const credit = async (id: string) => { const v = prompt("Credit the organization balance (XAF) — only for money actually collected on its behalf:"); if (!v) return; const ref = prompt("Reference (collection batch / invoice id):") ?? ""; try { await api.platformCredit(id, Number(v), ref); await show(id); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
-  const setPw = async (uid: string) => { const v = prompt("Set a password for this developer (≥10 characters). Tell them out of band:"); if (!v) return; try { await api.platformSetPassword(uid, v); setMsg("Password set."); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
+  // One inline panel at a time: which action is open, and for which target.
+  const [ask, setAsk] = useState<{ kind: "credit" | "password" | "suspend" | "revoke"; id: string; label?: string } | null>(null);
+  const credit = async (id: string, values: Record<string, string>) => {
+    setMsg(null);
+    try { await api.platformCredit(id, Number(values.xaf), values.reference); setAsk(null); await show(id); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); }
+  };
+  const setPw = async (uid: string, values: Record<string, string>) => {
+    setMsg(null);
+    try { await api.platformSetPassword(uid, values.password); setAsk(null); setMsg("Password set. Tell them out of band — it is not emailed."); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); }
+  };
+  const revoke = async (credId: string, orgId: string, values: Record<string, string>) => {
+    setMsg(null);
+    try { await api.platformRevokeCredential(credId, values.reason); setAsk(null); await show(orgId); setMsg("Credential revoked — it stops authorising requests immediately."); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); }
+  };
   return (
     <>
       {msg && <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 8 }}>{msg}</div>}
@@ -72,20 +127,59 @@ function Orgs() {
             <div><KV k="KYB" v={<select value={open.organization.kyb} style={inp} onChange={(e) => update(open.organization.id, { kyb: e.target.value })}><option>not_started</option><option>pending</option><option>verified</option><option>rejected</option></select>} /></div>
             <div><KV k="Plan" v={<select value={open.organization.plan} style={inp} onChange={(e) => update(open.organization.id, { plan: e.target.value })}><option>developer</option><option>business</option><option>enterprise</option></select>} /></div>
             <div><KV k="Live credentials" v={<button type="button" className={`btn ${open.organization.liveEnabled ? "btn-ghost" : "btn-primary"}`} style={small} onClick={() => update(open.organization.id, { liveEnabled: !open.organization.liveEnabled })}>{open.organization.liveEnabled ? "Disable live" : "Enable live"}</button>} /></div>
-            <div><KV k="Status" v={open.organization.status === "active" ? <button type="button" className="btn btn-ghost" style={small} onClick={() => { const r = prompt("Reason for suspension:"); if (r) void update(open.organization.id, { status: "suspended", suspendedReason: r }); }}>Suspend</button> : <button type="button" className="btn btn-primary" style={small} onClick={() => update(open.organization.id, { status: "active" })}>Reactivate ({open.organization.suspendedReason})</button>} /></div>
+            <div><KV k="Status" v={open.organization.status === "active" ? <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ kind: "suspend", id: open.organization.id })}>Suspend</button> : <button type="button" className="btn btn-primary" style={small} onClick={() => update(open.organization.id, { status: "active" })}>Reactivate ({open.organization.suspendedReason})</button>} /></div>
           </Grid>
           <Grid cols={3} style={{ marginTop: 12 }}>
             <AKpi label="Live volume (30 d)" value={fmt(open.usage.live.summary.volumeXaf)} unit="XAF" sub={`${open.usage.live.summary.completed} completed · ${open.usage.live.summary.successRatePct}%`} />
             <AKpi label="Sandbox payments (30 d)" value={open.usage.test.summary.payments} sub={`${open.usage.test.summary.requests} requests`} />
             <AKpi label="Balance" value={fmt(open.balance.available)} unit="XAF" sub={`${fmt(open.balance.pending)} pending settlement`} />
           </Grid>
+          {ask?.kind === "suspend" && ask.id === open.organization.id && (
+            <AskFields
+              title={`Suspend ${open.organization.name}`}
+              fields={[{ key: "reason", label: "Reason (shown to the customer and recorded in the audit trail)" }]}
+              confirm="Suspend" tone="bad"
+              onSubmit={async (v) => { await update(open.organization.id, { status: "suspended", suspendedReason: v.reason }); setAsk(null); }}
+              onCancel={() => setAsk(null)}
+            />
+          )}
+          {ask?.kind === "credit" && ask.id === open.organization.id && (
+            <AskFields
+              title={`Credit ${open.organization.name}'s balance`}
+              fields={[
+                { key: "xaf", label: "Amount (XAF) — only money actually collected on their behalf", type: "number" },
+                { key: "reference", label: "Reference (collection batch / invoice id)" },
+              ]}
+              confirm="Credit the balance"
+              onSubmit={(v) => credit(open.organization.id, v)}
+              onCancel={() => setAsk(null)}
+            />
+          )}
+          {ask?.kind === "password" && (
+            <AskFields
+              title={`Set a password for ${ask.label ?? "this developer"}`}
+              fields={[{ key: "password", label: "New password (at least 10 characters). It is not emailed — tell them out of band.", type: "password" }]}
+              confirm="Set password" tone="bad"
+              onSubmit={(v) => setPw(ask.id, v)}
+              onCancel={() => setAsk(null)}
+            />
+          )}
+          {ask?.kind === "revoke" && (
+            <AskFields
+              title={`Revoke ${ask.label ?? "this credential"}`}
+              fields={[{ key: "reason", label: "Reason (audited). The key stops authorising requests immediately.", required: false }]}
+              confirm="Revoke the credential" tone="bad"
+              onSubmit={(v) => revoke(ask.id, open.organization.id, v)}
+              onCancel={() => setAsk(null)}
+            />
+          )}
           <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
-            <button type="button" className="btn btn-ghost" style={small} onClick={() => credit(open.organization.id)}>Credit balance…</button>
+            <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ kind: "credit", id: open.organization.id })}>Credit balance…</button>
             <button type="button" className="btn btn-ghost" style={small} onClick={() => api.platformInvoice(open.organization.id, new Date().toISOString().slice(0, 7)).then(() => show(open.organization.id))}>Build this month's invoice</button>
           </div>
           <Grid cols={2}>
-            <Card title="Members">{open.members.map((m) => <div key={m.userId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}><span>{m.user.name} <span style={{ color: "var(--ink-3)" }}>{m.user.email}</span></span><span>{m.role} <button type="button" className="btn btn-ghost" style={small} onClick={() => setPw(m.userId)}>Set password</button></span></div>)}</Card>
-            <Card title="Credentials">{open.credentials.map((c) => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}><span>{c.label} <code style={{ fontSize: 11.5 }}>{c.hint}</code></span><span>{c.env} · {c.status} · last {when(c.lastUsedAt)}</span></div>)}{!open.credentials.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>None.</div>}</Card>
+            <Card title="Members">{open.members.map((m) => <div key={m.userId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}><span>{m.user.name} <span style={{ color: "var(--ink-3)" }}>{m.user.email}</span></span><span>{m.role} <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ kind: "password", id: m.userId, label: m.user.email })}>Set password</button></span></div>)}</Card>
+            <Card title="Credentials" sub="A leaked key is revoked here — suspending the whole organization stops every integration it runs.">{open.credentials.map((c) => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 13, padding: "4px 0" }}><span>{c.label} <code style={{ fontSize: 11.5 }}>{c.hint}</code></span><span style={{ display: "flex", alignItems: "center", gap: 6 }}>{c.env} · {c.status} · last {when(c.lastUsedAt)}{c.status === "active" && <button type="button" className="btn btn-ghost" style={{ ...small, color: "var(--bad)" }} onClick={() => setAsk({ kind: "revoke", id: c.id, label: `${c.label} (${c.env})` })}>Revoke</button>}</span></div>)}{!open.credentials.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>None.</div>}</Card>
             <Card title="Open reservations">{open.reservations.map((r) => <div key={r.id} style={{ fontSize: 13 }}>{fmt(r.xaf)} XAF · {r.paymentId ?? "unattached"} · expires {when(r.expiresAt)}</div>)}{!open.reservations.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>None.</div>}</Card>
             <Card title="Invoices">{open.invoices.map((i) => <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}><span>{i.period} · {i.status}</span><span>{fmt(i.totalXaf)} XAF {i.status === "draft" && <button type="button" className="btn btn-ghost" style={small} onClick={() => api.platformInvoice(open.organization.id, i.period, "issue").then(() => show(open.organization.id))}>Issue</button>}{i.status === "issued" && <button type="button" className="btn btn-ghost" style={small} onClick={() => api.platformInvoice(open.organization.id, i.period, "paid").then(() => show(open.organization.id))}>Mark paid</button>}</span></div>)}{!open.invoices.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>None.</div>}</Card>
           </Grid>
@@ -100,18 +194,41 @@ function Settlements() {
   const [rows, setRows] = useState<Array<Record<string, any>> | null>(null); const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(() => api.platformSettlements().then((r) => setRows(r.settlements)), []);
   useEffect(() => { void load(); }, [load]);
-  const act = async (id: string, a: "approve" | "submit" | "complete" | "fail") => { setMsg(null); const b: Record<string, string> = {}; if (a === "submit") { const r = prompt("Provider reference of the payout you made from treasury:"); if (!r) return; b.providerRef = r; } if (a === "fail") { b.reason = prompt("Reason:") ?? "failed by operator"; } try { await api.platformSettlementAction(id, a, b); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
+  const [ask, setAsk] = useState<{ id: string; a: "submit" | "fail" } | null>(null);
+  const act = async (id: string, a: "approve" | "submit" | "complete" | "fail", b: Record<string, string> = {}) => {
+    setMsg(null);
+    try { await api.platformSettlementAction(id, a, b); setAsk(null); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); }
+  };
   return <Card title="Settlement requests" sub="REQUESTED → approve → submit (after paying from treasury, with the provider reference) → complete. Cancel/fail return the money to the organization's balance.">
     {msg && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 8 }}>{msg}</div>}
     <table style={{ width: "100%", fontSize: 13 }}><thead><tr><th>Requested</th><th>Organization</th><th>Amount</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       {(rows ?? []).map((s) => <tr key={s.id}><td>{when(s.requested_at)}</td><td>{s.organization}</td><td>{fmt(Number(s.amount))} XAF</td><td>{s.destination.type === "bank" ? `${s.destination.bank} ${s.destination.account}` : `${s.destination.operator} ${s.destination.phone}`}{s.destination.name ? ` · ${s.destination.name}` : ""}</td><td><Pill status={s.status} tone={s.status === "COMPLETED" ? "recv" : ["FAILED", "CANCELLED"].includes(s.status) ? "bad" : "warn"} /></td><td style={{ display: "flex", gap: 4 }}>
         {s.status === "REQUESTED" && <button type="button" className="btn btn-primary" style={small} onClick={() => act(s.id, "approve")}>Approve</button>}
-        {s.status === "PROCESSING" && <button type="button" className="btn btn-primary" style={small} onClick={() => act(s.id, "submit")}>Mark submitted…</button>}
+        {s.status === "PROCESSING" && <button type="button" className="btn btn-primary" style={small} onClick={() => setAsk({ id: s.id, a: "submit" })}>Mark submitted…</button>}
         {s.status === "SUBMITTED" && <button type="button" className="btn btn-primary" style={small} onClick={() => act(s.id, "complete")}>Complete</button>}
-        {["REQUESTED", "PROCESSING", "SUBMITTED"].includes(s.status) && <button type="button" className="btn btn-ghost" style={small} onClick={() => act(s.id, "fail")}>Fail</button>}
+        {["REQUESTED", "PROCESSING", "SUBMITTED"].includes(s.status) && <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ id: s.id, a: "fail" })}>Fail</button>}
       </td></tr>)}
       {rows && !rows.length && <tr><td colSpan={6} style={{ color: "var(--ink-3)" }}>No settlement requests.</td></tr>}
     </tbody></table>
+    {ask?.a === "submit" && (
+      <AskFields
+        title="Record the payout you made from treasury"
+        fields={[{ key: "providerRef", label: "Provider reference of that payout — this is what reconciliation matches on" }]}
+        confirm="Mark submitted"
+        onSubmit={(v) => act(ask.id, "submit", { providerRef: v.providerRef })}
+        onCancel={() => setAsk(null)}
+      />
+    )}
+    {ask?.a === "fail" && (
+      <AskFields
+        title="Fail this settlement"
+        fields={[{ key: "reason", label: "Reason (audited). The money returns to the organization's balance." }]}
+        confirm="Fail it" tone="bad"
+        onSubmit={(v) => act(ask.id, "fail", { reason: v.reason })}
+        onCancel={() => setAsk(null)}
+      />
+    )}
   </Card>;
 }
 
@@ -182,13 +299,28 @@ function Queue() {
   const [d, setD] = useState<Awaited<ReturnType<typeof api.platformRequests>> | null>(null); const [all, setAll] = useState(false); const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(() => api.platformRequests(all).then(setD), [all]);
   useEffect(() => { void load(); }, [load]);
-  const decide = async (id: string, decision: "approve" | "reject") => { const note = prompt(decision === "approve" ? "Note to the developer (optional):" : "Reason (sent to the developer):") ?? undefined; if (decision === "reject" && !note) return; setMsg(null); try { await api.platformDecide(id, decision, note); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
+  const [ask, setAsk] = useState<{ id: string; decision: "approve" | "reject"; what: string } | null>(null);
+  const decide = async (id: string, decision: "approve" | "reject", note?: string) => {
+    setMsg(null);
+    try { await api.platformDecide(id, decision, note); setAsk(null); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); }
+  };
   const kindLabel = (k: string) => ({ kyb: "Company verification", plan_change: "Plan change", live_access: "Live access" }[k] ?? k);
   return <Card title="Activation queue" sub={`KYB submissions, plan changes and live-access requests. Approving applies the change and emails the developer${d && !d.email_configured ? " (email provider NOT configured — decisions are recorded, not sent)" : ""}.`} action={<button type="button" className="btn btn-ghost" style={small} onClick={() => setAll(!all)}>{all ? "Open only" : "Show decided"}</button>}>
     {msg && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 8 }}>{msg}</div>}
     {(d?.requests ?? []).map((r) => <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line-2)", fontSize: 13 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><span><b>{r.organization}</b> · {kindLabel(r.kind)}{r.kind === "plan_change" ? ` → ${String(r.payload.plan)}` : ""} <span style={{ color: "var(--ink-3)" }}>· {r.requester} · {when(r.createdAt)}</span></span>
-        <span>{r.status === "open" ? <><button type="button" className="btn btn-primary" style={small} onClick={() => decide(r.id, "approve")}>Approve</button> <button type="button" className="btn btn-ghost" style={small} onClick={() => decide(r.id, "reject")}>Reject</button></> : <Pill status={r.status} tone={r.status === "approved" ? "recv" : "bad"} />}</span></div>
+        <span>{r.status === "open" ? <><button type="button" className="btn btn-primary" style={small} onClick={() => setAsk({ id: r.id, decision: "approve", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Approve</button> <button type="button" className="btn btn-ghost" style={small} onClick={() => setAsk({ id: r.id, decision: "reject", what: `${r.organization} · ${kindLabel(r.kind)}` })}>Reject</button></> : <Pill status={r.status} tone={r.status === "approved" ? "recv" : "bad"} />}</span></div>
+      {ask?.id === r.id && (
+        <AskFields
+          title={ask.decision === "approve" ? `Approve — ${ask.what}` : `Reject — ${ask.what}`}
+          fields={[{ key: "note", label: ask.decision === "approve" ? "Note to the developer (optional)" : "Reason — this is sent to the developer", required: ask.decision === "reject" }]}
+          confirm={ask.decision === "approve" ? "Approve" : "Reject"}
+          tone={ask.decision === "approve" ? "primary" : "bad"}
+          onSubmit={(v) => decide(r.id, ask.decision, v.note || undefined)}
+          onCancel={() => setAsk(null)}
+        />
+      )}
       <div style={{ color: "var(--ink-2)", fontSize: 12.5, marginTop: 4 }}>{Object.entries(r.payload).filter(([, v]) => v !== "" && v != null).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}{r.decisionNote ? ` — note: ${r.decisionNote}` : ""}</div>
     </div>)}
     {d && !d.requests.length && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>Queue is empty.</div>}
@@ -206,6 +338,7 @@ function Emails() {
 
 function ConnectNetwork() {
   const [m, setM] = useState<Record<string, any> | null>(null); const [t, setT] = useState<Record<string, any> | null>(null); const [q, setQ] = useState<Array<Record<string, any>> | null>(null); const [all, setAll] = useState(false); const [msg, setMsg] = useState<string | null>(null); const [refFor, setRefFor] = useState<{ id: string; ref: string } | null>(null);
+  const [failFor, setFailFor] = useState<{ id: string; reason: string } | null>(null);
   const load = useCallback(() => Promise.all([api.platformConnectMetrics(30).then(setM), api.platformConnectTreasury().then(setT), api.platformConnectSettlements(all).then((r) => setQ(r.settlements))]).catch((e) => setMsg(e instanceof Error ? e.message : "Failed.")), [all]);
   useEffect(() => { void load(); }, [load]);
   const act = async (id: string, a: "submit" | "settle" | "fail" | "execute" | "retry", b: Record<string, string> = {}) => { setMsg(null); try { await api.platformConnectSettlementAction(id, a, b); setRefFor(null); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : "Failed."); } };
@@ -236,7 +369,9 @@ function ConnectNetwork() {
           {s.status === "submitted" && <button type="button" className="btn btn-primary" style={small} onClick={() => act(s.id, "settle")}>Confirm settled</button>}
           {s.status === "pending" && s.method !== "bank_transfer" && <button type="button" className="btn btn-ghost" style={small} onClick={() => act(s.id, "execute")}>Execute now</button>}
           {s.status === "failed" && <button type="button" className="btn btn-ghost" style={small} onClick={() => act(s.id, "retry")}>Retry</button>}
-          {["pending", "processing", "submitted"].includes(s.status) && <button type="button" className="btn btn-ghost" style={small} onClick={() => { const r = prompt("Reason:"); if (r) void act(s.id, "fail", { reason: r }); }}>Fail</button>}
+          {["pending", "processing", "submitted"].includes(s.status) && (failFor && failFor.id === s.id
+            ? <><input value={failFor.reason} onChange={(e) => setFailFor({ id: s.id, reason: e.target.value })} placeholder="Reason (audited)" style={inp} /><button type="button" className="btn btn-ghost" style={{ ...small, color: "var(--bad)" }} disabled={!failFor.reason} onClick={() => { void act(s.id, "fail", { reason: failFor.reason }); setFailFor(null); }}>Confirm fail</button><button type="button" className="btn btn-ghost" style={small} onClick={() => setFailFor(null)}>Cancel</button></>
+            : <button type="button" className="btn btn-ghost" style={small} onClick={() => setFailFor({ id: s.id, reason: "" })}>Fail…</button>)}
         </td></tr>)}
         {q && !q.length && <tr><td colSpan={7} style={{ color: "var(--ink-3)" }}>Nothing waiting.</td></tr>}
       </tbody></table>

@@ -42,6 +42,14 @@ async function main() {
       ["POST", "/api/admin/momo/cashout", { phone: "677000789", amount: 100 }],
       ["POST", "/api/admin/users", { username: "mallory", password: "Passw0rd!x", role: "Read Only" }],
       ["POST", "/api/admin/apikeys", { label: "k" }],
+      // API Platform: each of these hands out a capability rather than moving money, which
+      // is exactly what a stolen console token is for. They were reachable with a plain
+      // session until this review.
+      ["POST", "/api/admin/platform/users/u_x/password", { password: "0123456789ab" }],
+      ["POST", "/api/admin/platform/requests/rq_x/approve", {}],
+      ["PUT", "/api/admin/platform/plans/developer", { platformFeePct: 2 }],
+      ["PUT", "/api/admin/platform/limits", { name: "r" }],
+      ["POST", "/api/admin/platform/credentials/cred_x/revoke", {}],
     ];
     for (const [m, path, body] of guarded) {
       const r = await fetch(`${base}${path}`, { method: m, headers: A, body: JSON.stringify(body) });

@@ -622,6 +622,10 @@ export const api = {
   platformConnectSettlementAction: (id: string, action: "submit" | "settle" | "fail" | "execute" | "retry", b: Record<string, string> = {}) => req<Record<string, any>>(`/admin/platform/connect/settlements/${id}/${action}`, { method: "POST", body: JSON.stringify(b) }),
   platformAudit: () => req<{ events: Array<{ id: string; at: string; orgId?: string; action: string; actor: { type: string; id: string; label?: string }; target?: { type: string; id: string }; details?: Record<string, unknown> }> }>("/admin/platform/audit"),
   platformSetPassword: (userId: string, password: string) => req<{ ok: boolean }>(`/admin/platform/users/${userId}/password`, { method: "POST", body: JSON.stringify({ password }) }),
+  /** Kill ONE leaked credential. Suspending the organization stops every integration it
+   *  runs; this stops the key that leaked and nothing else. */
+  platformRevokeCredential: (credentialId: string, reason?: string) =>
+    req<{ ok: boolean; credential: { id: string; status: string } }>(`/admin/platform/credentials/${credentialId}/revoke`, { method: "POST", body: JSON.stringify({ reason }) }),
   networkSettings: (patch: { [K in keyof NetworkSettings]?: Partial<NetworkSettings[K]> }) => req<{ network: NetworkSettings }>("/admin/network/settings", { method: "PUT", body: JSON.stringify(patch) }),
   networkShadowRun: () => req<{ compared: number }>("/admin/network/shadow/run", { method: "POST", body: "{}" }),
   networkTick: () => req<{ examined: number }>("/admin/network/tick", { method: "POST", body: "{}" }),

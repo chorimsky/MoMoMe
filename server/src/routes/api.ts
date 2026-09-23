@@ -332,6 +332,17 @@ api.use("/admin", (req, res, next) => {
     /^\/platform\/connect\/settlements\/[^/]+\/(submit|settle|execute)$/, // moves an identity's balance to a bank / rail
     /^\/merchant-accounts\/[^/]+\/(verify|suspend)$/,   // vouches for a settlement number / stops a business accepting
     /^\/platform\/organizations\/[^/]+$/,            // live activation / suspension of an API customer
+    // Setting a developer's password is taking over an account that holds live API keys —
+    // the same class of act as changing who can reach this console.
+    /^\/platform\/users\/[^/]+\/password$/,
+    // Approving a request is what turns live access on: after it, that organization can mint
+    // mm_live_ credentials and move real money. (A rejection grants nothing and is undoable.)
+    /^\/platform\/requests\/[^/]+\/approve$/,
+    // A plan or a limit rule is the price and the ceiling for EVERY customer on it.
+    /^\/platform\/plans\/[^/]+$/,
+    /^\/platform\/limits(\/|$)/,
+    // Revoking a credential stops an integration dead; minting one authorises payments.
+    /^\/platform\/credentials\/[^/]+\/(revoke|rotate)$/,
     /^\/rails\/egress(?!\/recheck)(\/|$)/,           // repoints the IP allowlist a rail trusts (a re-check only re-reads it)
   ];
   if (req.method !== "GET" && ELEVATED_ONLY.some((re) => re.test(sub)) && !isElevated({ uid: user.id, role, elevatedUntil: session.elevatedUntil })) {

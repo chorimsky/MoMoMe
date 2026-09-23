@@ -16,7 +16,7 @@
    ============================================================ */
 import { Router, type Request } from "express";
 import { listOrganizations, getOrganization, updateOrganization, membersOf, applicationsOf, getUser, setPassword, type OrgStatus, type KybStatus } from "../core/platform/orgs.js";
-import { listCredentials } from "../core/platform/credentials.js";
+import { listCredentials, getCredential, revokeCredential } from "../core/platform/credentials.js";
 import { audit, auditOf, auditAll } from "../core/platform/audit.js";
 import { usageSummary } from "../core/platform/usage.js";
 import { listPlans, upsertPlan, getPlan, type PricingPlan, buildInvoice, issueInvoice, markInvoicePaid, invoicesOf } from "../core/platform/billing.js";
@@ -45,6 +45,19 @@ platformAdmin.get("/organizations/:id", (req, res) => {
 });
 platformAdmin.patch("/organizations/:id", (req, res) => {
   const b = req.body ?? {};
+  const before = getOrganization(req.params.id);
+  if (!before) return res.status(404).json({ error: "not_found", message: "No such organization." });
+  // "Live is enabled here once KYB is verified" is what this screen tells the operator, but
+  // nothing enforced it: live could be switched on for an organization whose KYB had never
+  // been started, which is the one thing compliance asks us not to do. Enabling live now
+  // requires a verified KYB — either already recorded, or set in this same request. Turning
+  // live OFF is always allowed, and existing grants are untouched.
+  if (b.liveEnabled === true && !before.liveEnabled) {
+    const kybAfter = (["not_started", "pending", "verified", "rejected"] as KybStatus[]).includes(b.kyb) ? (b.kyb as KybStatus) : before.kyb;
+    if (kybAfter !== "verified") {
+      return res.status(409).json({ error: "kyb_required", message: "Live credentials need a verified KYB. Set KYB to verified first, or record the verification in the same change." });
+    }
+  }
   const o = updateOrganization(req.params.id, { status: (["active", "suspended", "closed"] as OrgStatus[]).includes(b.status) ? b.status : undefined, suspendedReason: str(b.suspendedReason) || undefined, kyb: (["not_started", "pending", "verified", "rejected"] as KybStatus[]).includes(b.kyb) ? b.kyb : undefined, plan: str(b.plan) && listPlans().some((p) => p.id === b.plan) ? b.plan : undefined, liveEnabled: typeof b.liveEnabled === "boolean" ? b.liveEnabled : undefined });
   if (!o) return res.status(404).json({ error: "not_found", message: "No such organization." });
   audit({ orgId: o.id, actor: who(req), action: "organization.operator_updated", details: b, ip: clientIp(req) });
@@ -54,6 +67,9 @@ platformAdmin.post("/organizations/:id/credit", (req, res) => {
   const o = getOrganization(req.params.id); if (!o) return res.status(404).json({ error: "not_found", message: "No such organization." });
   const xaf = Number((req.body ?? {}).xaf); const from = str((req.body ?? {}).from) === "payout_float_XAF" ? "payout_float_XAF" : "momo_collect_clearing";
   if (!Number.isFinite(xaf) || xaf <= 0) return res.status(400).json({ error: "bad_request", message: "xaf must be positive." });
+  // A credit is a liability we then owe. There is no legitimate manual credit of this size,
+  // and a mistyped figure is indistinguishable from a real one once it is booked.
+  if (xaf > 100_000_000) return res.status(400).json({ error: "amount_too_large", message: "A single manual credit is capped at 100 000 000 XAF. Split it, or correct the amount." });
   creditOrganization(o.id, Math.round(xaf), from, str((req.body ?? {}).reference) || `manual:${Date.now()}`);
   audit({ orgId: o.id, actor: who(req), action: "organization.credited", details: { xaf, from }, ip: clientIp(req) });
   res.json({ ok: true, balance: orgBalance(o.id) });
@@ -65,10 +81,39 @@ platformAdmin.post("/users/:id/password", (req, res) => {
   res.json({ ok: true });
 });
 
+/* A leaked live key had no answer here: an operator could suspend the whole organization —
+   stopping every integration the customer runs — or wait for them to notice. Revoking the
+   one credential is the proportionate act, and the one a customer will ask for at 2am. */
+platformAdmin.post("/credentials/:id/revoke", (req, res) => {
+  const c = getCredential(req.params.id);
+  if (!c) return res.status(404).json({ error: "not_found", message: "No such credential." });
+  if (c.status !== "active") return res.status(409).json({ error: "bad_state", message: `This credential is already ${c.status}.` });
+  if (!revokeCredential(c.id)) return res.status(409).json({ error: "bad_state", message: "Could not revoke it." });
+  audit({ orgId: c.orgId, actor: who(req), action: "credential.revoked_by_operator", target: { type: "credential", id: c.id }, details: { env: c.env, label: c.label, reason: str((req.body ?? {}).reason) || undefined }, ip: clientIp(req) });
+  res.json({ ok: true, credential: getCredential(c.id) });
+});
+
 platformAdmin.get("/plans", (_req, res) => res.json({ plans: listPlans() }));
 platformAdmin.put("/plans/:id", (req, res) => {
   const b = (req.body ?? {}) as Partial<PricingPlan>;
   const cur = listPlans().find((p) => p.id === req.params.id);
+  // Every number here prices or throttles EVERY customer on this plan. `Number("abc")` is
+  // NaN, and a NaN fee propagates silently into quotes and invoices — so the shape is
+  // checked before anything is written, not after someone notices a strange bill.
+  const num = (v: unknown, lo: number, hi: number): number | null => { if (v === undefined) return null; const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? n : NaN; };
+  const checks: Array<[string, number | null]> = [
+    ["rateLimitRpm", num(b.rateLimitRpm, 1, 100_000)],
+    ["paymentEndpointRpm", num(b.paymentEndpointRpm, 1, 100_000)],
+    ["platformFeePct", num(b.platformFeePct, 0, 100)],
+    ["minFeeXaf", num(b.minFeeXaf, 0, 1_000_000)],
+    ["fixedMonthlyXaf", num(b.fixedMonthlyXaf, 0, 100_000_000)],
+    ["negotiatedFeePct", num(b.negotiatedFeePct, 0, 100)],
+  ];
+  const bad = checks.find(([, v]) => Number.isNaN(v));
+  if (bad) return res.status(400).json({ error: "bad_request", message: `${bad[0]} is out of range or not a number.` });
+  if (b.tiers !== undefined && (!Array.isArray(b.tiers) || b.tiers.some((t) => !t || typeof t !== "object" || !Number.isFinite(Number((t as { upToXaf?: unknown }).upToXaf)) || !Number.isFinite(Number((t as { pct?: unknown }).pct))))) {
+    return res.status(400).json({ error: "bad_request", message: "Each tier needs a numeric upToXaf and pct." });
+  }
   const p = upsertPlan({ id: req.params.id, name: str(b.name) || cur?.name || req.params.id, rateLimitRpm: Number(b.rateLimitRpm ?? cur?.rateLimitRpm ?? 60), paymentEndpointRpm: Number(b.paymentEndpointRpm ?? cur?.paymentEndpointRpm ?? 15), platformFeePct: Number(b.platformFeePct ?? cur?.platformFeePct ?? 1.5), minFeeXaf: Number(b.minFeeXaf ?? cur?.minFeeXaf ?? 100), tiers: Array.isArray(b.tiers) ? b.tiers : cur?.tiers ?? [], fixedMonthlyXaf: Number(b.fixedMonthlyXaf ?? cur?.fixedMonthlyXaf ?? 0), ...(b.negotiatedFeePct !== undefined ? { negotiatedFeePct: Number(b.negotiatedFeePct) } : cur?.negotiatedFeePct !== undefined ? { negotiatedFeePct: cur.negotiatedFeePct } : {}), description: str(b.description) || cur?.description, custom: b.custom ?? cur?.custom });
   audit({ actor: who(req), action: "plan.updated", target: { type: "plan", id: p.id }, ip: clientIp(req) });
   res.json(p);
@@ -77,7 +122,16 @@ platformAdmin.get("/limits", (_req, res) => res.json({ rules: listLimitRules() }
 platformAdmin.put("/limits", (req, res) => {
   const b = (req.body ?? {}) as Partial<LimitRule>;
   if (!str(b.name)) return res.status(400).json({ error: "bad_request", message: "name is required." });
-  const r = upsertLimitRule({ id: str(b.id) || undefined, name: str(b.name), enabled: b.enabled !== false, priority: Number(b.priority ?? 50), scope: b.scope ?? {}, ceilings: b.ceilings ?? {} });
+  // A ceiling that is not a number silently stops limiting anything. Both objects are
+  // shape-checked here, where a bad rule can still be refused.
+  const okObj = (v: unknown) => v === undefined || (typeof v === "object" && v !== null && !Array.isArray(v));
+  if (!okObj(b.scope) || !okObj(b.ceilings)) return res.status(400).json({ error: "bad_request", message: "scope and ceilings must be objects." });
+  if (b.ceilings && Object.values(b.ceilings as Record<string, unknown>).some((v) => v !== undefined && !(Number.isFinite(Number(v)) && Number(v) >= 0))) {
+    return res.status(400).json({ error: "bad_request", message: "Every ceiling must be a non-negative number." });
+  }
+  const prio = Number(b.priority ?? 50);
+  if (!Number.isFinite(prio) || prio < 0 || prio > 1000) return res.status(400).json({ error: "bad_request", message: "priority must be between 0 and 1000." });
+  const r = upsertLimitRule({ id: str(b.id) || undefined, name: str(b.name), enabled: b.enabled !== false, priority: prio, scope: b.scope ?? {}, ceilings: b.ceilings ?? {} });
   audit({ actor: who(req), action: "limit.updated", target: { type: "limit_rule", id: r.id }, ip: clientIp(req) });
   res.json(r);
 });

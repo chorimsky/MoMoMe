@@ -46,6 +46,31 @@ export function RailsView() {
     finally { setEgBusy(false); }
   }
 
+  // Collection (money IN) is as operational as payouts: which rail takes a payment, what is
+  // switched off during a provider incident, and what bounds apply. Saved per change, with
+  // the engine's own answer ("what would be chosen right now") read back from the server.
+  const [colBusy, setColBusy] = useState(false);
+  const [colMsg, setColMsg] = useState<string | null>(null);
+  async function saveCollect(patch: Parameters<typeof api.adminSetCollectRails>[0]) {
+    setColBusy(true); setColMsg(null);
+    try {
+      const r = await api.adminSetCollectRails(patch);
+      const fresh = await api.adminRails();
+      setCfg(fresh);
+      setColMsg(r.warning ?? "Saved.");
+    } catch (err) { setColMsg(err instanceof Error ? err.message : "Could not save."); }
+    finally { setColBusy(false); }
+  }
+  async function savePayoutPref(op: "MTN" | "ORANGE", rail: string) {
+    setColBusy(true); setColMsg(null);
+    try {
+      await api.adminSetPayoutRails({ preferred: { [op]: rail } });
+      setCfg(await api.adminRails());
+      setColMsg("Saved — a preferred rail is used when it is funded for the amount.");
+    } catch (err) { setColMsg(err instanceof Error ? err.message : "Could not save."); }
+    finally { setColBusy(false); }
+  }
+
   // Real rail configuration (env, configured, masked keys — never raw secrets).
   useEffect(() => {
     let alive = true;
@@ -117,6 +142,143 @@ export function RailsView() {
           </Card>
         ))}
       </Grid>
+
+      {/* ---- Collection (money IN) ---- */}
+      <SectionTitle t="Collection & payout rails" s="Which rail takes a payment, which pays one out, and the bounds that apply. Changes take effect on the next payment." />
+      <Card
+        title="Collection (money in)"
+        sub="A pinned rail is always used while it can act. “Auto” lets the engine choose among the rails that are configured."
+        action={colBusy ? <Pill status="Saving…" /> : undefined}
+        style={{ marginBottom: 16 }}
+      >
+        <div style={{ display: "grid", gap: 14 }}>
+          {/* The master switch. It was an env var (CONNECT_MOMO_COLLECT), so turning the
+              money-in side on or off used to need a redeploy. */}
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+            <input
+              type="checkbox" checked={cfg?.collect?.settings.enabled ?? false} disabled={colBusy}
+              onChange={(e) => { void saveCollect({ enabled: e.target.checked }); }}
+            />
+            <span style={{ fontWeight: 600 }}>Accept Mobile Money payments</span>
+            <span style={{ color: "var(--ink-3)", fontSize: 12.5 }}>Off → customers are not offered Mobile Money at checkout. Sandbox always offers it.</span>
+          </label>
+
+          {(["MTN", "ORANGE"] as const).map((op) => {
+            const rails = (cfg?.collect?.rails ?? []).filter((r) => r.operators.includes(op));
+            const pref = op === "MTN" ? cfg?.collect?.settings.preferred.MTN : cfg?.collect?.settings.preferred.ORANGE;
+            return (
+              <div key={op} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ minWidth: 72, fontWeight: 700, fontSize: 13 }}>{op}</span>
+                <select
+                  value={pref ?? "auto"}
+                  disabled={colBusy}
+                  onChange={(e) => { void saveCollect({ preferred: { [op]: e.target.value } }); }}
+                  style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)" }}
+                >
+                  <option value="auto">Auto</option>
+                  {rails.map((r) => <option key={r.name} value={r.name}>{r.name}{r.configured ? "" : " (not configured)"}</option>)}
+                </select>
+                <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+                  now: {op === "MTN" ? cfg?.collect?.selected.MTN : cfg?.collect?.selected.ORANGE}
+                </span>
+              </div>
+            );
+          })}
+
+          <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12, display: "grid", gap: 8 }}>
+            {(cfg?.collect?.rails ?? []).map((r) => (
+              <label key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={!r.disabled}
+                  disabled={colBusy}
+                  onChange={(e) => {
+                    const cur = cfg?.collect?.settings.disabled ?? [];
+                    const next = e.target.checked ? cur.filter((n) => n !== r.name) : [...cur, r.name];
+                    void saveCollect({ disabled: next });
+                  }}
+                />
+                <span style={{ fontWeight: 600 }}>{r.name}</span>
+                <span style={{ color: "var(--ink-3)", fontSize: 12.5 }}>
+                  {r.operators.join(" · ")} — {r.configured ? (r.live ? "live" : "sandbox credentials") : "not configured"}
+                  {/* "not answering (not configured)" said the same thing twice: a rail with no
+                      credentials cannot answer, and that is already on the line. */}
+                  {r.configured && r.ok === false ? ` · not answering${r.note ? ` (${r.note})` : ""}` : ""}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12, display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            {(["minXaf", "maxXaf"] as const).map((k) => (
+              <label key={k} style={{ display: "grid", gap: 4, fontSize: 12.5, color: "var(--ink-3)" }}>
+                {k === "minXaf" ? "Minimum per collection (XAF)" : "Maximum per collection (XAF)"}
+                <input
+                  type="number" min={0} step={100} defaultValue={cfg?.collect?.settings[k] ?? 0} disabled={colBusy}
+                  onBlur={(e) => { const v = Number(e.target.value || 0); if (v !== (cfg?.collect?.settings[k] ?? 0)) void saveCollect({ [k]: v }); }}
+                  style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)", width: 160 }}
+                />
+              </label>
+            ))}
+            <label style={{ display: "grid", gap: 4, fontSize: 12.5, color: "var(--ink-3)" }}>
+              Approval window (minutes)
+              <input
+                type="number" min={1} max={120} step={1} defaultValue={cfg?.collect?.settings.ttlMinutes ?? 15} disabled={colBusy}
+                onBlur={(e) => { const v = Number(e.target.value || 15); if (v !== (cfg?.collect?.settings.ttlMinutes ?? 15)) void saveCollect({ ttlMinutes: v }); }}
+                style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)", width: 160 }}
+              />
+            </label>
+            <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>0 = no bound. Checked before the payer is prompted.</span>
+          </div>
+
+          {/* What each rail itself accepts, as its provider documents it. We cannot probe
+              this, and being refused after the payer approves is the worst way to learn it. */}
+          <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12, display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Per-rail limits, as the provider documents them. 0 = not recorded.</div>
+            {(cfg?.collect?.rails ?? []).map((r) => {
+              const lim = cfg?.collect?.settings.railLimits?.[r.name] ?? { minXaf: 0, maxXaf: 0 };
+              const save = (patch: { minXaf?: number; maxXaf?: number }) => {
+                const next = { ...(cfg?.collect?.settings.railLimits ?? {}), [r.name]: { ...lim, ...patch } };
+                void saveCollect({ railLimits: next });
+              };
+              return (
+                <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ minWidth: 72, fontSize: 13, fontWeight: 600 }}>{r.name}</span>
+                  {(["minXaf", "maxXaf"] as const).map((k) => (
+                    <input
+                      key={k} type="number" min={0} step={100} defaultValue={lim[k]} disabled={colBusy}
+                      aria-label={`${r.name} ${k === "minXaf" ? "minimum" : "maximum"} XAF`}
+                      placeholder={k === "minXaf" ? "min XAF" : "max XAF"}
+                      onBlur={(e) => { const v = Number(e.target.value || 0); if (v !== lim[k]) save({ [k]: v }); }}
+                      style={{ padding: "6px 9px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 12.5, color: "var(--ink)", width: 120 }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Payout preference — used when that rail is eligible and funded for the amount; otherwise the next funded rail pays.</div>
+            {(["MTN", "ORANGE"] as const).map((op) => (
+              <div key={op} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ minWidth: 72, fontWeight: 700, fontSize: 13 }}>{op}</span>
+                <select
+                  value={(op === "MTN" ? cfg?.payoutSettings?.preferred.MTN : cfg?.payoutSettings?.preferred.ORANGE) ?? "auto"}
+                  disabled={colBusy}
+                  onChange={(e) => { void savePayoutPref(op, e.target.value); }}
+                  style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", font: "inherit", fontSize: 13, color: "var(--ink)" }}
+                >
+                  <option value="auto">Auto (cheapest funded)</option>
+                  {(cfg?.payout ?? []).map((p) => <option key={p.name} value={p.name.toLowerCase()}>{p.name}{p.configured ? "" : " (not configured)"}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          {colMsg && <div role="status" style={{ fontSize: 12.5, color: /could not|No collection rail is left/i.test(colMsg) ? "var(--bad)" : "var(--recv)" }}>{colMsg}</div>}
+        </div>
+      </Card>
 
       {/* Egress IP allowlist. Surfaced next to rail config because that is what it is:
           Peexit production accepts calls only from an address it has whitelisted, so a

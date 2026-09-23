@@ -21,6 +21,7 @@ import { jobsHealth } from "./jobs.js";
 import { ratesFresh, ratesMeta } from "./core/rates.js";
 import { usingPostgres } from "./db/store.js";
 import { persistDurable } from "./core/persist.js";
+import { collectHealth } from "./adapters/collect.js";
 import { PAYOUTS } from "./adapters/payouts.js";
 import { payoutHealth } from "./core/routing.js";
 import { activeAlerts } from "./core/alerts.js";
@@ -191,6 +192,10 @@ export function createApp() {
     const fx = { fresh: ratesFresh(), ...ratesMeta() };
     const store = { backend: usingPostgres() ? "postgres" : "sqlite", durable: persistDurable() };
     const rails = PAYOUTS.filter((p) => p.configured()).map((p) => ({ name: p.name, live: p.live(), ...payoutHealth(p.name) }));
+    // Money IN is as operational a question as money OUT: which rails can take a payment,
+    // for which operator, and are they answering. Only configured rails are listed, exactly
+    // as for payouts — an unconfigured adapter is not an outage.
+    const collectRails = (await collectHealth()).filter((c) => c.configured);
     const alerts = activeAlerts();
     // Identity resolution is advisory: a provider outage is reported, never a 503 by itself.
     const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status, ...(p.lastError ? { lastError: p.lastError } : {}), latencyMs: p.latencyMs })) } : { enabled: false };
@@ -199,8 +204,9 @@ export function createApp() {
     if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
+    if (collectRails.some((c) => c.ok === false)) problems.push(`collection rail down: ${collectRails.filter((c) => c.ok === false).map((c) => c.name).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

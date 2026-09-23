@@ -39,6 +39,23 @@ async function main() {
     const t = r.body;
     ok("created (201): AWAITING_PAYER, a collection request went to the MTN payer", r.status === 201 && t.state === "AWAITING_PAYER" && t.from.provider === "MTN" && t.to.provider === "ORANGE" && t.collectRef, `${r.status} ${t.state}`);
     ok("the payer's number is refused as recipient of its own money", (await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000111", to: "677000111", xaf: 5000 }) })).body.error === "same_number");
+
+    /* The collection CALLBACK. Money out has always had one; money in had none, so an
+       approval waited for the next 30-second reconcile tick. The callback settles the exact
+       transfer it names — and only on the rail's own status, never on the posted body. */
+    const cbRoot = root.replace(/\/api$/, "");
+    let cb = await fetch(`${cbRoot}/webhooks/collect/nope`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    ok("a callback for an unknown rail is refused", cb.status === 404, String(cb.status));
+    cb = await fetch(`${cbRoot}/webhooks/collect/peexit`, { method: "POST", headers: { "content-type": "application/json" }, body: "not json" });
+    ok("a malformed callback body is refused, never a 500", cb.status === 400, String(cb.status));
+    const other = await j("/momo/transfers", { method: "POST", body: JSON.stringify({ from: "677000111", to: "699000222", xaf: 3000, toName: "Ama" }) });
+    ok("a second transfer is awaiting its payer", other.body.state === "AWAITING_PAYER");
+    cb = await fetch(`${cbRoot}/webhooks/collect/peexit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ track_id: other.body.id, status: "SUCCESS" }) });
+    ok("a callback naming our key is accepted and acked fast", cb.status === 200, String(cb.status));
+    for (let i = 0; i < 40 && getTransfer(other.body.id)?.state === "AWAITING_PAYER"; i++) await new Promise((r2) => setTimeout(r2, 50));
+    ok("…and the collection settles WITHOUT waiting for the reconcile tick", getTransfer(other.body.id)?.state !== "AWAITING_PAYER", getTransfer(other.body.id)?.state);
+    cb = await fetch(`${cbRoot}/webhooks/collect/peexit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ track_id: "mmt_not_ours", status: "SUCCESS" }) });
+    ok("a callback for a key that is not ours changes nothing", cb.status === 200, String(cb.status));
     await reconcileTransfers();
     let tt = getTransfer(t.id)!;
     ok("the payer approves (simulated) → collected → paid out → DELIVERED", tt.state === "DELIVERED", `${tt.state}: ${tt.events.map((e) => e.state).join(" → ")}`);

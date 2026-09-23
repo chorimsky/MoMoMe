@@ -60,7 +60,13 @@ export function normalizeAlias(type: AliasType, raw: string, country: CountryCod
   if (type === "momome_id") return /^mpi_[0-9a-f]{18}$/.test(v) ? v : null;
   return v.slice(0, 120);
 }
-const aliasKey = (type: AliasType, value: string) => `${type}:${value}`;
+/* HOISTED, deliberately. persist.register() runs its restore callback SYNCHRONOUSLY at
+   module load — above this line — and the callback uses aliasKey. As a `const` arrow it was
+   still in the temporal dead zone, so every restore threw "Cannot access 'aliasKey' before
+   initialization", persist swallowed it, and every payment identity silently failed to
+   rehydrate: the map loaded EMPTY after a restart while the snapshot still held the rows.
+   A function declaration is hoisted and cannot be caught by this again. */
+function aliasKey(type: AliasType, value: string): string { return `${type}:${value}`; }
 
 export function getMpi(id: string): Mpi | undefined { return mpis.get(id); }
 export function findByAlias(type: AliasType, raw: string, country: CountryCode = "CM"): Mpi | undefined {

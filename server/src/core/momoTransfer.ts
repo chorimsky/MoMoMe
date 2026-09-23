@@ -30,7 +30,7 @@ import { register, touch } from "./persist.js";
 import { store } from "../db/store.js";
 import { getSettings } from "./settings.js";
 import { liveMoney, ibexConfigured } from "../config.js";
-import * as peexit from "../adapters/peexit.js";
+import { collectorByName, selectCollector } from "../adapters/collect.js";
 import * as ibex from "../adapters/ibex.js";
 import { payoutsFor } from "../adapters/payouts.js";
 import { selectFundedAggregator } from "./routing.js";
@@ -41,11 +41,35 @@ import { btcUsd, usdXaf, ensureRatesFresh, ratesFresh } from "./rates.js";
 const transfers = new Map<string, MomoTransfer>();
 register("momo_transfers", () => [...transfers.values()].slice(-20_000), (d: MomoTransfer[]) => { for (const t of d ?? []) transfers.set(t.id, t); });
 
-export const TRANSFER_FEE_PCT = 0.015;   // our margin over the rails' own fees
-const COLLECT_TTL_MS = 15 * 60_000;      // the payer has this long to approve on their phone
+/** Our margin over the rails' own fees. Configuration, not a constant: this is the price of
+ *  the money-in side and it must be changeable without a deploy (kept exported at its old
+ *  name so nothing that reads it breaks). */
+export const transferFeePct = (): number => {
+  const v = getSettings().pricing.collectFeePct;
+  return Number.isFinite(v) && v >= 0 && v < 1 ? v : 0.015;
+};
+/** The payer's approval window, from settings (Admin → Rails). Providers differ, and a
+ *  prompt that outlives the customer standing at the till is worse than a clean expiry. */
+const collectTtlMs = () => Math.max(1, getSettings().rails.collect.ttlMinutes || 15) * 60_000;
 
 export function enabled(): boolean { return !!getSettings().features.momoTransfer; }
 export function getTransfer(tid: string): MomoTransfer | undefined { return transfers.get(tid); }
+
+/** A collection callback names OUR key; this settles that one transfer NOW rather than on
+ *  the next reconcile tick. The rail's own `status()` is still what decides — a callback
+ *  body is a hint that something changed, never the fact that it changed. Returns what the
+ *  rail said, or null when the key is unknown to us (another deployment's, or a stale one).
+ *  Safe to call repeatedly: every step re-reads the rail and `move()` is idempotent. */
+export async function settleCollectionNow(transferId: string): Promise<"COMPLETED" | "FAILED" | "PENDING" | null> {
+  const t = transfers.get(transferId);
+  if (!t || t.state !== "AWAITING_PAYER") return null;
+  const rail = collectorByName(t.collectRail);
+  if (!rail) return null;
+  const s = t.simulated ? "COMPLETED" : await rail.status(t.id).catch(() => null);
+  if (s === "COMPLETED") { await onCollected(t); return "COMPLETED"; }
+  if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); return "FAILED"; }
+  return s ?? null;
+}
 export function transfersOf(owner: string): MomoTransfer[] { return [...transfers.values()].filter((t) => t.owner === owner).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
 export function allTransfers(limit = 200): MomoTransfer[] { return [...transfers.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit); }
 
@@ -59,8 +83,9 @@ const ref = () => `MMT-${new Date().getFullYear()}-${Math.floor(100000 + Math.ra
 
 /** Quote: the recipient gets `xaf`; the payer is asked for `xaf` plus the fee. */
 export function quote(xaf: number): { xaf: number; feeXaf: number; collectXaf: number; feePct: number } {
-  const feeXaf = Math.max(getSettings().pricing.minFeeXaf ?? 100, Math.round(xaf * TRANSFER_FEE_PCT));
-  return { xaf, feeXaf, collectXaf: xaf + feeXaf, feePct: TRANSFER_FEE_PCT };
+  const pct = transferFeePct();
+  const feeXaf = Math.max(getSettings().pricing.minFeeXaf ?? 100, Math.round(xaf * pct));
+  return { xaf, feeXaf, collectXaf: xaf + feeXaf, feePct: pct };
 }
 
 export type CreateInput = { owner: string; fromPhone: string; toAddress: string; xaf: number; country?: CountryCode; fromName?: string; toName?: string; byAdmin?: boolean };
@@ -117,22 +142,30 @@ export async function createTransfer(input: CreateInput): Promise<CreateResult> 
     if (!ratesFresh()) return { ok: false, status: 503, error: "rates_unavailable", message: "Exchange rates are not available right now." };
   }
   const q = quote(xaf);
+  // WHICH rail collects — decided before anything is created, because a corridor with no
+  // collection rail, or an amount outside every rail's accepted range, must be refused here
+  // rather than after the payer has been prompted.
+  const pick = selectCollector({ provider: from.party.provider, country: from.party.country, xaf: q.collectXaf });
+  if (!pick.rail) return { ok: false, status: 503, error: "collect_unavailable", message: "The payer's network cannot be charged right now. Please try again shortly." };
   const now = new Date().toISOString();
   const t: MomoTransfer = {
     id: id("mmt"), ref: ref(), createdAt: now, updatedAt: now, owner: input.owner,
     from: { ...from.party, ...(input.fromName ? { name: input.fromName } : {}) },
     to: { ...dest.to, ...(input.toName ? { name: input.toName } : {}) } as MomoTransfer["to"],
     route: dest.route, xaf: q.xaf, feeXaf: q.feeXaf, collectXaf: q.collectXaf,
-    state: "AWAITING_PAYER", collectRail: "peexit", expiresAt: new Date(Date.now() + COLLECT_TTL_MS).toISOString(),
+    state: "AWAITING_PAYER", collectRail: pick.rail.name, expiresAt: new Date(Date.now() + collectTtlMs()).toISOString(),
     ...(screen.flags.length ? { complianceFlags: screen.flags } : {}),
     events: [{ at: now, state: "AWAITING_PAYER", note: `collecting ${q.collectXaf} XAF from ${from.party.provider} ${from.party.phone}` }],
   };
-  // The collection request: a prompt on the payer's phone. Peexit serves MTN and Orange.
+  // The collection request: a prompt on the payer's phone (or, on a hosted rail, a page for
+  // them to complete). WHICH rail is the registry's decision — the operator's own API when it
+  // is configured, an aggregator otherwise — and the chosen one is recorded on the transfer so
+  // reconciliation asks the same rail that took the request.
   try {
-    const res = await peexit.collect({ idempotencyKey: t.id, provider: t.from.provider, country: t.from.country, phone: t.from.phone, xaf: t.collectXaf, name: input.fromName ?? "MoMoMe transfer" });
+    const res = await pick.rail.collect({ idempotencyKey: t.id, provider: t.from.provider, country: t.from.country, phone: t.from.phone, xaf: t.collectXaf, name: input.fromName ?? "MoMoMe transfer" });
     t.collectRef = res.providerRef; t.simulated = res.simulated;
   } catch (e) {
-    console.error(`[momo-transfer] collect request failed for ${t.ref}:`, e instanceof Error ? e.message : e);
+    console.error(`[momo-transfer] collect request failed for ${t.ref} on ${pick.rail.name}:`, e instanceof Error ? e.message : e);
     return { ok: false, status: 503, error: "collect_unavailable", message: "The payer's network did not accept the request. Please try again." };
   }
   transfers.set(t.id, t); touch("momo_transfers");
@@ -242,7 +275,9 @@ export async function reconcileTransfers(now = Date.now()): Promise<void> {
   for (const t of transfers.values()) {
     try {
       if (t.state === "AWAITING_PAYER") {
-        const s = t.simulated ? "COMPLETED" : await peexit.collectStatus(t.id).catch(() => null);
+        // Ask the rail that TOOK the request — not whichever one happens to be first now.
+        const rail = collectorByName(t.collectRail);
+        const s = t.simulated ? "COMPLETED" : rail ? await rail.status(t.id).catch(() => null) : null;
         if (s === "COMPLETED") { await onCollected(t); continue; }
         if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); continue; }
         if (Date.parse(t.expiresAt) < now) move(t, "EXPIRED", "the payer did not approve in time");

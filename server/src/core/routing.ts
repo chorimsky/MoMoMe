@@ -11,6 +11,7 @@
 import type { ProviderId, CountryCode, RoutingSnapshot, AggregatorHealth, ExecutionLogEntry } from "../../../shared/types.js";
 import { register, touch } from "./persist.js";
 import { HealthTracker, type RailHealthState } from "./railHealth.js";
+import { getSettings } from "./settings.js";
 import { PAYOUTS, payoutByName, payoutsFor, peexitAdapter, type PayoutAdapter } from "../adapters/payouts.js";
 
 const ALL_PROVIDERS: ProviderId[] = ["MTN", "ORANGE", "AIRTEL"];
@@ -78,10 +79,15 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
       if (bal != null && bal >= amountXaf) funded.push({ p, bal, fee: p.payoutFeePct ? await p.payoutFeePct(provider, country).catch(() => null) : null });
     }
     if (funded.length) {
+      // The operator's preference (Admin → Rails), applied ONLY among rails that are
+      // eligible and actually funded for this amount: a preference orders candidates, it
+      // never sends a payout to a rail that cannot pay it.
+      const prefCfg = getSettings().rails.payout.preferred;
+      const pref = provider === "MTN" ? prefCfg.MTN : provider === "ORANGE" ? prefCfg.ORANGE : "auto";
       // COST FIRST among the rails that can pay: the difference between two rails' fees on
       // the same payout is pure margin. A rail whose fee is unknown ranks after one whose
       // fee is known; ties go to the deeper balance, then the better recent success rate.
-      funded.sort((x, y) => (x.fee ?? 1) - (y.fee ?? 1) || y.bal - x.bal || successRate(y.p.name) - successRate(x.p.name));
+      funded.sort((x, y) => Number(y.p.name === pref) - Number(x.p.name === pref) || (x.fee ?? 1) - (y.fee ?? 1) || y.bal - x.bal || successRate(y.p.name) - successRate(x.p.name));
       if (funded.length > 1) console.log(`[route] ${provider}/${country} amt=${amountXaf}: ${funded.map((f) => `${f.p.name} fee=${f.fee == null ? "?" : (f.fee * 100).toFixed(2) + "%"} bal=${Math.round(f.bal)}`).join(" | ")} → ${funded[0].p.name}`);
       return funded[0].p;
     }

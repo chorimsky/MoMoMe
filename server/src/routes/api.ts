@@ -66,6 +66,7 @@ import { openApiSpec } from "../openapi.js";
 import { webcrypto, type JsonWebKey } from "node:crypto";
 import * as merchant from "../core/merchant.js";
 import { routingTable, routingSnapshot, payoutReady, setAggregatorUp } from "../core/routing.js";
+import { COLLECTORS, collectHealth, selectCollector } from "../adapters/collect.js";
 import type { Aggregator } from "../../../shared/types.js";
 import * as peex from "../integrations/peex/service.js";
 import { issueToken, verifyToken, tokenFromHeaders, isElevated, ELEVATION_TTL_MS, type Session } from "../core/adminAuth.js";
@@ -2751,6 +2752,8 @@ api.get("/admin/pricing", async (_req, res) => {
     methods: ALL_METHODS.map((m) => { const rq = rateFor(m); return { method: m, asset: rq.asset, midXafPerUnit: rq.midXafPerUnit, customerXafPerUnit: rq.customerXafPerUnit, spreadBps: rq.spreadBps, offered: offered[m] !== false }; }),
     samples: [500, 2_500, 10_000, 50_000, 250_000, 1_000_000].map((xaf) => { const fee = platformFee(xaf); return { xaf, feeXaf: fee, totalXaf: xaf + fee, feePct: Math.round((fee / xaf) * 10000) / 100, floorApplied: fee > Math.round(xaf * s.feePct) }; }),
     railFees: sched ? { source: "peexit", mtn: asPct(sched.disbMtn), orange: asPct(sched.disbOrange) } : null,
+    collectFeePct: s.collectFeePct,
+    collectContracts: s.collectContracts,
     fresh: ratesFresh(),
     divergent: meta.divergent,
     live: liveMoney(),
@@ -3296,7 +3299,10 @@ api.get("/admin/rails", async (_req, res) => {
   const mask = (s: string) => (s ? `••••${s.slice(-4)}` : "—");
   const head = (s: string) => (s ? `${s.slice(0, 8)}…` : "—");
   // Real BTC-rail monitoring (Lightning + on-chain), replacing fabricated metrics.
-  const btcPays = (await store().listPayments()).filter((p) => p.payInstruction.method === "LIGHTNING" || p.payInstruction.method === "ONCHAIN");
+  // A payment without an instruction is possible (one that failed before an address was
+  // minted), and reading through it threw — taking the whole Rails page down with a 500
+  // rather than showing the rails, which is the one thing an operator opens this page for.
+  const btcPays = (await store().listPayments()).filter((p) => p.payInstruction?.method === "LIGHTNING" || p.payInstruction?.method === "ONCHAIN");
   const dayAgo = Date.now() - 86_400_000;
   const monitor = {
     pending: btcPays.filter((p) => IN_FLIGHT.includes(p.state)).length,
@@ -3342,6 +3348,19 @@ api.get("/admin/rails", async (_req, res) => {
         descriptionHash: true,
       },
     ],
+    // COLLECTION (money IN). The same operational questions as payouts: which rails can
+    // take a payment, for which operator, are they answering, which one is pinned, which
+    // has been switched off. `selected` is what the engine would choose right now for a
+    // typical amount — the honest answer, not a guess from the list order.
+    collect: {
+      rails: (await collectHealth()).map((c) => ({ ...c, disabled: (getSettings().rails.collect.disabled ?? []).includes(c.name) })),
+      settings: getSettings().rails.collect,
+      selected: {
+        MTN: selectCollector({ provider: "MTN", country: "CM", xaf: 10_000 }).why,
+        ORANGE: selectCollector({ provider: "ORANGE", country: "CM", xaf: 10_000 }).why,
+      },
+    },
+    payoutSettings: getSettings().rails.payout,
     payout: [
       { name: "PawaPay", env: config.pawapay.env, configured: pawapayConfigured(), live: pawapayLive(), apiUrl: config.pawapay.apiUrl, apiKey: mask(config.pawapay.apiKey) },
       { name: "Peexit", env: config.peexit.env, configured: peexitConfigured(), live: peexitLive(), apiUrl: config.peexit.apiUrl, apiKey: mask(config.peexit.apiKey),
@@ -3378,6 +3397,90 @@ api.put("/admin/rails/egress", async (req, res) => {
   updateSettings({ egress: { allowlistedIp: ip } });
   invalidateEgressCache(); // re-probe so the response reflects the new comparison at once
   res.json({ egress: await egressStatus() });
+});
+
+/* ---------- collection & payout rail settings (Rails section) ----------
+   Which rail takes a payment, which pays one out, what bounds apply, and what is switched
+   off. These are operational decisions that change with a provider's behaviour — a pinned
+   collection rail is exactly what stops a newly-configured operator API from silently
+   taking over live collection — so they live in settings, editable here, and every money
+   path re-reads them per payment. */
+const RAIL_NAME = /^[a-z0-9_-]{2,24}$/;
+api.put("/admin/rails/collect", async (req, res) => {
+  const b = (req.body ?? {}) as { preferred?: { MTN?: unknown; ORANGE?: unknown }; disabled?: unknown; minXaf?: unknown; maxXaf?: unknown; enabled?: unknown; ttlMinutes?: unknown; railLimits?: unknown };
+  const known = new Set(COLLECTORS.map((c) => c.name));
+  const railOrAuto = (v: unknown, current: string): string | null => {
+    if (v === undefined) return current;
+    if (typeof v !== "string") return null;
+    const n = v.trim().toLowerCase();
+    return n === "auto" || (RAIL_NAME.test(n) && known.has(n)) ? n : null;
+  };
+  const cur = getSettings().rails.collect;
+  const mtn = railOrAuto(b.preferred?.MTN, cur.preferred.MTN);
+  const orange = railOrAuto(b.preferred?.ORANGE, cur.preferred.ORANGE);
+  if (mtn === null || orange === null) return res.status(400).json({ error: "unknown_rail", message: `A preferred rail must be "auto" or one of: ${[...known].join(", ")}.` });
+  let disabled = cur.disabled;
+  if (b.disabled !== undefined) {
+    if (!Array.isArray(b.disabled) || b.disabled.some((x) => typeof x !== "string" || !known.has(x))) {
+      return res.status(400).json({ error: "unknown_rail", message: `Switch off only known rails: ${[...known].join(", ")}.` });
+    }
+    disabled = b.disabled as string[];
+  }
+  const bound = (v: unknown, current: number): number | null => {
+    if (v === undefined) return current;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 100_000_000 ? Math.round(n) : null;
+  };
+  const minXaf = bound(b.minXaf, cur.minXaf), maxXaf = bound(b.maxXaf, cur.maxXaf);
+  if (minXaf === null || maxXaf === null) return res.status(400).json({ error: "bad_bound", message: "Bounds must be whole XAF amounts, 0 for no bound." });
+  // Is collection offered at all, and how long does the payer get to approve?
+  const enabled = b.enabled === undefined ? undefined : b.enabled === true;
+  let ttlMinutes: number | undefined;
+  if (b.ttlMinutes !== undefined) {
+    const t = Number(b.ttlMinutes);
+    if (!Number.isFinite(t) || t < 1 || t > 120) return res.status(400).json({ error: "bad_ttl", message: "The approval window must be between 1 and 120 minutes." });
+    ttlMinutes = Math.round(t);
+  }
+  // What each rail accepts, as its provider documents it — recorded, never guessed.
+  let railLimits: Record<string, { minXaf: number; maxXaf: number }> | undefined;
+  if (b.railLimits !== undefined) {
+    if (typeof b.railLimits !== "object" || b.railLimits === null) return res.status(400).json({ error: "bad_limits", message: "Rail limits must be an object keyed by rail name." });
+    railLimits = {};
+    for (const [name, v] of Object.entries(b.railLimits as Record<string, { minXaf?: unknown; maxXaf?: unknown }>)) {
+      if (!known.has(name)) return res.status(400).json({ error: "unknown_rail", message: `Unknown rail "${name}".` });
+      const lo = Number(v?.minXaf ?? 0), hi = Number(v?.maxXaf ?? 0);
+      if (![lo, hi].every((n) => Number.isFinite(n) && n >= 0 && n <= 100_000_000)) return res.status(400).json({ error: "bad_limits", message: "Rail limits must be whole XAF amounts, 0 for no bound." });
+      if (lo && hi && lo > hi) return res.status(400).json({ error: "bad_limits", message: `${name}: the minimum cannot be above the maximum.` });
+      railLimits[name] = { minXaf: Math.round(lo), maxXaf: Math.round(hi) };
+    }
+  }
+  if (minXaf && maxXaf && minXaf > maxXaf) return res.status(400).json({ error: "bad_bound", message: "The minimum cannot be above the maximum." });
+  updateSettings({ rails: { ...getSettings().rails, collect: { ...cur, preferred: { MTN: mtn, ORANGE: orange }, disabled, minXaf, maxXaf, ...(enabled === undefined ? {} : { enabled }), ...(ttlMinutes === undefined ? {} : { ttlMinutes }), ...(railLimits === undefined ? {} : { railLimits }) } } });
+  // Leaving an operator with no rail that can actually act stops collection from that
+  // network outright. It is a legitimate thing to want during a provider incident, so it is
+  // allowed — but it is said out loud here rather than discovered by a customer. Asked of
+  // the selector itself, so "can act" means what it means everywhere else.
+  const stranded = (["MTN", "ORANGE"] as const).filter((p) => selectCollector({ provider: p, country: "CM", xaf: 10_000 }).rail === null);
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "rails.collect.updated", target: { type: "settings", id: "rails.collect" }, ip: clientIp(req), details: { preferred: { MTN: mtn, ORANGE: orange }, disabled, minXaf, maxXaf } });
+  res.json({ collect: getSettings().rails.collect, warning: stranded.length ? `No collection rail is left for ${stranded.join(" and ")} — payments from ${stranded.length > 1 ? "those networks" : "that network"} will be refused.` : null });
+});
+
+api.put("/admin/rails/payout", async (req, res) => {
+  const b = (req.body ?? {}) as { preferred?: { MTN?: unknown; ORANGE?: unknown } };
+  const known = new Set(PAYOUTS.map((p) => p.name));
+  const pick = (v: unknown, current: string): string | null => {
+    if (v === undefined) return current;
+    if (typeof v !== "string") return null;
+    const n = v.trim().toLowerCase();
+    return n === "auto" || known.has(n) ? n : null;
+  };
+  const cur = getSettings().rails.payout;
+  const mtn = pick(b.preferred?.MTN, cur.preferred.MTN), orange = pick(b.preferred?.ORANGE, cur.preferred.ORANGE);
+  if (mtn === null || orange === null) return res.status(400).json({ error: "unknown_rail", message: `A preferred rail must be "auto" or one of: ${[...known].join(", ")}.` });
+  updateSettings({ rails: { ...getSettings().rails, payout: { preferred: { MTN: mtn, ORANGE: orange } } } });
+  platformAudit({ actor: { type: "operator", id: adminUid(req) }, action: "rails.payout.updated", target: { type: "settings", id: "rails.payout" }, ip: clientIp(req), details: { preferred: { MTN: mtn, ORANGE: orange } } });
+  // A preference only ORDERS funded rails — say so, so nobody reads it as a guarantee.
+  res.json({ payout: getSettings().rails.payout, note: "A preferred rail is used when it is eligible and funded for the amount; otherwise the next funded rail pays." });
 });
 
 /* Re-check NOW: re-probe our outbound IP and, when Peexit is live, force a FRESH account

@@ -46,11 +46,26 @@ export function renderTemplate(tpl: string, vars: Partial<Record<(typeof MESSAGE
 const DEFAULTS: AdminSettings = {
   company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
   channels: { Email: true, SMS: true, WhatsApp: false, Push: true },
-  rails: { defaultRail: "Lightning", autoSwitch: true, threshold: 200000 },
+  rails: {
+    defaultRail: "Lightning", autoSwitch: true, threshold: 200000,
+    // Collection is PINNED to the aggregator that serves it today. An operator's own
+    // Collection API becomes selectable the moment its credentials are set, and that must
+    // be a decision someone makes here — not a side effect of adding an env var to a live
+    // deployment that is collecting money.
+    collect: {
+      preferred: { MTN: "peexit", ORANGE: "peexit" }, disabled: [], minXaf: 0, maxXaf: 0,
+      // The env var was the switch before this setting existed; it stays the initial value
+      // so upgrading a deployment does not silently change what it accepts.
+      enabled: (process.env.CONNECT_MOMO_COLLECT ?? "").toLowerCase() === "true",
+      ttlMinutes: 15,
+      railLimits: {},
+    },
+    payout: { preferred: { MTN: "auto", ORANGE: "auto" } },
+  },
   // Cost assumptions for net-margin intelligence (override with real rail rates):
   // payout ≈ Mobile Money disbursement cost (PawaPay/Peexit/MTN/Orange) as a
   // fraction of delivered XAF; rail ≈ crypto-in cost; fixed = per-tx flat cost.
-  pricing: { feePct: FEE_PCT, minFeeXaf: 100, spreadBps: { ...RAIL_SPREAD_BPS }, costs: { payoutPct: 0.015, railPct: 0.001, fixedXaf: 0 } },
+  pricing: { feePct: FEE_PCT, minFeeXaf: 100, spreadBps: { ...RAIL_SPREAD_BPS }, costs: { payoutPct: 0.015, railPct: 0.001, fixedXaf: 0 }, collectFeePct: 0.015 },
   // Default: accept payments, approval threshold at the corridor max (effectively
   // off until an operator lowers it — e.g. for live money).
   ops: { acceptingPayments: true, payoutApprovalXaf: MAX_XAF, alertPhone: "" },
@@ -135,13 +150,24 @@ register("settings", () => settings, (d: Partial<AdminSettings>) => {
   settings = {
     company: { ...DEFAULTS.company, ...(d.company ?? {}) },
     channels: { ...DEFAULTS.channels, ...(d.channels ?? {}) },
-    rails: { ...DEFAULTS.rails, ...(d.rails ?? {}) },
+    rails: {
+      ...DEFAULTS.rails, ...(d.rails ?? {}),
+      collect: {
+        ...DEFAULTS.rails.collect, ...(d.rails?.collect ?? {}),
+        railLimits: { ...(d.rails?.collect?.railLimits ?? {}) },
+        preferred: { ...DEFAULTS.rails.collect.preferred, ...(d.rails?.collect?.preferred ?? {}) },
+        disabled: Array.isArray(d.rails?.collect?.disabled) ? d.rails.collect.disabled : DEFAULTS.rails.collect.disabled,
+      },
+      payout: { ...DEFAULTS.rails.payout, ...(d.rails?.payout ?? {}), preferred: { ...DEFAULTS.rails.payout.preferred, ...(d.rails?.payout?.preferred ?? {}) } },
+    },
     pricing: {
       feePct: d.pricing?.feePct ?? DEFAULTS.pricing.feePct,
       minFeeXaf: d.pricing?.minFeeXaf ?? DEFAULTS.pricing.minFeeXaf,
       spreadBps: { ...DEFAULTS.pricing.spreadBps, ...(d.pricing?.spreadBps ?? {}) },
       costs: { ...DEFAULTS.pricing.costs, ...(d.pricing?.costs ?? {}) },
       contracts: d.pricing?.contracts ?? {},
+      collectFeePct: d.pricing?.collectFeePct ?? DEFAULTS.pricing.collectFeePct,
+      collectContracts: d.pricing?.collectContracts ?? {},
     },
     ops: { ...DEFAULTS.ops, ...(d.ops ?? {}) },
     egress: { ...DEFAULTS.egress, ...(d.egress ?? {}) },
@@ -185,6 +211,8 @@ export function updateSettings(patch: Partial<AdminSettings>): AdminSettings {
       feePct: patch.pricing?.feePct ?? settings.pricing.feePct,
       minFeeXaf: patch.pricing?.minFeeXaf ?? settings.pricing.minFeeXaf,
       spreadBps: { ...settings.pricing.spreadBps, ...(patch.pricing?.spreadBps ?? {}) },
+      collectFeePct: patch.pricing?.collectFeePct ?? settings.pricing.collectFeePct,
+      collectContracts: patch.pricing?.collectContracts ?? settings.pricing.collectContracts,
       costs: { ...settings.pricing.costs, ...(patch.pricing?.costs ?? {}) },
       contracts: patch.pricing?.contracts ?? settings.pricing.contracts ?? {},
     },

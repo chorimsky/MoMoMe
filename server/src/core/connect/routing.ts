@@ -19,6 +19,7 @@ import type { Mpi, PaymentMethodId } from "./identities.js";
 import { balanceOf } from "./ledger.js";
 import { offeredMethods } from "../../routes/api.js";
 import { config } from "../../config.js";
+import { getSettings } from "../settings.js";
 
 export type RouteKind = "internal" | "direct" | "lightning" | "stablecoin" | "fallback";
 export interface RouteDecision {
@@ -32,7 +33,11 @@ export interface RouteContext { payee: Mpi; payer?: Mpi; amountXaf: number; perm
 /** Which funding methods the platform can take right now (engine switches + rails). */
 export function fundingAvailable(): Record<PaymentMethodId, boolean> {
   const m = offeredMethods();
-  return { momo_me: true, lightning: !!m.LIGHTNING, stablecoin: !!(m.USDT || m.USDC), mobile_money: config.railsMode === "sandbox" || (process.env.CONNECT_MOMO_COLLECT ?? "").toLowerCase() === "true", bank_transfer: false };
+  // Mobile Money acceptance is an operator switch (Admin → Rails), not an env var: turning
+  // the money-in side on or off used to need a redeploy. Sandbox offers it regardless, as
+  // every demo and test depends on it.
+  const collect = getSettings().rails.collect;
+  return { momo_me: true, lightning: !!m.LIGHTNING, stablecoin: !!(m.USDT || m.USDC), mobile_money: config.railsMode === "sandbox" || collect.enabled, bank_transfer: false };
 }
 
 export function decide(ctx: RouteContext): RouteDecision | { error: "ROUTE_UNAVAILABLE"; explanation: string[] } {

@@ -6,6 +6,8 @@
 import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
+import { collectorByName } from "../adapters/collect.js";
+import { settleCollectionNow } from "../core/momoTransfer.js";
 import { hint as networkHint } from "../core/network/monitor.js";
 import { store } from "../db/store.js";
 import { markDetected, confirmInbound, recordUnattributedInbound } from "../core/stateMachine.js";
@@ -72,6 +74,44 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
 webhooks.post("/peexit", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback("peexit", req, res));
 webhooks.post("/pawapay", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback("pawapay", req, res));
 webhooks.post("/payout/:name", express.raw({ type: "*/*" }), (req, res) => handlePayoutCallback(req.params.name, req, res));
+
+/* ---------- collection (money IN) callbacks ----------
+   Money OUT has had callbacks since the beginning; money IN had none, so a payer approving
+   on their handset was noticed only when the 30-second reconcile tick next asked. At a till
+   that is the difference between "paid" and an awkward wait. Same discipline as the payout
+   path, deliberately: verify with the adapter, ack fast, and settle ONLY on the rail's own
+   authoritative status — a callback body is a hint that something changed, never proof of
+   what it changed to. Inconclusive → do nothing and let reconcile settle it later.
+
+   The reference a rail sends back is OUR key (the transfer id), because that is what every
+   adapter is handed as `idempotencyKey`. */
+webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => {
+  const rail = collectorByName(req.params.name);
+  if (!rail) return res.status(404).json({ error: "unknown_rail" });
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  if (rail.verifyCallback && !rail.verifyCallback(raw, req.headers)) {
+    recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  // Which of our collections is this about? Rails differ in what they call the field, so
+  // every documented spelling of "the reference you gave us" is accepted — and nothing else.
+  let key: string | undefined;
+  try {
+    const d = JSON.parse(raw) as Record<string, unknown>;
+    for (const k of ["track_id", "trackId", "externalId", "external_id", "order_id", "orderId", "reference", "referenceId", "X-Reference-Id"]) {
+      const v = d[k];
+      if (typeof v === "string" && v) { key = v; break; }
+    }
+  } catch { recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "bad json" }); return res.status(400).json({ error: "bad_json" }); }
+  const rec = recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.received", rawBody: raw, providerReference: key ?? null, status: "verified" });
+  res.json({ ok: true, ...(rec.duplicate ? { duplicate: true } : {}) }); // ack fast, settle behind it
+  if (rec.duplicate || !key) return;
+  background((async () => {
+    const s = await settleCollectionNow(key!).catch(() => null);
+    if (s === "COMPLETED" || s === "FAILED") markProcessed(rec.event.id, null, `collection ${s}`);
+    // PENDING or unknown: the rail has not decided, or the key is not ours. Reconcile owns it.
+  })());
+});
 
 // Peex intelligence-layer webhook — signature-verified, logged. Registered
 // before the generic rail route. Failures here never affect payments.

@@ -167,6 +167,48 @@ export const config = {
     proxyUrl: secret("PEEXIT_PROXY_URL") || secret("EGRESS_PROXY_URL"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
+  /** MTN Mobile Money — the operator's OWN Collection API (MoMo Developer portal), as an
+   *  alternative to collecting through an aggregator. OAuth2-style: an API user + API key
+   *  are exchanged for a short-lived bearer token; `requesttopay` prompts the payer and
+   *  `requesttopay/{referenceId}` is the authoritative status. The subscription key is the
+   *  portal's `Ocp-Apim-Subscription-Key`. Absent → the rail is simply not registered, and
+   *  collection keeps using whatever else is configured. Commercial onboarding (a real
+   *  collection account, the production target environment, the callback host) is the
+   *  operator's to complete with MTN. */
+  mtnCollect: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    apiUrl: env("MTN_MOMO_API_URL", sandbox ? "https://sandbox.momodeveloper.mtn.com" : "https://momodeveloper.mtn.com"),
+    /** MTN's own environment name, sent as X-Target-Environment. "sandbox" or the country
+     *  environment MTN assigns in production (e.g. "mtncameroon") — never guessed here. */
+    targetEnvironment: secret("MTN_MOMO_TARGET_ENV", sandbox ? "sandbox" : ""),
+    subscriptionKey: secret("MTN_MOMO_SUBSCRIPTION_KEY"),
+    apiUser: secret("MTN_MOMO_API_USER"),
+    apiKey: secret("MTN_MOMO_API_KEY"),
+    /** Where MTN posts the result. Optional: the status re-query settles either way. */
+    callbackUrl: secret("MTN_MOMO_CALLBACK_URL"),
+    currency: secret("MTN_MOMO_CURRENCY", "XAF"),
+  }))(!isProdEnv("MTN_MOMO_ENV")),
+
+  /** Orange Money — the operator's OWN Web Payment API, as an alternative to an aggregator.
+   *  OAuth2 client credentials are exchanged for a bearer token; a web-payment request
+   *  returns a hosted payment URL the customer completes on Orange's side, and the
+   *  transaction status endpoint is authoritative. Absent → not registered. Merchant
+   *  onboarding (merchant key, the live endpoints, return/cancel URLs) is the operator's
+   *  to complete with Orange. */
+  orangeCollect: ((sandbox: boolean) => ({
+    env: sandbox ? "sandbox" : "production",
+    apiUrl: env("ORANGE_MONEY_API_URL", "https://api.orange.com"),
+    /** OAuth2 client credentials issued in the Orange developer portal. */
+    clientId: secret("ORANGE_MONEY_CLIENT_ID"),
+    clientSecret: secret("ORANGE_MONEY_CLIENT_SECRET"),
+    /** The merchant key identifying the collection account on Orange's side. */
+    merchantKey: secret("ORANGE_MONEY_MERCHANT_KEY"),
+    returnUrl: secret("ORANGE_MONEY_RETURN_URL"),
+    cancelUrl: secret("ORANGE_MONEY_CANCEL_URL"),
+    notifUrl: secret("ORANGE_MONEY_NOTIF_URL"),
+    currency: secret("ORANGE_MONEY_CURRENCY", "XAF"),
+  }))(!isProdEnv("ORANGE_MONEY_ENV")),
+
   /** Admin console auth. Per-user accounts gate every /admin/* API and the
    *  console UI. ADMIN_SESSION_SECRET signs session tokens (else a persisted
    *  random secret is used — never the password). */
@@ -268,6 +310,13 @@ export function ibexConfigured(): boolean {
  *  set — independent of RAILS_MODE — so one can go live before the other. */
 export function pawapayConfigured(): boolean { return !!config.pawapay.apiKey; }
 export function peexitConfigured(): boolean { return !!config.peexit.apiKey; }
+/** MTN's own Collection API needs all three: a subscription key, an API user and its key.
+ *  Anything less cannot mint a token, so the rail stays unregistered rather than half-live. */
+export function mtnCollectConfigured(): boolean { const m = config.mtnCollect; return !!(m.subscriptionKey && m.apiUser && m.apiKey && m.targetEnvironment); }
+export function mtnCollectLive(): boolean { return mtnCollectConfigured() && config.mtnCollect.env === "production"; }
+/** Orange Web Payment needs client credentials AND a merchant key. */
+export function orangeCollectConfigured(): boolean { const o = config.orangeCollect; return !!(o.clientId && o.clientSecret && o.merchantKey); }
+export function orangeCollectLive(): boolean { return orangeCollectConfigured() && config.orangeCollect.env === "production"; }
 
 /* ---- "live money" gates — REAL value moves only when a rail is production ----
    Sandbox rails simulate; only production envs move real funds. These gates let

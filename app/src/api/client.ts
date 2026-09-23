@@ -350,6 +350,17 @@ export interface PlatformOrgDetail { organization: PlatformOrgRow; plan: Platfor
 export interface PlatformPlan { id: string; name: string; rateLimitRpm: number; paymentEndpointRpm: number; platformFeePct: number; minFeeXaf: number; tiers: Array<{ fromXaf: number; feePct: number }>; fixedMonthlyXaf: number; negotiatedFeePct?: number; description?: string; custom?: boolean }
 export interface PlatformLimitRule { id: string; name: string; enabled: boolean; priority: number; scope: { orgIds?: string[]; envs?: string[]; countries?: string[]; assets?: string[]; currencies?: string[]; operators?: string[]; plans?: string[] }; ceilings: { maxTransactionXaf?: number; minTransactionXaf?: number; dailyXaf?: number; monthlyXaf?: number; velocityPerHour?: number; dailyCount?: number }; createdAt: string; updatedAt: string }
 
+/** Admin → Rails, collection side. Mirrors AdminSettings["rails"]["collect"]. */
+export interface CollectRailSettings {
+  preferred: { MTN: string; ORANGE: string }; disabled: string[]; minXaf: number; maxXaf: number;
+  /** Is collection offered at all (was an env var, so it needed a redeploy). */
+  enabled: boolean;
+  /** How long the payer has to approve on their handset. */
+  ttlMinutes: number;
+  /** What each rail itself accepts, as its provider documents it. */
+  railLimits: Record<string, { minXaf: number; maxXaf: number }>;
+}
+
 export const api = {
   getConfig: (): Promise<AppConfigResponse> => getConfigShared(),
   /* ---------- the Pan-African network (send abroad) — device-signed like everything else ---------- */
@@ -665,8 +676,22 @@ export const api = {
       accountId?: string; clientId?: string; walletId?: string; sandboxPayout?: boolean;
     }>;
     payout: Array<{ name: string; env: string; configured: boolean; live: boolean; apiUrl: string; apiKey: string; reachability?: RailReachability | null }>;
+    /** COLLECTION (money IN): the rails that can take a payment, what is pinned or switched
+     *  off, and what the engine would actually choose right now for each operator. */
+    collect: {
+      rails: Array<{ name: string; configured: boolean; live: boolean; operators: string[]; ok: boolean | null; note?: string; disabled: boolean }>;
+      settings: CollectRailSettings;
+      selected: { MTN: string; ORANGE: string };
+    };
+    payoutSettings: { preferred: { MTN: string; ORANGE: string } };
     egress?: EgressStatus;
   }>("/admin/rails"),
+  /** Which rail collects, what is switched off, and the operator's own amount bounds. */
+  adminSetCollectRails: (patch: Partial<{ preferred: { MTN?: string; ORANGE?: string }; disabled: string[]; minXaf: number; maxXaf: number; enabled: boolean; ttlMinutes: number; railLimits: Record<string, { minXaf: number; maxXaf: number }> }>) =>
+    req<{ collect: CollectRailSettings; warning: string | null }>("/admin/rails/collect", { method: "PUT", body: JSON.stringify(patch) }),
+  /** Which rail is preferred for payouts — applied only among rails that are funded. */
+  adminSetPayoutRails: (patch: { preferred: { MTN?: string; ORANGE?: string } }) =>
+    req<{ payout: { preferred: { MTN: string; ORANGE: string } }; note: string }>("/admin/rails/payout", { method: "PUT", body: JSON.stringify(patch) }),
   /** Record the IP registered with an IP-allowlisting rail (Peexit production). */
   adminSetEgressIp: (allowlistedIp: string) =>
     req<{ egress: EgressStatus }>("/admin/rails/egress", { method: "PUT", body: JSON.stringify({ allowlistedIp }) }),

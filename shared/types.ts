@@ -748,7 +748,40 @@ export interface AdminSettings {
   /** logo is a data URL (data:image/…;base64,…) or null when unset. */
   company: { brand: string; email: string; phone: string; logo: string | null };
   channels: { Email: boolean; SMS: boolean; WhatsApp: boolean; Push: boolean };
-  rails: { defaultRail: string; autoSwitch: boolean; threshold: number };
+  rails: {
+    /** Legacy keys, kept so an existing stored settings row still parses. Nothing reads
+     *  them; the fields below are the ones the money path actually consults. */
+    defaultRail: string; autoSwitch: boolean; threshold: number;
+    /** COLLECTION (money IN — a payer approving a debit on their own wallet). */
+    collect: {
+      /** Which rail takes the request, per operator. A rail name (e.g. "peexit") pins it;
+       *  "auto" lets the registry choose by priority among the rails that can act.
+       *  Pinned by default: configuring an operator's own API must never silently move
+       *  live collection off the rail that is working. */
+      preferred: { MTN: string; ORANGE: string };
+      /** Rails an operator has switched OFF for collection. Never selected while listed. */
+      disabled: string[];
+      /** Operator-imposed bounds on ONE collection, on top of whatever a rail enforces.
+       *  0 = no bound. Checked before the payer is prompted. */
+      minXaf: number; maxXaf: number;
+      /** Is collection offered at all? Was CONNECT_MOMO_COLLECT — an env var, so switching
+       *  the money-in side on or off needed a redeploy. The env var is still honoured as the
+       *  initial value so no deployment changes behaviour on upgrade. */
+      enabled: boolean;
+      /** How long the payer has to approve on their handset before the request lapses.
+       *  Providers differ, and a prompt that outlives the customer at the till is worse than
+       *  one that expires cleanly. */
+      ttlMinutes: number;
+      /** What each rail itself accepts, as the PROVIDER documents it — we cannot probe this,
+       *  so an operator records it and the selector refuses out-of-range amounts before the
+       *  payer is ever prompted. Keyed by rail name. */
+      railLimits: Record<string, { minXaf: number; maxXaf: number }>;
+    };
+    /** PAYOUT (money OUT). Up/down per rail already lives in routing health; this is the
+     *  operator's PREFERENCE, applied only among rails that are eligible and funded — it
+     *  orders candidates, it never overrides funding. */
+    payout: { preferred: { MTN: string; ORANGE: string } };
+  };
   pricing: {
     feePct: number;
     /** The fee never goes below this (XAF): at small tickets the rails' own fees would
@@ -765,6 +798,13 @@ export interface AdminSettings {
      *  assumption above everywhere: cost-first routing, the revenue view, the network's fee
      *  engine. Absent entries fall back to what the rail publishes, then to `costs.payoutPct`. */
     contracts?: Record<string, Partial<Record<"MTN" | "ORANGE" | "AIRTEL", { pct: number; fixedXaf: number }>>>;
+    /** Our margin on a COLLECTION, as a fraction. Was a hard-coded constant in
+     *  core/momoTransfer.ts, which made the money-in price the one number on the platform
+     *  an operator could not change without a deploy. */
+    collectFeePct: number;
+    /** What a rail charges US to collect, per rail × operator — the money-in twin of
+     *  `contracts`. Without it every margin figure on the collection side is a guess. */
+    collectContracts?: Record<string, Partial<Record<"MTN" | "ORANGE" | "AIRTEL", { pct: number; fixedXaf: number }>>>;
   };
   /** Operational controls wired into the live payment path. */
   ops: {
@@ -1003,6 +1043,10 @@ export interface PricingInfo {
   costs: { payoutPct: number; railPct: number; fixedXaf: number };
   /** The signed disbursement schedules (settings.pricing.contracts). */
   contracts?: AdminSettings["pricing"]["contracts"];
+  /** Our margin on a COLLECTION (money in) — the twin of feePct for the other direction. */
+  collectFeePct: number;
+  /** What a rail charges US to collect, per rail × operator. */
+  collectContracts?: AdminSettings["pricing"]["collectContracts"];
   rates: Array<{ pair: string; rate: number; spreadBps: number }>;
   /** Live FX source feeding the spot rates (IBEX, with freshness). */
   feed: { source: string; updatedAt: string | null; btcUsd: number; usdtUsd: number; eurUsd: number; usdXaf: number };

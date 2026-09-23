@@ -92,6 +92,9 @@ export function PricingView() {
   const [period, setPeriod] = useState("30d");
   const [feePctInput, setFeePctInput] = useState(0);
   const [minFee, setMinFee] = useState(0);
+  // The money-IN price. It was a constant in the collection engine, which made it the one
+  // number on the platform an operator could not change without a deploy.
+  const [collectFeePct, setCollectFeePct] = useState(0);
   const [spreadBps, setSpreadBps] = useState<Spreads | null>(null);
   const [costs, setCosts] = useState<Costs | null>(null);
   const [contracts, setContracts] = useState<Contracts>({});
@@ -106,6 +109,7 @@ export function PricingView() {
       setPricing(p);
       setFeePctInput(Math.round(p.feePct * 10000) / 100);
       setMinFee(p.minFeeXaf ?? 0);
+      setCollectFeePct(Math.round((p.collectFeePct ?? 0.015) * 10000) / 100);
       setSpreadBps({ ...p.spreadBps });
       setCosts({ ...p.costs });
       setContracts(p.contracts ?? {});
@@ -149,7 +153,7 @@ export function PricingView() {
   const save = async () => {
     setSaving(true); setErr(null);
     try {
-      await api.saveSettings({ pricing: { feePct: feePctInput / 100, minFeeXaf: minFee, spreadBps, costs, contracts } });
+      await api.saveSettings({ pricing: { feePct: feePctInput / 100, minFeeXaf: minFee, spreadBps, costs, contracts, collectFeePct: collectFeePct / 100 } });
       await loadConfig();
       api.adminRevenue(period).then(setReport).catch(() => {});
       setSaved(true);
@@ -362,6 +366,8 @@ export function PricingView() {
           <Grid cols={2} gap={12} style={{ marginTop: 4 }}>
             <NumInput label="Platform fee" value={feePctInput} onChange={editFee} min={0} max={10} step={0.05} suffix="%" />
             <NumInput label="Minimum fee" value={minFee} onChange={(v) => { setMinFee(v); setDirty(true); }} min={0} max={5000} step={50} suffix="XAF" />
+            {/* Money in: what we add over the collection rail's own fee. */}
+            <NumInput label="Collection fee (money in)" value={collectFeePct} onChange={(v) => { setCollectFeePct(v); setDirty(true); }} min={0} max={10} step={0.05} suffix="%" />
             {SPREAD_ROWS.map((s) => <NumInput key={s.k} label={s.label} value={spreadBps[s.k]} onChange={(v) => editSpread(s.k, v)} min={0} max={1000} step={10} suffix="bps" />)}
           </Grid>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".05em", margin: "16px 0 8px" }}>Cost assumptions (for net margin)</div>

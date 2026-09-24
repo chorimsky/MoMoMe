@@ -346,3 +346,71 @@ modes, and `settle-or-refund.test.ts` now passes repeatedly rather than intermit
 Covered by 27 assertions in the new `server/test/momo-lightning.test.ts`, 11 more in
 `momo-transfer.test.ts` (42 total), 3 in `collect-rails.test.ts` (36 total) and 5 in
 `rail-health.test.ts` (26 total).
+
+---
+
+## Increment — why "Pending" was growing, and the four holes under it (2026-09-24)
+
+Production said this, without needing an admin session:
+
+```
+🔴 Payout float is 42,630 XAF — below 250,000
+🟠 peexit wallet holds 1.8 day(s) of payouts (42,630 vs 23,616 XAF/day)
+🟠 Still open (90h): 2 refund(s) unclaimed: MMM-2026-418934, MMM-2026-418911
+[peexit] /disbursement/me → HTTP 500; balance is UNKNOWN, not zero
+[treasury] pawapay: out of rotation (supports no corridor) — balance not counted
+```
+
+One payout rail, nearly empty, with a balance endpoint returning 500 and no failover
+(PawaPay's Cameroon corridor is not activated — deliberate, and correct). That is the
+operational backdrop. The code had four holes underneath it.
+
+### Only a Lightning instruction ever expired
+
+`reconcileOneInbound` returns immediately for anything that is not Lightning. An on-chain
+BTC or USDT/USDC payment the customer simply never paid therefore sat at `AWAITING_INBOUND`
+**for ever**, and since `DISPLAY[state] ?? "Pending"` makes every non-terminal state read
+"Pending", each one was a permanent pending row. That is most of what a long pending list is
+made of, and it is what buries the payments that are actually stuck.
+
+`expireAbandonedDeposits()` now sweeps them. Expiring moves nothing — no funds arrived, no
+ledger entry exists — so it is a triage decision, not a money one. The other half matters
+just as much: the payment stays **matchable to a late deposit** for 14 days
+(`DEPOSIT_RECOVERY_MS`), mirroring how a Lightning invoice already stays recoverable after
+it expires. Without that, expiring would have converted a late-but-legitimate payment into
+an unattributed inbound for someone to trace by hand.
+
+### Nothing reconciled `INBOUND_CONFIRMED` or `FX_LOCKED`
+
+`confirmInbound` books the inbound, re-prices, locks FX and requests the payout in one
+inline flow. A process that stops in the middle — a deploy, a crash, an unhandled throw
+inside the lock — leaves the payment at `INBOUND_CONFIRMED` or `FX_LOCKED` with our money on
+the books and no payout requested. `reconcileStuckPayouts` starts at `PAYOUT_REQUESTED`;
+`retryTransientHolds` only looks at `MANUAL_REVIEW`; the inbound reconcilers only look at
+payments still awaiting one. Nothing would ever have touched it again.
+
+`resumeStalledSettlements()` resumes it on the same path a held payment uses: the inbound is
+already booked, `resume` skips re-booking it, and the payout key is unchanged so a rail that
+already took the request answers "duplicate" rather than paying twice.
+
+### Holds stopped retrying at twenty-four hours
+
+Float-low, rail-down and stale-FX holds retry themselves — but `retryTransientHolds` skipped
+anything held longer than 24 h as "a person's problem (paged)". These causes are all outside
+the payment and can clear at any hour: an operator topping up the aggregator wallet on day
+two expects the queue to drain, and it did not. Retries now continue for a week, hourly after
+the first day. With the production float below its floor, this one was live.
+
+### "Pending" meant four different things
+
+One word covered: the customer never paid (none of our money), the money is in and
+undelivered (our liability, clock running), the money is owed back, and a person has to
+decide. New Super-Admin read-only `GET /admin/payments/pending-audit` and a **"What
+'Pending' is made of"** card in Admin → Reports split them with the blocking reason for each,
+and lead with the only figure that is a liability — `our_money_xaf`. Closed outcomes
+(delivered / failed / refunded) are reported alongside, so "which failed" is answerable in
+the same place.
+
+Covered by 22 assertions in the new `server/test/pending-audit.test.ts`, including that
+expiring books nothing, that a late deposit still settles its own payment, and that a
+two-day-old float hold drains once the cause clears.

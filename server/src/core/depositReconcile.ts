@@ -28,6 +28,7 @@ import { listUnattributed } from "./unattributed.js";
 import { erc20TransfersInTx } from "./erc20.js";
 import { btcOutputsInTx } from "./bitcoinTx.js";
 import type { DepositAsset, RailDeposit } from "../adapters/types.js";
+import { DEPOSIT_RECOVERY_MS } from "./stateMachine.js";
 
 /** @deprecated name kept for older call sites */
 export const reconcileStablecoinDeposits = (): Promise<void> => reconcileDeposits();
@@ -39,8 +40,21 @@ let inflight: Promise<void> | null = null;
 
 const isDepositMethod = (p: Payment): boolean => p.payInstruction.method === "USDT" || p.payInstruction.method === "USDC" || p.payInstruction.method === "ONCHAIN";
 const methodOf = (a: DepositAsset): Payment["payInstruction"]["method"] => (a === "BTC" ? "ONCHAIN" : a);
-const openForDeposit = (p: Payment): boolean =>
-  (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED") && isDepositMethod(p);
+/** Can a deposit still be matched to this payment?
+ *
+ *  Awaiting or detected, obviously. But ALSO a payment we expired for not being paid: an
+ *  address stays spendable long after we stop showing it, and a customer who pays a day
+ *  late must still have their money land on their own payment instead of arriving as an
+ *  unattributed inbound for someone to trace by hand. The window mirrors the one Lightning
+ *  already uses to recover a wrongly-expired invoice; past it, a late deposit is genuinely
+ *  unattributed and is recorded as such. */
+const openForDeposit = (p: Payment): boolean => {
+  if (!isDepositMethod(p)) return false;
+  if (p.state === "AWAITING_INBOUND" || p.state === "INBOUND_DETECTED") return true;
+  if (p.state !== "FAILED") return false;
+  const expired = [...p.events].reverse().find((e) => e.state === "FAILED" && /expired — not paid/.test(e.note ?? ""));
+  return !!expired && Date.now() - Date.parse(expired.at) < DEPOSIT_RECOVERY_MS;
+};
 
 /** Who did this deposit's chain transaction pay? ERC-20 transfers for stablecoins,
  *  outputs for BTC — one shape: (to, asset, amount). null = chain not readable yet. */

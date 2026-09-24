@@ -2466,6 +2466,80 @@ api.get("/admin/payments/unsettled", async (_req, res) => {
   res.json({ count: rows.length, xaf: rows.reduce((s, r) => s + r.xaf, 0), rows });
 });
 
+/* ---------- WHAT "PENDING" ACTUALLY MEANS ----------
+   Every non-terminal state renders as "Pending" (DISPLAY[state] ?? "Pending"), so one word
+   covers four situations that could not be more different:
+
+     • the customer never paid            — no money of ours is involved at all
+     • the money is in, not delivered     — our liability, and the clock is running
+     • the money is in, owed back         — our liability, waiting on a refund or the sender
+     • a person has to decide             — held for review
+
+   A long "pending" list is mostly the first kind, which is harmless, and that is exactly
+   what hides the second kind. This splits them, with the blocking reason for each, so the
+   question "why do we have so many pending?" has an answer instead of a count. Read-only. */
+api.get("/admin/payments/pending-audit", async (_req, res) => {
+  const now = Date.now();
+  const all = await store().listPayments();
+  const open = all.filter((p) => !["DELIVERED", "PAYOUT_CONFIRMED", "REFUNDED", "FAILED"].includes(p.state));
+  const bookedIn = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED");
+
+  const rows = open.map((p) => {
+    const last = p.events.at(-1);
+    const expiresAt = Date.parse(p.payInstruction?.expiresAt ?? "");
+    const past = Number.isFinite(expiresAt) && expiresAt < now;
+    const sinceIn = p.events.find((e) => e.state === "INBOUND_CONFIRMED")?.at ?? p.createdAt;
+    const bucket =
+      !bookedIn(p) ? "unpaid"
+      : p.state === "REFUND_PENDING" ? "owed_back"
+      : p.state === "MANUAL_REVIEW" ? "needs_person"
+      : "unsettled";
+    // WHY it is where it is, in the terms an operator can act on.
+    const why =
+      bucket === "unpaid"
+        ? (p.state === "INBOUND_DETECTED" ? "seen on-chain, not yet confirmed"
+          : past ? "the instruction has expired and was never paid" : "waiting for the customer to pay")
+      : bucket === "owed_back"
+        ? (p.refundNeedsDestination ? "the sender must supply a refund destination" : "a refund is in flight")
+      : bucket === "needs_person" ? (last?.note ?? "held for review")
+      : (last?.note ?? `no payout requested yet (${p.state})`);
+    return {
+      id: p.id, ref: p.ref, bucket, state: p.state, method: p.method, xaf: p.xaf,
+      createdAt: p.createdAt, updatedAt: p.updatedAt,
+      ageMin: Math.round((now - Date.parse(bucket === "unpaid" ? p.createdAt : sinceIn)) / 60_000),
+      instructionExpired: bucket === "unpaid" ? past : undefined,
+      aggregator: p.aggregator ?? null, attempts: p.payoutAttempts ?? 0,
+      recipient: `${p.recipient.provider} ···${p.recipient.phone.replace(/\D/g, "").slice(-4)}`,
+      why,
+    };
+  });
+
+  const of = (b: string) => rows.filter((r) => r.bucket === b);
+  const sum = (rs: typeof rows) => rs.reduce((n, r) => n + r.xaf, 0);
+  const unpaid = of("unpaid");
+  const liability = [...of("unsettled"), ...of("owed_back"), ...of("needs_person")];
+  res.json({
+    generatedAt: new Date(now).toISOString(),
+    /* The headline: of everything showing "Pending", how much is actually OUR money. */
+    summary: {
+      pending_total: rows.length,
+      unpaid: { count: unpaid.length, xaf: sum(unpaid), expired: unpaid.filter((r) => r.instructionExpired).length },
+      unsettled: { count: of("unsettled").length, xaf: sum(of("unsettled")) },
+      owed_back: { count: of("owed_back").length, xaf: sum(of("owed_back")) },
+      needs_person: { count: of("needs_person").length, xaf: sum(of("needs_person")) },
+      our_money_xaf: sum(liability),
+      oldest_liability_min: liability.reduce((m, r) => Math.max(m, r.ageMin), 0),
+    },
+    /* Terminal outcomes over the same set, so "which failed" is answerable here too. */
+    closed: {
+      delivered: all.filter((p) => p.state === "DELIVERED" || p.state === "PAYOUT_CONFIRMED").length,
+      failed: all.filter((p) => p.state === "FAILED").length,
+      refunded: all.filter((p) => p.state === "REFUNDED").length,
+    },
+    rows: rows.sort((a, b) => (a.bucket === b.bucket ? b.ageMin - a.ageMin : a.bucket === "unpaid" ? 1 : -1)).slice(0, 500),
+  });
+});
+
 /* ---------- Universal Payment Identity — admin visibility (works with the flags off) ---------- */
 api.get("/admin/upi", async (_req, res) => {
   res.json({ flags: upiFlags(), mode: routingMode(), settlementModel: SETTLEMENT_MODEL, rule: routingRule(), canary: { ...canaryConfig(), executed24hXaf: executedVolume24h() }, providers: await capabilityRegistry(), assets: assets(), networks: Object.values(NETWORKS), pools: await pools(), shadow: shadowSummary(), metrics: upiMetrics(), intents: (await Promise.all(allIntents(30).map(syncIntent))).map((i) => ({ id: i.id, state: i.state, identity: i.recipient.identity, amount: i.amount, source: i.source, route: i.route ? `${i.route.type}:${i.route.sourceRail}` : null, refs: i.refs, at: i.createdAt })), chain: chainTxs(30) });

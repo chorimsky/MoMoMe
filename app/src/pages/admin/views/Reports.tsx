@@ -79,6 +79,7 @@ export function ReportsView() {
   return (
     <div>
       <SectionTitle t="Reports" s="Gross revenue (fees + FX spread), volume and where payments stop — by pay-in method and by operator." />
+      <PendingBreakdown />
       <UnsettledCard />
       <div className="mm-toolbar" style={{ marginBottom: 14 }}>
         <SegToggle options={PERIODS} value={period} onChange={setPeriod} />
@@ -238,6 +239,59 @@ export function ReportsView() {
 const ACTION_LABEL: Record<UnsettledRow["action"], [string, "warn" | "bad" | "ink" | "recv" | "lightning"]> = {
   awaiting_rail: ["awaiting the rail", "warn"], awaiting_sender: ["awaiting the sender", "warn"], refund_in_flight: ["refund in flight", "lightning"], retry: ["retry now", "bad"], review: ["needs a decision", "bad"],
 };
+/** What the word "Pending" is hiding.
+ *
+ *  Every non-terminal state renders as "Pending", so a long pending list is mostly quotes
+ *  nobody ever paid — harmless, and exactly what buries the ones where our money is sitting
+ *  still. This splits the four cases and leads with the only number that is a liability. */
+function PendingBreakdown() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.adminPendingAudit>> | null>(null);
+  const [open, setOpen] = useState<"unsettled" | "owed_back" | "needs_person" | "unpaid" | null>(null);
+  useEffect(() => { const load = () => api.adminPendingAudit().then(setD).catch(() => {}); void load(); const t = setInterval(load, 60_000); return () => clearInterval(t); }, []);
+  if (!d) return null;
+  const s = d.summary;
+  const B: Array<[typeof open & string, string, { count: number; xaf: number }, string, "recv" | "bad" | "warn" | "ink"]> = [
+    ["unsettled", "Paid, not delivered", s.unsettled, "Our money. The recipient has not been paid and no refund has gone back.", s.unsettled.count ? "bad" : "recv"],
+    ["owed_back", "Owed back to the sender", s.owed_back, "A refund is in flight, or the sender still has to say where to send it.", s.owed_back.count ? "bad" : "recv"],
+    ["needs_person", "Held for a decision", s.needs_person, "Compliance, an approval threshold, or something the engine would not decide alone.", s.needs_person.count ? "warn" : "recv"],
+    ["unpaid", "Never paid", s.unpaid, "The customer was quoted and did not pay. None of our money is involved.", "ink"],
+  ];
+  return (
+    <Card title="What “Pending” is made of" sub={`${s.pending_total} payment${s.pending_total === 1 ? "" : "s"} are not finished. Only some of that is money we hold.`}
+      action={<Pill status={s.our_money_xaf === 0 ? "none of it is ours" : `${fmt(s.our_money_xaf)} XAF is ours`} tone={s.our_money_xaf === 0 ? "recv" : "bad"} />} style={{ marginBottom: 16 }}>
+      <div style={{ display: "grid", gap: 8 }}>
+        {B.map(([k, label, v, hint, tone]) => (
+          <div key={k}>
+            <button type="button" onClick={() => setOpen(open === k ? null : k)}
+              style={{ width: "100%", textAlign: "left", background: "none", border: 0, cursor: "pointer", display: "grid", gridTemplateColumns: "1.3fr auto auto", gap: 10, alignItems: "baseline", padding: "8px 0", borderBottom: "1px solid var(--line-2)", font: "inherit", color: "inherit" }}>
+              <span><b style={{ fontSize: 13.5 }}>{label}</b><span style={{ display: "block", fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.4 }}>{hint}{k === "unpaid" && v.count > 0 ? ` ${(s.unpaid.expired ?? 0)} of them have expired.` : ""}</span></span>
+              <span className="num" style={{ fontSize: 13 }}>{fmt(v.xaf)} XAF</span>
+              <Pill status={String(v.count)} tone={tone} />
+            </button>
+            {open === k && (
+              <div style={{ padding: "6px 0 10px" }}>
+                {d.rows.filter((r) => r.bucket === k).slice(0, 25).map((r) => (
+                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 0.5fr 0.5fr 2fr", gap: 10, fontSize: 12, padding: "4px 0", color: "var(--ink-2)" }}>
+                    <span className="mono">{r.ref}</span>
+                    <span className="num">{fmt(r.xaf)}</span>
+                    <span>{r.ageMin < 60 ? `${r.ageMin} min` : `${Math.round(r.ageMin / 60)} h`}</span>
+                    <span>{r.why}</span>
+                  </div>
+                ))}
+                {!d.rows.some((r) => r.bucket === k) && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>None.</div>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 10, lineHeight: 1.5 }}>
+        Closed so far: {fmt(d.closed.delivered)} delivered · {fmt(d.closed.failed)} failed · {fmt(d.closed.refunded)} refunded.
+        {s.oldest_liability_min > 0 && ` The oldest thing we hold has been held ${s.oldest_liability_min < 60 ? `${s.oldest_liability_min} min` : `${Math.round(s.oldest_liability_min / 60)} h`}.`}
+      </div>
+    </Card>
+  );
+}
+
 function UnsettledCard() {
   const [d, setD] = useState<{ count: number; xaf: number; rows: UnsettledRow[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

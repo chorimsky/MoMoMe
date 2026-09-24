@@ -514,6 +514,12 @@ export const api = {
   adminPayments: () => req<Payment[]>("/admin/payments"),
   /** Debited but not delivered — the list that must be empty. */
   adminUnsettled: () => req<{ count: number; xaf: number; rows: UnsettledRow[] }>("/admin/payments/unsettled"),
+  adminPendingAudit: () => req<{
+    generatedAt: string;
+    summary: { pending_total: number; unpaid: { count: number; xaf: number; expired: number }; unsettled: { count: number; xaf: number }; owed_back: { count: number; xaf: number }; needs_person: { count: number; xaf: number }; our_money_xaf: number; oldest_liability_min: number };
+    closed: { delivered: number; failed: number; refunded: number };
+    rows: Array<{ id: string; ref: string; bucket: "unpaid" | "unsettled" | "owed_back" | "needs_person"; state: string; method: string; xaf: number; ageMin: number; instructionExpired?: boolean; recipient: string; why: string }>;
+  }>("/admin/payments/pending-audit"),
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
   adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),

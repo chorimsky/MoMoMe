@@ -5,7 +5,7 @@
    Each tick is idempotent + self-contained (safe to run from either, at any cadence).
    ============================================================ */
 import { store } from "./db/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts, retryTransientHolds } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts, retryTransientHolds, resumeStalledSettlements, expireAbandonedDeposits } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { reconcileDeposits } from "./core/depositReconcile.js";
 import { reconciliationSweep } from "./core/interop/reconcile.js";
@@ -98,6 +98,14 @@ async function reconcileOnce(): Promise<void> {
   await reconcileTransfers().catch((e) => console.error("momo transfers", e));
   if (ibexConfigured()) await reconcileStuckRefunds().catch((e) => console.error("reconcile refunds", e));
   await reconcileFailedPayouts().catch((e) => console.error("reconcile failed-payouts", e));
+  // Money in, nothing driving it: confirmInbound books, re-prices, locks FX and requests the
+  // payout inline, so a process that stops mid-flow leaves a payment at INBOUND_CONFIRMED or
+  // FX_LOCKED that NOTHING else looks at. Resume it on the same path a held payment uses.
+  await resumeStalledSettlements().then((n) => { if (n) console.warn(`[settle] ${n} payment(s) resumed after being left mid-settlement`); }).catch((e) => console.error("resume stalled", e));
+  // Abandoned deposit instructions: only Lightning ever expired, so unpaid on-chain and
+  // stablecoin payments accumulated as "Pending" for ever. Expiring moves no money and the
+  // payment stays matchable to a late deposit.
+  await expireAbandonedDeposits().then((n) => { if (n) console.log(`[settle] ${n} unpaid deposit instruction(s) expired`); }).catch((e) => console.error("expire deposits", e));
   // A hold caused by float / a rail being down clears itself: retry, do not wait for a person.
   await retryTransientHolds().then((n) => { if (n) console.log(`[settle] ${n} held payment(s) retried after the hold cleared`); }).catch((e) => console.error("retry holds", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

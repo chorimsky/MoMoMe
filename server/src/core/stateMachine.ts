@@ -491,17 +491,63 @@ export async function retryDeliveryForSender(pIn: Payment): Promise<{ ok: boolea
  *  Uses the operator retry (every money guard re-applied); throttled per payment. Holds
  *  that need a human (compliance, approval threshold, low-trust, duplicate) are left alone. */
 const TRANSIENT_HOLD = /insufficient XAF float|no funded LIVE payout rail|no payout aggregator with sufficient balance|rail blocked|rejected the disbursement|FX feed not fresh/i;
-export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000, maxAgeMs = 24 * 3_600_000): Promise<number> {
+export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000, maxAgeMs = 7 * 24 * 3_600_000): Promise<number> {
   let n = 0;
   for (const p of await store().listPayments()) {
     if (p.state !== "MANUAL_REVIEW") continue;
     const last = [...p.events].reverse().find((e) => e.state === "MANUAL_REVIEW");
     if (!last || !TRANSIENT_HOLD.test(last.note ?? "")) continue;
-    if (now - Date.parse(last.at) > maxAgeMs) continue;               // old enough to be a person's problem (paged)
-    if (now - Date.parse(p.updatedAt) < everyMs) continue;             // throttle
+    const heldFor = now - Date.parse(last.at);
+    if (heldFor > maxAgeMs) continue;                                  // genuinely a person's problem now
+    // These holds are all "the cause is outside this payment": an empty float, a rail that
+    // was down, a stale FX feed. The cause can clear at ANY hour — an operator topping up
+    // the aggregator wallet on day two expects the queue to drain, and it used to not:
+    // retries stopped dead at 24 h, so a payment held while the float was low stayed held
+    // after the float came back, with nothing left to move it. Keep trying for a week,
+    // slowly after the first day, so a late top-up still drains the queue on its own.
+    const interval = heldFor > 24 * 3_600_000 ? 60 * 60_000 : everyMs;
+    if (now - Date.parse(p.updatedAt) < interval) continue;            // throttle
     const r = /FX feed not fresh/i.test(last.note ?? "") ? await resumeHeldRepricing(p).catch(() => null) : await adminRetryWhy(p, "auto (hold cleared)").catch(() => null);
     if (r?.ok) n++;
     else { p.updatedAt = new Date(now).toISOString(); await store().putPayment(p); } // wait another interval without a new event
+  }
+  return n;
+}
+
+/** THE MONEY IS IN AND NOTHING IS DRIVING IT.
+ *
+ *  confirmInbound books the inbound, re-prices, locks FX and requests the payout in ONE
+ *  inline flow. If the process stops in the middle of that — a deploy, a crash, an
+ *  unhandled throw inside the lock — the payment is left at INBOUND_CONFIRMED or FX_LOCKED
+ *  with our money on the books and no payout requested. Nothing reconciled those two
+ *  states: reconcileStuckPayouts starts at PAYOUT_REQUESTED, retryTransientHolds only looks
+ *  at MANUAL_REVIEW, and the inbound reconcilers only look at payments still awaiting one.
+ *  The payment simply read "Pending" for ever.
+ *
+ *  Resuming is safe because it is the SAME resume path a held payment uses: the inbound is
+ *  already booked, `resume` skips re-booking it, and the payout key is unchanged so a rail
+ *  that already took the request answers "duplicate" rather than paying twice. */
+export async function resumeStalledSettlements(now = Date.now(), idleMs = 5 * 60_000, maxAgeMs = 14 * 24 * 3_600_000): Promise<number> {
+  let n = 0;
+  for (const p of await store().listPayments()) {
+    if (p.state !== "INBOUND_CONFIRMED" && p.state !== "FX_LOCKED") continue;
+    if (now - Date.parse(p.updatedAt) < idleMs) continue;          // give the inline flow time to finish
+    if (now - Date.parse(p.createdAt) > maxAgeMs) continue;        // ancient: a person's problem, and it is paged
+    if (!inboundBooked(p)) continue;                               // nothing arrived — not this function's business
+    const booked = (await store().entriesFor(p.id)).find((e) => e.account === "customer_wallet" && e.direction === "credit");
+    if (!booked) continue;
+    try {
+      await ensureRatesFresh().catch(() => {});
+      await store().lockPayment(p.id, async () => {
+        const fresh = await store().getPayment(p.id);
+        // Re-check inside the lock: the inline flow may have finished while we waited.
+        if (!fresh || (fresh.state !== "INBOUND_CONFIRMED" && fresh.state !== "FX_LOCKED")) return;
+        console.warn(`[settle] ${fresh.ref} was left at ${fresh.state} with the money in — resuming`);
+        await confirmInboundLocked(fresh.id, booked.amount, undefined, undefined, undefined, undefined, true);
+      });
+      const after = await store().getPayment(p.id);
+      if (after && after.state !== "INBOUND_CONFIRMED" && after.state !== "FX_LOCKED") n++;
+    } catch (e) { console.error("resume stalled settlement", p.id, e instanceof Error ? e.message : e); }
   }
   return n;
 }
@@ -1001,6 +1047,43 @@ export async function reconcileOneInbound(p: Payment): Promise<void> {
       });
     }
   } catch (e) { console.error("reconcile inbound", p.id, e); }
+}
+
+/** How long after its instruction expires a deposit-method payment keeps being matched.
+ *  An address stays spendable long after we stop showing it, so a late deposit must still
+ *  land on ITS payment rather than becoming an unattributed inbound someone has to trace. */
+export const DEPOSIT_RECOVERY_MS = 14 * 24 * 3_600_000;
+
+/** EXPIRE AN ABANDONED DEPOSIT INSTRUCTION.
+ *
+ *  reconcileOneInbound returns immediately for anything that is not Lightning, so only a
+ *  Lightning invoice ever expired. An on-chain BTC or USDT/USDC payment the customer simply
+ *  never paid sat at AWAITING_INBOUND for ever, displaying as "Pending" — which is most of
+ *  what a long "pending" list is made of, and it hid the payments that are genuinely stuck
+ *  among quotes nobody ever acted on.
+ *
+ *  Expiring one moves nothing: no funds arrived, no ledger entry exists. It is a display
+ *  and triage decision. The payment stays RECOVERABLE — depositReconcile still matches a
+ *  late deposit to it for DEPOSIT_RECOVERY_MS — exactly as a Lightning invoice stays
+ *  recoverable after it expires. */
+export async function expireAbandonedDeposits(now = Date.now(), graceMs = 30 * 60_000): Promise<number> {
+  let n = 0;
+  for (const p of await store().listPayments()) {
+    if (p.state !== "AWAITING_INBOUND") continue;
+    const m = p.payInstruction.method;
+    if (m !== "ONCHAIN" && m !== "USDT" && m !== "USDC") continue;   // Lightning has its own path
+    const expiresAt = Date.parse(p.payInstruction.expiresAt ?? "");
+    if (!Number.isFinite(expiresAt) || expiresAt > now - graceMs) continue;
+    // Never expire something that has already been seen on-chain: that is money in flight.
+    if (p.events.some((e) => e.state === "INBOUND_DETECTED" || e.state === "INBOUND_CONFIRMED")) continue;
+    await store().lockPayment(p.id, async () => {
+      const fresh = await store().getPayment(p.id);
+      if (!fresh || fresh.state !== "AWAITING_INBOUND") return;      // it was paid while we looked
+      await transition(fresh, "FAILED", "deposit instruction expired — not paid");
+      n++;
+    });
+  }
+  return n;
 }
 
 export async function reconcileStuckInbounds(maxAgeMs = 90_000): Promise<void> {

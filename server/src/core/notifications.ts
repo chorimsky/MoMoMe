@@ -23,7 +23,8 @@ import type {
 import { COUNTRIES } from "../../../shared/domain.js";
 import { channelsFor, smsChannel } from "../adapters/notify.js";
 import { sendAuthCode } from "../adapters/whatsapp.js";
-import { config, whatsappConfigured } from "../config.js";
+import { config, whatsappConfigured, nexahConfigured } from "../config.js";
+import * as nexah from "../adapters/nexah.js";
 import { pushTokenFor, pushTokenCount } from "./pushTokens.js";
 import { getSettings, renderTemplate } from "./settings.js";
 import { accountOf } from "./account.js";
@@ -279,9 +280,20 @@ export async function notifyTestReport(r: TestReport, failedTitles: string[]): P
 }
 
 /** Can we actually deliver an SMS right now? One source of truth, so a flow that depends on
- *  a code arriving cannot be enabled by a flag while the channel behind it is unwired. */
+ *  a code arriving cannot be enabled by a flag while the channel behind it is unwired.
+ *
+ *  Two senders can carry an SMS: NEXAH, which is wired for VERIFICATION only and reports
+ *  whether the handset actually received the code, and the generic SMS_WEBHOOK_URL gateway,
+ *  which carries everything else. Either one being up means a code can go out. */
 export function canSendSms(): boolean {
-  return smsChannel.configured() && getSettings().channels.SMS;
+  return (nexahConfigured() || smsChannel.configured()) && getSettings().channels.SMS;
+}
+/** Which sender a verification code would use right now. NEXAH first: it is the only one
+ *  that comes back and says whether the code arrived. */
+export function otpSmsSender(): "nexah" | "gateway" | null {
+  if (!getSettings().channels.SMS) return null;
+  if (nexahConfigured()) return "nexah";
+  return smsChannel.configured() ? "gateway" : null;
 }
 
 export type OtpChannel = "whatsapp" | "sms";
@@ -313,6 +325,21 @@ export function canSendOtp(): boolean {
  *  WhatsApp channel as a "manual_review" notice — a template with amount/reference slots
  *  and no place for a code — so a merchant on WhatsApp got a blank review notice, and the
  *  SMS was then skipped as "already delivered over WhatsApp". */
+/** The SMS leg of a one-time code.
+ *
+ *  NEXAH when it is configured — it hands back a message id, which is what a delivery
+ *  receipt later refers to, so the outbox can answer "did the code reach the handset?"
+ *  rather than only "did a gateway accept it?". Otherwise the generic gateway, unchanged.
+ *  The body is never recorded anywhere: it contains the code. */
+async function sendOtpOverSms(to: string, code: string, purpose: string): Promise<{ ok: boolean; detail?: string; id?: string }> {
+  const body = `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.`;
+  if (nexahConfigured()) {
+    const r = await nexah.sendVerificationSms(to, body);
+    return { ok: r.ok, detail: r.detail, ...(r.messageId ? { id: r.messageId } : {}) };
+  }
+  return smsChannel.send({ audience: "recipient", kind: "one_time_code", to, body });
+}
+
 export async function sendOtp(
   to: string,
   code: string,
@@ -329,7 +356,7 @@ export async function sendOtp(
     try {
       r = ch === "whatsapp"
         ? await sendAuthCode(to, code, opts.lang === "fr" && config.whatsapp.templateLangFr ? config.whatsapp.templateLangFr : config.whatsapp.templateLang, purpose)
-        : await smsChannel.send({ audience: "recipient", kind: "one_time_code", to, body: `${code} is your MoMo>Me code to ${purpose}. It expires in 5 minutes. Never share it.` });
+        : await sendOtpOverSms(to, code, purpose);
     } catch (e) {
       r = { ok: false, detail: e instanceof Error ? e.message : "send threw" };
     }
@@ -355,16 +382,42 @@ export function listNotifications(limit = 100): NotificationRecord[] {
 }
 
 /** What an operator needs to see at a glance: is anything silently going nowhere? */
+/** Last credit reading, refreshed out of band so the health view never waits on NEXAH. */
+let lastCredit: nexah.Credit | null = null;
+export async function refreshSmsCredit(force = false): Promise<nexah.Credit | null> {
+  lastCredit = await nexah.credit(force);
+  return lastCredit;
+}
+export function _setSmsCredit(c: nexah.Credit | null): void { lastCredit = c; }
+
 export function notificationHealth(): {
   total: number; sent: number; failed: number; skipped: number;
   channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: NotificationAudience[]; devices?: number }>;
   /** Where verification codes can go right now. Merchant verification, "own your number"
-   *  and account claim all dead-end when this is all false — the console must say so. */
-  otp: Record<OtpChannel, boolean> & { whatsappTemplate: boolean };
+   *  and account claim all dead-end when this is all false — the console must say so.
+   *  `smsSender` names WHICH sender would carry one, and `smsCredit` is what NEXAH says is
+   *  left: running out does not degrade gracefully, it stops every code at once. A null
+   *  credit is UNKNOWN (unconfigured, or NEXAH did not answer), never zero. */
+  otp: Record<OtpChannel, boolean> & {
+    whatsappTemplate: boolean;
+    smsSender: "nexah" | "gateway" | null;
+    smsCredit: number | null;
+    smsCreditLow: boolean;
+    smsCreditFloor: number;
+    smsCreditExpires?: string;
+  };
 } {
   const all: NotificationAudience[] = ["recipient", "sender", "operator"];
   return {
-    otp: { ...otpChannels(), whatsappTemplate: !!config.whatsapp.templateOtp },
+    otp: {
+      ...otpChannels(),
+      whatsappTemplate: !!config.whatsapp.templateOtp,
+      smsSender: otpSmsSender(),
+      smsCredit: lastCredit?.credit ?? null,
+      smsCreditLow: lastCredit != null && lastCredit.credit <= nexah.lowCreditFloor(),
+      smsCreditFloor: nexah.lowCreditFloor(),
+      ...(lastCredit?.balanceExpires ? { smsCreditExpires: lastCredit.balanceExpires } : {}),
+    },
     total: outbox.length,
     sent: outbox.filter((r) => r.status === "sent").length,
     failed: outbox.filter((r) => r.status === "failed").length,

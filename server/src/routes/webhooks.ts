@@ -7,6 +7,7 @@ import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
 import { collectorByName } from "../adapters/collect.js";
+import { parseDlr as parseNexahDlr, verifyDlrSecret as nexahVerifyDlrSecret } from "../adapters/nexah.js";
 import { settleCollectionNow } from "../core/momoTransfer.js";
 import { hint as networkHint } from "../core/network/monitor.js";
 import { store } from "../db/store.js";
@@ -111,6 +112,36 @@ webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => {
     if (s === "COMPLETED" || s === "FAILED") markProcessed(rec.event.id, null, `collection ${s}`);
     // PENDING or unknown: the rail has not decided, or the key is not ours. Reconcile owns it.
   })());
+});
+
+/* ---------- NEXAH delivery receipts (verification SMS) ----------
+   NEXAH posts a batch of receipts for messages WE sent. Nothing signs them, so two things
+   stand in their way: the secret in the path, and the fact that a receipt naming an id we
+   never issued changes nothing — `updateDelivery` matches on our own outbox. A forged
+   receipt can at worst claim delivery for a code we really did send, which tells an
+   attacker nothing they did not already have to know to forge it.
+
+   NEXAH expects `status: 1` back on success, per §2.3.2. */
+webhooks.post("/sms/nexah/:secret", express.raw({ type: "*/*" }), (req, res) => {
+  if (!nexahVerifyDlrSecret(req.params.secret)) {
+    recordEvent({ provider: "sms:nexah", eventType: "callback.rejected", rawBody: "", status: "rejected", detail: "bad secret" });
+    return res.status(404).json({ status: 0 });
+  }
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  const receipts = parseNexahDlr(raw);
+  if (!receipts.length) {
+    // Either not JSON, or no receipt in a shape the spec documents. Neither is a 500.
+    recordEvent({ provider: "sms:nexah", eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "no recognised dlrlist entry" });
+    return res.status(400).json({ status: 0 });
+  }
+  let applied = 0;
+  for (const r of receipts) {
+    // Only a DELIVRD is delivery. An UNDELIV is a real failure and must show as one: a
+    // verification flow that looks fine while the code never lands is the whole problem.
+    if (updateDelivery(r.messageId, r.status === "delivered" ? "delivered" : "failed", r.status === "failed" ? "the operator could not deliver this SMS" : undefined)) applied++;
+  }
+  recordEvent({ provider: "sms:nexah", eventType: "dlr.received", rawBody: raw, status: "verified", detail: `${applied} of ${receipts.length} matched a message we sent` });
+  res.json({ status: 1 });
 });
 
 // Peex intelligence-layer webhook — signature-verified, logged. Registered

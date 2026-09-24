@@ -10,7 +10,7 @@ import { useAdmin } from "../context.js";
 
 type Health = { total: number; sent: number; failed: number; skipped: number;
   channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }>;
-  otp?: { whatsapp: boolean; sms: boolean; whatsappTemplate: boolean } };
+  otp?: { whatsapp: boolean; sms: boolean; whatsappTemplate: boolean; smsSender?: "nexah" | "gateway" | null; smsCredit?: number | null; smsCreditLow?: boolean; smsCreditFloor?: number; smsCreditExpires?: string } };
 
 export function NotificationsView() {
   const { notifications, dismiss } = useAdmin();
@@ -100,7 +100,28 @@ export function NotificationsView() {
                 {health.otp.whatsapp && health.otp.sms ? "WhatsApp first, SMS fallback"
                   : health.otp.whatsapp ? "WhatsApp only"
                   : health.otp.sms ? `SMS only${!health.otp.whatsappTemplate ? " — set WHATSAPP_TEMPLATE_OTP to send codes over WhatsApp" : ""}`
-                  : "nowhere — nobody can verify a number. Set WHATSAPP_TEMPLATE_OTP (an approved authentication template) or SMS_WEBHOOK_URL."}
+                  : "nowhere — nobody can verify a number. Set WHATSAPP_TEMPLATE_OTP (an approved authentication template), or NEXAH_USER / NEXAH_PASSWORD / NEXAH_SENDER_ID, or SMS_WEBHOOK_URL."}
+                {health.otp.sms && health.otp.smsSender && (
+                  <span style={{ display: "block", color: "var(--ink-3)", fontSize: 11.5, marginTop: 2 }}>
+                    over {health.otp.smsSender === "nexah" ? "NEXAH — delivery is confirmed back per message" : "the generic gateway — no delivery confirmation"}
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+          {/* SMS credit. Running out stops every code at once, so it is worth a line of its
+              own — and "—" here means the balance could not be read, which is not zero. */}
+          {health.otp?.smsSender === "nexah" && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13 }}>
+              <div>
+                <strong>SMS CREDIT</strong>
+                <span style={{ color: "var(--ink-3)", marginLeft: 8, fontSize: 12 }}>codes stop the moment this runs out</span>
+              </div>
+              <span style={{ fontSize: 12.5, textAlign: "right", color: health.otp.smsCredit == null ? "var(--warn-ink)" : health.otp.smsCreditLow ? "var(--bad)" : "inherit" }}>
+                {health.otp.smsCredit == null
+                  ? "unknown — NEXAH did not answer. Unknown, not zero."
+                  : `${health.otp.smsCredit.toLocaleString("en")} left${health.otp.smsCreditLow ? ` — below the ${(health.otp.smsCreditFloor ?? 0).toLocaleString("en")} floor, top up` : ""}`}
+                {health.otp.smsCreditExpires && <span style={{ display: "block", color: "var(--ink-3)", fontSize: 11.5, marginTop: 2 }}>expires {health.otp.smsCreditExpires}</span>}
               </span>
             </div>
           )}

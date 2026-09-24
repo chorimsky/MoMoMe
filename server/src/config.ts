@@ -84,6 +84,20 @@ export const config = {
   webOrigin: env("WEB_ORIGIN", "https://www.momome.xyz").replace(/\/$/, ""), // www: the host the app links and share previews are served on (the apex redirects)
   /** WhatsApp Business (Cloud API). Text + voice-note handling on our number, and a
    *  notification channel. Unset → the channel reports unconfigured and the webhook 404s. */
+  /* NEXAH BulkSMS — PHONE NUMBER VERIFICATION only (adapters/nexah.ts). Deliberately not a
+     general notification channel: the generic SMS_WEBHOOK_URL gateway keeps that job. */
+  nexah: {
+    apiUrl: env("NEXAH_API_URL", "https://smsvas.com/bulk/public/index.php/api/v1"),
+    user: secret("NEXAH_USER"),
+    password: secret("NEXAH_PASSWORD"),
+    /** Registered and approved with the operators; an unapproved one is refused outright. */
+    senderId: env("NEXAH_SENDER_ID"),
+    /** Dialling code prepended to a 9-digit local number. */
+    dial: env("NEXAH_DIAL", "237"),
+    /** Path segment on /webhooks/sms/nexah/:secret. NEXAH does not sign its delivery
+     *  receipts, so an unguessable URL is what keeps strangers out of the outbox. */
+    dlrSecret: secret("NEXAH_DLR_SECRET"),
+  },
   whatsapp: {
     accessToken: secret("WHATSAPP_ACCESS_TOKEN"),
     phoneNumberId: env("WHATSAPP_PHONE_NUMBER_ID"),
@@ -335,6 +349,9 @@ export function aggregatorLive(name: string): boolean {
 }
 /** Any rail that moves REAL funds is active → simulation must be off. A production
  *  IBEX inbound counts too — a real inbound settling would drive a real payout. */
+/** Credentials AND a sender id: NEXAH refuses a send without an approved senderid, so a
+ *  deployment missing it can announce itself as unconfigured rather than fail per message. */
+export function nexahConfigured(): boolean { return !!(config.nexah.user && config.nexah.password && config.nexah.senderId); }
 export function whatsappConfigured(): boolean { return !!(config.whatsapp.accessToken && config.whatsapp.phoneNumberId); }
 export function phoenixdConfigured(): boolean { return !!(config.phoenixd.url && config.phoenixd.password); }
 /** phoenixd only ever holds real keys; a mainnet node's settled invoice is real sats. */

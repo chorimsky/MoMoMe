@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { runBootChecks, assertStoredAdminCredential } from "./boot.js";
-import { config, ibexConfigured, liveMoney, peexitLive } from "./config.js";
+import { config, ibexConfigured, liveMoney, peexitLive, nexahConfigured } from "./config.js";
+import { refreshSmsCredit } from "./core/notifications.js";
 import { flushAll } from "./core/persist.js";
 import { egressStatus } from "./core/egress.js";
 import { registerAccountWebhook, accountBalances } from "./adapters/ibex.js";
@@ -124,6 +125,14 @@ if ((process.env.RESET_DEMO_TRUST ?? "").trim() === "1") {
 // only; the default `all` is the single-container deployment. See jobs.ts.
 if (runsJobs()) {
   setInterval(() => void reconcileTick(), 30_000).unref();
+  /* SMS credit for verification codes. Running out does not degrade gracefully — every
+     one-time code stops at once, and merchant verification, "own your number" and account
+     claim stop with it — so an operator has to be able to see it coming. Read at boot and
+     every 15 minutes; the reading is cached and a failure leaves it UNKNOWN, not zero. */
+  if (nexahConfigured()) {
+    void refreshSmsCredit(true).catch(() => {});
+    setInterval(() => void refreshSmsCredit(true).catch(() => {}), 15 * 60_000).unref();
+  }
   if (ibexConfigured() || liveMoney()) {
     void fxTick().catch((e) => console.error("fx rates", e)); // prime the cache at boot
     setInterval(() => void fxTick().catch((e) => console.error("fx rates", e)), 30_000).unref();

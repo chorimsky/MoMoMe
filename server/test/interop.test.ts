@@ -64,7 +64,11 @@ async function main() {
 
     // Routing: deterministic, every check recorded.
     r = await j(`/payment-intents/${it.id}/routes`, { method: "POST" });
-    const routes = r.body.routes as Array<{ id: string; method: string; viable: boolean; checks: Array<{ name: string; ok: boolean }>; quote: { recipientAmount: number; totalFee: number; sourceCurrency: string; quoteId: string }; steps: Array<{ role: string; party: string }>; score: { total: number } }>;
+    // Assert the RESPONSE before its shape. Reading `.length` off a missing `routes` threw
+    // an opaque TypeError and took the whole run down with it, hiding what the API actually
+    // said — which, the one time this happened, was a 503 from the route's own stuck-guard.
+    const routes = (r.body.routes ?? []) as Array<{ id: string; method: string; viable: boolean; checks: Array<{ name: string; ok: boolean }>; quote: { recipientAmount: number; totalFee: number; sourceCurrency: string; quoteId: string }; steps: Array<{ role: string; party: string }>; score: { total: number } }>;
+    ok("route discovery answers at all", r.status === 200 && Array.isArray(r.body.routes), `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
     ok("routes are discovered for every pay-in method", routes.length === 4, routes.map((x) => `${x.method}:${x.viable}`).join(" "));
     ok("each route carries its checks, a quote and the parties per step", routes.every((x) => x.checks.length >= 8 && x.steps.length === 3 && x.steps.every((s) => s.party)), String(routes[0]?.checks.map((c) => c.name).join(",")));
     const viable = routes.filter((x) => x.viable);

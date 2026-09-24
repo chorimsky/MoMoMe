@@ -50,6 +50,16 @@ async function main() {
   const untilIntent = async (key: string, id: string, statuses: string[], ms = 12_000) => { const t0 = Date.now(); let cur = (await v1(`/payment-intents/${id}`, { key })).body.data; while (!statuses.includes(cur.status) && Date.now() - t0 < ms) { await settle(150); cur = (await v1(`/payment-intents/${id}`, { key })).body.data; } return cur as J; };
 
   // Two organizations: A (Company A) and B (Company B), each with a sandbox key.
+  /* This suite drives one organization through a long sequence of /v1 calls — far more than
+     sixty in a minute — and the developer plan's 60 rpm is a real limit the API enforces
+     correctly. On a fast machine the run slipped under the window; on a loaded one it did
+     not, and the suite rate-limited ITSELF. Raise the ceiling for the duration rather than
+     pretend the limiter is wrong: what is under test here is Connect, not throttling
+     (api-v1.test.ts covers that). */
+  const { getPlan, upsertPlan } = await import("../src/core/platform/billing.js");
+  const devPlan = getPlan("developer");
+  upsertPlan({ ...devPlan, rateLimitRpm: 100_000, paymentEndpointRpm: 100_000 });
+
   const mk = async (name: string, email: string) => { const su = await dev("/signup", { email, name: `${name} owner`, password: "long-enough-password", organization: name }); const cr = await dev(`/orgs/${su.organization.id}/credentials`, { environment: "test", label: "k" }, su.token); return { orgId: su.organization.id as string, key: cr.secret as string, token: su.token as string }; };
   const A = await mk("Company A", "a@example.com"); const B = await mk("Company B", "b@example.com");
   try {
@@ -216,6 +226,7 @@ async function main() {
     // Assert the intent exists before using it: this line once failed inside a full chain run
     // and surfaced as "cannot read properties of undefined", which says nothing about why.
     ok("an intent payable to E is created", !!piE.body.data?.id, `${piE.status} ${JSON.stringify(piE.body.error ?? "")}`);
+    if (!piE.body.data?.id) throw new Error(`cannot continue: the intent was refused — ${piE.status} ${JSON.stringify(piE.body.error ?? piE.body)}`);
     await v1(`/payment-intents/${piE.body.data.id}/execute`, { key: A.key, idem: idem(), body: {} });
     await settle(500);
     const siE = (await v1("/settlement-intents", { key: E.key })).body.data.data.find((x: J) => x.payment_intent === piE.body.data.id);

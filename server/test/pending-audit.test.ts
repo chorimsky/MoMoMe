@@ -147,6 +147,75 @@ async function main() {
       ok("…so a top-up drains it instead of leaving it held for ever", nowState !== "MANUAL_REVIEW", nowState);
     }
 
+    console.log("\n'Failed' hides the same distinction one state later\n");
+    {
+      const outcomes = async () => (await (await fetch(`${base}/api/admin/payments/outcomes`, { headers: A })).json()) as {
+        delivery: { attempted: number; delivered: number; undelivered: number; success_pct: number | null; undelivered_xaf: number };
+        abandoned: { count: number; xaf: number; reasons: Array<{ reason: string; count: number }> };
+        undelivered: { count: number; reasons: Array<{ reason: string; count: number }> };
+      };
+      // `chain` was quoted and never paid (swept above, then settled by a late deposit);
+      // make a fresh one that is only ever abandoned, and one that took money and failed.
+      const gone = await mk("USDT");
+      {
+        const p = (await store().getPayment(gone.id))!;
+        p.payInstruction.expiresAt = new Date(Date.now() - 2 * 3600_000).toISOString();
+        await store().putPayment(p);
+        await expireAbandonedDeposits();
+      }
+      const lostIt = await mk("LIGHTNING");
+      {
+        const p = (await store().getPayment(lostIt.id))!;
+        await store().recordTxn(p.id, [
+          { account: "inbound_clearing", direction: "debit", amount: p.payInstruction.amount, currency: "BTC" },
+          { account: "customer_wallet", direction: "credit", amount: p.payInstruction.amount, currency: "BTC" },
+        ]);
+        p.events.push({ at: new Date().toISOString(), state: "INBOUND_CONFIRMED" });
+        p.state = "REFUNDED"; p.displayStatus = "Failed";
+        p.events.push({ at: new Date().toISOString(), state: "REFUNDED", note: "no funded payout rail — returned to the sender" });
+        await store().putPayment(p);
+      }
+      const o = await outcomes();
+      ok("a quote nobody paid counts as ABANDONED, not as a failure of ours", o.abandoned.count >= 1 && /expired — not paid/.test(o.abandoned.reasons[0]?.reason ?? ""), JSON.stringify(o.abandoned.reasons[0]));
+      ok("money that arrived and did not land counts as UNDELIVERED", o.undelivered.count >= 1 && /no funded payout rail/.test(o.undelivered.reasons.map((r) => r.reason).join(" ")), JSON.stringify(o.undelivered.reasons));
+      ok("the success rate is measured only against payments that were actually paid", o.delivery.attempted === o.delivery.delivered + o.delivery.undelivered, JSON.stringify(o.delivery));
+      ok("…so an abandoned quote never drags the delivery rate down", o.delivery.attempted < (o.delivery.attempted + o.abandoned.count), `${o.delivery.attempted} vs ${o.abandoned.count} abandoned`);
+      ok("the XAF we failed to deliver is reported", o.delivery.undelivered_xaf > 0, String(o.delivery.undelivered_xaf));
+      const anonO = await fetch(`${base}/api/admin/payments/outcomes`);
+      ok("outcomes is operator-only too", anonO.status === 401 || anonO.status === 403, String(anonO.status));
+    }
+
+    console.log("\nAn unclaimed refund keeps reminding the one person who can resolve it\n");
+    {
+      const { remindUnclaimedRefunds } = await import("../src/core/stateMachine.js");
+      const { listNotifications } = await import("../src/core/notifications.js");
+      const owed = await mk("LIGHTNING");
+      const op = (await store().getPayment(owed.id))!;
+      await store().recordTxn(op.id, [
+        { account: "inbound_clearing", direction: "debit", amount: op.payInstruction.amount, currency: "BTC" },
+        { account: "customer_wallet", direction: "credit", amount: op.payInstruction.amount, currency: "BTC" },
+      ]);
+      const twoHoursAgo = new Date(Date.now() - 2 * 3600_000).toISOString();
+      op.events.push({ at: twoHoursAgo, state: "INBOUND_CONFIRMED" });
+      op.state = "REFUND_PENDING"; op.displayStatus = "Pending"; op.refundNeedsDestination = true;
+      op.senderId = "device-pending";
+      op.events.push({ at: twoHoursAgo, state: "REFUND_PENDING", note: "no funded payout rail — refund over Lightning" });
+      await store().putPayment(op);
+
+      const before = listNotifications(200).filter((r) => r.kind === "refund_needed").length;
+      const reminded = await remindUnclaimedRefunds();
+      ok("the sender is reminded while their money is still waiting", reminded === 1, String(reminded));
+      ok("…and the reminder really went to the outbox", listNotifications(200).filter((r) => r.kind === "refund_needed").length > before);
+      ok("…recorded against the sender, not the recipient", listNotifications(200).find((r) => r.kind === "refund_needed")?.audience === "sender");
+      ok("a second tick straight away does not spam them", (await remindUnclaimedRefunds()) === 0);
+      ok("the reminder never carries anything the recipient could act on", !(listNotifications(200).find((r) => r.kind === "refund_needed")?.body ?? "").includes(op.recipient.phone));
+
+      const a3 = await audit();
+      const orow = a3.rows.find((r) => r.ref === owed.ref);
+      ok("the console reports it as money owed back, with the reason", orow?.bucket === "owed_back" && /supply a refund destination/.test(orow?.why ?? ""), orow?.why);
+      ok("…and says plainly that this sender cannot be reached at all", (orow as { senderReachable?: boolean })?.senderReachable === false, String((orow as { senderReachable?: boolean })?.senderReachable));
+    }
+
     console.log("\nThe audit is operator-only\n");
     const anon = await fetch(`${base}/api/admin/payments/pending-audit`);
     ok("it is not readable without an admin session", anon.status === 401 || anon.status === 403, String(anon.status));

@@ -233,6 +233,19 @@ export async function notifyPayoutFailed(p: Payment, reason: string): Promise<vo
   }
 }
 
+/** A reminder that an unclaimed refund is still waiting. Same words as the first notice —
+ *  the sender did not miss a detail, they missed the message. Sender-audience, so push is
+ *  the only carrier; when that is unreachable the outbox records it as SKIPPED with the
+ *  reason, which is what tells an operator the customer cannot be told at all. */
+export async function notifyRefundReminder(p: Payment): Promise<void> {
+  if (!p.senderId || p.senderId.startsWith("lnurl:")) return;
+  const fr = senderLang(p) === "fr";
+  await notify({
+    kind: "refund_needed", audience: "sender", to: p.senderId, paymentRef: p.ref,
+    body: fr ? `Remboursement en attente\n${xaf(p.xaf)} vous attendent toujours. Ouvrez l'app pour indiquer où les envoyer · Réf ${p.ref}` : `Your refund is waiting\n${xaf(p.xaf)} is still waiting for you. Open the app to say where to send it · Ref ${p.ref}`,
+  }).catch(() => {});
+}
+
 export async function notifyHeldForReview(p: Payment, reason: string): Promise<void> {
   await notify({
     kind: "manual_review",

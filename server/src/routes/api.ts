@@ -16,7 +16,7 @@ import { findByAlias as findMpiByAlias } from "../core/connect/identities.js";
 import type { AdminMerchantAccount } from "../../../shared/types.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
-import { setPushToken, clearPushToken, validPushToken } from "../core/pushTokens.js";
+import { setPushToken, clearPushToken, validPushToken, pushTokenFor } from "../core/pushTokens.js";
 import { otpSendAllowed } from "../core/otpThrottle.js";
 import { idemFingerprint, IDEM_MISMATCH, idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
 import { engine as complianceEngine } from "../core/interop/compliance.js";
@@ -2510,6 +2510,13 @@ api.get("/admin/payments/pending-audit", async (_req, res) => {
       instructionExpired: bucket === "unpaid" ? past : undefined,
       aggregator: p.aggregator ?? null, attempts: p.payoutAttempts ?? 0,
       recipient: `${p.recipient.provider} ···${p.recipient.phone.replace(/\D/g, "").slice(-4)}`,
+      /* An unclaimed refund can only be resolved by the sender, and push is the ONLY channel
+         that reaches one (the account is a device — we hold no number for them). If they
+         never turned alerts on, nothing we send arrives, and an operator has to know that
+         rather than wait for a customer who is never going to hear from us. */
+      senderReachable: bucket === "owed_back" && p.refundNeedsDestination
+        ? (!!p.senderId && !p.senderId.startsWith("lnurl:") && !!pushTokenFor(p.senderId))
+        : undefined,
       why,
     };
   });
@@ -2537,6 +2544,56 @@ api.get("/admin/payments/pending-audit", async (_req, res) => {
       refunded: all.filter((p) => p.state === "REFUNDED").length,
     },
     rows: rows.sort((a, b) => (a.bucket === b.bucket ? b.ageMin - a.ageMin : a.bucket === "unpaid" ? 1 : -1)).slice(0, 500),
+  });
+});
+
+/* ---------- WHAT "FAILED" ACTUALLY MEANS ----------
+   "Failed" is the same conflation as "Pending", one state later. It covers FAILED and
+   REFUNDED, and FAILED covers two situations that are nothing alike:
+
+     • the customer was quoted, never paid, and the instruction lapsed — no money of ours
+       was ever involved, and nothing went wrong;
+     • money arrived and we could not deliver it — that IS a failure, and it is the only
+       number that says anything about how well the product works.
+
+   Counting them together makes the delivery success rate look far worse than it is and
+   hides the failures worth acting on. The split is by evidence, not by guesswork: a payment
+   that never recorded an INBOUND_CONFIRMED event never had our money in it. */
+api.get("/admin/payments/outcomes", async (_req, res) => {
+  const all = await store().listPayments();
+  const closed = all.filter((p) => ["DELIVERED", "PAYOUT_CONFIRMED", "FAILED", "REFUNDED"].includes(p.state));
+  const paid = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED");
+  const delivered = closed.filter((p) => p.state === "DELIVERED" || p.state === "PAYOUT_CONFIRMED");
+  const abandoned = closed.filter((p) => p.state === "FAILED" && !paid(p));
+  const undelivered = closed.filter((p) => (p.state === "FAILED" || p.state === "REFUNDED") && paid(p));
+
+  // WHY each abandonment and each real failure happened, from the payment's own last word.
+  const reasons = (rs: Payment[]) => {
+    const m = new Map<string, number>();
+    for (const p of rs) {
+      const note = [...p.events].reverse().find((e) => e.note)?.note ?? p.state;
+      const key = note.replace(/\b[0-9a-f]{8,}\b/gi, "…").replace(/\d+/g, "N").slice(0, 90);
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count }));
+  };
+  const byRail = (rs: Payment[]) => { const m = new Map<string, number>(); for (const p of rs) m.set(p.method, (m.get(p.method) ?? 0) + 1); return Object.fromEntries(m); };
+
+  res.json({
+    closed: closed.length,
+    /** The honest denominator: payments where money actually arrived. */
+    delivery: {
+      attempted: delivered.length + undelivered.length,
+      delivered: delivered.length,
+      undelivered: undelivered.length,
+      success_pct: delivered.length + undelivered.length ? Math.round((1000 * delivered.length) / (delivered.length + undelivered.length)) / 10 : null,
+      undelivered_xaf: undelivered.reduce((n, p) => n + p.xaf, 0),
+    },
+    /** Quoted and never paid. Not a failure of ours; it is a funnel number. */
+    abandoned: { count: abandoned.length, xaf: abandoned.reduce((n, p) => n + p.xaf, 0), byRail: byRail(abandoned), reasons: reasons(abandoned).slice(0, 10) },
+    /** Money in, not delivered. The number that says how well the product works. */
+    undelivered: { count: undelivered.length, byRail: byRail(undelivered), reasons: reasons(undelivered).slice(0, 10) },
+    deliveredByRail: byRail(delivered),
   });
 });
 

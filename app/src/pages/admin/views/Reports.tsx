@@ -80,6 +80,7 @@ export function ReportsView() {
     <div>
       <SectionTitle t="Reports" s="Gross revenue (fees + FX spread), volume and where payments stop — by pay-in method and by operator." />
       <PendingBreakdown />
+      <OutcomesCard />
       <UnsettledCard />
       <div className="mm-toolbar" style={{ marginBottom: 14 }}>
         <SegToggle options={PERIODS} value={period} onChange={setPeriod} />
@@ -275,7 +276,7 @@ function PendingBreakdown() {
                     <span className="mono">{r.ref}</span>
                     <span className="num">{fmt(r.xaf)}</span>
                     <span>{r.ageMin < 60 ? `${r.ageMin} min` : `${Math.round(r.ageMin / 60)} h`}</span>
-                    <span>{r.why}</span>
+                    <span>{r.why}{r.senderReachable === false && <b style={{ color: "var(--bad)" }}> — and we cannot tell them: this sender has no way to receive a notification. Reach them another way.</b>}</span>
                   </div>
                 ))}
                 {!d.rows.some((r) => r.bucket === k) && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>None.</div>}
@@ -288,6 +289,45 @@ function PendingBreakdown() {
         Closed so far: {fmt(d.closed.delivered)} delivered · {fmt(d.closed.failed)} failed · {fmt(d.closed.refunded)} refunded.
         {s.oldest_liability_min > 0 && ` The oldest thing we hold has been held ${s.oldest_liability_min < 60 ? `${s.oldest_liability_min} min` : `${Math.round(s.oldest_liability_min / 60)} h`}.`}
       </div>
+    </Card>
+  );
+}
+
+/** What "Failed" is hiding — the same conflation as "Pending", one state later.
+ *
+ *  A quote nobody paid and a payment we could not deliver both read "Failed", so the
+ *  headline success rate is measured against a denominator full of people who simply
+ *  changed their mind. The only honest denominator is payments where money actually
+ *  arrived. */
+function OutcomesCard() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.adminOutcomes>> | null>(null);
+  useEffect(() => { const load = () => api.adminOutcomes().then(setD).catch(() => {}); void load(); const t = setInterval(load, 60_000); return () => clearInterval(t); }, []);
+  if (!d) return null;
+  const dl = d.delivery;
+  return (
+    <Card title="Delivered, abandoned, or not delivered" sub="“Failed” counts a quote nobody paid the same as a payment we could not deliver. Only the second is ours."
+      action={<Pill status={dl.success_pct == null ? "no data" : `${dl.success_pct}% delivered`} tone={dl.success_pct == null ? "ink" : dl.success_pct >= 95 ? "recv" : dl.success_pct >= 80 ? "warn" : "bad"} />} style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6, marginBottom: 10 }}>
+        Of <b>{fmt(dl.attempted)}</b> payment{dl.attempted === 1 ? "" : "s"} where the money actually arrived, <b>{fmt(dl.delivered)}</b> reached the recipient
+        and <b>{fmt(dl.undelivered)}</b> did not{dl.undelivered ? ` (${fmt(dl.undelivered_xaf)} XAF)` : ""}.
+        A further <b>{fmt(d.abandoned.count)}</b> were quoted and never paid — none of our money was involved, and they are not a failure of the product.
+      </div>
+      {d.undelivered.reasons.length > 0 && <>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".06em", margin: "10px 0 4px" }}>Why money that arrived did not land</div>
+        {d.undelivered.reasons.map((r) => (
+          <div key={r.reason} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, fontSize: 12.5, padding: "3px 0", color: "var(--ink-2)" }}>
+            <b className="num">{r.count}</b><span>{r.reason}</span>
+          </div>
+        ))}
+      </>}
+      {d.abandoned.reasons.length > 0 && <>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".06em", margin: "12px 0 4px" }}>Why a quote was never paid</div>
+        {d.abandoned.reasons.slice(0, 5).map((r) => (
+          <div key={r.reason} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, fontSize: 12.5, padding: "3px 0", color: "var(--ink-3)" }}>
+            <b className="num">{r.count}</b><span>{r.reason}</span>
+          </div>
+        ))}
+      </>}
     </Card>
   );
 }

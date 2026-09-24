@@ -5,7 +5,7 @@
    Each tick is idempotent + self-contained (safe to run from either, at any cadence).
    ============================================================ */
 import { store } from "./db/store.js";
-import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts, retryTransientHolds, resumeStalledSettlements, expireAbandonedDeposits } from "./core/stateMachine.js";
+import { reconcileStuckPayouts, reconcileStuckInbounds, reconcileStuckRefunds, reconcileFailedPayouts, retryTransientHolds, resumeStalledSettlements, expireAbandonedDeposits, remindUnclaimedRefunds } from "./core/stateMachine.js";
 import { reconcilePendingCashins } from "./core/momoOps.js";
 import { reconcileDeposits } from "./core/depositReconcile.js";
 import { reconciliationSweep } from "./core/interop/reconcile.js";
@@ -106,6 +106,9 @@ async function reconcileOnce(): Promise<void> {
   // stablecoin payments accumulated as "Pending" for ever. Expiring moves no money and the
   // payment stays matchable to a late deposit.
   await expireAbandonedDeposits().then((n) => { if (n) console.log(`[settle] ${n} unpaid deposit instruction(s) expired`); }).catch((e) => console.error("expire deposits", e));
+  // The one person who can resolve an unclaimed refund is the sender, and they were told
+  // once. Remind them while their money is still waiting.
+  await remindUnclaimedRefunds().then((n) => { if (n) console.log(`[settle] ${n} sender(s) reminded that a refund is waiting`); }).catch((e) => console.error("refund reminders", e));
   // A hold caused by float / a rail being down clears itself: retry, do not wait for a person.
   await retryTransientHolds().then((n) => { if (n) console.log(`[settle] ${n} held payment(s) retried after the hold cleared`); }).catch((e) => console.error("retry holds", e));
   try { await scanCompliance(); } catch (e) { console.error("compliance scan", e); }

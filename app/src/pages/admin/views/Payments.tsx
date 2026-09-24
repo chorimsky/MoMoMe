@@ -14,11 +14,26 @@ import { useAdmin } from "../context.js";
 import { useAdminUser } from "../AdminGate.js";
 import { Failed, Loading } from "./Overview.js";
 
+/** Did our money ever arrive for this payment? The whole difference between "the customer
+ *  walked away" and "we failed to deliver" turns on this one event. */
+const moneyArrived = (p: Payment) => p.events.some((e) => e.state === "INBOUND_CONFIRMED");
+/** Outcome in words that mean something, because "Failed" covers both of the above and
+ *  "Pending" covers four more. A spreadsheet of Completed/Pending/Failed cannot be used to
+ *  work out what went wrong, which is the only reason anyone exports it. */
+function outcomeOf(p: Payment): string {
+  if (p.state === "DELIVERED" || p.state === "PAYOUT_CONFIRMED") return "Delivered";
+  if (p.state === "REFUNDED") return "Refunded to sender";
+  if (p.state === "FAILED") return moneyArrived(p) ? "Not delivered" : "Never paid";
+  if (p.state === "REFUND_PENDING") return "Refund owed";
+  if (p.state === "MANUAL_REVIEW") return "Held for review";
+  return moneyArrived(p) ? "Paid, not yet delivered" : "Waiting for the customer";
+}
+
 function exportCsv(rows: Payment[]) {
-  const head = ["Reference", "Recipient", "Phone", "Country", "Provider", "Amount XAF", "Fee XAF", "Rail", "Status", "Created", "Origin country", "Origin city", "Origin IP"];
+  const head = ["Reference", "Recipient", "Phone", "Country", "Provider", "Amount XAF", "Fee XAF", "Rail", "Status", "Outcome", "State", "Reason", "Payout rail", "Attempts", "Created", "Updated", "Origin country", "Origin city", "Origin IP"];
   // Neutralize CSV formula injection on any free-text cell (matches the server export guard).
   const esc = (v: string | number) => { let s = String(v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
-  const lines = rows.map((p) => [p.ref, p.recipient.name, p.recipient.phone, p.recipient.country, p.recipient.provider, p.xaf, p.feeXaf, p.method, p.displayStatus, p.createdAt, p.senderLocation?.country ?? "", p.senderLocation?.city ?? "", p.senderLocation?.ip ?? ""].map(esc).join(","));
+  const lines = rows.map((p) => [p.ref, p.recipient.name, p.recipient.phone, p.recipient.country, p.recipient.provider, p.xaf, p.feeXaf, p.method, p.displayStatus, outcomeOf(p), p.state, [...p.events].reverse().find((e) => e.note)?.note ?? "", p.aggregator ?? "", p.payoutAttempts ?? 0, p.createdAt, p.updatedAt, p.senderLocation?.country ?? "", p.senderLocation?.city ?? "", p.senderLocation?.ip ?? ""].map(esc).join(","));
   const csv = [head.map(esc).join(","), ...lines].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
   const a = document.createElement("a");

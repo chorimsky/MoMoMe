@@ -414,3 +414,57 @@ the same place.
 Covered by 22 assertions in the new `server/test/pending-audit.test.ts`, including that
 expiring books nothing, that a late deposit still settles its own payment, and that a
 two-day-old float hold drains once the cause clears.
+
+---
+
+## Increment — reading the real payment export (2026-09-24)
+
+89 production payments, exported from Admin → Payments. What they say, once the categories
+are honest:
+
+| the 44 rows marked "Failed" | |
+|---|---|
+| 11 | payments to sandbox test numbers (`677000789`, `677000788`, `677000798`) — our own testing |
+| 9 | on-chain / stablecoin quotes nobody ever paid — closed by the sweep shipped in `78b04a7` |
+| 24 | everything else, of which 23 are Lightning |
+
+Of the 13 non-Lightning payments to real numbers, **three delivered** (all USDC), **nine were
+never paid by the customer**, and **one is a genuine failure** (`MMM-2026-418928`, USDT,
+10,000 XAF). A first reading of the same file called that rail "0 for 7, never once
+succeeded" — counting abandonment as failure, which is exactly the defect below. The
+denominator matters more than the rate.
+
+### "Failed" is the same conflation as "Pending", one state later
+
+`DISPLAY` maps both `FAILED` and `REFUNDED` to "Failed", and `FAILED` itself covers a quote
+nobody paid (no money of ours; nothing went wrong) and money that arrived and could not be
+delivered (the only failure that is ours). Measuring delivery against the two together makes
+the product look far worse than it is and buries the failures worth acting on.
+
+`GET /admin/payments/outcomes` and a **"Delivered, abandoned, or not delivered"** card now
+measure the success rate against payments where money actually arrived, and list why money
+that arrived did not land separately from why a quote was never paid.
+
+### The export could not answer the question it exists for
+
+The CSV said "Failed" and stopped: no reason, no state, no rail, no attempt count — so it
+could not be used to work out what went wrong, which is the only reason anyone exports it.
+It now carries **Outcome** (*Delivered / Never paid / Not delivered / Refunded to sender /
+Refund owed / Held for review*), **State**, **Reason** (the payment's own last note),
+**Payout rail**, **Attempts** and **Updated**.
+
+### An unclaimed refund told the sender once, and sometimes not at all
+
+`MMM-2026-418911` and `MMM-2026-418934` had been unclaimed for ten and four days. Only the
+sender can resolve one — they have to supply a destination — and they were notified **exactly
+once**, by a single push at the moment delivery failed. Push is also the only channel that
+can reach a sender at all: the account is a device, we hold no number for them, and
+`smsChannel` serves recipients only. A sender who never enabled alerts was told nothing,
+ever, while the operator alert reminded itself hourly for ninety hours.
+
+`remindUnclaimedRefunds()` now reminds hourly for the first day and daily for a month. And
+when the sender has no push token, the audit row says so outright — *"we cannot tell them:
+this sender has no way to receive a notification"* — instead of leaving an operator waiting
+on a customer who will never hear from us.
+
+Covered by 35 assertions in `server/test/pending-audit.test.ts`.

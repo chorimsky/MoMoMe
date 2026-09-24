@@ -11,7 +11,7 @@
 import type { InboundAsset, Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
 import { store } from "../db/store.js";
 import { captureUnattributed } from "./unattributed.js";
-import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed } from "./notifications.js";
+import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed, notifyRefundReminder } from "./notifications.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive, liveMoney } from "../config.js";
 import { railTrusted, confirmSettlement, adapterByName, payRefund, refundStatus, outboundRail } from "../adapters/index.js";
@@ -510,6 +510,36 @@ export async function retryTransientHolds(now = Date.now(), everyMs = 5 * 60_000
     const r = /FX feed not fresh/i.test(last.note ?? "") ? await resumeHeldRepricing(p).catch(() => null) : await adminRetryWhy(p, "auto (hold cleared)").catch(() => null);
     if (r?.ok) n++;
     else { p.updatedAt = new Date(now).toISOString(); await store().putPayment(p); } // wait another interval without a new event
+  }
+  return n;
+}
+
+/** REMIND THE SENDER THAT THEIR MONEY IS WAITING.
+ *
+ *  An unclaimed refund can only be resolved by one person — the sender, who has to supply a
+ *  destination — and they were told exactly ONCE, by a single push at the moment delivery
+ *  failed. Push is also the only channel that can reach a sender at all (the account is a
+ *  device; we hold no phone number for them), so a sender who had not turned on alerts was
+ *  never told anything. Meanwhile the operator alert reminded itself every hour. Two real
+ *  payments sat unclaimed for four and ten days that way.
+ *
+ *  Now: once an hour for the first day, then daily. The reminder carries no amount the
+ *  recipient could act on and no code — it is the same body the first push carried. */
+export async function remindUnclaimedRefunds(now = Date.now(), maxAgeMs = 30 * 24 * 3_600_000): Promise<number> {
+  let n = 0;
+  for (const p of await store().listPayments()) {
+    if (p.state !== "REFUND_PENDING" || !p.refundNeedsDestination || p.refundTxId) continue;
+    if (!p.senderId || p.senderId.startsWith("lnurl:")) continue;   // nobody to remind
+    const openedAt = Date.parse([...p.events].reverse().find((e) => e.state === "REFUND_PENDING")?.at ?? p.updatedAt);
+    const openFor = now - openedAt;
+    if (openFor > maxAgeMs) continue;                                // long past a reminder's usefulness
+    const every = openFor > 24 * 3_600_000 ? 24 * 3_600_000 : 60 * 60_000;
+    const lastAt = p.refundRemindedAt ? Date.parse(p.refundRemindedAt) : openedAt;
+    if (now - lastAt < every) continue;
+    await notifyRefundReminder(p);
+    p.refundRemindedAt = new Date(now).toISOString();
+    await store().putPayment(p);
+    n++;
   }
   return n;
 }

@@ -518,8 +518,15 @@ export const api = {
     generatedAt: string;
     summary: { pending_total: number; unpaid: { count: number; xaf: number; expired: number }; unsettled: { count: number; xaf: number }; owed_back: { count: number; xaf: number }; needs_person: { count: number; xaf: number }; our_money_xaf: number; oldest_liability_min: number };
     closed: { delivered: number; failed: number; refunded: number };
-    rows: Array<{ id: string; ref: string; bucket: "unpaid" | "unsettled" | "owed_back" | "needs_person"; state: string; method: string; xaf: number; ageMin: number; instructionExpired?: boolean; recipient: string; why: string }>;
+    rows: Array<{ id: string; ref: string; bucket: "unpaid" | "unsettled" | "owed_back" | "needs_person"; state: string; method: string; xaf: number; ageMin: number; instructionExpired?: boolean; senderReachable?: boolean; recipient: string; why: string }>;
   }>("/admin/payments/pending-audit"),
+  adminOutcomes: () => req<{
+    closed: number;
+    delivery: { attempted: number; delivered: number; undelivered: number; success_pct: number | null; undelivered_xaf: number };
+    abandoned: { count: number; xaf: number; byRail: Record<string, number>; reasons: Array<{ reason: string; count: number }> };
+    undelivered: { count: number; byRail: Record<string, number>; reasons: Array<{ reason: string; count: number }> };
+    deliveredByRail: Record<string, number>;
+  }>("/admin/payments/outcomes"),
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
   adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),

@@ -17,11 +17,12 @@
    here moves money; the money screen still asks for confirmation.
    ============================================================ */
 import { COUNTRIES, MIN_XAF, MAX_XAF, checkPhone, receiveLink } from "../../../shared/domain.js";
-import type { CountryCode } from "../../../shared/types.js";
+import type { CountryCode, Payment } from "../../../shared/types.js";
 import { config } from "../config.js";
 import { store } from "../db/store.js";
 import { resolveRecipient } from "./nameResolver.js";
 import { waDigits } from "./whatsapp.js";
+import { accountOf } from "./account.js";
 import { metaAiConfigured, structured, transcribe } from "../adapters/metaAi.js";
 import { downloadMedia } from "../adapters/whatsapp.js";
 import { oggOpusToWav } from "./audio.js";
@@ -112,6 +113,34 @@ const STATE_LABEL: Record<string, { en: string; fr: string }> = {
   REFUND_PENDING: { en: "refund pending", fr: "remboursement en attente" }, REFUNDED: { en: "refunded", fr: "remboursé" }, AWAITING_INBOUND: { en: "waiting for your payment", fr: "en attente de votre paiement" },
 };
 
+/** IS THIS PAYMENT ANY OF THIS PERSON'S BUSINESS?
+ *
+ *  `status MMM-2026-418921` used to answer anybody. References are sequential — a real
+ *  export runs 418843 → 418937 with six gaps — so walking the range read back the amount and
+ *  state of every payment on the platform, from a WhatsApp message, with no account and no
+ *  app. Nothing else exposes a payment by reference; this was the only door.
+ *
+ *  A person may ask about a payment they RECEIVED (their number is the recipient) or one
+ *  they SENT (their number is the one their device anchored to). Anything else gets the
+ *  same answer as a reference that does not exist, so the reply never confirms that it
+ *  does. */
+function connectedTo(p: Payment, from: string): boolean {
+  const asking = waDigits(from);
+  if (asking.length < 8) return false;
+  const recipient = waDigits(p.recipient.phone);
+  if (recipient.length >= 8 && asking.endsWith(recipient)) return true;
+  const acct = p.senderId ? accountOf(p.senderId) : undefined;   // "acct:<digits>"
+  const sender = acct?.startsWith("acct:") ? waDigits(acct.slice(5)) : "";
+  return sender.length >= 8 && asking.endsWith(sender);
+}
+
+async function statusReply(ref: string, from: string, lang: Lang): Promise<string> {
+  const t = T[lang];
+  const p = await store().findPaymentByRef(ref);
+  if (!p || !connectedTo(p, from)) return t.statusNone(ref);
+  return t.status(ref, STATE_LABEL[p.state]?.[lang] ?? p.state.toLowerCase(), p.xaf);
+}
+
 /** One inbound → one reply. Exported for tests; the webhook calls it. */
 export async function replyTo(m: Inbound): Promise<string> {
   if (m.kind === "audio") return replyToVoice(m);
@@ -147,11 +176,7 @@ async function replyToText(text: string, from: string): Promise<string> {
   if (ai) {
     const lang = ai.language;
     const t = T[lang];
-    if (ai.intent === "status" && ai.ref) {
-      const ref = ai.ref.toUpperCase();
-      const p = await store().findPaymentByRef(ref);
-      return p ? t.status(ref, STATE_LABEL[p.state]?.[lang] ?? p.state.toLowerCase(), p.xaf) : t.statusNone(ref);
-    }
+    if (ai.intent === "status" && ai.ref) return statusReply(ai.ref.toUpperCase(), from, lang);
     if (ai.intent === "send") {
       if (!ai.number) return t.help;
       const digits = waDigits(ai.number);
@@ -190,10 +215,7 @@ function replyByRules(text: string, from: string, langHint?: Lang): Promise<stri
 
   // status MMM-2026-000123
   const ref = text.match(/MMM-\d{4}-\d{4,}/i)?.[0]?.toUpperCase();
-  if (ref) {
-    const p = await store().findPaymentByRef(ref);
-    return p ? t.status(ref, STATE_LABEL[p.state]?.[lang] ?? p.state.toLowerCase(), p.xaf) : t.statusNone(ref);
-  }
+  if (ref) return statusReply(ref, from, lang);
 
   // send <amount> to <number>  /  envoyer <montant> à <numéro>
   const send = text.match(/(?:send|pay|envoy\w*|paie\w*|payer)\s+(.+?)\s+(?:to|à|a|au|pour)\s+(\+?[\d  ]{4,})/i);

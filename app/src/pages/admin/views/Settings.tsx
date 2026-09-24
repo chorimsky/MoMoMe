@@ -396,6 +396,7 @@ export function SettingsView() {
               ["referrals", "Referrals & ambassadors", "Shareable referral codes and the ambassador dashboard"],
               ["developerApi", "Developer API", "Partner API keys and the developer portal"],
               ["diaspora", "Diaspora corridor", "The diaspora remittance landing page"],
+              ["whatsappBot", "WhatsApp bot", "Answers `send 5000 to 677000789`, `receive 5000` and `status MMM-…` on WhatsApp, in English or French, by text or voice note — and replies with a link the person confirms in the app. OFF means OFF: the “Pay on WhatsApp” buttons disappear AND inbound messages get no reply. Needs the bot number above and Meta Cloud API credentials on the server. Delivery receipts for our own notifications keep working either way."],
               ["momoTransfer", "Mobile Money → Mobile Money transfers", "MTN pays Orange and any network pays any other: the payer approves a collection on their phone, the recipient is paid from the float; beyond our rails, over Lightning to a Lightning Address. OFF by default — invisible to users and refused by the API until you turn it on."],
             ] as const;
             return rows.map(([k, name, desc], i) => (

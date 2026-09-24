@@ -75,6 +75,9 @@ async function main() {
   const { notifyDelivered, listNotifications } = await import("../src/core/notifications.js");
   const { updateSettings, getSettings } = await import("../src/core/settings.js");
   const { inReplyWindow } = await import("../src/core/whatsapp.js");
+  // The bot ships OFF. A real deployment turns it on in Admin → Settings → Product features;
+  // so does this suite, before asserting that it answers anything.
+  updateSettings({ features: { ...getSettings().features, whatsappBot: true } });
   const server = createApp().listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -105,6 +108,32 @@ async function main() {
     r = await replyTo({ from: "237699000111", kind: "text", text: "status MMM-2026-999999" });
     ok("unknown ref → says so", /no payment MMM-2026-999999/.test(r));
 
+    /* References are SEQUENTIAL — a real export runs 418843 → 418937 with six gaps — so an
+       unguarded `status` let anyone walk the range and read back the amount and state of
+       every payment on the platform, from WhatsApp, with no account and no app. A person may
+       ask about one they received or one they sent; anyone else gets the same answer as a
+       reference that does not exist, so the reply never confirms that it does. */
+    {
+      const { store } = await import("../src/db/store.js");
+      const nosy = "237600999888";
+      const owned: Payment = {
+        id: "pay_stat1", ref: "MMM-2026-418955", quoteId: "q", state: "DELIVERED", displayStatus: "Completed", method: "LIGHTNING",
+        recipient: { phone: "699000111", country: "CM", provider: "ORANGE", name: "", nameSource: "manual" },
+        xaf: 7500, feeXaf: 100, totalXaf: 7600, usd: 12,
+        payInstruction: { kind: "lightning", asset: "BTC", amount: 0, invoice: "" } as unknown as Payment["payInstruction"],
+        events: [{ at: new Date().toISOString(), state: "DELIVERED" }], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      } as Payment;
+      await store().putPayment(owned);
+
+      r = await replyTo({ from: "237699000111", kind: "text", text: "status MMM-2026-418955" });
+      ok("the recipient can read the status of their own payment", /delivered/i.test(r) && /7 500/.test(r), r);
+      r = await replyTo({ from: nosy, kind: "text", text: "status MMM-2026-418955" });
+      ok("a stranger walking the references is told nothing", /no payment MMM-2026-418955/.test(r), r);
+      ok("…and the amount never appears in that reply", !/7 500|7500/.test(r), r);
+      ok("…and the answer is identical to a reference that does not exist, so it confirms nothing",
+        r === await replyTo({ from: nosy, kind: "text", text: "status MMM-2026-418956" }).then((x) => x.replace("418956", "418955")), r);
+    }
+
     // Webhook: verification handshake + signed inbound → bot reply sent through the API.
     let res = await fetch(`${base}/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=abc123`);
     ok("Meta verification handshake echoes the challenge", res.status === 200 && (await res.text()) === "abc123");
@@ -130,6 +159,24 @@ async function main() {
       updateSettings({ company: { ...getSettings().company, whatsappBot: "+237680344485" } });
       cfg = await (await fetch(`${base}/api/config`)).json() as typeof cfg;
       ok("once set, the bot number reaches the app separately from support", cfg.support.whatsappBot === "+237680344485" && cfg.support.phone !== cfg.support.whatsappBot, JSON.stringify(cfg.support));
+
+      /* OFF MEANS OFF. A switch that only hid the buttons while the bot kept answering
+         would be the same half-truth as a channel toggle in front of an unwired provider. */
+      updateSettings({ features: { ...getSettings().features, whatsappBot: false } });
+      const before = sent.length;
+      const off = meta("237699000222", { type: "text", text: { body: "help" } });
+      let res2 = await fetch(`${base}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": sign(off) }, body: off });
+      ok("with the feature off Meta is still acked, so it does not retry for ever", res2.status === 200);
+      await wait(600);
+      ok("…but the bot does not reply", sent.length === before, `${sent.length - before} sent`);
+
+      updateSettings({ features: { ...getSettings().features, whatsappBot: true } });
+      const on = meta("237699000333", { type: "text", text: { body: "help" } });
+      res2 = await fetch(`${base}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": sign(on) }, body: on });
+      ok("switching it back on makes it answer again", res2.status === 200);
+      await wait(800);
+      ok("…and the reply is the menu", sent.some((m) => m.to === "237699000333" && /MoMo›Me on WhatsApp|pay any Mobile Money/i.test(m.text ?? "")), sent.filter((m) => m.to === "237699000333").map((m) => m.text?.slice(0, 40)).join(" | "));
+
       updateSettings({ company: { ...getSettings().company, whatsappBot: "" } });
     }
 

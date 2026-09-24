@@ -69,6 +69,11 @@ async function main() {
 
     console.log("\n4. Deterministic routes\n");
     r = await j(`/payment-intents/${it.id}/routes`, { method: "POST", headers: P() });
+    // Assert the RESPONSE before its shape: route discovery can answer 503 from its own
+    // stuck-guard, and reading `.routes` off that threw an opaque TypeError that took the
+    // whole run down without saying what the API had actually replied.
+    ok("route discovery answers at all", r.status === 200 && Array.isArray(r.body.routes), `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
+    if (!Array.isArray(r.body.routes)) throw new Error(`cannot continue: route discovery returned ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     const routes = r.body.routes as any[]; const rec = routes.find((x) => x.id === r.body.recommended);
     ok("every pay-in method got a route with the fixed check list", routes.length >= 4 && routes.every((x) => ["destination_supported", "within_limits", "accepting_payments", "payout_rail_operational", "liquidity", "source_rail_available", "source_rail_operational", "compliance", "quote"].every((n) => x.checks.some((c: any) => c.name === n))));
     ok("recommended = best-scored viable route, with a real quote", rec && rec.viable && rec.quote.sourceAmount > 0 && routes.filter((x) => x.viable).every((x) => x.score.total <= rec.score.total));

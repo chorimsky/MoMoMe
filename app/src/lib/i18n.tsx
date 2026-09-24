@@ -511,6 +511,7 @@ export const STRINGS: Dict = {
   mt_held_desc: ["Your approval came through and the money is safe with us. This transfer needs a quick check by our team, usually within one business day. You will be told the moment it is delivered or, if it cannot be, returned to your number in full.", "Votre approbation est arrivée et l'argent est en sécurité chez nous. Ce transfert nécessite une courte vérification par notre équipe, en général sous un jour ouvré. Vous serez prévenu dès qu'il est livré ou, si ce n'est pas possible, remboursé intégralement sur votre numéro."],
   mt_tile_cost: ["You pay {amount} XAF", "Vous payez {amount} XAF"],
   mt_tile_fee: ["(includes a {fee} XAF fee)", "(dont {fee} XAF de frais)"],
+  lp_cta_wa: ["Pay on WhatsApp", "Payer sur WhatsApp"],
   wa_bot_title: ["Pay from WhatsApp", "Payer depuis WhatsApp"],
   wa_bot_sub: ["Message our number and it replies with a pay link — no app needed to start. You still confirm every payment here.", "Écrivez à notre numéro et il répond avec un lien de paiement — sans installer l'app. Vous confirmez toujours chaque paiement ici."],
   wa_bot_cta: ["Open WhatsApp", "Ouvrir WhatsApp"],

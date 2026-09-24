@@ -10,7 +10,10 @@ import { api } from "../api/client.js";
 
 const DEFAULTS: AppFeatures = {
   directory: true, scanToPay: true, referrals: true, invoices: true, developerApi: true, diaspora: true,
-  merchant: true, receive: true, contacts: true, momoTransfer: false, // admin-gated: off until the server says so
+  merchant: true, receive: true, contacts: true,
+  // Admin-gated: off until the server says so. A default of ON here would flash a
+  // "Pay from WhatsApp" button in front of a bot that is not running.
+  momoTransfer: false, whatsappBot: false,
 };
 
 let _features: AppFeatures = DEFAULTS;
@@ -21,6 +24,11 @@ const netSubs = new Set<(v: boolean) => void>();
 export type IdentityConfig = { enabled: boolean; mode: "advisory" | "gate" };
 let _identity: IdentityConfig = { enabled: false, mode: "advisory" };
 const idSubs = new Set<(v: IdentityConfig) => void>();
+/** The number the WhatsApp bot answers on. Empty until /config says otherwise — every
+ *  surface that would point at it renders nothing, so a bot with no number is never
+ *  advertised. */
+let _waBot = "";
+const waSubs = new Set<(v: string) => void>();
 let _loaded = false;    // set true only on a SUCCESSFUL load
 let _inflight = false;  // a fetch is in progress → don't start another
 const subs = new Set<(f: AppFeatures) => void>();
@@ -40,6 +48,7 @@ export function useFeatures(): AppFeatures {
         if (c.features) { _features = { ...DEFAULTS, ...c.features }; subs.forEach((s) => s(_features)); }
         _networkOpen = !!c.network?.enabled; netSubs.forEach((s) => s(_networkOpen));
         _identity = { enabled: !!c.identity?.enabled, mode: c.identity?.mode === "gate" ? "gate" : "advisory" }; idSubs.forEach((s) => s(_identity));
+        _waBot = (c.support?.whatsappBot ?? "").trim(); waSubs.forEach((s) => s(_waBot));
       }).catch(() => { /* keep defaults; retry on a later mount */ })
         .finally(() => { _inflight = false; });
     }
@@ -62,4 +71,14 @@ export function useIdentityConfig(): IdentityConfig {
   useFeatures(); // shares the single /config load
   useEffect(() => { idSubs.add(setV); setV(_identity); return () => { idSubs.delete(setV); }; }, []);
   return v;
+}
+
+/** The WhatsApp bot entry point: the number, but only when the feature is ON and a number is
+ *  actually configured. Both are required — a button in front of a bot that is switched off
+ *  is worse than no button, and so is one pointing at a number nobody answers. */
+export function useWhatsAppBot(): string {
+  const [v, setV] = useState(_waBot);
+  const f = useFeatures();
+  useEffect(() => { waSubs.add(setV); setV(_waBot); return () => { waSubs.delete(setV); }; }, []);
+  return f.whatsappBot ? v : "";
 }

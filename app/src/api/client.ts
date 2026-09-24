@@ -342,7 +342,7 @@ function getConfigShared(): Promise<AppConfigResponse> {
   p.catch(() => { if (_config?.p === p) _config = null; });
   return p;
 }
-export type AppConfigResponse = { demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } };
+export type AppConfigResponse = { demoMode: boolean; demoHint: string; feePct: number; minFeeXaf?: number; brandLogo: string | null; support: { email: string; phone: string; whatsappBot?: string }; methods?: Partial<Record<Method, boolean>>; features?: Partial<AppFeatures>; network?: { enabled: boolean }; identity?: { enabled: boolean; mode: "advisory" | "gate" } };
 
 export interface UsageSum { requests: number; errors: number; quotes: number; payments: number; completed: number; failed: number; volumeXaf: number; feesXaf: number; webhooks: number; webhookFailures: number; settlements: number; settledXaf: number; avgLatencyMs: number; successRatePct: number }
 export interface PlatformOrgRow { id: string; name: string; slug: string; status: string; createdAt: string; country: string; kyb: string; plan: string; liveEnabled: boolean; suspendedReason?: string; members?: number; credentials?: number; live?: UsageSum; test?: UsageSum; balance?: { available: number; pending: number } }

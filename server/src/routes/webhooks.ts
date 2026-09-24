@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import { config, whatsappConfigured } from "../config.js";
 import { inboundMessages, replyTo } from "../core/whatsappBot.js";
 import { noteInbound } from "../core/whatsapp.js";
+import { getSettings } from "../core/settings.js";
 import { sendText, markRead, statusUpdates } from "../adapters/whatsapp.js";
 import { updateDelivery } from "../core/notifications.js";
 
@@ -206,6 +207,12 @@ webhooks.post("/whatsapp", express.raw({ type: "*/*" }), (req, res) => {
     const known = updateDelivery(st.id, st.status, st.detail);
     if (st.status === "failed") console.warn(`[whatsapp] message ${st.id} to ${st.recipient ?? "?"} failed: ${st.detail}${known ? "" : " (no outbox record)"}`);
   }
+  /* OFF means off. A switch that only hid the button while the bot kept answering would be
+     the same half-truth as a channel toggle in front of an unwired provider: an operator who
+     turns the bot off expects it to stop replying, not to become harder to find. Status
+     updates above are deliberately NOT gated — those are delivery receipts for messages WE
+     sent, and they belong to the notification outbox rather than to the bot. */
+  if (!getSettings().features.whatsappBot) return;
   for (const m of inboundMessages(body)) {
     noteInbound(m.from);
     // A number flooding the bot burns transcription/model spend: 20 messages a minute is

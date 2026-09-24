@@ -542,3 +542,48 @@ the genuinely oldest when none have.
 
 Covered by 51 assertions in `server/test/nexah.test.ts`, 10 in the new
 `server/test/whatsapp-unsigned.test.ts` and 37 in `server/test/whatsapp.test.ts`.
+
+---
+
+## Increment — the WhatsApp bot: reachable, switchable, and not a read of the whole book (2026-09-24)
+
+### `status` answered anybody
+
+`status MMM-2026-418921` returned the amount and state of any payment, to anyone, with no
+ownership check. References are **sequential** — the production export runs 418843 → 418937
+with six gaps — so walking the range read back the book: every payment's amount and state,
+from a WhatsApp message, with no account and no app. Nothing else exposes a payment by
+reference (`/payments/:id` goes through `ownerOf`); the bot was the only door.
+
+A person may now ask about a payment they **received** (their number is the recipient) or one
+they **sent** (their number is the one their device anchored to). Everyone else gets the reply
+that a non-existent reference gets, byte for byte — a distinct "not yours" would still have
+leaked which references exist.
+
+### The bot had no entry point, and then no switch
+
+Nothing in the product told anyone the bot existed: the only `wa.me` links were for sharing a
+pay link, and the support number — a person. `company.whatsappBot` is now its own setting,
+`/api/config` carries it beside (not instead of) `support.phone`, and the landing page and
+Help render a **Pay on WhatsApp** button.
+
+`features.whatsappBot` gates it, **off by default**, and off means off: the buttons disappear
+**and** inbound messages get no reply. A switch that only hid the button while the bot kept
+answering would be the same half-truth as a channel toggle in front of an unwired provider —
+the one that sent an operator chasing NEXAH credentials that were already correct. Both the
+feature and a configured number are required before anything renders.
+
+Delivery receipts are deliberately **not** gated: those are Meta reporting on messages *we*
+sent, and they belong to the notification outbox rather than to the bot. Meta still gets a
+fast `200` so it does not retry into a disabled endpoint.
+
+### Three suites shared one latent crash
+
+`interop`, `connect` and `roadmap-e2e` all read `r.body.routes` (or `.data.id`) without
+checking the response first. When route discovery answers `503` from its own stuck-guard,
+`.length`/`.find` on `undefined` throws an opaque `TypeError` that takes the run down and
+says nothing about what the API replied — which cost most of a day in "is this my change or
+a flake?". All three assert the response before its shape now, and stop with the real cause.
+
+Covered by 47 assertions in `server/test/whatsapp.test.ts` and 10 in
+`server/test/whatsapp-unsigned.test.ts`.

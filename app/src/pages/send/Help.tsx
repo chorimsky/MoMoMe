@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../../lib/i18n.js";
 import { DEFAULT_SUPPORT, waLink, telLink } from "../../lib/support.js";
+import { useWhatsAppBot } from "../../lib/features.js";
 import { FlowCard } from "./ui.js";
 
 const FAQS = [
@@ -21,7 +22,7 @@ export function Help({ support }: { support?: { email: string; phone: string; wh
   /* The bot answers on its OWN number, not the support one. Rendered only when that number
      is configured: pointing people at a WhatsApp nobody answers is worse than saying
      nothing, and until now the bot had no advertised entry point anywhere in the product. */
-  const bot = (support?.whatsappBot ?? "").trim();
+  const bot = useWhatsAppBot();
   return (
     <FlowCard>
       <h2 style={{ fontSize: 20 }}>{t("help_title")}</h2>

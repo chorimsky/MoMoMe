@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Logo, Momo, ThemeToggle } from "../components/atoms.js";
 import { useNarrow } from "../lib/useNarrow.js";
 import { useI18n } from "../lib/i18n.js";
-import { useFeatures, useNetworkOpen } from "../lib/features.js";
+import { useFeatures, useNetworkOpen, useWhatsAppBot } from "../lib/features.js";
 import { AppBanner, StoreBadges } from "../components/StoreBadges.js";
 import "./Landing.css";
 
@@ -110,6 +110,7 @@ export function Landing() {
   const { t, lang, setLang } = useI18n();
   const features = useFeatures();
   const networkOpen = useNetworkOpen();
+  const waBot = useWhatsAppBot();
   return (
     <div className="app-bg" style={{ background: "var(--paper)" }}>
       <div className="lp">
@@ -136,6 +137,16 @@ export function Landing() {
               <span style={{ fontSize: 13, color: "var(--ink-3)" }}>{t("lp_or_web")}</span>
               <Link className="btn btn-ghost" to="/send" style={{ textDecoration: "none" }}>{t("lp_cta_send")}</Link>
               {networkOpen && <Link className="btn btn-ghost" to="/send-abroad" style={{ textDecoration: "none" }}>{t("ab_title")}</Link>}
+              {/* The bot's entry point. Renders only when the feature is ON and a number is
+                  set — a button in front of a bot that is switched off, or pointing at a
+                  number nobody answers, is worse than no button at all. */}
+              {waBot && (
+                <a className="btn btn-ghost" href={`https://wa.me/${waBot.replace(/\D/g, "")}?text=${encodeURIComponent(t("wa_bot_first"))}`}
+                  target="_blank" rel="noopener noreferrer" style={{ gap: 8, textDecoration: "none" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.75.46 3.45 1.32 4.95L2 22l5.3-1.39a9.86 9.86 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.44 9.9-9.9 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.02h-.01a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.11.82.83-3.03-.2-.31a8.2 8.2 0 0 1-1.26-4.37c0-4.54 3.7-8.23 8.24-8.23 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.82c0 4.54-3.69 8.21-8.24 8.21Zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.13-.16.24-.64.8-.78.97-.14.16-.29.18-.54.06-.25-.13-1.05-.39-1.99-1.23-.74-.66-1.24-1.47-1.38-1.72-.15-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.13-.15.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.16 0-.43.06-.65.31-.22.25-.85.84-.85 2.04 0 1.2.87 2.36.99 2.53.12.16 1.71 2.61 4.15 3.66.58.25 1.03.4 1.38.51.58.19 1.11.16 1.53.1.47-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.06-.11-.22-.17-.47-.29Z" /></svg>
+                  {t("lp_cta_wa")}
+                </a>
+              )}
               {features.scanToPay && (
                 <Link className="btn btn-ghost" to="/scan" style={{ gap: 8, textDecoration: "none" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M4 12h16" /></svg>

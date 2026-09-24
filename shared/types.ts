@@ -853,6 +853,11 @@ export interface AdminSettings {
      *  over the payout rails or, beyond them, over Lightning. OFF by default: not shown to
      *  users and refused by the API until an admin turns it on. */
     momoTransfer: boolean;
+    /** The WhatsApp bot: the "Pay from WhatsApp" entry points AND the bot itself. OFF means
+     *  off — the button does not render and an inbound message gets no reply, rather than a
+     *  hidden button in front of a bot still answering. Delivery receipts for messages WE
+     *  sent keep flowing either way: those are our own notifications, not the bot. */
+    whatsappBot: boolean;
   };
   /** AML/CFT controls (CEMAC Règlement N°01 / ANIF Cameroun). Thresholds are
    *  configurable so they track the current regulation; defaults follow the

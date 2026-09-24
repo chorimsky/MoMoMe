@@ -44,7 +44,7 @@ export function renderTemplate(tpl: string, vars: Partial<Record<(typeof MESSAGE
 }
 
 const DEFAULTS: AdminSettings = {
-  company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null },
+  company: { brand: "MoMo›Me", email: "info@momome.xyz", phone: "+237 233 00 00 00", logo: null, whatsappBot: "" },
   channels: { Email: true, SMS: true, WhatsApp: false, Push: true },
   rails: {
     defaultRail: "Lightning", autoSwitch: true, threshold: 200000,

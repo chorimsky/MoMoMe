@@ -749,7 +749,13 @@ export interface RoutingSnapshot {
 
 export interface AdminSettings {
   /** logo is a data URL (data:image/…;base64,…) or null when unset. */
-  company: { brand: string; email: string; phone: string; logo: string | null };
+  company: {
+    brand: string; email: string; phone: string; logo: string | null;
+    /** The WhatsApp Business number the BOT answers on. Distinct from `phone`, which is
+     *  support — a person. Unset means the bot has no advertised entry point and nobody
+     *  will find it, whatever the webhook is doing. */
+    whatsappBot?: string;
+  };
   channels: { Email: boolean; SMS: boolean; WhatsApp: boolean; Push: boolean };
   rails: {
     /** Legacy keys, kept so an existing stored settings row still parses. Nothing reads

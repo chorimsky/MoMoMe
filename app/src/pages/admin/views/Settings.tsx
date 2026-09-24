@@ -277,6 +277,14 @@ export function SettingsView() {
             <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
               Shown on the public <strong>Help</strong> &amp; <strong>Contact</strong> pages. The phone also powers the WhatsApp (wa.me) and call links.
             </div>
+            {/* A different number, and a different thing: support is a person, this is the
+                bot. Left empty the entry point does not render at all — pointing people at a
+                WhatsApp nobody answers is worse than not mentioning it. */}
+            <LabeledInput label="WhatsApp bot number (optional)" value={company.whatsappBot ?? ""} onChange={(v) => edit({ whatsappBot: v })} mono />
+            <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              The number the <strong>bot</strong> answers on — not support. Set it and Help shows a “Pay from WhatsApp” button; leave it empty and nothing is advertised.
+              It only does anything once that number is live on Meta’s <strong>Cloud API</strong> with <code>WHATSAPP_ACCESS_TOKEN</code>, <code>WHATSAPP_PHONE_NUMBER_ID</code> and <code>WHATSAPP_APP_SECRET</code> set on the server.
+            </div>
           </Grid>
         </Card>
 

@@ -120,6 +120,19 @@ async function main() {
     ok("…and the bot's reply went out over the Cloud API", !!reply && /to=237677000789&amount=1000/.test(reply.text ?? ""), reply?.text?.split("\n")[1]);
     ok("the person is now inside the 24 h reply window", inReplyWindow("237699000111"));
 
+    // The bot had no advertised entry point anywhere in the product: the only wa.me links
+    // were for SHARING a pay link, and the support number — a person, and a different
+    // number. A bot nobody is told about answers nobody.
+    {
+      const { updateSettings, getSettings } = await import("../src/core/settings.js");
+      let cfg = await (await fetch(`${base}/api/config`)).json() as { support: { phone: string; whatsappBot: string } };
+      ok("with no bot number configured, none is advertised", cfg.support.whatsappBot === "", JSON.stringify(cfg.support));
+      updateSettings({ company: { ...getSettings().company, whatsappBot: "+237680344485" } });
+      cfg = await (await fetch(`${base}/api/config`)).json() as typeof cfg;
+      ok("once set, the bot number reaches the app separately from support", cfg.support.whatsappBot === "+237680344485" && cfg.support.phone !== cfg.support.whatsappBot, JSON.stringify(cfg.support));
+      updateSettings({ company: { ...getSettings().company, whatsappBot: "" } });
+    }
+
     // Eviction used to take `keys().next().value` — the FIRST number ever seen, which a Map
     // does not reorder on `set`. So the daily user was first out, losing their reply window
     // (and with it free-form text), while numbers that had gone quiet a week ago stayed.

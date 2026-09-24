@@ -14,10 +14,14 @@ const FAQS = [
   { q: "faq6_q", a: "faq6_a" },
 ];
 
-export function Help({ support }: { support?: { email: string; phone: string } }) {
+export function Help({ support }: { support?: { email: string; phone: string; whatsappBot?: string } }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(0);
   const phone = support?.phone || DEFAULT_SUPPORT.phone;
+  /* The bot answers on its OWN number, not the support one. Rendered only when that number
+     is configured: pointing people at a WhatsApp nobody answers is worse than saying
+     nothing, and until now the bot had no advertised entry point anywhere in the product. */
+  const bot = (support?.whatsappBot ?? "").trim();
   return (
     <FlowCard>
       <h2 style={{ fontSize: 20 }}>{t("help_title")}</h2>
@@ -37,6 +41,13 @@ export function Help({ support }: { support?: { email: string; phone: string } }
           );
         })}
       </div>
+      {bot && (
+        <div style={{ marginTop: 14, padding: 14, borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", textAlign: "center" }}>
+          <div style={{ fontWeight: 650, fontSize: 14 }}>{t("wa_bot_title")}</div>
+          <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "4px 0 12px", lineHeight: 1.5 }}>{t("wa_bot_sub")}</p>
+          <a className="btn btn-primary btn-block" href={waLink(bot, t("wa_bot_first"))} target="_blank" rel="noopener noreferrer" style={{ padding: "12px", textDecoration: "none" }}>{t("wa_bot_cta")}</a>
+        </div>
+      )}
       <div style={{ marginTop: 14, padding: 14, borderRadius: "var(--r)", background: "var(--surface-2)", border: "1px solid var(--line)", textAlign: "center" }}>
         <div style={{ fontWeight: 650, fontSize: 14 }}>{t("still_help")}</div>
         <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "4px 0 12px" }}>{t("team_replies")}</p>

@@ -7,6 +7,10 @@
 export interface SupportContact {
   email: string;
   phone: string;
+  /** The WhatsApp Business number the BOT answers on — not the support number, which is a
+   *  person. Empty when no bot number is configured, and every surface that would point at
+   *  it simply does not render: an advertised bot nobody answers is worse than none. */
+  whatsappBot?: string;
 }
 
 export const DEFAULT_SUPPORT: SupportContact = {
@@ -14,9 +18,11 @@ export const DEFAULT_SUPPORT: SupportContact = {
   phone: "+237 233 00 00 00",
 };
 
-/** Digits only — for the wa.me path. */
-export function waLink(phone: string): string {
-  return `https://wa.me/${phone.replace(/\D/g, "")}`;
+/** Digits only — for the wa.me path. An optional prefilled first message means the bot's
+ *  very first reply is its menu, instead of the person having to guess what to type. */
+export function waLink(phone: string, text?: string): string {
+  const base = `https://wa.me/${phone.replace(/\D/g, "")}`;
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base;
 }
 
 /** tel: URI — keep a leading +, strip everything else but digits. */

@@ -778,7 +778,7 @@ api.get("/config", async (_req, res) => {
     // Public support contact (admin-managed in Settings → Company) so the Help
     // and Contact surfaces always show the live email/phone, never a hardcoded
     // placeholder. Phone is also used to derive the WhatsApp (wa.me) and tel link.
-    support: { email: getSettings().company.email, phone: getSettings().company.phone },
+    support: { email: getSettings().company.email, phone: getSettings().company.phone, whatsappBot: getSettings().company.whatsappBot || "" },
     // Sandbox payout outcomes are driven by the recipient number. Surfaced only
     // in demo mode so testers' payments complete cleanly.
     demoHint: demoMode

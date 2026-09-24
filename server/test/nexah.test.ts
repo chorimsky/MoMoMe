@@ -14,6 +14,7 @@ process.env.NEXAH_PASSWORD = "test-password";
 process.env.NEXAH_SENDER_ID = "MoMoMe";
 process.env.NEXAH_DLR_SECRET = "s3cret-path-segment";
 process.env.NEXAH_API_URL = "https://nexah.test/api/v1";
+process.env.NEXAH_DIAL = "237";
 
 import type { AddressInfo } from "node:net";
 
@@ -99,6 +100,63 @@ async function main() {
     ok("…but it does carry the message id a receipt will refer to", rec?.providerMessageId === "otp-msg-1", rec?.providerMessageId);
     ok("it is 'sent', not yet 'delivered' — acceptance is not arrival", rec?.deliveryStatus === "sent", rec?.deliveryStatus);
 
+    console.log("\nThe operator can prove the account works without spending an SMS\n");
+    {
+      const { issueToken } = await import("../src/core/adminAuth.js");
+      const { createUser } = await import("../src/core/adminUsers.js");
+      const A = { "x-admin-token": issueToken({ uid: createUser("sms-checker", "Str0ng-Passw0rd!x", "Super Admin" as never).id, role: "Super Admin" as never }).token };
+      const check = async () => (await (await fetch(`${base}/api/admin/notifications/sms-check`, { headers: A })).json()) as { configured: boolean; ok: boolean; credit?: number; message: string; smsChannelOn?: boolean };
+      nexah._resetCreditCache();
+      reply = () => ({ status: 200, body: { errorcode: 401, message: "Unauthorised" } });
+      let ch = await check();
+      ok("a wrong credential is found HERE, not by a customer who never gets a code", ch.configured && !ch.ok, JSON.stringify(ch));
+      ok("…and the message points at the usual cause", /Unauthorised|user or password/i.test(ch.message), ch.message);
+      nexah._resetCreditCache();
+      reply = () => ({ status: 200, body: { credit: 4000 } });
+      ch = await check();
+      ok("a working account reports its credit", ch.ok && ch.credit === 4000, JSON.stringify(ch));
+      ok("…and never returns the credential itself", !JSON.stringify(ch).includes("test-password"));
+      // SMS switched off in Settings is the other way a working account sends nothing.
+      updateSettings({ channels: { ...getSettings().channels, SMS: false } });
+      nexah._resetCreditCache();
+      ch = await check();
+      ok("working credentials with the channel switched off say so plainly", /switched OFF/i.test(ch.message), ch.message);
+      updateSettings({ channels: { ...getSettings().channels, SMS: true } });
+      /* A placeholder is worse than a missing value: non-empty, so every "is it set?" check
+         passes, and then the provider refuses every single send. This exact shape happened —
+         `--set NEXAH_PASSWORD='<your rotated password>'` quoted the instruction, so the shell
+         stored it verbatim. `config` snapshots the environment at module load, so the
+         predicate is what is asserted here; nexahConfigured() composes it over those values. */
+      const { looksLikePlaceholder } = await import("../src/config.js");
+      ok("a bracketed placeholder is not a credential", looksLikePlaceholder("<your rotated password>"));
+      // Both of these were set on a real deployment from a copied command. The first version
+      // of this check only matched a LEADING keyword, so the second one sailed through it.
+      ok("…and neither is an instruction anywhere in the phrase", looksLikePlaceholder("replace-with-your-rotated-password") && looksLikePlaceholder("paste-the-real-password-here"));
+      ok("…nor 'change me', a TODO or an example, hyphen- or underscore-joined", looksLikePlaceholder("change-me") && looksLikePlaceholder("TODO_here") && looksLikePlaceholder("replace_with_your_password") && looksLikePlaceholder("example secret"));
+      ok("a real secret is NOT mistaken for one, however punctuated", !looksLikePlaceholder("Demo2000@$&") && !looksLikePlaceholder("k3Yr-8f2!x_qz") && !looksLikePlaceholder("xK9-mQ2_vB7"), "");
+      ok("…and neither is an email login, even at example.com", !looksLikePlaceholder("rimskycho@gmail.com") && !looksLikePlaceholder("someone@example.com"));
+      ok("an empty value is missing, not a placeholder", !looksLikePlaceholder(""));
+
+      const anonC = await fetch(`${base}/api/admin/notifications/sms-check`);
+      ok("the check is operator-only", anonC.status === 401 || anonC.status === 403, String(anonC.status));
+    }
+
+    console.log("\nThe console blames the right thing\n");
+    {
+      // The failure that actually happened: every NEXAH variable set correctly, and the
+      // console still said "nobody can verify a number. Set NEXAH_USER / NEXAH_PASSWORD /
+      // NEXAH_SENDER_ID" — sending an operator to re-check credentials that were fine,
+      // because the provider and the Settings switch were folded into one boolean.
+      updateSettings({ channels: { ...getSettings().channels, SMS: false, WhatsApp: false } });
+      let h = notif.notificationHealth();
+      ok("with the switch off, nothing can carry a code", !h.otp.sms && !h.otp.whatsapp);
+      ok("…but the provider is reported as READY, separately from the switch", h.otp.smsProviderReady === true && h.otp.smsChannelOn === false, JSON.stringify({ ready: h.otp.smsProviderReady, on: h.otp.smsChannelOn }));
+      updateSettings({ channels: { ...getSettings().channels, SMS: true } });
+      h = notif.notificationHealth();
+      ok("switching it on is all it takes — no credential change", h.otp.sms === true && h.otp.smsChannelOn === true);
+      ok("…and the sender is named", h.otp.smsSender === "nexah", String(h.otp.smsSender));
+    }
+
     console.log("\nDelivery receipts\n");
     const dlr = (id: string, status: string) => JSON.stringify({ dlrlist: [{ reponsecode: 1, messageid: id, mobileno: "+237677000111", status, submittime: "2026-09-24 10:00:00", senttime: "2026-09-24 10:00:01", deliverytime: "2026-09-24 10:00:03" }] });
     let res = await postRaw("/webhooks/sms/nexah/wrong-secret", dlr("otp-msg-1", "DELIVRD"));
@@ -127,6 +185,24 @@ async function main() {
     ok("an entry with no message id is skipped", nexah.parseDlr(JSON.stringify({ dlrlist: [{ status: "DELIVRD" }] })).length === 0);
     ok("a secret of the wrong length is refused without comparing", !nexah.verifyDlrSecret("short") && !nexah.verifyDlrSecret(undefined));
   } finally { server.close(); }
+
+    console.log("\nA hosted deployment that answers a rejection with HTTP 200\n");
+    // sms.wandatech.net serves the same API at /api/v1 and answers a bad credential with
+    // {"errorcode":401,"message":"Unauthorised"} and a 200 status — no responsecode at all.
+    // Read as the documented envelope that became a bare "refused the request".
+    nexah._resetCreditCache();
+    reply = () => ({ status: 200, body: { errorcode: 401, message: "Unauthorised" } });
+    const un = await nexah.sendVerificationSms("677000111", "x");
+    ok("a 200-with-errorcode rejection is a failure, never a success", !un.ok, JSON.stringify(un));
+    ok("…and it carries the word that says what is wrong", (un.detail ?? "").includes("Unauthorised") && (un.detail ?? "").includes("401"), un.detail);
+    const uc = await nexah.credit(true);
+    ok("the same shape on the credit endpoint reads as UNKNOWN, not zero credit", uc === null, String(uc));
+
+    console.log("\nThe API base is taken as given, whatever the deployment's path\n");
+    calls.length = 0;
+    reply = () => ({ status: 200, body: { responsecode: 1, sms: [{ messageid: "m9", status: "success" }] } });
+    await nexah.sendVerificationSms("677000111", "x");
+    ok("a base that already names its version is used unchanged", calls[0]?.url === "https://nexah.test/api/v1/sendsms", calls[0]?.url);
 
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

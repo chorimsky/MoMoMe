@@ -413,6 +413,14 @@ export function notificationHealth(): {
    *  credit is UNKNOWN (unconfigured, or NEXAH did not answer), never zero. */
   otp: Record<OtpChannel, boolean> & {
     whatsappTemplate: boolean;
+    /* A channel is usable only if a PROVIDER is wired AND the Settings switch is on, and
+       folding both into one boolean made the console blame the provider for a switch that
+       was simply off — sending an operator to re-check credentials that were already right.
+       Reported separately so the message can name the actual cause. */
+    smsProviderReady: boolean;
+    smsChannelOn: boolean;
+    whatsappProviderReady: boolean;
+    whatsappChannelOn: boolean;
     smsSender: "nexah" | "gateway" | null;
     smsCredit: number | null;
     smsCreditLow: boolean;
@@ -425,6 +433,10 @@ export function notificationHealth(): {
     otp: {
       ...otpChannels(),
       whatsappTemplate: !!config.whatsapp.templateOtp,
+      smsProviderReady: nexahConfigured() || smsChannel.configured(),
+      smsChannelOn: getSettings().channels.SMS,
+      whatsappProviderReady: whatsappConfigured() && !!config.whatsapp.templateOtp,
+      whatsappChannelOn: getSettings().channels.WhatsApp,
       smsSender: otpSmsSender(),
       smsCredit: lastCredit?.credit ?? null,
       smsCreditLow: lastCredit != null && lastCredit.credit <= nexah.lowCreditFloor(),

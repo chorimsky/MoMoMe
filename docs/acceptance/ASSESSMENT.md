@@ -468,3 +468,77 @@ this sender has no way to receive a notification"* — instead of leaving an ope
 on a customer who will never hear from us.
 
 Covered by 35 assertions in `server/test/pending-audit.test.ts`.
+
+---
+
+## Increment — NEXAH against a real deployment, and the WhatsApp webhook (2026-09-24)
+
+### The provider does not speak the spec exactly
+
+Pointed at `sms.wandatech.net`, two differences from the published NEXAH document, both
+found without authenticating:
+
+- the API is served at `/api/v1`, not `/bulk/public/index.php/api/v1` (which 404s);
+- a rejection arrives as **HTTP 200** with `{"errorcode":401,"message":"Unauthorised"}` —
+  no `responsecode` at all.
+
+Read as the documented envelope, that second one became a bare "NEXAH refused the request",
+throwing away the one word that says what is wrong. Both shapes are understood now, and an
+**unrecognised** shape is still a failure, never a success.
+
+### A placeholder is worse than a missing value
+
+`--set NEXAH_PASSWORD='<your rotated password>'` quotes the instruction, so the shell stores
+it verbatim: non-empty, so every "is it set?" check passes, and then the provider refuses
+every send. The readiness console already guarded its own secrets against exactly this
+(`...`, `<any long random string you pick>`); NEXAH was not covered.
+
+The first version of the guard matched only a **leading** keyword — so
+`replace-with-your-rotated-password`, a placeholder this project's own instructions produced,
+sailed straight through it. And `\b` does not fire across an underscore, so `TODO_here` and
+`replace_with_your_password` would have too. It now matches an instruction word anywhere in
+the phrase, bounded on non-alphanumerics, and only when the value contains a word separator —
+so `Demo2000@$&`, `k3Yr-8f2!x_qz` and an email login are not flagged.
+
+### The console blamed the credentials for a switch
+
+Every NEXAH variable set correctly, and the console still read *"nobody can verify a number.
+Set NEXAH_USER / NEXAH_PASSWORD / NEXAH_SENDER_ID"* — because `otpChannels()` computed
+`sms: providerConfigured && settings.channels.SMS`, one boolean over two unrelated causes.
+An operator was sent to re-check credentials that were already right. Provider-readiness and
+the Settings switch are now reported separately, and the message names whichever is actually
+missing.
+
+`Admin → Notifications → Check credentials` (`GET /admin/notifications/sms-check`) asks the
+provider for the account balance, which authenticates **without sending anything** — so a
+wrong credential is found there rather than by a customer who never receives a code.
+
+### WhatsApp: the webhook verified a signature only when it could
+
+`/webhooks/whatsapp` checked Meta's HMAC only `if (config.whatsapp.appSecret)`. A deployment
+with an access token and a phone number but no `WHATSAPP_APP_SECRET` accepted **any** POST,
+and three things followed from a forged body:
+
+- an invented inbound made the bot reply — a WhatsApp message from our own verified business
+  number to a number the caller chose, plus model spend on every one;
+- `noteInbound()` opened Meta's 24 h window for that number, after which free-form text needs
+  no approved template;
+- invented `statuses` drove `updateDelivery`, marking a real one-time code delivered or failed
+  on evidence nobody supplied.
+
+Every other rail here refuses what it cannot verify. This one is now the same: 503 with the
+reason, and a boot warning naming the variable. Not exploitable in production today —
+Railway holds no `WHATSAPP_*` variables at all, so the route 404s — but it would have opened
+the moment someone set the token and phone number without the secret.
+
+### And the reply window evicted the wrong number
+
+At 20,000 tracked numbers the tracker deleted `keys().next().value` — the number that
+messaged us **first**, not longest ago, because a Map does not reorder on `set`. The most
+loyal daily user was first out, and losing the entry closes their 24 h window, so their next
+notice degrades to a template or is skipped when no template covers that kind. Eviction now
+takes an entry whose window has already expired — already useless — and only falls back to
+the genuinely oldest when none have.
+
+Covered by 51 assertions in `server/test/nexah.test.ts`, 10 in the new
+`server/test/whatsapp-unsigned.test.ts` and 37 in `server/test/whatsapp.test.ts`.

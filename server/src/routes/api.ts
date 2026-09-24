@@ -17,6 +17,8 @@ import type { AdminMerchantAccount } from "../../../shared/types.js";
 import { createInstruction, adapterFor, adapterByName, confirmSettlement, methodServable, ibexMethods } from "../adapters/index.js";
 import { nodeBalance } from "../adapters/phoenixd.js";
 import { setPushToken, clearPushToken, validPushToken, pushTokenFor } from "../core/pushTokens.js";
+import { credit as nexahCredit, lowCreditFloor as nexahLowCreditFloor } from "../adapters/nexah.js";
+import { nexahProblems } from "../config.js";
 import { otpSendAllowed } from "../core/otpThrottle.js";
 import { idemFingerprint, IDEM_MISMATCH, idemLookup, idemStore, validIdemKey } from "../core/interop/intents.js";
 import { engine as complianceEngine } from "../core/interop/compliance.js";
@@ -3831,6 +3833,49 @@ api.get("/admin/readiness", async (req, res) => {
    is sending messages nobody receives. */
 api.get("/admin/notifications/outbox", async (_req, res) => {
   res.json({ health: notificationHealth(), items: listNotifications(100) });
+});
+
+/** DOES THE SMS ACCOUNT ACTUALLY WORK?
+ *
+ *  Asks NEXAH for the account's credit, which authenticates WITHOUT sending anything: no
+ *  SMS is spent, no customer is involved, and the answer distinguishes the three states an
+ *  operator otherwise has to guess between — not configured, configured but rejected, and
+ *  working. Without it, the first proof that a credential is wrong is a customer who never
+ *  receives a code, which is precisely the failure this rail exists to end.
+ *
+ *  Never returns the credential, only what the provider said about it. */
+api.get("/admin/notifications/sms-check", async (req, res) => {
+  if (!isSuperAdmin(sessionOf(req)!.role)) return res.status(403).json({ error: "forbidden", message: "Super Admin only." });
+  const problems = nexahProblems();
+  if (problems.length) {
+    const ph = problems.filter((p) => p.problem === "placeholder");
+    return res.json({
+      configured: false, ok: false, missing: problems.map((p) => p.key), base: config.nexah.apiUrl,
+      message: ph.length
+        // This is the failure worth naming loudly: set, non-empty, and therefore invisible
+        // to every "is it configured?" check — but rejected by the provider every time.
+        ? `${ph.map((p) => p.key).join(", ")} ${ph.length === 1 ? "holds" : "hold"} a placeholder, not a credential — it was probably pasted with the surrounding angle brackets. Set the real value; until then every code is refused.`
+        : `NEXAH is not configured: ${problems.map((p) => p.key).join(", ")} ${problems.length === 1 ? "is" : "are"} unset. Codes will go over the generic SMS gateway, or nowhere.`,
+    });
+  }
+  const c = await nexahCredit(true);
+  if (!c) {
+    return res.json({
+      configured: true, ok: false, base: config.nexah.apiUrl,
+      message: "NEXAH is configured but did not return a balance. The usual cause is a wrong user or password (the provider answers \"Unauthorised\"), or the wrong API base URL — the server log carries what it actually said.",
+    });
+  }
+  const low = c.credit <= nexahLowCreditFloor();
+  res.json({
+    configured: true, ok: true, base: config.nexah.apiUrl,
+    credit: c.credit, low, floor: nexahLowCreditFloor(),
+    accountExpires: c.accountExpires, balanceExpires: c.balanceExpires,
+    smsChannelOn: getSettings().channels.SMS,
+    message: !getSettings().channels.SMS
+      ? `The credentials work (${c.credit} credit), but SMS is switched OFF in Settings → Channels, so no code will be sent over it.`
+      : low ? `The credentials work, but only ${c.credit} credit is left (floor ${nexahLowCreditFloor()}). Top up before codes start failing.`
+      : `Working. ${c.credit} credit available.`,
+  });
 });
 
 /** Real operational notifications derived from payment activity. */

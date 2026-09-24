@@ -6,7 +6,7 @@
    Kept separate from index.ts (which also owns the listen + background pollers,
    neither of which exists on serverless) so the checks can't drift between the two.
    ============================================================ */
-import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive } from "./config.js";
+import { config, assertLiveConfig, assertIbexConfig, assertAdminSecurity, assertCronSecurity, assertComplianceConfig, assertRailsMode, assertDeployEnv, deployEnv, databaseHost, liveMoney, peexitLive, pawapayLive , whatsappConfigured } from "./config.js";
 import { persistDurable } from "./core/persist.js";
 import { installProcessGuards } from "./core/processGuards.js";
 import { storedAdminMatches } from "./core/adminUsers.js";
@@ -93,6 +93,11 @@ export function runBootChecks(): void {
   // callback path works.
   if (pawapayLive()) {
     console.warn("⚠️  PawaPay is live but its callback signature (RFC-9421) is NOT verified — callbacks are REJECTED and payouts settle via status polling + reconcile (slower, still correct).");
+  }
+  // WhatsApp wired up but unverifiable: the inbound webhook refuses everything until the
+  // app secret is set, so the bot is silent rather than open. Say which, and why.
+  if (whatsappConfigured() && !config.whatsapp.appSecret) {
+    console.warn("⚠️  WhatsApp is configured but WHATSAPP_APP_SECRET is NOT set — Meta's signature cannot be checked, so the inbound webhook REFUSES every delivery. The bot will not reply and delivery receipts will not arrive until it is set (Meta app dashboard → App settings → Basic → App secret).");
   }
   if (peexitLive() && !config.peexit.callbackPass) {
     console.warn("⚠️  PEEXIT is live but PEEXIT_CALLBACK_PASS is not set — payout callbacks will be REJECTED (settlement falls back to slower reconcile polling). Set PEEXIT_CALLBACK_USER/PEEXIT_CALLBACK_PASS and give them to Peexit with your callback URL.");

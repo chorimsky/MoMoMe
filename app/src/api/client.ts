@@ -527,6 +527,7 @@ export const api = {
     undelivered: { count: number; byRail: Record<string, number>; reasons: Array<{ reason: string; count: number }> };
     deliveredByRail: Record<string, number>;
   }>("/admin/payments/outcomes"),
+  adminSmsCheck: () => req<{ configured: boolean; ok: boolean; missing?: string[]; base: string; credit?: number; low?: boolean; floor?: number; accountExpires?: string; balanceExpires?: string; smsChannelOn?: boolean; message: string }>("/admin/notifications/sms-check"),
   /** Crypto that arrived with no payment to attach it to — real receipts of funds, held
    *  as a liability until an operator attributes or returns them. */
   adminDeletionRequests: () => req<{ open: number; items: DeletionRequest[] }>("/admin/deletion-requests"),

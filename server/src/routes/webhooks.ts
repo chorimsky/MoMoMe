@@ -175,8 +175,26 @@ webhooks.get("/whatsapp", (req, res) => {
 webhooks.post("/whatsapp", express.raw({ type: "*/*" }), (req, res) => {
   if (!whatsappConfigured()) return res.status(404).json({ error: "not_configured" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  /* NO SECRET, NO ENTRY.
+     This used to verify the signature only `if (config.whatsapp.appSecret)` — so a
+     deployment with a token and a phone number but no WHATSAPP_APP_SECRET accepted ANY
+     POST to this URL. Three things followed from a forged body, none of them theoretical:
+       • an invented inbound message made the bot reply, so we sent a WhatsApp message from
+         our own verified business number to a number the caller chose — spam amplification
+         that Meta penalises the sender for, and model spend on every one;
+       • `noteInbound` opened Meta's 24 h window for that number, after which free-form text
+         could be sent to it without a template;
+       • invented `statuses` drove updateDelivery, marking a real one-time code delivered or
+         failed on evidence nobody supplied.
+     Every other rail here rejects what it cannot verify (see PawaPay's boot warning). This
+     one accepted everything. Refusing costs nothing while the secret is set, and closes the
+     door on the partial configuration that would otherwise open it silently. */
+  if (!config.whatsapp.appSecret) {
+    console.error("[whatsapp] inbound webhook REFUSED: WHATSAPP_APP_SECRET is not set, so Meta's signature cannot be checked and anyone could post here. Set it in the Meta app dashboard → App settings → Basic → App secret.");
+    return res.status(503).json({ error: "signature_unverifiable", message: "WHATSAPP_APP_SECRET is not configured on the server." });
+  }
   const sig = String(req.headers["x-hub-signature-256"] ?? "");
-  if (config.whatsapp.appSecret) {
+  {
     const want = "sha256=" + crypto.createHmac("sha256", config.whatsapp.appSecret).update(raw).digest("hex");
     if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ error: "bad_signature" });
   }

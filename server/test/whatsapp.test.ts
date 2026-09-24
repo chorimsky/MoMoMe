@@ -120,6 +120,20 @@ async function main() {
     ok("…and the bot's reply went out over the Cloud API", !!reply && /to=237677000789&amount=1000/.test(reply.text ?? ""), reply?.text?.split("\n")[1]);
     ok("the person is now inside the 24 h reply window", inReplyWindow("237699000111"));
 
+    // Eviction used to take `keys().next().value` — the FIRST number ever seen, which a Map
+    // does not reorder on `set`. So the daily user was first out, losing their reply window
+    // (and with it free-form text), while numbers that had gone quiet a week ago stayed.
+    {
+      const { noteInbound, _evictOnce } = await import("../src/core/whatsapp.js");
+      // Insertion order matters: the stale number is seen FIRST, which is exactly the entry
+      // the old `keys().next().value` would have kept safe while dropping the active one.
+      noteInbound("237600000002", new Date(Date.now() - 1000).toISOString());  // active, seen first
+      noteInbound("237600000001", new Date(Date.now() - 48 * 3600_000).toISOString()); // expired, seen second
+      _evictOnce();
+      ok("eviction drops the entry whose window has already closed", !inReplyWindow("237600000001"));
+      ok("…and leaves the active number its window", inReplyWindow("237600000002"));
+    }
+
     // Channel: delivery notice to the RECIPIENT — text inside the window, template outside.
     updateSettings({ channels: { ...getSettings().channels, WhatsApp: true, SMS: true } });
     const now = new Date().toISOString();

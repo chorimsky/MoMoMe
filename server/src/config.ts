@@ -349,9 +349,46 @@ export function aggregatorLive(name: string): boolean {
 }
 /** Any rail that moves REAL funds is active → simulation must be off. A production
  *  IBEX inbound counts too — a real inbound settling would drive a real payout. */
+/** A value that is PRESENT but is obviously the instruction rather than the secret. The
+ *  shape that actually happened: a shell `--set NEXAH_PASSWORD='<your rotated password>'`
+ *  quoted the placeholder, so it was stored verbatim — non-empty, so every check passed, and
+ *  every send came back "Unauthorised". A credential is never bracketed and never says
+ *  "your". (The go-live readiness console applies the same test to its own secrets.) */
+export const looksLikePlaceholder = (v: string): boolean => {
+  const t = (v ?? "").trim();
+  if (!t) return false;                                   // empty is MISSING, a different fault
+  if (/[<>]/.test(t)) return true;                        // `<your rotated password>`
+  // A credential is a token; an instruction is a PHRASE. Requiring a word separator is what
+  // keeps this from flagging a real secret: `Demo2000@$&` and `k3Yr-8f2!x_qz` have no
+  // instruction word, and `someone@example.com` has no hyphen, space or underscore — while
+  // `replace-with-your-rotated-password` has both, and was a real value set on a real
+  // deployment. (The first version of this only matched a LEADING keyword, so that exact
+  // string sailed through it.)
+  if (!/[-_ ]/.test(t)) return false;
+  // NOT \b: an underscore is a word character, so \btodo\b does not fire on `TODO_here`
+  // and `replace_with_your_password` would slip through — which is the same class of miss
+  // the leading-keyword version had. Bound on "not a letter or digit" instead.
+  return /(^|[^a-z0-9])(replace|paste|insert|enter|change|placeholder|todo|example|your|rotated|real)([^a-z0-9]|$)/i.test(t);
+};
+
 /** Credentials AND a sender id: NEXAH refuses a send without an approved senderid, so a
- *  deployment missing it can announce itself as unconfigured rather than fail per message. */
-export function nexahConfigured(): boolean { return !!(config.nexah.user && config.nexah.password && config.nexah.senderId); }
+ *  deployment missing it can announce itself as unconfigured rather than fail per message.
+ *  A placeholder counts as missing — it is worse than missing, because it satisfies the
+ *  check and then fails once per customer. */
+export function nexahConfigured(): boolean {
+  const { user, password, senderId } = config.nexah;
+  if (!user || !password || !senderId) return false;
+  return ![user, password, senderId].some(looksLikePlaceholder);
+}
+/** Which NEXAH settings are unusable, and why — for the operator check, never for a log. */
+export function nexahProblems(): Array<{ key: string; problem: "missing" | "placeholder" }> {
+  const out: Array<{ key: string; problem: "missing" | "placeholder" }> = [];
+  for (const [key, v] of [["NEXAH_USER", config.nexah.user], ["NEXAH_PASSWORD", config.nexah.password], ["NEXAH_SENDER_ID", config.nexah.senderId]] as const) {
+    if (!v) out.push({ key, problem: "missing" });
+    else if (looksLikePlaceholder(v)) out.push({ key, problem: "placeholder" });
+  }
+  return out;
+}
 export function whatsappConfigured(): boolean { return !!(config.whatsapp.accessToken && config.whatsapp.phoneNumberId); }
 export function phoenixdConfigured(): boolean { return !!(config.phoenixd.url && config.phoenixd.password); }
 /** phoenixd only ever holds real keys; a mainnet node's settled invoice is real sats. */

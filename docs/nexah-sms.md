@@ -36,12 +36,41 @@ Configured, a one-time code sent by SMS goes through NEXAH, and three things fol
 | `NEXAH_PASSWORD` | NEXAH password. |
 | `NEXAH_SENDER_ID` | The sender name, **registered and approved with the operators**. An unapproved one is refused outright (`Invalid senderid`). |
 | `NEXAH_DLR_SECRET` | An unguessable path segment for the delivery-receipt URL. |
-| `NEXAH_API_URL` | Defaults to `https://smsvas.com/bulk/public/index.php/api/v1`. |
+| `NEXAH_API_URL` | The **whole base, including the version segment**. The published spec documents `https://smsvas.com/bulk/public/index.php/api/v1`; a hosted instance may serve the same API at `https://<host>/api/v1` instead — on `sms.wandatech.net` the `/bulk/public/index.php` form returns 404. A base with no version segment is completed with `/api/v1` rather than guessed at. |
 | `NEXAH_DIAL` | Dialling code prepended to a 9-digit local number. Defaults to `237`. |
 | `NEXAH_LOW_CREDIT` | Credit floor for the console warning. Defaults to `200`. |
 
 All three of user, password and sender id must be present, or the rail reports itself
 unconfigured rather than failing one message at a time.
+
+## Deployments do not all speak the same dialect
+
+The spec documents one envelope. A hosted instance can answer a rejection with **HTTP 200**
+and a different shape entirely:
+
+```
+POST https://sms.wandatech.net/api/v1/sendsms  {}
+→ HTTP 200  {"errorcode":401,"message":"Unauthorised"}
+```
+
+No `responsecode` at all. Read as the documented envelope, that became a bare "NEXAH refused
+the request" and threw away the one word that says what is wrong. Both shapes are now
+understood, and an **unrecognised** shape is still treated as a failure — never as a success,
+which would mean claiming a code was sent when it was not.
+
+## Proving the account works before a customer finds out it does not
+
+`Admin → Notifications → SMS ACCOUNT → Check credentials`
+(`GET /admin/notifications/sms-check`, Super Admin) asks the provider for the account's
+credit. That authenticates **without sending anything**: no SMS is spent and no customer is
+involved. It separates the three states an operator otherwise has to guess between —
+
+- not configured (and it names which variable is missing),
+- configured but rejected (wrong user, password or base URL),
+- working (with the credit remaining, and a warning if SMS is switched off in
+  Settings → Channels, which stops codes just as effectively as a bad password).
+
+It never returns the credential, only what the provider said about it.
 
 ## The delivery-receipt URL to register with NEXAH
 
@@ -79,8 +108,11 @@ addresses their callbacks originate from, add them to the egress/ingress allowli
 
 ## Tests
 
-`server/test/nexah.test.ts` (31 assertions): the request shape actually sent (POST, country
+`server/test/nexah.test.ts` (41 assertions): the request shape actually sent (POST, country
 code, registered sender id), every documented error code, unknown-not-zero credit, that the
 code never reaches the outbox body but its message id does, that the wrong secret changes
 nothing, that a malformed body is a 400 rather than a 500, that a receipt for an unknown id
-is a no-op, and that `DELIVRD` / `UNDELIV` move the record to delivered / failed.
+is a no-op, that `DELIVRD` / `UNDELIV` move the record to delivered / failed, that a
+200-with-`errorcode` rejection is read as a failure carrying the provider's own word, and
+that the credential check separates not-configured from rejected from working without
+sending anything.

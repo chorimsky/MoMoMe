@@ -37,7 +37,15 @@
 import { config, nexahConfigured } from "../config.js";
 import { fetchT } from "./http.js";
 
-const base = () => config.nexah.apiUrl.replace(/\/$/, "");
+/* The API PATH is not the same on every NEXAH deployment. The published spec documents
+   `https://smsvas.com/bulk/public/index.php/api/v1`; a hosted instance can serve the same
+   API at `https://<host>/api/v1` (the /bulk/public/index.php form 404s there). NEXAH_API_URL
+   is therefore the whole base including the version segment, and a bare host is completed
+   with the shorter form rather than guessed at. */
+const base = () => {
+  const u = config.nexah.apiUrl.replace(/\/+$/, "");
+  return /\/v\d+$/.test(u) ? u : `${u}/api/v1`;
+};
 
 /** The documented error codes. Anything else is reported by number, never guessed at. */
 const ERRORS: Record<string, string> = {
@@ -89,12 +97,21 @@ export async function sendVerificationSms(to: string, body: string): Promise<Sen
     if (!res.ok) return { ok: false, detail: `NEXAH HTTP ${res.status}` };
     const d = (await res.json()) as {
       responsecode?: number; responsedescription?: string; responsemessage?: string;
+      /** Some deployments answer a rejection with HTTP 200 and this shape instead. */
+      errorcode?: number | string; message?: string;
       sms?: Array<{ messageid?: string; mobileno?: string; status?: string; errorcode?: number | string; errordescription?: string }>;
     };
-    // The envelope can fail on its own (bad credentials, empty balance) with no per-message
-    // array at all — that is the case the error table is mostly about.
+    // A REJECTION CAN ARRIVE AS HTTP 200. The hosted deployment this is pointed at answers
+    // a bad credential with `{"errorcode":401,"message":"Unauthorised"}` and a 200 status —
+    // no responsecode at all. Reading only the documented envelope turned that into a bare
+    // "refused the request" and threw away the one word that says what is wrong.
+    if (d.errorcode !== undefined && Number(d.errorcode) !== 0 && d.responsecode === undefined) {
+      return { ok: false, detail: `${d.message || "refused"} (${d.errorcode})` };
+    }
+    // The documented envelope can also fail on its own (bad credentials, empty balance)
+    // with no per-message array — that is what the error table is mostly about.
     if (Number(d.responsecode) !== 1) {
-      return { ok: false, detail: d.responsemessage || d.responsedescription || "NEXAH refused the request" };
+      return { ok: false, detail: d.responsemessage || d.responsedescription || d.message || "NEXAH refused the request" };
     }
     const one = d.sms?.[0];
     if (!one) return { ok: false, detail: "NEXAH accepted the request but reported no message" };
@@ -127,7 +144,13 @@ export async function credit(force = false): Promise<Credit | null> {
       body: JSON.stringify({ user: config.nexah.user, password: config.nexah.password }),
     }, 10_000);
     if (!res.ok) { cached = { v: null, at: Date.now() }; return null; }
-    const d = (await res.json()) as { credit?: number | string; accountexpdate?: string; balanceexpdate?: string };
+    const d = (await res.json()) as { credit?: number | string; accountexpdate?: string; balanceexpdate?: string; errorcode?: number | string; message?: string };
+    // Same 200-with-an-error shape as the send path: a refusal is UNKNOWN credit, not zero.
+    if (d.credit === undefined && d.errorcode !== undefined) {
+      console.warn(`[nexah] credit refused: ${d.message ?? ""} (${d.errorcode})`);
+      cached = { v: null, at: Date.now() };
+      return null;
+    }
     const n = Number(d.credit);
     // A balance we could not read is UNKNOWN, not zero — the same distinction the payout
     // float makes. Returning 0 here would read as "out of credit" and page someone.

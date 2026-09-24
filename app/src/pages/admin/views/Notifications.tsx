@@ -10,7 +10,23 @@ import { useAdmin } from "../context.js";
 
 type Health = { total: number; sent: number; failed: number; skipped: number;
   channels: Array<{ name: string; configured: boolean; enabled: boolean; reaches: string[] }>;
-  otp?: { whatsapp: boolean; sms: boolean; whatsappTemplate: boolean; smsSender?: "nexah" | "gateway" | null; smsCredit?: number | null; smsCreditLow?: boolean; smsCreditFloor?: number; smsCreditExpires?: string } };
+  otp?: { whatsapp: boolean; sms: boolean; whatsappTemplate: boolean; smsProviderReady?: boolean; smsChannelOn?: boolean; whatsappProviderReady?: boolean; whatsappChannelOn?: boolean; smsSender?: "nexah" | "gateway" | null; smsCredit?: number | null; smsCreditLow?: boolean; smsCreditFloor?: number; smsCreditExpires?: string } };
+
+function SmsCheck() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof api.adminSmsCheck>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => { setBusy(true); try { setD(await api.adminSmsCheck()); } catch (e) { setD({ configured: false, ok: false, base: "", message: e instanceof Error ? e.message : "Could not check." }); } finally { setBusy(false); } };
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13, flexWrap: "wrap" }}>
+      <div>
+        <strong>SMS ACCOUNT</strong>
+        <span style={{ color: "var(--ink-3)", marginLeft: 8, fontSize: 12 }}>asks the provider about the account — sends nothing</span>
+        {d && <div style={{ fontSize: 12, marginTop: 4, color: d.ok ? "var(--recv)" : "var(--bad)", maxWidth: 560, lineHeight: 1.5 }}>{d.message}{d.base ? <span style={{ color: "var(--ink-3)" }}> · {d.base}</span> : null}</div>}
+      </div>
+      <button type="button" className="btn btn-quiet" style={{ padding: "5px 10px", fontSize: 12 }} disabled={busy} onClick={() => void run()}>{busy ? "…" : "Check credentials"}</button>
+    </div>
+  );
+}
 
 export function NotificationsView() {
   const { notifications, dismiss } = useAdmin();
@@ -90,6 +106,10 @@ export function NotificationsView() {
               </div>
             );
           })}
+          {/* Proof, not inference. Asks the provider about the account WITHOUT sending an SMS,
+              so a wrong credential is found here rather than by a customer who never gets a
+              code. Nothing about the credential itself is ever returned. */}
+          <SmsCheck />
           {health.otp && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line-2)", fontSize: 13 }}>
               <div>
@@ -100,7 +120,12 @@ export function NotificationsView() {
                 {health.otp.whatsapp && health.otp.sms ? "WhatsApp first, SMS fallback"
                   : health.otp.whatsapp ? "WhatsApp only"
                   : health.otp.sms ? `SMS only${!health.otp.whatsappTemplate ? " — set WHATSAPP_TEMPLATE_OTP to send codes over WhatsApp" : ""}`
-                  : "nowhere — nobody can verify a number. Set WHATSAPP_TEMPLATE_OTP (an approved authentication template), or NEXAH_USER / NEXAH_PASSWORD / NEXAH_SENDER_ID, or SMS_WEBHOOK_URL."}
+                  /* Two very different reasons nothing can be sent. Saying "set these
+                     variables" when the variables are already set sends an operator to
+                     re-check credentials that were never the problem. */
+                  : health.otp.smsProviderReady || health.otp.whatsappProviderReady
+                    ? `nowhere — ${[health.otp.smsProviderReady && !health.otp.smsChannelOn ? "SMS" : "", health.otp.whatsappProviderReady && !health.otp.whatsappChannelOn ? "WhatsApp" : ""].filter(Boolean).join(" and ")} ${health.otp.smsProviderReady && !health.otp.smsChannelOn && health.otp.whatsappProviderReady && !health.otp.whatsappChannelOn ? "are" : "is"} wired up but switched OFF in Settings → Channels. The credentials are fine; the switch is not.`
+                    : "nowhere — nobody can verify a number. No provider is wired: set WHATSAPP_TEMPLATE_OTP (an approved authentication template), or NEXAH_USER / NEXAH_PASSWORD / NEXAH_SENDER_ID, or SMS_WEBHOOK_URL."}
                 {health.otp.sms && health.otp.smsSender && (
                   <span style={{ display: "block", color: "var(--ink-3)", fontSize: 11.5, marginTop: 2 }}>
                     over {health.otp.smsSender === "nexah" ? "NEXAH — delivery is confirmed back per message" : "the generic gateway — no delivery confirmation"}

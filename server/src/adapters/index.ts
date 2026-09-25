@@ -114,6 +114,9 @@ export interface CreateInboundRequest {
   /** LUD-06 description_hash (hex). Rails that can set it are tried FIRST; a rail that
    *  cannot still mints (lenient wallets pay it) so a Lightning Address never dead-ends. */
   descriptionHash?: string;
+  /** Exact msat the invoice must carry (LNURL — the wallet checks equality). When this is
+   *  not a whole number of sats, only rails that can mint msat are eligible. */
+  amountMsat?: number;
   /** Recipient label for the invoice memo (see InstructionRequest.label). */
   label?: string;
 }
@@ -129,6 +132,12 @@ export async function createInstruction(req: CreateInboundRequest): Promise<PayI
   // A caller that needs the invoice to carry description_hash gets the rails that can set
   // it first, in their own priority order; the rest stay as failover.
   if (req.descriptionHash) supporting = [...supporting.filter((r) => r.descriptionHash), ...supporting.filter((r) => !r.descriptionHash)];
+  // A sub-sat amount is not a preference, it is a requirement: an invoice rounded to the
+  // next sat is a different number from the one the wallet asked for, and LUD-06 has the
+  // wallet refuse it. Rails that cannot mint msat are removed, not merely deprioritised.
+  if (req.amountMsat !== undefined && req.amountMsat % 1000 !== 0) {
+    supporting = supporting.filter((r) => r.msatPrecision || r.name === "sandbox");
+  }
   const primary = supporting[0];
   if (!primary) throw new Error(`No rail adapter for method ${req.method}`);
 
@@ -221,7 +230,7 @@ async function callSandbox(req: CreateInboundRequest): Promise<PayInstruction> {
 
 function callRail(rail: RailAdapter, req: CreateInboundRequest): Promise<PayInstruction> {
   const callbackUrl = `${config.publicUrl}/webhooks/${rail.name}`;
-  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl, ...(req.descriptionHash ? { descriptionHash: req.descriptionHash } : {}), ...(req.label ? { label: req.label } : {}) };
+  const full: InstructionRequest = { method: req.method, ref: req.ref, amount: req.amount, usd: req.usd, callbackUrl, ...(req.descriptionHash ? { descriptionHash: req.descriptionHash } : {}), ...(req.amountMsat !== undefined ? { amountMsat: req.amountMsat } : {}), ...(req.label ? { label: req.label } : {}) };
   return rail.createInstruction(full);
 }
 

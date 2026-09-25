@@ -26,6 +26,11 @@ export interface InstructionRequest {
    *  verifies the invoice's `h` tag against it and a strict wallet refuses without it. A
    *  rail that cannot set description_hash ignores this (and is chosen last for it). */
   descriptionHash?: string;
+  /** Exact millisatoshis the Lightning invoice must carry, overriding the BTC amount's
+   *  round-up-to-whole-sat. LNURL needs this: LUD-06 step 7 has the payer's wallet verify
+   *  that the invoice amount EQUALS what it asked for, so an invoice rounded up by even
+   *  1 msat is refused. Only rails with `msatPrecision` are given a non-whole-sat value. */
+  amountMsat?: number;
 }
 
 /** Normalised inbound event parsed from a provider webhook. */
@@ -106,6 +111,9 @@ export interface RailAdapter {
   /** Can this rail mint a Lightning invoice whose `h` tag is a caller-supplied
    *  description_hash (LUD-06)? Undefined = no. */
   readonly descriptionHash?: boolean;
+  /** Can this rail mint an invoice for an exact millisatoshi amount (not just whole
+   *  sats)? Undefined = no; such a rail is skipped for non-whole-sat LNURL amounts. */
+  readonly msatPrecision?: boolean;
   /** Create the inbound pay instruction (invoice / address). Idempotent on ref. */
   createInstruction(req: InstructionRequest): Promise<PayInstruction>;
   /** Verify a raw webhook payload's authenticity. */

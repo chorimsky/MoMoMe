@@ -26,9 +26,16 @@ export const sandboxAdapter: RailAdapter = {
   configured: () => true,
   trusted: () => false,
   supports: () => true,
+  // The sandbox mirrors the real rail's shapes, exact-msat invoices included, so a test
+  // that passes here means the same thing in production.
+  msatPrecision: true,
 
   async createInstruction(req: InstructionRequest): Promise<PayInstruction> {
-    const { method, amount } = req;
+    const { method } = req;
+    // An LNURL caller fixes the msat; everyone else gets the BTC amount as quoted.
+    const amount = method === "LIGHTNING" && req.amountMsat !== undefined
+      ? req.amountMsat / 1e11
+      : req.amount;
     const asset: InboundAsset = METHOD_ASSET[method];
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[method] * 1000).toISOString();
     let code: string;
@@ -36,7 +43,11 @@ export const sandboxAdapter: RailAdapter = {
     let providerRef: string;
 
     if (method === "LIGHTNING") {
-      code = `lnbc${Math.round(amount * 1e8)}n1${rand(B32, 90)}`;
+      // Encode the amount the way bolt11 does, in the smallest unit the invoice can
+      // express: `p` is 1e-12 BTC, so one msat is 10 of them. The old form used `n`
+      // (1e-9 BTC) with the SAT count, which read back exactly 10x too low — a test could
+      // assert on this string and never notice an amount was wrong.
+      code = `lnbc${Math.round(amount * 1e11) * 10}p1${rand(B32, 90)}`;
       qr = lightningQr(code); // same shape as the live adapter
       providerRef = rand("0123456789abcdef", 64); // mock payment hash
     } else if (method === "ONCHAIN") {

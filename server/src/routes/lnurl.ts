@@ -46,14 +46,26 @@ function baseUrl(req: { protocol: string; get(h: string): string | undefined }):
    answered once and times out the next time), so the served string is pinned per user for
    the life of a wallet flow and the callback reuses it. */
 const SERVED_TTL_MS = 60 * 60_000;
-const servedMetadata = new Map<string, { metadata: string; at: number }>();
-function pinMetadata(national: string, metadata: string): void {
+const servedMetadata = new Map<string, { metadata: string; at: number; min: number; max: number }>();
+function pinMetadata(national: string, metadata: string, min: number, max: number): void {
   if (servedMetadata.size > 5_000) servedMetadata.clear();
-  servedMetadata.set(national, { metadata, at: Date.now() });
+  servedMetadata.set(national, { metadata, at: Date.now(), min, max });
+}
+function pinned(national: string): { metadata: string; min: number; max: number } | undefined {
+  const hit = servedMetadata.get(national);
+  return hit && Date.now() - hit.at < SERVED_TTL_MS ? hit : undefined;
 }
 export function pinnedMetadata(national: string): string | undefined {
-  const hit = servedMetadata.get(national);
-  return hit && Date.now() - hit.at < SERVED_TTL_MS ? hit.metadata : undefined;
+  return pinned(national)?.metadata;
+}
+/* The bounds are derived from a LIVE rate, so recomputing them at callback time gives a
+   different answer from the one the wallet was shown seconds earlier. A wallet that offers
+   "pay the minimum" then sends exactly minSendable — and would be refused for being a
+   hair under a minimum that moved after it read it. The advertised range is what the payer
+   agreed to, so the advertised range is what the callback enforces. */
+function enforcedRange(national: string): { min: number; max: number } {
+  const hit = pinned(national);
+  return hit ? { min: hit.min, max: hit.max } : sendableRangeMsat();
 }
 
 /* What a stranger resolving <number>@momome.xyz may learn about its holder. The registered
@@ -90,7 +102,7 @@ lnurl.get("/.well-known/lnurlp/:user", rateLimitMiddleware("lnurlp", 60, 60_000)
   const address = lnAddress(r);
   const { min, max } = sendableRangeMsat();
   const metadata = lnurlMetadata({ national: r.national, provider: r.provider, name, address });
-  pinMetadata(r.national, metadata);
+  pinMetadata(r.national, metadata, min, max);
   res.json({
     tag: "payRequest",
     callback: `${baseUrl(req)}/lnurl/pay/${r.national}`,
@@ -112,7 +124,7 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
 
   const msat = Number(req.query.amount);
   if (!Number.isFinite(msat) || msat <= 0) return res.json(lnErr("Missing or invalid amount."));
-  const { min, max } = sendableRangeMsat();
+  const { min, max } = enforcedRange(r.national);
   if (msat < min || msat > max) return res.json(lnErr(`Amount out of range (${min}–${max} msat).`));
 
   // Rate-freshness gate — this unauthenticated path mints a REAL payout quote off
@@ -155,6 +167,10 @@ lnurl.get("/lnurl/pay/:user", rateLimitMiddleware("lnurl_pay", 30, 60_000), asyn
       amount: btc,
       usd: totalXaf / rq.usdXaf, // for USD-wallet (Stablesats) hedging rails
       descriptionHash,
+      // LUD-06 step 7: the wallet checks the invoice equals what it asked for. Pass the
+      // payer's msat through untouched — deriving it back from BTC rounds up to the next
+      // sat and the wallet refuses an invoice it did not ask for.
+      amountMsat: msat,
     });
   } catch (e) {
     return res.json(lnErr(e instanceof Error ? e.message : "Could not create the invoice."));

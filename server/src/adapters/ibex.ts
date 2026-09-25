@@ -394,6 +394,8 @@ export function mintBlockedReason(method: string): string | null {
 
 export const ibexAdapter: RailAdapter = {
   name: "ibex",
+  /** IBEX /invoice/add takes amountMsat, so an LNURL amount can be honoured exactly. */
+  msatPrecision: true,
   // IBEX is the BASE crypto rail — priority 0 so it's chosen ahead of any other
   // configured crypto rail for the methods it supports.
   priority: 0,
@@ -407,9 +409,12 @@ export const ibexAdapter: RailAdapter = {
     const expiresAt = new Date(Date.now() + QUOTE_TTL_SEC[req.method] * 1000).toISOString();
 
     if (req.method === "LIGHTNING") {
-      // Whole satoshis, rounded up (see shared/domain): the figure on the invoice is the
-      // figure the app shows, so the payer's wallet and our screen never disagree by a sat.
-      const invoiceMsat = btcToInvoiceMsat(req.amount);
+      // Normally whole satoshis, rounded up (see shared/domain): the figure on the invoice
+      // is the figure the app shows, so the payer's wallet and our screen never disagree by
+      // a sat. But when the CALLER fixes the msat — LNURL, where the payer's wallet chose
+      // the amount and then verifies the invoice matches it exactly (LUD-06 step 7) —
+      // rounding up by even 1 msat makes the wallet refuse. Then the caller's figure wins.
+      const invoiceMsat = req.amountMsat ?? btcToInvoiceMsat(req.amount);
       const invoiceBtc = msatToBtc(invoiceMsat);
       const res = await ibex("/invoice/add", {
         method: "POST",

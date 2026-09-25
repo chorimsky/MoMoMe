@@ -65,10 +65,13 @@ export function msatForXaf(totalXaf: number): number {
  *  fee, so a payer can never under/overshoot what the engine will settle. */
 export function sendableRangeMsat(): { min: number; max: number } {
   const feePct = getSettings().pricing.feePct;
-  return {
-    min: Math.max(1000, msatForXaf(Math.round(MIN_XAF * (1 + feePct)))),
-    max: msatForXaf(Math.round(MAX_XAF * (1 + feePct))),
-  };
+  // Whole satoshis at both ends. Wallets commonly offer "pay the minimum", and a
+  // minSendable of 1 077 576 msat is 576 msat that no whole-sat rail can invoice — the
+  // one amount most likely to be chosen was the one guaranteed to fail. Round the floor
+  // UP and the ceiling DOWN so both bounds stay inside the deliverable range.
+  const min = Math.max(1000, Math.ceil(msatForXaf(Math.round(MIN_XAF * (1 + feePct))) / 1000) * 1000);
+  const max = Math.floor(msatForXaf(Math.round(MAX_XAF * (1 + feePct))) / 1000) * 1000;
+  return { min, max: Math.max(min, max) };
 }
 
 /** LUD-06 metadata array (JSON-encoded), from the operator-managed templates (Settings →

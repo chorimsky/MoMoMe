@@ -145,3 +145,56 @@ have and must not: either a team/individual **App Store Connect API key** (Issue
 and the `AuthKey_*.p8`, dropped into the gitignored `mobile/.secrets/` and referenced as
 `submit.production.ios.ascApiKeyPath`), or an interactive Apple sign-in run by the operator.
 Only an Account Holder or Admin can mint a team key; any user can mint an individual one.
+
+## Play testing tracks — what was actually there (reviewed 2026-09-25)
+
+Worth writing down because the console showed several things that had been quietly broken or
+unused, and none of them are visible from the repo.
+
+**No pre-launch report has ever been generated.** This is Google's free device-farm crawl —
+it installs the app on real hardware and reports crashes, ANRs, performance, accessibility,
+security and privacy findings before a human reviewer sees it. The overview page was still
+on its empty state ("Import artifacts to generate pre-launch reports"), which means the app
+has never been run on Google's devices, across six uploads. A report is produced when a
+bundle lands on a testing track.
+
+Three deep links are now configured so the crawler reaches screens that are several taps
+deep, rather than only the Send tab it lands on:
+
+    momome://merchant · momome://activity · momome://settings
+
+Test-account credentials are deliberately still "do not provide": the app has no login wall,
+so the crawler can explore without them. Supplying the reviewer number and code would let it
+past phone verification — a decision for the operator, not a default.
+
+**Track state.** Internal: active, but on versionCode 8 while production serves 9. Closed:
+two channels, "Momome Alpha test" and a duplicate "Alpha", neither with a release. Open:
+**suspended**, holding a stale 1.0.0 and an unnamed draft.
+
+The closed channel's checklist stood at 2 of 4: countries chosen and a draft release created,
+but no testers selected — even though a "MoMoMe testers" mailing list with 3 people already
+existed and simply had not been ticked. It is now ticked, feedback goes to info@momome.xyz,
+and the draft holds bundle 9 (1.1.0) with English and French release notes.
+
+### Why it was not submitted
+
+Submitting raises a dialog: a review has been in progress since 25 September, and submitting
+now **cancels and restarts it**. That review is the production phased rollout of 1.1.0 at
+10%. A closed test track arriving an hour sooner is not worth delaying a release that is
+already reaching users, so the changes are staged in the publication overview instead.
+
+Once the production review clears, the publication overview's "Submit N changes for review"
+sends them, and the pre-launch report follows from that upload.
+
+### Two things noticed in passing
+
+`versionCode 9` carries **no deobfuscation/mapping file**, so any crash or ANR from it
+arrives unsymbolicated — stack traces of obfuscated names. Uploading the R8 mapping would fix
+it, and EAS can be told to.
+
+The console is showing an **Android developer validation** notice: package names and signing
+keys used to distribute Android apps *outside* Google Play must be registered by
+**30 September 2026** or those builds stop installing on certified devices in some countries.
+Play-distributed apps are already registered. Worth confirming whether the preview APK we
+hand out directly falls under this — it shares the package name but not necessarily the
+signing key, since Play re-signs uploads with its own app signing key.

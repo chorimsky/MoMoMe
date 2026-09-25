@@ -63,3 +63,4 @@ google-play-key.json
 # Play Developer API OAuth client + token (never commit)
 google-play-oauth-client.json
 google-play-oauth-token.json
+store.config.json

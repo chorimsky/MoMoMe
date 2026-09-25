@@ -61,7 +61,8 @@
       },
       "ios": {
         "ascAppId": "6806540524",
-        "bundleIdentifier": "com.momome.app"
+        "bundleIdentifier": "com.momome.app",
+        "metadataPath": "./store.config.js"
       }
     },
     "internal": {
@@ -71,7 +72,8 @@
       },
       "ios": {
         "ascAppId": "6806540524",
-        "bundleIdentifier": "com.momome.app"
+        "bundleIdentifier": "com.momome.app",
+        "metadataPath": "./store.config.js"
       }
     }
   }

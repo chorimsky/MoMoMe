@@ -21,6 +21,8 @@ const DEFAULTS: AppFeatures = {
   receive: true,
   contacts: true,
   momoTransfer: false, // admin-gated: never on until the server says so
+  // Same: a default of ON would advertise a WhatsApp bot that is not running.
+  whatsappBot: false,
 };
 
 let features: AppFeatures = DEFAULTS;

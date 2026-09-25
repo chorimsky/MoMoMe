@@ -1,13 +1,22 @@
 # Continuous deployment for the settlement engine (Tier-1 item 3 of the infrastructure
-# audit): main → the Railway STAGING environment on every green run; a version tag
-# (v1.2.3) → PRODUCTION. Both are gated by scripts/deploy-gate.sh (deep health + a
-# synthetic quote) and roll back to the previous deployment when the gate fails.
+# audit): main → PRODUCTION on every green run, gated by scripts/deploy-gate.sh (deep
+# health + a synthetic quote on the NEW build) and rolled back to the previous deployment
+# when the gate fails.
 #
-# One-time setup (operator): a Railway staging environment cloned from production on
-# sandbox rails (RAILS_MODE=sandbox, sandbox keys), and repository secrets
+# WHY NOT STAGING. This used to send main → a Railway "staging" environment and only a
+# version tag → production. That environment has never existed: `railway link -e staging`
+# answers "Environment 'staging' not found", so the default path of this workflow could
+# not have worked on any run. It was never noticed because every job on this repo has been
+# refused before starting ("your account is locked due to a billing issue"), and the real
+# deploys were going out through scripts/deploy.sh by hand — to production, on every push.
+# This now describes that. Choosing `staging` by hand still works the moment someone
+# creates the environment; until then it fails with Railway's own clear message rather
+# than a missing-secret one.
+#
+# One-time setup (operator): repository secrets
 #   RAILWAY_TOKEN              — a Railway project token (Project → Settings → Tokens)
-#   STAGING_API_URL            — e.g. https://momome-api-staging.up.railway.app
 #   PRODUCTION_API_URL         — https://momome-api-production.up.railway.app
+#   STAGING_API_URL            — only if a staging environment is ever created
 # The workflow uploads a clean `git archive` of the commit from the repository ROOT (the
 # server build needs shared/ and railway.json) — never a working tree.
 name: Deploy
@@ -19,9 +28,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "staging or production"
+        description: "production, or staging once that Railway environment exists"
         required: true
-        default: staging
+        default: production
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -44,7 +53,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      TARGET: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production') && 'production' || 'staging' }}
+      # Staging only when someone explicitly asks for it; everything else is production.
+      TARGET: ${{ github.event.inputs.environment == 'staging' && 'staging' || 'production' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

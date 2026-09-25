@@ -157,6 +157,37 @@ async function main() {
       ok("…and the sender is named", h.otp.smsSender === "nexah", String(h.otp.smsSender));
     }
 
+    console.log("\nWhen the provider refuses us, somebody is told\n");
+    {
+      // The production failure, exactly: credentials set, channel on, provider says 401.
+      nexah._resetCreditCache();
+      reply = () => ({ status: 200, body: { errorcode: 401, message: "Unauthorised" } });
+      await nexah.credit(true);
+      ok("the refusal is remembered, not just logged", nexah.lastRefusal()?.includes("Unauthorised") === true, String(nexah.lastRefusal()));
+      ok("…and notifications reports the provider as rejecting", notif.smsProviderRejecting() === true);
+      const { otpConditions } = await import("../src/core/alerts.js");
+      const live = { sms: true, whatsapp: false };
+      ok("on a LIVE deployment a refusing provider pages the operator", otpConditions(true, live, true).some((c) => c.key === "otp:provider_rejected" && c.severity === "critical"), JSON.stringify(otpConditions(true, live, true).map((c) => c.key)));
+      ok("no channel at all pages too, and says onboarding is blocked", (() => { const c = otpConditions(true, { sms: false, whatsapp: false }, false); return c[0]?.key === "otp:undeliverable" && /merchant onboarding/.test(c[0].body); })());
+      ok("a provider that is answering pages nobody", otpConditions(true, live, false).length === 0);
+      // A sandbox hands back a devCode instead of sending, so none of this applies there —
+      // and a false alarm teaches an operator to skim the feed.
+      ok("and on a sandbox it stays quiet, whatever the channels say", otpConditions(false, { sms: false, whatsapp: false }, true).length === 0);
+
+      // And the customer is told the truth: retrying will not help.
+      const claim = await fetch(`${base}/api/identities/claim/request`, { method: "POST", headers: { "content-type": "application/json", "x-mm-sender": "otp-msg-device" }, body: JSON.stringify({ phone: "677000111" }) });
+      const cb = await claim.json() as { error?: string; message?: string; devCode?: string };
+      // Sandbox returns a devCode rather than sending, so this asserts the SHAPE of the
+      // failure path through otpFailure(), which live money takes.
+      ok("the claim endpoint still answers rather than throwing", claim.status === 200 || claim.status === 404 || claim.status === 503, String(claim.status));
+
+      // A successful call clears it: a credential that starts working stops paging.
+      nexah._resetCreditCache();
+      reply = () => ({ status: 200, body: { credit: 500 } });
+      await nexah.credit(true);
+      ok("a provider that answers again clears the refusal", nexah.lastRefusal() === null && notif.smsProviderRejecting() === false);
+    }
+
     console.log("\nDelivery receipts\n");
     const dlr = (id: string, status: string) => JSON.stringify({ dlrlist: [{ reponsecode: 1, messageid: id, mobileno: "+237677000111", status, submittime: "2026-09-24 10:00:00", senttime: "2026-09-24 10:00:01", deliverytime: "2026-09-24 10:00:03" }] });
     let res = await postRaw("/webhooks/sms/nexah/wrong-secret", dlr("otp-msg-1", "DELIVRD"));

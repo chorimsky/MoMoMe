@@ -26,7 +26,7 @@ import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
-import { listNotifications, notificationHealth, sendOtp, notify, canSendOtp, otpChannels, notifyDeletionRequest, notifyTestReport, type OtpChannel } from "../core/notifications.js";
+import { listNotifications, notificationHealth, sendOtp, notify, canSendOtp, otpChannels, smsProviderRejecting, notifyDeletionRequest, notifyTestReport, type OtpChannel } from "../core/notifications.js";
 import { isReviewPhone } from "../core/review.js";
 import { fileDeletionRequest, listDeletionRequests, resolveDeletionRequest } from "../core/deletionRequests.js";
 import { fileTestReport, listTestReports, normaliseResults } from "../core/testReports.js";
@@ -945,6 +945,20 @@ function otpPrefs(body: unknown): { prefer?: OtpChannel; lang?: "en" | "fr" } {
 }
 
 /* ---------- consumer account claim (Phase 2) ---------- */
+/* WHY A CODE COULD NOT BE SENT, in words the person can act on.
+   "Please try again shortly" is only honest when trying again might work. When no channel
+   is configured, or the provider is refusing our credentials, every retry fails the same
+   way — and the customer sits there tapping a button, with nothing telling anyone. Both of
+   those also raise an operator alert (core/alerts.ts), so the person is not the only one
+   who finds out. */
+function otpFailure(): { status: 503; error: string; message: string } {
+  const avail = otpChannels();
+  const permanent = (!avail.sms && !avail.whatsapp) || smsProviderRejecting();
+  return permanent
+    ? { status: 503, error: "otp_unavailable", message: "We can't send verification codes at the moment — this is a problem on our side, not with your number. Our team has been alerted; please contact support rather than retrying." }
+    : { status: 503, error: "sms_unavailable", message: "We could not send the code right now. Please try again shortly." };
+}
+
 api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6, 60_000), async (req, res) => {
   const phoneRaw = String((req.body ?? {}).phone ?? "");
   // Per-PHONE budget on top of the per-IP one: the person being texted is the one an SMS
@@ -959,7 +973,7 @@ api.post("/identities/claim/request", rateLimitDurableMiddleware("claim_req", 6,
   // devCode is sandbox-only; in production the code is sent by SMS — it USED to be
   // generated and never sent, which made the claim flow impossible to complete live.
   const sent = liveMoney() ? await sendOtp(`${COUNTRIES.CM.dial}${phoneRaw.replace(/\D/g, "").slice(-9)}`, r.code!, "claim your account", otpPrefs(req.body)) : { sent: false as const };
-  if (liveMoney() && !sent.sent) return res.status(503).json({ error: "sms_unavailable", message: "We could not send the code right now. Please try again shortly." });
+  if (liveMoney() && !sent.sent) { const f = otpFailure(); return res.status(f.status).json({ error: f.error, message: f.message }); }
   res.json({ sent: true, via: sent.via, channels: otpChannels(), devCode: liveMoney() ? undefined : r.code });
 });
 
@@ -1744,7 +1758,7 @@ api.post("/me/anchor/request", rateLimitDurableMiddleware("anchor_req", 6, 60_00
   // withheld, so "own your number" waited for an SMS that never existed.
   const sent = await sendOtp(`${COUNTRIES.CM.dial}${phoneIn.replace(/\D/g, "").slice(-9)}`, r.code!, "confirm your number", otpPrefs(req.body));
   if (!sent.sent && liveMoney()) {
-    return res.status(503).json({ error: "sms_unavailable", message: "We can't send confirmation codes right now. Please try again later." });
+    { const f = otpFailure(); return res.status(f.status).json({ error: f.error, message: f.message }); }
   }
   res.json({ sent: sent.sent, via: sent.via, channels: otpChannels(), devCode: liveMoney() ? undefined : r.code }); // devCode sandbox-only
 });
@@ -1873,10 +1887,7 @@ api.post("/merchant/verify/request", rateLimitDurableMiddleware("anchor_req", 6,
   // report what actually happened.
   const sent = await sendOtp(`${COUNTRIES[m.country].dial}${m.settlementPhone}`, r.code!, "verify your business number", otpPrefs(req.body));
   if (!sent.sent && liveMoney()) {
-    return res.status(503).json({
-      error: "sms_unavailable",
-      message: "We can't send verification codes right now. Please contact support so we can verify your number.",
-    });
+    { const f = otpFailure(); return res.status(f.status).json({ error: f.error, message: f.message }); }
   }
   // `via` tells the client where to look ("check WhatsApp" vs "check your messages") and
   // `channels` whether offering "send by SMS instead" makes sense.

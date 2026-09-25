@@ -17,7 +17,7 @@ import { store } from "../db/store.js";
 import { PAYOUTS } from "../adapters/payouts.js";
 import { payoutHealth } from "./routing.js";
 import { availableFloatXaf } from "./stateMachine.js";
-import { notify } from "./notifications.js";
+import { notify, otpChannels, otpSmsSender, smsProviderRejecting } from "./notifications.js";
 import * as whatsapp from "../adapters/whatsapp.js";
 import { smsChannel } from "../adapters/notify.js";
 import { inReplyWindow } from "./whatsapp.js";
@@ -75,6 +75,14 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   if (rc.unmatched) out.push({ key: "network:unmatched", severity: "critical", body: `${rc.unmatched} network transaction(s) whose ledger does not balance. Admin → Interoperability → Transactions.` });
   if (rc.stuck) out.push({ key: "network:stuck", severity: "warning", body: `${rc.stuck} network transaction(s) stuck in one state for over 30 min.` });
   const low = await lowLiquidity().catch(() => []);
+  /* NOBODY CAN VERIFY A NUMBER.
+     Verification is not a background nicety: merchant onboarding, "own your number" and
+     account claim all dead-end at a code that never arrives, and the customer is told
+     "we could not send a text message right now, please try again shortly" — which invites
+     a retry that will also fail, for ever. That state was visible only in a log line and a
+     console tile nobody had reason to open. It pages now, like an empty float does. */
+  out.push(...otpConditions(liveMoney(), otpChannels(), otpSmsSender() === "nexah" && smsProviderRejecting()));
+
   for (const a of low) out.push({ key: `liquidity:${a.sourceId}`, severity: "warning", body: `Low liquidity: ${a.sourceId} has ${Math.round(a.available).toLocaleString("en")} (floor ${a.floor.toLocaleString("en")}).` });
   return out;
 }
@@ -105,6 +113,25 @@ export async function page(text: string): Promise<{ via: "whatsapp" | "sms" | "c
 }
 
 /** Evaluate, page new/persisting conditions, all-clear the ones that vanished. */
+/** CAN ANYBODY VERIFY A NUMBER? Pure, so it can be asserted without a live-money deployment.
+ *
+ *  Only where a real code has to reach a real handset: on a sandbox the OTP endpoints hand
+ *  back a devCode instead of sending, so verification works with no channel at all, and
+ *  paging about it there is a false alarm — which is worse than no alarm, because it
+ *  teaches an operator to skim the feed. */
+export function otpConditions(live: boolean, otp: { sms: boolean; whatsapp: boolean }, providerRejecting: boolean): AlertCondition[] {
+  if (!live) return [];
+  if (!otp.sms && !otp.whatsapp) {
+    return [{ key: "otp:undeliverable", severity: "critical", body: `No channel can deliver a one-time code, so NOBODY can verify a number: merchant onboarding, "own your number" and account claim are all blocked. Admin → Notifications → Check credentials says which of the provider and the Settings → Channels switch is missing.` }];
+  }
+  if (providerRejecting) {
+    // Configured, switched on, and the provider is refusing us — the worst of the three,
+    // because every check short of actually calling the provider says it is fine.
+    return [{ key: "otp:provider_rejected", severity: "critical", body: `The SMS provider is REFUSING our credentials, so one-time codes are not being delivered. Verification is blocked until it is fixed. Admin → Notifications → Check credentials shows what the provider said.` }];
+  }
+  return [];
+}
+
 export async function evaluateAlerts(now = Date.now()): Promise<{ raised: string[]; cleared: string[]; active: AlertState[] }> {
   const list = await conditions(now);
   lastEvaluation = { at: new Date(now).toISOString(), conditions: list };

@@ -106,7 +106,8 @@ export async function sendVerificationSms(to: string, body: string): Promise<Sen
     // no responsecode at all. Reading only the documented envelope turned that into a bare
     // "refused the request" and threw away the one word that says what is wrong.
     if (d.errorcode !== undefined && Number(d.errorcode) !== 0 && d.responsecode === undefined) {
-      return { ok: false, detail: `${d.message || "refused"} (${d.errorcode})` };
+      refusal = `${d.message || "refused"} (${d.errorcode})`;
+      return { ok: false, detail: refusal };
     }
     // The documented envelope can also fail on its own (bad credentials, empty balance)
     // with no per-message array — that is what the error table is mostly about.
@@ -132,7 +133,13 @@ export interface Credit { credit: number; accountExpires?: string; balanceExpire
 let cached: { v: Credit | null; at: number } | null = null;
 const CREDIT_TTL_MS = 5 * 60_000;
 
-export function _resetCreditCache(): void { cached = null; }
+/* Did the PROVIDER refuse us, as opposed to being unreachable? Only the first is
+   actionable and only the first should page anyone: a timeout is weather, a 401 is a
+   credential nobody has fixed. Set on a refusal, cleared the moment a call succeeds. */
+let refusal: string | null = null;
+export function lastRefusal(): string | null { return refusal; }
+
+export function _resetCreditCache(): void { cached = null; refusal = null; }
 
 export async function credit(force = false): Promise<Credit | null> {
   if (!nexahConfigured()) return null;
@@ -147,7 +154,8 @@ export async function credit(force = false): Promise<Credit | null> {
     const d = (await res.json()) as { credit?: number | string; accountexpdate?: string; balanceexpdate?: string; errorcode?: number | string; message?: string };
     // Same 200-with-an-error shape as the send path: a refusal is UNKNOWN credit, not zero.
     if (d.credit === undefined && d.errorcode !== undefined) {
-      console.warn(`[nexah] credit refused: ${d.message ?? ""} (${d.errorcode})`);
+      refusal = `${d.message ?? "refused"} (${d.errorcode})`;
+      console.warn(`[nexah] credit refused: ${refusal}`);
       cached = { v: null, at: Date.now() };
       return null;
     }
@@ -156,6 +164,7 @@ export async function credit(force = false): Promise<Credit | null> {
     // float makes. Returning 0 here would read as "out of credit" and page someone.
     if (!Number.isFinite(n)) { cached = { v: null, at: Date.now() }; return null; }
     const v: Credit = { credit: n, accountExpires: d.accountexpdate, balanceExpires: d.balanceexpdate, at: new Date().toISOString() };
+    refusal = null;                                    // it answered: whatever was wrong is not now
     cached = { v, at: Date.now() };
     return v;
   } catch {

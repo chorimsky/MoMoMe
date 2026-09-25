@@ -303,6 +303,12 @@ export function canSendSms(): boolean {
 }
 /** Which sender a verification code would use right now. NEXAH first: it is the only one
  *  that comes back and says whether the code arrived. */
+/** Is the SMS provider actively refusing our credentials? Distinct from "unconfigured" and
+ *  from "unreachable": this is the state where every check short of calling the provider
+ *  says everything is fine, and no code is delivered. */
+export function smsProviderRejecting(): boolean {
+  return nexahConfigured() && nexah.lastRefusal() !== null;
+}
 export function otpSmsSender(): "nexah" | "gateway" | null {
   if (!getSettings().channels.SMS) return null;
   if (nexahConfigured()) return "nexah";

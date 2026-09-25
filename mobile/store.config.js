@@ -174,7 +174,7 @@ module.exports = {
   configVersion: 0,
   apple: {
     version: '1.1.0',
-    copyright: `${new Date().getFullYear()} momome`,
+    copyright: `${new Date().getFullYear()} Bitbase Technologies Incorporated`,
     categories: ['FINANCE'],
     // Manual: a first release should be released by a person who has looked at it, not by a
     // clock. Switch to automaticRelease once there is a second version to compare against.

@@ -112,3 +112,36 @@ pnpm check     # typecheck app + server + MOBILE, then every test
 `npm test` inside `server/` is **not** that gate. A change to `shared/types.ts` that breaks
 the mobile app passes the server chain and the web build and is caught only here — which is
 exactly how a non-compiling mobile app reached `main` on 2026-09-24.
+
+## Store releases (verified against both stores, 2026-09-25)
+
+The two stores are at completely different stages, which is worth writing down because the
+repo reads as though they were symmetrical.
+
+**Android is already live.** The Play production track holds `versionCode 6`; `8` has been
+sitting in `internal` since 22 Sept. So an Android "go live" is a *promotion*, not a first
+release. The service account at `mobile/.secrets/fcm-service-account.json` — despite the
+`fcm-` name, it is a Firebase key that has been granted publishing rights on the Play app —
+authenticates against `androidpublisher` and can create and discard edits on `momome.app`.
+Nothing further is needed from the operator for Android.
+
+Note the package names differ by platform and neither is a typo: iOS is `com.momome.app`,
+Android is `momome.app`. A Play API call with the iOS identifier answers
+`404 Package not found`, which reads like a permissions failure and is not one.
+
+**iOS has never shipped.** `itunes.apple.com/lookup?id=6806540524` returns no result in any
+storefront. The build exists, the app record exists, but no version has been released.
+
+`eas.json`'s `submit.production.android` now targets `track: production` with
+`releaseStatus: inProgress` and `rollout: 0.1`. A staged rollout, not 100%, because Play
+cannot withdraw a bundle once live — it can only halt a rollout — and this build carries a
+quarter's worth of change. Raise the fraction in the Play Console once it looks healthy.
+`submit.internal` keeps the old behaviour for test builds.
+
+### What is still blocked, and on whom
+
+`eas submit --platform ios` needs App Store Connect credentials, which this repo does not
+have and must not: either a team/individual **App Store Connect API key** (Issuer ID, Key ID
+and the `AuthKey_*.p8`, dropped into the gitignored `mobile/.secrets/` and referenced as
+`submit.production.ios.ascApiKeyPath`), or an interactive Apple sign-in run by the operator.
+Only an Account Holder or Admin can mint a team key; any user can mint an individual one.

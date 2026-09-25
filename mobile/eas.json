@@ -55,6 +55,18 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./.secrets/fcm-service-account.json",
+        "track": "production",
+        "releaseStatus": "inProgress",
+        "rollout": 0.1
+      },
+      "ios": {
+        "ascAppId": "6806540524",
+        "bundleIdentifier": "com.momome.app"
+      }
+    },
+    "internal": {
+      "android": {
+        "serviceAccountKeyPath": "./.secrets/fcm-service-account.json",
         "track": "internal"
       },
       "ios": {

@@ -46,7 +46,8 @@ case "$WHAT" in
     echo "mobile: OTA → production channel · \"$MSG\""
     ( cd mobile && npx eas-cli@latest update --channel production --non-interactive --message "$MSG" )
     echo "mobile: published. Phones on $VERSION pick it up on next launch."
-    ( cd mobile && npx eas-cli@latest update:list --limit 3 --non-interactive 2>/dev/null | head -20 ) || true
+    # --branch is required; without it the CLI exits "Branch name may not be empty".
+    ( cd mobile && npx eas-cli@latest update:list --branch production --limit 3 --non-interactive 2>/dev/null | head -24 ) || true
     ;;
   build)
     echo "mobile: queueing iOS + Android production builds on EAS (not submitted — submission stays manual)"

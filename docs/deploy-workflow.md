@@ -198,3 +198,30 @@ keys used to distribute Android apps *outside* Google Play must be registered by
 Play-distributed apps are already registered. Worth confirming whether the preview APK we
 hand out directly falls under this — it shares the package name but not necessarily the
 signing key, since Play re-signs uploads with its own app signing key.
+
+### All three tracks completed (2026-09-25, later)
+
+Internal, closed and open now all carry versionCode 9 with English and French release notes.
+
+**Internal publishes instantly and does not go through review** — the confirm step says so
+plainly ("the changes will be published immediately on Google Play"), which is why it could
+be finished while a production review was in flight. 9 (1.1.0) is live to internal testers.
+That upload is also what should finally produce the first pre-launch report.
+
+**Open and closed both require review**, and submitting them forced the trade-off the console
+had warned about: the production 1.1.0 phased rollout at 10% was still under review, and
+sending anything new cancels and restarts it. Everything was staged first so the restart
+happened once rather than three times, and all six changes now sit under a single review
+covering production plus both test tracks.
+
+Two things to know when this happens again:
+
+- **Stage, then submit once.** Each submission while a review is open restarts that review.
+  Doing the tracks one at a time would have restarted the production clock three times.
+- **Managed publishing is enabled.** Approval does not release anything; the publication
+  overview needs a manual publish afterwards. That is a safety feature, not an oversight —
+  but "approved" and "live" are different states here, and it is easy to assume otherwise.
+
+Open testing covers 1 country/region while production covers 175. Left as it was: a public
+open test of a Cameroon payments product reasonably stays in Cameroon, but it is a deliberate
+setting, not a default, so it is worth a second look before inviting testers.

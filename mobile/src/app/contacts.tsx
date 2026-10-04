@@ -206,7 +206,15 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
   const [pickNote, setPickNote] = useState<string | null>(null);
 
   // Pick someone from the phone's own address book — the system picker, so the app never
-  // reads the whole contact list and needs no permission dialog on iOS.
+  // reads the whole contact list, and on iOS it needs no permission dialog at all.
+  //
+  // Android is not so tidy. ACTION_PICK itself needs nothing, but expo-contacts reads the
+  // chosen contact back with a general query against ContactsContract.Data filtered by id
+  // — not through the one-shot URI the picker grants — and that query needs READ_CONTACTS
+  // actually GRANTED, not merely declared in the manifest. We declared it and never asked
+  // for it, so every Android pick ended in a raw SecurityException. Ask at the moment the
+  // user reaches for the feature, and only on Android: asking on iOS would raise the
+  // full-address-book prompt that using the picker exists to avoid.
   const pickFromPhone = async () => {
     setPickNote(null);
     try {
@@ -214,6 +222,10 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
       // install that received this screen over the air would crash at startup on a static
       // import; this way it just gets told to update.
       const DeviceContacts = await import('expo-contacts');
+      if (Platform.OS === 'android') {
+        const perm = await DeviceContacts.requestPermissionsAsync();
+        if (!perm.granted) { setPickNote(tr('c_pick_denied')); return; }
+      }
       const c = await DeviceContacts.presentContactPickerAsync();
       if (!c) return;
       const best = bestPhoneBookNumber((c.phoneNumbers ?? []).map((p) => p.number ?? ''), country);

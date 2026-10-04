@@ -421,6 +421,7 @@ export const STRINGS = {
   c_from_phone: ['From phone', 'Depuis le téléphone'],
   c_pick_no_number: ['That contact has no phone number we can pay.', 'Ce contact n’a aucun numéro que nous puissions payer.'],
   c_pick_update: ['Update MoMo›Me from the store to pick contacts from your phone.', 'Mettez MoMo›Me à jour depuis le store pour choisir des contacts depuis votre téléphone.'],
+  c_pick_denied: ['MoMo›Me needs permission to read the contact you picked. You can allow it in Settings, or just type the number.', 'MoMo›Me a besoin d’une autorisation pour lire le contact choisi. Autorisez-la dans les Réglages, ou saisissez simplement le numéro.'],
   c_duplicate: ['You already have this number saved as {n}.', 'Ce numéro est déjà enregistré sous {n}.'],
   c_delete_title: ['Delete this contact?', 'Supprimer ce contact ?'],
   c_delete_body: ['{n} will be removed from your saved contacts. Past payments are not affected.', '{n} sera retiré de vos contacts. Les paiements passés ne sont pas concernés.'],

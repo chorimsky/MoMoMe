@@ -225,3 +225,45 @@ Two things to know when this happens again:
 Open testing covers 1 country/region while production covers 175. Left as it was: a public
 open test of a Cameroon payments product reasonably stays in Cameroon, but it is a deliberate
 setting, not a default, so it is worth a second look before inviting testers.
+
+## Android contacts: a live bug, and a policy clock (2026-10-04)
+
+Google's Contacts Permission policy takes effect **27 January 2027**, for apps targeting
+**Android 17 (SDK 37) or later** that declare `READ_CONTACTS` without a declaration. We
+target SDK 36 today, so the clock has not started — but chasing it down surfaced something
+that had already broken.
+
+**The picker never worked on Android.** `contacts.tsx` calls
+`presentContactPickerAsync()`, and the comment beside it said the app "needs no permission
+dialog". True on iOS. On Android, `ACTION_PICK` needs nothing to *open*, but expo-contacts
+reads the chosen contact back with
+
+```kotlin
+resolver.query(ContactsContract.Data.CONTENT_URI, …, "contact_id = ?", …)
+```
+
+— a general provider query, not the one-shot URI grant the picker hands back. That needs
+`READ_CONTACTS` **granted**. We declared it in `app.config.ts` and never once called
+`requestPermissionsAsync`, and a declared dangerous permission is not a granted one on
+Android 6+. So every Android "From phone" pick ended in a raw SecurityException shown to the
+user as an untranslated error string. iOS was fine throughout.
+
+Fixed by asking at the moment the user taps the feature, Android only — asking on iOS would
+raise the whole-address-book prompt that using the picker exists to avoid — with a denial
+message that points at Settings and at simply typing the number.
+
+### The policy decision, when the clock starts
+
+Our use is exactly the "occasional or selective" case Google says should migrate to the
+Contact Picker *without* the permission. We already use that picker; what keeps us in scope
+is expo-contacts reading the result the long way round. So when we move to SDK 37 the options
+are, in order of preference:
+
+1. Upstream fix: read the picked contact through `intent.data`, which the picker already
+   grants. No permission, no declaration.
+2. A small config plugin that strips `READ_CONTACTS` plus our own result reader.
+3. Submit a declaration — weakest, since the use case is one Google explicitly steers away
+   from declaring.
+4. Drop device-contact picking on Android; the encrypted in-app contacts vault stays.
+
+Decide before the SDK 37 bump, not in January 2027.

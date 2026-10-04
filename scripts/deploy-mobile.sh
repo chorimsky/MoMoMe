@@ -42,7 +42,11 @@ case "$WHAT" in
       echo "mobile: WARNING — the last commit touched:"; printf '  %s\n' $NATIVE
       echo "mobile: if that added a native module or changed the app version, an OTA will NOT carry it; run '$0 build' instead."
     }
-    MSG=$(git log -1 --pretty=%s)
+    # Label the update with the last commit that actually TOUCHED the app, not simply the
+    # last commit. Publishing right after a docs commit used to stamp the docs subject on a
+    # release carrying a code fix, and that message is the only record of what shipped.
+    MSG=$(git log -1 --pretty=%s -- mobile shared)
+    [ -z "$MSG" ] && MSG=$(git log -1 --pretty=%s)
     echo "mobile: OTA → production channel · \"$MSG\""
     ( cd mobile && npx eas-cli@latest update --channel production --non-interactive --message "$MSG" )
     echo "mobile: published. Phones on $VERSION pick it up on next launch."

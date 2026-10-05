@@ -111,6 +111,26 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     [
+      // R8 for Android release builds. Without it Play reports the DEX as ~1% obfuscated and
+      // warns that a figure under 25% "can impact its visibility and your chances of
+      // publishing" — Expo does not minify release builds by default, so this was never on.
+      //
+      // It also closes a second hole: an AAB built with R8 carries its own mapping file,
+      // which Play ingests automatically, so crashes and ANRs from this build arrive with
+      // real stack traces instead of obfuscated ones. versionCode 9 shipped without that.
+      //
+      // R8 strips what it cannot see being used, and React Native reaches for classes by
+      // reflection. DO NOT promote a minified build past the internal track until somebody
+      // has opened it: send money, scan a QR, pick a contact, take a payment.
+      'expo-build-properties',
+      {
+        android: {
+          enableProguardInReleaseBuilds: true,
+          enableShrinkResourcesInReleaseBuilds: true,
+        },
+      },
+    ],
+    [
       'expo-notifications',
       {
         icon: './assets/images/android-icon-monochrome.png',

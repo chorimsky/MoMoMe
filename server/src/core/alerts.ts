@@ -18,6 +18,8 @@ import { PAYOUTS } from "../adapters/payouts.js";
 import { payoutHealth } from "./routing.js";
 import { availableFloatXaf } from "./stateMachine.js";
 import { notify, otpChannels, otpSmsSender, smsProviderRejecting } from "./notifications.js";
+import { identityEnabled, providersHealth } from "./identityResolution/resolver.js";
+import type { IdentityProviderHealth } from "../../../shared/identity.js";
 import * as whatsapp from "../adapters/whatsapp.js";
 import { smsChannel } from "../adapters/notify.js";
 import { inReplyWindow } from "./whatsapp.js";
@@ -83,6 +85,14 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
      console tile nobody had reason to open. It pages now, like an empty float does. */
   out.push(...otpConditions(liveMoney(), otpChannels(), otpSmsSender() === "nexah" && smsProviderRejecting()));
 
+  /* NOBODY CAN CHECK WHO OWNS A NUMBER.
+     The same shape of silence as the OTP outage above. Recipient verification is the one
+     guard on a payment that cannot be reversed, and when the provider that answers "who
+     owns this number" is misconfigured the resolver rests it, drops the reason, and every
+     sender is told the soft, true-sounding "this number can't be verified yet" instead.
+     Senders keep paying — unverified — and nothing anywhere says the verifier is off. */
+  out.push(...identityConditions(liveMoney(), identityEnabled(), await providersHealth().catch(() => [])));
+
   for (const a of low) out.push({ key: `liquidity:${a.sourceId}`, severity: "warning", body: `Low liquidity: ${a.sourceId} has ${Math.round(a.available).toLocaleString("en")} (floor ${a.floor.toLocaleString("en")}).` });
   return out;
 }
@@ -119,6 +129,23 @@ export async function page(text: string): Promise<{ via: "whatsapp" | "sms" | "c
  *  back a devCode instead of sending, so verification works with no channel at all, and
  *  paging about it there is a false alarm — which is worse than no alarm, because it
  *  teaches an operator to skim the feed. */
+/** Recipient verification, under live money, with nobody able to answer.
+ *
+ *  "Can answer" means configured, able to RESOLVE a name (the aggregator confirms a number
+ *  is reachable and nothing more — it can never name anybody), and not currently down or
+ *  resting on a breaker. When that set is empty the product still works: it just stops
+ *  checking recipients, quietly, which is the dangerous way for a safety feature to fail. */
+export function identityConditions(live: boolean, enabled: boolean, health: IdentityProviderHealth[]): AlertCondition[] {
+  if (!live || !enabled) return [];
+  const namers = health.filter((h) => h.configured && h.supports.resolve);
+  const answering = namers.filter((h) => h.status !== "DOWN" && h.status !== "NOT_CONFIGURED");
+  if (answering.length) return [];
+  const why = namers.length
+    ? namers.map((h) => `${h.name} (${h.lastError ?? h.status})`).join(", ")
+    : "no configured provider can resolve a name";
+  return [{ key: "identity:unverifiable", severity: "critical", body: `Recipient verification is OFF: no provider can say who owns a number, so every sender is told the recipient "can't be verified" and pays unchecked. Mobile Money does not reverse. Cause: ${why}. Admin → Identity shows each provider.` }];
+}
+
 export function otpConditions(live: boolean, otp: { sms: boolean; whatsapp: boolean }, providerRejecting: boolean): AlertCondition[] {
   if (!live) return [];
   if (!otp.sms && !otp.whatsapp) {

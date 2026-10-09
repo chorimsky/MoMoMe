@@ -45,11 +45,28 @@ const refHost = () => { try { const r = document.referrer ? new URL(document.ref
 function envelope(events: Ev[]) {
   return { p: "web", vid: vid(), sid: sid(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, lang: (document.documentElement.lang || navigator.language || "").slice(0, 5), ver: `web-${platformOf(navigator.userAgent)}`, scr: scr(), ref: refHost(), events };
 }
+/** sendBeacon always sends with credentials mode "include". Cross-origin, that makes the
+ *  browser demand `Access-Control-Allow-Credentials: true`, which this API does not send
+ *  (it has no cookie auth to send), so the beacon is REFUSED before it leaves:
+ *
+ *    blocked by CORS policy: the value of the 'Access-Control-Allow-Credentials' header
+ *    in the response is '' which must be 'true' when the request's credentials mode is
+ *    'include'
+ *
+ *  Production serves the app from momome.xyz and the API from Railway, so every page-hide
+ *  flush was dropped — precisely the events that say where someone abandoned the send flow.
+ *  fetch with keepalive survives unload just as well and does not force credentials, so the
+ *  beacon is now used only where it is same-origin and therefore harmless. */
+const sameOrigin = (url: string): boolean => {
+  try { return new URL(url, location.href).origin === location.origin; } catch { return false; }
+};
 function flush(beacon = false): void {
   if (!queue.length) return;
   const body = JSON.stringify(envelope(queue.splice(0, queue.length)));
   const url = `${API_BASE}/telemetry`;
-  if (beacon && "sendBeacon" in navigator) { try { navigator.sendBeacon(url, new Blob([body], { type: "application/json" })); return; } catch { /* fall through */ } }
+  if (beacon && "sendBeacon" in navigator && sameOrigin(url)) {
+    try { navigator.sendBeacon(url, new Blob([body], { type: "application/json" })); return; } catch { /* fall through */ }
+  }
   fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => {});
 }
 function push(e: Ev): void {

@@ -4,9 +4,15 @@ Two environments, one backend:
 
 | Env | URL | Hosts | How it deploys |
 |-----|-----|-------|----------------|
-| **Dev / staging** | `mo-mo-me-app.vercel.app` | frontend | **automatic** on every `git push` to `main` |
-| **Production (live)** | `momome.xyz` | frontend (Hostinger Cloud) | **manual** — `scripts/deploy-hostinger.sh` |
+| **Production (live)** | `momome.xyz` | frontend (**Vercel**) | **automatic** on every `git push` to `main` |
+| Hostinger box | 92.112.182.63 | *no longer serves the domain* | `scripts/deploy-hostinger.sh` |
 | Backend (both) | `momome-api-production.up.railway.app` | Node settlement engine | Railway (`railway up`) |
+
+> **Corrected 2026-10-09.** This table used to say Hostinger was production and Vercel was
+> staging. It is the other way round: `curl -I https://momome.xyz/` answers `server: Vercel`.
+> Running `deploy-hostinger.sh` builds and rsyncs successfully to a host nobody reads, and
+> the live site does not change — which is exactly what happened before this was noticed.
+> **Shipping the frontend means `git push`.**
 
 Both frontends call the **same Railway backend** — Vercel is for testing the UI,
 not a separate backend.
@@ -14,12 +20,11 @@ not a separate backend.
 ## The loop
 
 ```
-# 1. make changes, then push → Vercel builds automatically
+# make changes, then push → Vercel builds and the LIVE site updates
 git add -A && git commit -m "…" && git push
 
-# 2. test on the Vercel URL (mo-mo-me-app.vercel.app)
-
-# 3. happy? ship the same code to the live site — EITHER:
+# the steps below ship to the Hostinger box, which no longer serves momome.xyz —
+# kept only in case the domain is ever pointed back at it:
 #    a) GitHub Actions → "Deploy to Hostinger (production)" → Run workflow   (no laptop needed)
 #       or push a release tag:  git tag v1.2.3 && git push --tags
 #    b) locally:

@@ -16,7 +16,11 @@ SSH_HOST="${HOSTINGER_HOST:-92.112.182.63}"
 SSH_PORT="${HOSTINGER_PORT:-65002}"
 SSH_USER="${HOSTINGER_USER:-u739778915}"
 WEB_ROOT="${HOSTINGER_WEBROOT:-domains/momome.xyz/public_html}"
-API_BASE="${VITE_API_BASE:-https://mo-mo-me-server.vercel.app/api}"
+# The LIVE backend is Railway. The old default here was the Vercel demo server — which is
+# still up and answers 200, so a deploy run without VITE_API_BASE would not fail, it would
+# quietly ship momome.xyz wired to the DEMO backend. Real senders, demo money. The bundle
+# currently live on momome.xyz points at Railway, which is what this default now matches.
+API_BASE="${VITE_API_BASE:-https://momome-api-production.up.railway.app/api}"
 SITE="${SITE_URL:-https://momome.xyz}"
 
 echo "──────────────────────────────────────────────"
@@ -36,7 +40,12 @@ echo "Uploading…"
 # rsync (e.g. an unreachable SSH host / missing deploy key) and let the script exit 0,
 # so a deploy that shipped NOTHING looked successful. Let rsync's exit propagate
 # (set -e aborts on failure). ConnectTimeout fails fast instead of hanging.
-rsync -rzh --info=stats1,progress2 -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=15" \
+# macOS ships openrsync, which rejects --info and --stats and answers with a usage dump —
+# so this line aborted the deploy on a Mac before a single byte moved. Probe once and use
+# the richest flags the local rsync actually understands.
+RSYNC_FLAGS="-rzh"
+if rsync --help 2>&1 | grep -q -- "--info"; then RSYNC_FLAGS="-rzh --info=stats1,progress2"; else RSYNC_FLAGS="-rvz"; fi
+rsync $RSYNC_FLAGS -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=15" \
   app/dist/ "$SSH_USER@$SSH_HOST:$WEB_ROOT/"
 
 echo "Verifying…"

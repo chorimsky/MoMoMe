@@ -5,7 +5,7 @@ import type { ApiKeyUsage,
   MerchantAccount, MerchantLinkKind, MerchantLinkPublic, MerchantDirectoryEntry, AmbassadorSummary, ReferredMerchant, AmbassadorTier,
 } from "../../../shared/types.js";
 import { namesMatch,
-  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21, cleanText } from "../../../shared/domain.js";
+  COUNTRIES, MIN_XAF, MAX_XAF, QUOTE_TTL_SEC, EUR_XAF_PEG, PROVIDER_PAYOUT_MAX, detectProvider, checkPhone, isRealName, samePhone, ALL_METHODS, bip21, cleanText, isWholeXaf } from "../../../shared/domain.js";
 import { rateFor, inboundAmount, formatAmount, usdValue } from "../core/fx.js";
 import { ratesMeta, ratesFresh } from "../core/rates.js";
 import { resolveRecipient, registeredName, warmIdentity } from "../core/nameResolver.js";
@@ -618,6 +618,12 @@ export async function buildQuote(input: QuoteRequest & { feePct?: number }): Pro
   if (typeof xaf !== "number" || !Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
     return { status: 400, body: { error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` } };
   }
+  // The range check above says nothing about whole francs, so /quotes used to mint a
+  // BINDING quote for 5 000.7 XAF — fee 100, total 5 100.7 — an amount no operator can pay
+  // out. Refuse rather than round: rounding a quote changes what the sender asked to send.
+  if (!isWholeXaf(xaf)) {
+    return { status: 400, body: { error: "bad_amount", message: "Amount must be a whole number of XAF — the franc has no subunit." } };
+  }
   if (!["LIGHTNING", "ONCHAIN", "USDT", "USDC"].includes(method)) {
     return { status: 400, body: { error: "bad_method", message: "Unknown payment method." } };
   }
@@ -727,6 +733,11 @@ api.get("/preview", rateLimitMiddleware("preview", 120, 60_000), async (req, res
   const xaf = Number(req.query.xaf);
   if (!Number.isFinite(xaf) || xaf < MIN_XAF || xaf > MAX_XAF) {
     return res.status(400).json({ error: "bad_amount", message: `Amount must be ${MIN_XAF}–${MAX_XAF} XAF.` });
+  }
+  // Same rule as /quotes: previewing an amount that cannot be quoted only teaches a caller
+  // that it is valid, and the refusal then arrives a step later.
+  if (!isWholeXaf(xaf)) {
+    return res.status(400).json({ error: "bad_amount", message: "Amount must be a whole number of XAF — the franc has no subunit." });
   }
   await ensureFreshRates().catch(() => {});
   const fresh = ratesFresh();

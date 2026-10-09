@@ -264,6 +264,12 @@ export function detectProvider(phone: string, country: CountryCode): ProviderId 
   return null; // 66x Nexttel, 62x Camtel — not supported
 }
 
+/** XAF is a ZERO-DECIMAL currency: there is no centime, and no Mobile Money operator can
+ *  pay 5 100.7 francs. An amount that is not a whole number is not a small rounding
+ *  question — it is an amount nobody can deliver, and silently rounding a BINDING quote
+ *  would change what the sender asked to send without telling them. */
+export const isWholeXaf = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n);
+
 /** XAF is pegged to EUR at this fixed rate (BACKEND_DESIGN §3). */
 export const EUR_XAF_PEG = 655.957;
 

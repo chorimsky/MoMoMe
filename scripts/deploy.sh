@@ -28,10 +28,20 @@ ROOT=$(mktemp -d /tmp/momome-deploy.XXXXXX); trap 'rm -rf "$ROOT"' EXIT
 git archive "$SHA" | tar -x -C "$ROOT"
 printf '%s\n' "$SHA" > "$ROOT/BUILD_VERSION"      # what /health/deep will report as `version`
 cd "$ROOT"
+# Separate "you are not signed in" from "the project is wrong". They used to look identical:
+# an expired CLI session spent 20 s retrying and then reported "could not link to Railway
+# project", which sends you to check a project id that was never the problem.
+if ! railway whoami >/dev/null 2>&1; then
+  echo "deploy: the Railway CLI is not authorised — this is a SESSION problem, not a project one."
+  echo "        fix it either way:"
+  echo "          railway login                     (interactive, opens a browser)"
+  echo "          RAILWAY_TOKEN=… scripts/deploy.sh $TARGET   (non-interactive, e.g. CI)"
+  exit 1
+fi
 # Railway's API times out now and then; link is cheap, so insist on it.
 for i in 1 2 3 4; do
   railway link -p "$PROJECT" -e "$TARGET" -s "$SERVICE" >/dev/null 2>&1 && railway status >/dev/null 2>&1 && break
-  [ "$i" = 4 ] && { echo "deploy: could not link to Railway project $PROJECT ($TARGET/$SERVICE)"; exit 1; }
+  [ "$i" = 4 ] && { echo "deploy: signed in, but could not link to project $PROJECT ($TARGET/$SERVICE) — check the ids above."; exit 1; }
   sleep 5
 done
 PREV=$(railway deployment list --json 2>/dev/null | python3 -c 'import sys,json; d=[x for x in json.load(sys.stdin) if x.get("status")=="SUCCESS"]; print(d[0]["id"] if d else "")' 2>/dev/null || true)

@@ -272,3 +272,35 @@ are, in order of preference:
 4. Drop device-contact picking on Android; the encrypted in-app contacts vault stays.
 
 Decide before the SDK 37 bump, not in January 2027.
+
+## Deploy, end to end, as verified on 2026-10-09
+
+Four surfaces. Two work, two are blocked, and the two blockers turn out to be one.
+
+| Surface | How it ships | State |
+|---|---|---|
+| Web — `momome.xyz` | `git push` → **Vercel** | **working** — verified by hash: the live bundle is byte-for-byte the local build |
+| Mobile | `eas build` / `submit` / `update` | **working** — versionCode 10 reached the internal track today |
+| Server — Railway | `scripts/deploy.sh production` | **blocked**: the CLI session is expired (`railway whoami` → Unauthorized) |
+| CI — GitHub Actions | every workflow, on push | **blocked**: *"The job was not started because your account is locked due to a billing issue."* |
+
+### The two blockers are one
+
+`.github/workflows/deploy.yml` installs the Railway CLI and authenticates with
+`RAILWAY_TOKEN`, which **is already configured** as a repo secret (alongside `EXPO_TOKEN`,
+`PRODUCTION_API_URL` and the `HOSTINGER_*` set). So the server deploy does not actually need
+anybody to be signed in locally — it needs Actions to be allowed to run.
+
+**Clearing the GitHub billing lock unblocks the server deploy as well as CI.** Until then the
+only route to Railway is `railway login` on a laptop, or a one-off
+`RAILWAY_TOKEN=… scripts/deploy.sh production`.
+
+Note the workflows now *run* and fail in ~4 s, where they used to be refused outright. That
+is the same lock, reported at a different point — the annotation is on the job, not the run,
+so `gh run list` shows a plain `failure` and only `gh run view <id>` names the cause.
+
+### An expired session no longer lies about the project
+
+`deploy.sh` used to spend ~20 s retrying `railway link` and then report *"could not link to
+Railway project"*, which sends you to check a project id that was never wrong. It now probes
+`railway whoami` first and says plainly that this is a session problem, naming both remedies.

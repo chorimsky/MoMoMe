@@ -39,6 +39,7 @@ const TITLES: Record<string, [en: string, fr: string]> = {
   "/privacy": ["Privacy Policy · MoMo›Me", "Politique de confidentialité · MoMo›Me"],
   "/admin": ["Operator console · MoMo›Me", "Console opérateur · MoMo›Me"],
   "/ops": ["Operations · MoMo›Me", "Opérations · MoMo›Me"],
+  "/partners/sorted": ["Sorted × MoMo›Me · Partner hub", "Sorted × MoMo›Me · Espace partenaire"],
 };
 
 function titleFor(pathname: string, fr: boolean): string {

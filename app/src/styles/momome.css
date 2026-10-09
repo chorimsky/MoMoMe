@@ -6,7 +6,10 @@
 
 /* ---- Fonts (loaded per-page via <link>) ---- */
 
-:root {
+:root,
+/* A subtree can force the light palette back on inside a dark page (the Sorted partner
+   hub has its own Light/Dark switch); without this a nested data-theme="light" was a no-op. */
+[data-theme="light"] {
   /* type — rounded, friendly fintech */
   --font-display: "Fredoka", system-ui, sans-serif;
   --font-body: "Nunito", system-ui, sans-serif;

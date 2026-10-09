@@ -575,6 +575,16 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
         <p style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 12, lineHeight: 1.45 }}>{t("m_indicative")}</p>
       )}
 
+      {/* Every rail switched off by the operator. Without this the list is empty and the
+          Continue button is simply disabled — a blank screen with a dead button and no
+          reason given. Say it, and offer the one route that does not depend on a crypto
+          rail. */}
+      {available.length === 0 && (
+        <div role="status" style={{ marginTop: 12, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>
+          {t("m_none_available")}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
         {!fixed && <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>}
         <button className="btn btn-primary" onClick={next} disabled={busy || available.length === 0} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>

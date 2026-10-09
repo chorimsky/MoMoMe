@@ -1,0 +1,9 @@
+/* Sorted partner hub — the few rules inline styles can't express. */
+@keyframes riseIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.sorted-hub a { color: var(--accent); text-decoration: none; }
+.sorted-hub a:hover { color: var(--ink); }
+.sorted-hub .sh-hover-0:hover { background: var(--paper-2) !important; }
+.sorted-hub .sh-hover-1:hover { border-color: var(--accent) !important; }
+.sorted-hub .sh-hover-2:hover { transform: translateY(-2px) !important; }
+.sorted-hub .sh-hover-3:hover { box-shadow: var(--shadow) !important; }
+.sorted-hub .sh-hover-4:hover { background: var(--paper-2) !important; }

@@ -190,12 +190,26 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
 
   // Remembers the action that just failed, so the error banner can offer a Retry.
   const retryRef = useRef<null | (() => void)>(null);
+  // The banner renders at the TOP of the flow, and `go()` only scrolls there on SUCCESS.
+  // On the Method step the Continue button sits below four option cards, so a sender who
+  // taps it is looking at the bottom of the page: when the quote failed, the button
+  // flickered and the reason appeared somewhere they could not see. It read as a dead
+  // button on a stuck screen. Bring the explanation to them instead.
+  const errRef = useRef<HTMLDivElement | null>(null);
   const fail = (e: unknown) => {
     // A browser-reported offline state → the friendly offline copy; otherwise map the
     // server's stable error CODE to a localized message (Francophone-first market),
     // falling back to the server message only for unknown codes.
     if (typeof navigator !== "undefined" && navigator.onLine === false) setErr(t("err_network"));
     else setErr(errMessage(e, t));
+    // After paint, so the node exists. Focus as well as scroll: role="alert" announces the
+    // text, but a sighted user still has to be shown where it is.
+    requestAnimationFrame(() => {
+      const el = errRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus({ preventScroll: true });
+    });
   };
 
   /** Did the server already create a payment for this quote? Answers the ambiguous
@@ -413,7 +427,7 @@ export function SendApp({ merchant }: { merchant?: MerchantContext } = {}) {
         )}
 
         {err && (
-          <div role="alert" style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div role="alert" ref={errRef} tabIndex={-1} style={{ margin: "0 0 12px", padding: "11px 14px", borderRadius: "var(--r)", border: "1px solid var(--bad)", background: "var(--bad-wash)", color: "var(--bad)", fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <span style={{ minWidth: 0 }}>{err}</span>
             {retryRef.current && (
               <button onClick={() => { const r = retryRef.current; if (r) { setErr(null); r(); } }} disabled={busy}

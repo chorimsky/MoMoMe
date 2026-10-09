@@ -274,6 +274,7 @@ export const STRINGS: Dict = {
   m_eta_minutes: ["2–5 min from a wallet · up to 60 min from an exchange", "2 à 5 min depuis un portefeuille · jusqu'à 60 min depuis une plateforme"],
   m_eta_onchain: ["Usually 10–60 minutes", "En général 10 à 60 minutes"],
   m_network_fee: ["Your wallet also pays a network fee", "Votre portefeuille paie aussi des frais de réseau"],
+  m_none_available: ["No payment method is available right now. This is on our side, not yours — please try again shortly, or contact support.", "Aucun moyen de paiement n’est disponible pour le moment. Le problème vient de nous, pas de vous — réessayez dans un instant ou contactez le support."],
   m_indicative: ["Amounts are indicative — your exact rate is locked on the next step.", "Montants indicatifs — votre taux exact est fixé à l'étape suivante."],
   m_none: ["No payment methods are available right now. Please try again shortly.", "Aucun moyen de paiement n'est disponible pour le moment. Réessayez bientôt."],
   rcv_copy_addr: ["Payment address", "Adresse de paiement"],

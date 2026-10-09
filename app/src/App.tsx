@@ -50,11 +50,13 @@ const AdminConsole = lazy(() => import("./pages/admin/AdminConsole.js").then((m)
 const OpsDashboard = lazy(() => import("./pages/ops/OpsDashboard.js").then((m) => ({ default: m.OpsDashboard })));
 // Capital Intelligence + Investor OS — a separate, heavy management surface behind
 // the same admin session gate; one chunk, loaded only when one of its areas opens.
+const SortedHub = lazy(() => import("./pages/partners/SortedHub.js").then((m) => ({ default: m.SortedHub })));
 const CapitalApp = lazy(() => import("./capital/CapitalApp.js").then((m) => ({ default: m.CapitalApp })));
 const InvestorPortal = lazy(() => import("./capital/CapitalApp.js").then((m) => ({ default: m.InvestorPortal })));
 // Capital Intelligence is a separate surface: its own sign-in name, menu and API namespace
 // (/api/capital). It shares only the session token with the console.
 const CAPITAL_BRAND = { title: "Capital Intelligence", sub: "Sign in to the capital and investor platform.", back: { to: "/", label: "Back to MoMo›Me" } };
+const PARTNER_BRAND = { title: "Partner hub", sub: "Sign in to open the Sorted partner hub.", back: { to: "/", label: "Back to MoMo›Me" } };
 const PORTAL_BRAND = { title: "Investor Portal", sub: "Sign in to your private investment room.", back: { to: "/", label: "Back to MoMo›Me" } };
 
 /** Minimal, theme-aware fallback while a lazy operator chunk loads. */
@@ -95,6 +97,7 @@ export function App() {
       <Route path="/reports/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="reports" /></Suspense></AdminGate>} />
       <Route path="/ai-copilot/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="copilot" /></Suspense></AdminGate>} />
       <Route path="/investor/*" element={<AdminGate brand={PORTAL_BRAND}><Suspense fallback={<ChunkFallback />}><InvestorPortal /></Suspense></AdminGate>} />
+      <Route path="/partners/sorted" element={<AdminGate brand={PARTNER_BRAND}><Suspense fallback={<ChunkFallback />}><SortedHub /></Suspense></AdminGate>} />
       <Route path="/developers" element={<Developers />} />
       <Route path="/developers/dashboard" element={<Suspense fallback={null}><DeveloperDashboard /></Suspense>} />
       <Route path="/merchant" element={<Merchant />} />

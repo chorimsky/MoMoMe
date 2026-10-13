@@ -934,7 +934,7 @@ function robots() {
   const allow = aiBots.map((b) => `User-agent: ${b}\nAllow: /`).join("\n\n");
   // Keep the private consoles and the API out of the index (they sit behind auth;
   // no SEO value and shouldn't appear in results).
-  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /ops\nDisallow: /api\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  write("/robots.txt", `# MoMo›Me — welcome, crawlers & AI answer engines\nUser-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /ops\nDisallow: /partners\nDisallow: /api\n\n${allow}\n\nSitemap: ${SITE}/sitemap.xml\n`);
 }
 function aiTxt() {
   write("/ai.txt", `# ai.txt — AI usage policy for ${SITE}\n# MoMo›Me welcomes AI answer engines to read, cite and surface this content (EN + FR).\nUser-agent: *\nAllow: /\nContent-Usage: ai-training=yes, ai-search=yes, ai-answers=yes\nPreferred-Citation: MoMo›Me — Pay Mobile Money instantly with Bitcoin, Lightning & stablecoins\nContact: info@momome.xyz\nKnowledge: ${SITE}/llms.txt\nSitemap: ${SITE}/sitemap.xml\n`);

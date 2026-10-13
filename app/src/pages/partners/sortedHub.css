@@ -7,3 +7,5 @@
 .sorted-hub .sh-hover-2:hover { transform: translateY(-2px) !important; }
 .sorted-hub .sh-hover-3:hover { box-shadow: var(--shadow) !important; }
 .sorted-hub .sh-hover-4:hover { background: var(--paper-2) !important; }
+.sorted-hub .sh-copy { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
+.sorted-hub .sh-copy:hover { border-color: var(--accent); color: var(--ink); }

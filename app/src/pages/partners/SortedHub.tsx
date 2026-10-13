@@ -13,14 +13,18 @@ import { useI18n } from "../../lib/i18n.js";
 import { useTheme } from "../../lib/theme.js";
 import "./sortedHub.css";
 
-type HubProps = { startView?: string; lang?: "en" | "fr"; theme?: "light" | "dark" };
+type HubProps = { startView?: string; lang?: "en" | "fr"; theme?: "light" | "dark"; onLang?: (l: "en" | "fr") => void; onTheme?: (t: "light" | "dark") => void };
 const fmt = (n, d = 0) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/[\u202f\u00a0]/g, '\u00a0');
 const pick = (o, l) => (o && typeof o === 'object' && 'en' in o ? o[l] : o);
 const loc = (x, l) => Array.isArray(x) ? x.map(i => loc(i, l)) : (x && typeof x === 'object' && !('en' in x) ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, loc(v, l)])) : pick(x, l));
 
 const RATE = { USDT: 603.4, BTC: 60350000, LN: 60350000 };
-const FEE = { USDT: 0.015, BTC: 0.02, LN: 0.01 };
+// One platform fee per org — a negotiated rate or volume tier, with a floor (core/platform/billing.ts
+// effectiveFeePct) — the same on every rail. 1.5 % is the illustrative pilot rate.
+const FEE = { USDT: 0.015, BTC: 0.015, LN: 0.015 };
 const MIN_FEE = 200;
+// Quote lifetime in seconds (shared/domain.ts QUOTE_TTL_SEC): 10 min Lightning and USDT, 15 min on-chain.
+const TTL = { USDT: 600, LN: 600, BTC: 900 };
 
 const T = {
   en: {
@@ -50,7 +54,7 @@ const T = {
 const VIEWS = {
   brief: { eb: { en: 'Partnership briefing', fr: 'Présentation du partenariat' }, title: { en: 'Send from Sorted. Arrive as Mobile Money.', fr: 'Envoyé depuis Sorted. Reçu en Mobile Money.' }, lede: { en: 'MomoMe becomes the African settlement layer behind Sorted Wallet — starting with digital assets to XAF on MTN and Orange in Cameroon.', fr: 'MomoMe devient la couche de règlement africaine derrière Sorted Wallet — en commençant par les actifs numériques vers le XAF sur MTN et Orange au Cameroun.' } },
   arch: { eb: { en: 'Current state → target', fr: 'Existant → cible' }, title: { en: 'Most of the gateway already moves real money', fr: 'L’essentiel de la passerelle traite déjà de l’argent réel' }, lede: { en: 'Built from the MomoMe codebase: what is live, what to extend, and what is new for a partner like Sorted. Click a block for its source.', fr: 'Établi depuis le code MomoMe : ce qui est en service, ce qu’il faut étendre, et ce qui est nouveau pour un partenaire comme Sorted. Cliquez un bloc pour sa source.' } },
-  states: { eb: { en: 'Payment state machine', fr: 'Machine à états' }, title: { en: 'Every payment follows one auditable path', fr: 'Chaque paiement suit un chemin unique et auditable' }, lede: { en: 'Partner-facing states, mapped onto the engine that runs today. Select a state to see where it can go, or run a scenario.', fr: 'États exposés au partenaire, mappés sur le moteur actuel. Sélectionnez un état pour voir ses transitions, ou lancez un scénario.' } },
+  states: { eb: { en: 'Payment state machine', fr: 'Machine à états' }, title: { en: 'Every payment follows one auditable path', fr: 'Chaque paiement suit un chemin unique et auditable' }, lede: { en: 'The /v1 statuses Sorted receives, mapped onto the engine that runs today. Select a state to see where it can go, or run a scenario.', fr: 'Les statuts /v1 reçus par Sorted, mappés sur le moteur actuel. Sélectionnez un état pour voir ses transitions, ou lancez un scénario.' } },
   wallet: { eb: { en: 'Inside Sorted Wallet', fr: 'Dans Sorted Wallet' }, title: { en: 'Country, number, amount, confirm', fr: 'Pays, numéro, montant, confirmer' }, lede: { en: 'The user never sees rails, providers or FX desks. Sorted signs; MomoMe quotes, verifies and pays out.', fr: 'L’utilisateur ne voit ni rails, ni fournisseurs, ni FX. Sorted signe ; MomoMe chiffre, vérifie et paie.' } },
   admin: { eb: { en: 'MomoMe operations', fr: 'Opérations MomoMe' }, title: { en: 'Admin console', fr: 'Console admin' }, lede: { en: 'Investigate any payment across chain, ledger and provider. Act only where the state machine allows it.', fr: 'Examinez tout paiement sur la chaîne, le grand livre et le fournisseur. N’agissez que là où la machine à états le permet.' } },
   analytics: { eb: { en: 'Partner analytics', fr: 'Analytique partenaire' }, title: { en: 'Sorted on MomoMe', fr: 'Sorted sur MomoMe' }, lede: { en: 'Volume, reliability and unit economics for the Sorted partnership.', fr: 'Volume, fiabilité et économie unitaire du partenariat Sorted.' } },
@@ -65,22 +69,56 @@ const NAV = [
   { g: 'gDev', items: [['docs', 'nDocs'], ['sandbox', 'nSandbox'], ['data', 'nData']] },
 ];
 
+const hashView = () => { const h = typeof window === 'undefined' ? '' : window.location.hash.slice(1); return VIEWS[h] ? h : null; };
+
 class SortedHubView extends React.Component<HubProps, any> {
-  state = { view: this.props.startView ?? 'brief', lang: this.props.lang ?? 'en', theme: this.props.theme ?? 'light' };
+  state = { view: hashView() ?? this.props.startView ?? 'brief' };
   timers = [];
-  componentWillUnmount() { [...this.timers, this.smTimer, this.wTimer, this.sbT].forEach(clearInterval); clearTimeout(this.toastT); }
+  // Each section is a link (#arch, #wallet…) so a tour can be shared mid-way and Back works.
+  onHash = () => {
+    const view = hashView();
+    if (!view || view === this.state.view) return;
+    this.setState({ view });
+    // On a phone the sidebar stacks above the content: land on the section, not on the menu.
+    const main = document.querySelector('.sorted-hub main');
+    window.scrollTo(0, main && main.offsetTop > 80 ? main.offsetTop : 0);
+  };
+  onKey = e => {
+    if (this.state.view !== 'brief' || e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)) return;
+    const i = this.state.slide ?? 0;
+    if (e.key === 'ArrowRight') this.setState({ slide: Math.min(4, i + 1) });
+    if (e.key === 'ArrowLeft') this.setState({ slide: Math.max(0, i - 1) });
+  };
+  componentDidMount() { window.addEventListener('hashchange', this.onHash); window.addEventListener('keydown', this.onKey); }
+  componentWillUnmount() {
+    window.removeEventListener('hashchange', this.onHash); window.removeEventListener('keydown', this.onKey);
+    [...this.timers, this.smTimer, this.wTimer, this.sbT].forEach(clearInterval); clearTimeout(this.toastT); clearTimeout(this.copyT);
+  }
+  // Copy a code sample; the button says "Copied" for a moment.
+  copy = (id, text) => {
+    const done = ok => { clearTimeout(this.copyT); this.setState({ copied: ok ? id : '!' + id }); this.copyT = setTimeout(() => this.setState({ copied: null }), 1500); };
+    // The async clipboard is refused without focus or permission; fall back to a selection copy.
+    const legacy = () => { const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch { ok = false; } ta.remove(); done(ok); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => done(true), legacy); else legacy();
+  };
   renderVals() {
-    const { view, lang, theme } = this.state;
+    const { view } = this.state;
+    const { lang = 'en', theme = 'light' } = this.props;
     const t = T[lang];
     let num = 0;
-    const navGroups = NAV.map(g => ({ label: t[g.g], items: g.items.map(([id, k]) => { num++; const on = view === id; return { label: t[k], num: String(num).padStart(2, '0'), go: () => { this.setState({ view: id }); window.scrollTo(0, 0); }, bg: on ? 'var(--accent-wash)' : 'transparent', color: on ? 'var(--ink)' : 'var(--ink-2)', tileBg: on ? 'var(--brand)' : 'var(--surface-2)', tileColor: on ? 'var(--brand-ink)' : 'var(--ink-2)' }; }) }));
+    const navGroups = NAV.map(g => ({ label: t[g.g], items: g.items.map(([id, k]) => { num++; const on = view === id; return { label: t[k], num: String(num).padStart(2, '0'), on, go: () => { if (hashView() === id) this.onHash(); else window.location.hash = id; }, bg: on ? 'var(--accent-wash)' : 'transparent', color: on ? 'var(--ink)' : 'var(--ink-2)', tileBg: on ? 'var(--brand)' : 'var(--surface-2)', tileColor: on ? 'var(--brand-ink)' : 'var(--ink-2)' }; }) }));
     const v = VIEWS[view];
-    return Object.assign({}, ...['vBrief', 'vArch', 'vStates', 'vWallet', 'vAdmin', 'vAnalytics', 'vDocs', 'vSandbox', 'vData'].filter(p => this[p]).map(p => this[p](lang, t)), {
+    // Only the open section's view-model: the others are hidden, and the wallet countdown and
+    // sandbox stream re-render every second or so.
+    const VM = { brief: 'vBrief', arch: 'vArch', states: 'vStates', wallet: 'vWallet', admin: 'vAdmin', analytics: 'vAnalytics', docs: 'vDocs', sandbox: 'vSandbox', data: 'vData' };
+    return Object.assign({}, this[VM[view]](lang, t), {
       t, theme, navGroups,
+      copyLabel: id => this.state.copied === id ? (lang === 'fr' ? 'Copié' : 'Copied') : this.state.copied === '!' + id ? (lang === 'fr' ? 'Échec de la copie' : 'Copy failed') : (lang === 'fr' ? 'Copier' : 'Copy'),
+      copyReq: () => this.copy('req', this.vDocs(lang).dc.req), copyRes: () => this.copy('res', this.vDocs(lang).dc.res),
       isBrief: view === 'brief', isArch: view === 'arch', isStates: view === 'states', isWallet: view === 'wallet', isAdmin: view === 'admin', isAnalytics: view === 'analytics', isDocs: view === 'docs', isData: view === 'data', isSandbox: view === 'sandbox',
       viewEyebrow: v.eb[lang], viewTitle: v.title[lang], viewLede: v.lede[lang],
-      langOpts: ['EN', 'FR'], langVal: lang.toUpperCase(), setLang: o => this.setState({ lang: o.toLowerCase() }),
-      themeOpts: [t.light, t.dark], themeVal: theme === 'dark' ? t.dark : t.light, setTheme: o => this.setState({ theme: o === t.dark ? 'dark' : 'light' }),
+      langOpts: ['EN', 'FR'], langVal: lang.toUpperCase(), setLang: o => this.props.onLang?.(o.toLowerCase()),
+      themeOpts: [t.light, t.dark], themeVal: theme === 'dark' ? t.dark : t.light, setTheme: o => this.props.onTheme?.(o === t.dark ? 'dark' : 'light'),
     });
   }
   vBrief(lang) {
@@ -133,24 +171,24 @@ class SortedHubView extends React.Component<HubProps, any> {
       sorted: { name: 'Sorted Wallet', s: 'planned', sub: { en: 'Keys, signing, user experience', fr: 'Clés, signature, expérience' }, desc: { en: 'External partner. Non-custodial: MomoMe never receives keys and never holds a user balance for Sorted.', fr: 'Partenaire externe. Non-custodial : MomoMe ne reçoit jamais de clés ni ne détient de solde utilisateur pour Sorted.' }, src: [] },
       api: { name: 'API v1', s: 'live', sub: { en: 'Quotes, payments, webhooks', fr: 'Devis, paiements, webhooks' }, desc: { en: 'Public /v1 surface with envelope, scoped Bearer keys, Idempotency-Key and per-plan rate limits. Delegates every money rule to core.', fr: 'Surface /v1 publique avec enveloppe, clés Bearer à portée, Idempotency-Key et limites par plan. Délègue chaque règle monétaire au cœur.' }, src: ['server/src/publicApi/*', 'docs/api-v1/02_API_REFERENCE.md'] },
       partner: { name: { en: 'Partner config', fr: 'Config partenaire' }, s: 'extend', sub: { en: 'Orgs, keys, limits, pricing', fr: 'Orgs, clés, limites, tarifs' }, desc: { en: 'Orgs, credentials (mm_live_/mm_test_), limits and billing exist. Add per-org allowed assets, networks, corridors and exposure caps — generic, not Sorted-specific.', fr: 'Orgs, identifiants, limites et facturation existent. Ajouter actifs, réseaux, corridors et plafonds d’exposition par org — générique, pas spécifique à Sorted.' }, src: ['core/platform/orgs.ts', 'core/platform/credentials.ts', 'core/platform/limits.ts'] },
-      orch: { name: { en: 'Payment orchestrator', fr: 'Orchestrateur' }, s: 'live', sub: { en: 'State machine + ledger', fr: 'Machine à états + grand livre' }, desc: { en: 'One durable aggregate per payment. Payout reachable only from FX_LOCKED; ambiguous payouts never auto-retry.', fr: 'Un agrégat durable par paiement. Paiement atteignable uniquement depuis FX_LOCKED ; jamais de relance automatique en cas d’ambiguïté.' }, src: ['core/stateMachine.ts', 'core/ledger.ts'] },
-      quote: { name: { en: 'Quote engine', fr: 'Moteur de devis' }, s: 'live', sub: { en: 'Rail-dependent TTL', fr: 'Durée selon le rail' }, desc: { en: 'buildQuote() prices per rail with TTLs from 60 s (Lightning) to re-quote-on-confirm (on-chain).', fr: 'buildQuote() chiffre par rail, de 60 s (Lightning) au re-devis à confirmation (on-chain).' }, src: ['routes/api.ts#buildQuote', 'core/pricing.ts'] },
+      orch: { name: { en: 'Payment orchestrator', fr: 'Orchestrateur' }, s: 'live', sub: { en: 'State machine + ledger', fr: 'Machine à états + grand livre' }, desc: { en: 'One durable aggregate per payment. A payout is submitted only with the float earmarked — from FX_LOCKED, or an approved review or retry that reserves again first. Ambiguous payouts never auto-retry.', fr: 'Un agrégat durable par paiement. Un paiement n’est soumis qu’avec le float réservé — depuis FX_LOCKED, ou une revue approuvée ou une relance qui réserve à nouveau. Jamais de relance automatique en cas d’ambiguïté.' }, src: ['core/stateMachine.ts', 'core/ledger.ts'] },
+      quote: { name: { en: 'Quote engine', fr: 'Moteur de devis' }, s: 'live', sub: { en: 'Rail-dependent TTL', fr: 'Durée selon le rail' }, desc: { en: 'buildQuote() prices per rail: quotes last 10 min for Lightning, USDT and USDC, 15 min on-chain (an estimate, re-priced at confirmation).', fr: 'buildQuote() chiffre par rail : 10 min pour Lightning, USDT et USDC, 15 min on-chain (estimation, re-chiffrée à confirmation).' }, src: ['routes/api.ts#buildQuote', 'core/pricing.ts'] },
       fx: { name: 'FX', s: 'live', sub: { en: 'Dual-source, locked rate', fr: 'Double source, taux bloqué' }, desc: { en: 'Two independent feeds with a divergence guard. XAF priced off the EUR peg (655.957). Rate stored immutably on the payment.', fr: 'Deux sources indépendantes avec garde de divergence. XAF calé sur l’ancrage EUR (655,957). Taux stocké de façon immuable.' }, src: ['core/rates.ts', 'core/fx.ts'] },
       comp: { name: { en: 'Compliance', fr: 'Conformité' }, s: 'extend', sub: { en: 'Approve · Review · Reject', fr: 'Approuver · Revoir · Rejeter' }, desc: { en: 'Recipient risk, review queue and limits exist. Add a per-payment decision record and a wallet-screening hook for inbound addresses.', fr: 'Risque destinataire, file de revue et limites existent. Ajouter une décision tracée par paiement et un filtrage des adresses entrantes.' }, src: ['core/compliance.ts', 'core/recipientRisk.ts', 'core/review.ts'] },
-      liq: { name: { en: 'Liquidity', fr: 'Liquidité' }, s: 'extend', sub: { en: 'XAF float + reservation', fr: 'Float XAF + réservation' }, desc: { en: 'Float earmarks are derived from the ledger. Add per-partner exposure caps so one partner cannot drain shared float.', fr: 'Les réservations sont dérivées du grand livre. Ajouter des plafonds par partenaire pour qu’aucun ne vide le float commun.' }, src: ['core/platform/liquidity.ts', 'core/treasury.ts', 'core/floatPlan.ts'] },
+      liq: { name: { en: 'Liquidity', fr: 'Liquidité' }, s: 'extend', sub: { en: 'XAF float + reservation', fr: 'Float XAF + réservation' }, desc: { en: 'Each /v1 payment holds a reservation (per org) on the payout float, consumed on completion. Add a per-partner exposure cap so one partner cannot drain shared float.', fr: 'Chaque paiement /v1 détient une réservation (par org) sur le float, consommée à la livraison. Ajouter un plafond par partenaire pour qu’aucun ne vide le float commun.' }, src: ['core/platform/liquidity.ts', 'core/treasury.ts', 'core/floatPlan.ts'] },
       router: { name: { en: 'Provider router', fr: 'Routeur fournisseurs' }, s: 'extend', sub: { en: 'Balance-aware failover', fr: 'Bascule selon soldes' }, desc: { en: 'Live router picks a funded aggregator; a rule-driven router runs in shadow. Promote it with documented, configurable weights.', fr: 'Le routeur actuel choisit un agrégateur approvisionné ; un routeur à règles tourne en mode fantôme. Le promouvoir avec des poids documentés.' }, src: ['core/routing.ts', 'core/upi/routing.ts'] },
       pawapay: { name: 'PawaPay', s: 'live', sub: 'MTN · Orange', desc: { en: 'Primary payout aggregator. Idempotency key persisted before the call.', fr: 'Agrégateur principal. Clé d’idempotence persistée avant l’appel.' }, src: ['adapters/pawapay.ts', 'adapters/payouts.ts'] },
       peexit: { name: 'Peexit', s: 'live', sub: { en: 'Payouts + name lookup', fr: 'Paiements + vérif. nom' }, desc: { en: 'Secondary payout rail and recipient KYC name lookup.', fr: 'Rail secondaire et vérification du nom destinataire.' }, src: ['adapters/peexit.ts', 'core/nameResolver.ts'] },
       mtn: { name: { en: 'MTN direct', fr: 'MTN direct' }, s: 'planned', sub: { en: 'Collect only today', fr: 'Collecte uniquement' }, desc: { en: 'Collection adapter exists; a direct disbursement adapter is optional — it plugs into PayoutAdapter without touching core.', fr: 'Adaptateur de collecte existant ; un adaptateur de décaissement direct est optionnel et se branche sur PayoutAdapter.' }, src: ['adapters/mtnCollect.ts'] },
       orange: { name: { en: 'Orange direct', fr: 'Orange direct' }, s: 'planned', sub: { en: 'Collect only today', fr: 'Collecte uniquement' }, desc: { en: 'Same pattern as MTN: optional direct adapter behind the shared interface.', fr: 'Même schéma que MTN : adaptateur direct optionnel derrière l’interface commune.' }, src: ['adapters/orangeCollect.ts'] },
       recip: { name: { en: 'XAF recipient', fr: 'Destinataire XAF' }, s: 'live', sub: { en: 'Name-checked MoMo wallet', fr: 'Wallet MoMo vérifié' }, desc: { en: 'Recipient only ever receives ordinary Mobile Money.', fr: 'Le destinataire ne reçoit que du Mobile Money ordinaire.' }, src: [] },
-      ln: { name: 'Lightning', s: 'live', sub: 'IBEX · phoenixd', desc: { en: 'Invoice per payment; HTLC settles near-atomically.', fr: 'Facture par paiement ; règlement HTLC quasi atomique.' }, src: ['adapters/ibex.ts', 'core/bolt11.ts'] },
+      ln: { name: 'Lightning', s: 'live', sub: 'IBEX · phoenixd', desc: { en: 'Invoice per payment; HTLC settles near-atomically.', fr: 'Facture par paiement ; règlement HTLC quasi atomique.' }, src: ['adapters/ibex.ts', 'adapters/phoenixd.ts', 'core/bolt11.ts'] },
       btc: { name: 'Bitcoin on-chain', s: 'live', sub: { en: 'Depth scales with amount', fr: 'Profondeur selon montant' }, desc: { en: 'Unique address per payment; confirmations scale with value.', fr: 'Adresse unique par paiement ; confirmations selon la valeur.' }, src: ['core/bitcoinTx.ts', 'core/depositReconcile.ts'] },
       erc: { name: 'USDT · ERC-20', s: 'live', sub: { en: 'Token + amount checks', fr: 'Contrôle jeton + montant' }, desc: { en: 'Contract, amount and finality verified; under/over-pay guards (15% overpay tolerance → review).', fr: 'Contrat, montant et finalité vérifiés ; gardes sous/sur-paiement (tolérance 15 % → revue).' }, src: ['core/erc20.ts', 'core/stateMachine.ts#OVERPAY_TOLERANCE'] },
-      trc: { name: 'USDT · TRC-20', s: 'build', sub: { en: 'Requested for Sorted', fr: 'Demandé pour Sorted' }, desc: { en: 'New RailAdapter for TRON: per-payment address, TRC-20 contract check, ~1 min finality, Tether blocklist check.', fr: 'Nouveau RailAdapter TRON : adresse par paiement, contrôle du contrat TRC-20, finalité ~1 min, liste noire Tether.' }, src: ['adapters/index.ts#RailAdapter'] },
+      trc: { name: 'USDT · TRC-20', s: 'build', sub: { en: 'Requested for Sorted', fr: 'Demandé pour Sorted' }, desc: { en: 'New RailAdapter for TRON: per-payment address, TRC-20 contract check, ~1 min finality, Tether blocklist check.', fr: 'Nouveau RailAdapter TRON : adresse par paiement, contrôle du contrat TRC-20, finalité ~1 min, liste noire Tether.' }, src: ['adapters/types.ts#RailAdapter'] },
       ledger: { name: { en: 'Ledger', fr: 'Grand livre' }, s: 'live', desc: { en: 'Append-only double entry; reconstruction of any payment.', fr: 'Partie double en ajout seul ; reconstitution de tout paiement.' }, src: ['core/ledger.ts'] },
       idem: { name: { en: 'Idempotency', fr: 'Idempotence' }, s: 'live', desc: { en: 'Org + endpoint + key + request hash + stored response.', fr: 'Org + endpoint + clé + empreinte + réponse stockée.' }, src: ['core/platform/idempotency.ts'] },
-      hooks: { name: 'Webhooks', s: 'extend', desc: { en: 'HMAC-signed, 1 s → 1 h backoff, dead-letter. Add the brief’s event names as aliases.', fr: 'Signés HMAC, backoff 1 s → 1 h, file morte. Ajouter les noms d’événements du brief en alias.' }, src: ['core/interop/outbound.ts'] },
+      hooks: { name: 'Webhooks', s: 'extend', desc: { en: 'HMAC-signed, 1 s → 1 h backoff, dead-letter. Typed events (payment.completed, payment.refunded…); add aliases only if Sorted’s spec needs other names.', fr: 'Signés HMAC, backoff 1 s → 1 h, file morte. Événements typés (payment.completed, payment.refunded…) ; alias seulement si la spec Sorted l’exige.' }, src: ['core/interop/outbound.ts'] },
       recon: { name: { en: 'Reconciliation', fr: 'Rapprochement' }, s: 'live', desc: { en: 'Three-way: chain ↔ ledger ↔ provider. Exceptions page an operator.', fr: 'Triple : chaîne ↔ grand livre ↔ fournisseur. Les exceptions alertent un opérateur.' }, src: ['core/interop/reconcile.ts'] },
       audit: { name: 'Audit', s: 'live', desc: { en: 'Per-org audit log and admin step-up.', fr: 'Journal d’audit par org et authentification renforcée admin.' }, src: ['core/platform/audit.ts', 'core/adminAuth.ts'] },
       obs: { name: { en: 'Observability', fr: 'Observabilité' }, s: 'live', desc: { en: '/health/deep, alerts, Sentry, interop metrics.', fr: '/health/deep, alertes, Sentry, métriques.' }, src: ['core/alerts.ts', 'core/interop/metrics.ts'] },
@@ -162,19 +200,19 @@ class SortedHubView extends React.Component<HubProps, any> {
     const GAPS = [
       ['Quote API', 'routes/api.ts', { en: 'buildQuote, rail TTLs', fr: 'buildQuote, TTL par rail' }, { en: 'POST /v1/quotes, deterministic, expiring', fr: 'POST /v1/quotes, déterministe, expirant' }, 'live', { en: 'Reuse as-is.', fr: 'Réutiliser tel quel.' }],
       ['Payment intent', 'publicApi/payments.ts', { en: '/v1/payments', fr: '/v1/payments' }, { en: 'Durable intent with 3 IDs', fr: 'Intention durable avec 3 identifiants' }, 'live', { en: 'Keep /v1/payments; do not rename to payment-intents.', fr: 'Garder /v1/payments ; ne pas renommer en payment-intents.' }],
-      [{ en: 'State machine', fr: 'Machine à états' }, 'stateMachine.ts', { en: '12 engine states', fr: '12 états moteur' }, { en: '13 partner states', fr: '13 états partenaire' }, 'extend', { en: 'Project COMPLIANCE_REVIEW and LIQUIDITY_RESERVED in mapping.ts only.', fr: 'Projeter COMPLIANCE_REVIEW et LIQUIDITY_RESERVED dans mapping.ts uniquement.' }],
+      [{ en: 'State machine', fr: 'Machine à états' }, 'platform/mapping.ts', { en: '12 engine states → 13 /v1 statuses', fr: '12 états moteur → 13 statuts /v1' }, { en: 'A stable partner vocabulary', fr: 'Un vocabulaire partenaire stable' }, 'live', { en: 'Integrate against the /v1 statuses; the engine is never renamed.', fr: 'S’intégrer sur les statuts /v1 ; le moteur n’est jamais renommé.' }],
       [{ en: 'Chain verification', fr: 'Vérification chaîne' }, 'erc20.ts · bitcoinTx.ts', { en: 'LN, BTC, ERC-20', fr: 'LN, BTC, ERC-20' }, { en: 'USDT on TRON', fr: 'USDT sur TRON' }, 'build', { en: 'Add a TRC-20 RailAdapter with Tether blocklist check.', fr: 'Ajouter un RailAdapter TRC-20 avec contrôle de liste noire Tether.' }],
       [{ en: 'Provider abstraction', fr: 'Abstraction fournisseurs' }, 'adapters/payouts.ts', { en: 'PawaPay, Peexit, simulator', fr: 'PawaPay, Peexit, simulateur' }, { en: 'MTN + Orange payouts', fr: 'Paiements MTN + Orange' }, 'live', { en: 'Cover via aggregators; direct MNO adapters are optional.', fr: 'Couvrir via agrégateurs ; adaptateurs MNO directs optionnels.' }],
       [{ en: 'Routing', fr: 'Routage' }, 'routing.ts', { en: 'Balance-aware choice', fr: 'Choix selon soldes' }, { en: 'Documented scoring', fr: 'Score documenté' }, 'extend', { en: 'Promote the shadow rule router with configurable weights.', fr: 'Promouvoir le routeur à règles avec poids configurables.' }],
       [{ en: 'Liquidity', fr: 'Liquidité' }, 'platform/liquidity.ts', { en: 'Ledger-derived earmarks', fr: 'Réservations dérivées' }, { en: 'Per-partner exposure', fr: 'Exposition par partenaire' }, 'extend', { en: 'Add max-exposure per org to the reservation check.', fr: 'Ajouter une exposition max par org au contrôle de réservation.' }],
-      ['FX', 'rates.ts · fx.ts', { en: 'Dual feed, locked rate', fr: 'Double source, taux bloqué' }, { en: 'Reproducible pricing', fr: 'Tarification reproductible' }, 'live', { en: 'Add partner-specific spread to pricing plans.', fr: 'Ajouter un spread par partenaire aux plans tarifaires.' }],
-      [{ en: 'Recipient check', fr: 'Vérif. destinataire' }, 'nameResolver.ts', { en: 'Operator name lookup', fr: 'Vérif. nom opérateur' }, { en: 'Network + name + validity', fr: 'Réseau + nom + validité' }, 'live', { en: 'Expose masked name only to the partner.', fr: 'N’exposer qu’un nom masqué au partenaire.' }],
+      ['FX', 'rates.ts · fx.ts', { en: 'Dual feed, locked rate', fr: 'Double source, taux bloqué' }, { en: 'Reproducible pricing', fr: 'Tarification reproductible' }, 'extend', { en: 'Add partner-specific spread to pricing plans.', fr: 'Ajouter un spread par partenaire aux plans tarifaires.' }],
+      [{ en: 'Recipient check', fr: 'Vérif. destinataire' }, 'nameResolver.ts', { en: 'Operator name lookup', fr: 'Vérif. nom opérateur' }, { en: 'Network + name + validity', fr: 'Réseau + nom + validité' }, 'extend', { en: 'Returns the full name today; add optional per-org masking.', fr: 'Renvoie le nom complet aujourd’hui ; ajouter un masquage optionnel par org.' }],
       [{ en: 'Idempotency', fr: 'Idempotence' }, 'platform/idempotency.ts', { en: 'All /v1 writes', fr: 'Toutes les écritures /v1' }, { en: 'Every money-moving call', fr: 'Chaque appel monétaire' }, 'live', { en: 'Reuse as-is.', fr: 'Réutiliser tel quel.' }],
-      ['Webhooks', 'interop/outbound.ts', { en: 'HMAC, retries, DLQ', fr: 'HMAC, relances, DLQ' }, { en: 'Brief’s event names', fr: 'Noms d’événements du brief' }, 'extend', { en: 'Emit payment.funded, payment.refund.pending etc. as aliases.', fr: 'Émettre payment.funded, payment.refund.pending etc. en alias.' }],
+      ['Webhooks', 'interop/outbound.ts', { en: 'HMAC, retries, DLQ', fr: 'HMAC, relances, DLQ' }, { en: 'Brief’s event names', fr: 'Noms d’événements du brief' }, 'extend', { en: 'Typed events exist; add aliases only where Sorted’s spec differs.', fr: 'Les événements typés existent ; alias seulement si la spec Sorted diffère.' }],
       [{ en: 'Partner config', fr: 'Config partenaire' }, 'platform/orgs.ts', { en: 'Orgs, scopes, limits', fr: 'Orgs, portées, limites' }, { en: 'Allowed assets/networks/corridors', fr: 'Actifs/réseaux/corridors autorisés' }, 'extend', { en: 'Generic org fields; Sorted is just a row.', fr: 'Champs génériques ; Sorted n’est qu’une ligne.' }],
-      [{ en: 'Compliance', fr: 'Conformité' }, 'compliance.ts', { en: 'Risk, limits, review', fr: 'Risque, limites, revue' }, { en: 'APPROVE / REVIEW / REJECT record', fr: 'Décision APPROVE / REVIEW / REJECT' }, 'build', { en: 'Persist a decision per payment; add wallet-screening hook.', fr: 'Persister une décision par paiement ; brancher un filtrage wallet.' }],
+      [{ en: 'Compliance', fr: 'Conformité' }, 'compliance.ts', { en: 'Risk, limits, review', fr: 'Risque, limites, revue' }, { en: 'APPROVE / REVIEW / REJECT record', fr: 'Décision APPROVE / REVIEW / REJECT' }, 'extend', { en: 'Decision already stored per /v1 payment; add decided_by and a wallet-screening hook.', fr: 'Décision déjà stockée par paiement /v1 ; ajouter l’auteur et un filtrage wallet.' }],
       [{ en: 'Reconciliation', fr: 'Rapprochement' }, 'interop/reconcile.ts', { en: 'Three-way, continuous', fr: 'Triple, continu' }, { en: 'Partner-facing report', fr: 'Rapport partenaire' }, 'extend', { en: 'Add CSV export scoped to the partner org.', fr: 'Ajouter un export CSV limité à l’org partenaire.' }],
-      ['Sandbox', 'platform/sandbox.ts', { en: 'Scenario numbers', fr: 'Numéros de scénario' }, { en: 'Deterministic E2E', fr: 'E2E déterministe' }, 'live', { en: 'Add TRON and liquidity-shortfall scenarios.', fr: 'Ajouter les scénarios TRON et manque de liquidité.' }],
+      ['Sandbox', 'platform/sandbox.ts', { en: 'Scenario numbers', fr: 'Numéros de scénario' }, { en: 'Deterministic E2E', fr: 'E2E déterministe' }, 'live', { en: 'Seven scenarios today; add TRON and underpayment ones.', fr: 'Sept scénarios aujourd’hui ; ajouter TRON et sous-paiement.' }],
       [{ en: 'Analytics', fr: 'Analytique' }, 'core/analytics.ts', { en: 'Platform-wide', fr: 'Plateforme globale' }, { en: 'Per-partner margin view', fr: 'Marge par partenaire' }, 'build', { en: 'Group by org; add FX revenue and provider cost.', fr: 'Grouper par org ; ajouter revenu FX et coût fournisseur.' }],
     ];
     const gf = this.state.gapFilter ?? 'all';
@@ -191,33 +229,34 @@ class SortedHubView extends React.Component<HubProps, any> {
     };
   }
   vStates(lang) {
+    // The /v1 public statuses (server/src/core/platform/mapping.ts) — the vocabulary Sorted
+    // integrates against. Columns: kind, engine state(s), webhook event, meaning.
     const S = {
-      CREATED: ['happy', '—', '—', { en: 'Partner request accepted and authenticated; no price yet.', fr: 'Requête partenaire acceptée et authentifiée ; pas encore de prix.' }],
-      QUOTED: ['happy', 'QUOTED', 'quote.created', { en: 'Rate, fees and expiry fixed. Pricing inputs stored so the quote is reproducible.', fr: 'Taux, frais et expiration fixés. Entrées de prix stockées pour reproduire le devis.' }],
-      AWAITING_FUNDS: ['happy', 'AWAITING_INBOUND', 'payment.created', { en: 'Per-payment address or Lightning invoice issued. Watching the chain.', fr: 'Adresse dédiée ou facture Lightning émise. Surveillance de la chaîne.' }],
-      FUNDED: ['happy', 'INBOUND_DETECTED', 'payment.funded', { en: 'A transaction matching this intent was seen. The client’s claim alone never gets here.', fr: 'Une transaction correspondant à l’intention a été vue. La simple déclaration du client ne suffit jamais.' }],
-      VALIDATING: ['happy', 'INBOUND_CONFIRMED', '—', { en: 'Network, token contract, amount, recipient address and finality checked; duplicates and replays rejected.', fr: 'Réseau, contrat, montant, adresse et finalité vérifiés ; doublons et rejeux rejetés.' }],
-      LIQUIDITY_RESERVED: ['happy', 'FX_LOCKED', '—', { en: 'XAF rate locked and payout float earmarked in the ledger. The only door to a payout.', fr: 'Taux XAF bloqué et float réservé dans le grand livre. Seule porte vers un paiement.' }],
-      PROCESSING: ['happy', 'PAYOUT_REQUESTED', 'payment.processing', { en: 'Payout submitted with a persisted idempotency key. Timeouts re-query status — never resubmit.', fr: 'Paiement soumis avec une clé d’idempotence persistée. En cas de délai, on re-interroge — jamais de nouvelle soumission.' }],
-      SETTLED: ['ok', 'PAYOUT_CONFIRMED → DELIVERED', 'payment.settled', { en: 'Provider confirmed authoritatively. Ledger balanced. Terminal.', fr: 'Fournisseur a confirmé de façon probante. Grand livre équilibré. Terminal.' }],
-      COMPLIANCE_REVIEW: ['hold', 'MANUAL_REVIEW', 'payment.review', { en: 'Held for a human: compliance flag, underpayment, or an ambiguous provider outcome.', fr: 'Retenu pour un humain : alerte conformité, sous-paiement ou issue fournisseur ambiguë.' }],
-      EXPIRED: ['end', 'FAILED (expired)', 'payment.expired', { en: 'Quote window passed with no funds. Nothing moved.', fr: 'Délai du devis écoulé sans fonds. Rien n’a bougé.' }],
-      FAILED: ['end', 'FAILED', 'payment.failed', { en: 'Cancelled or rejected before any funds arrived.', fr: 'Annulé ou rejeté avant l’arrivée de fonds.' }],
-      REFUND_PENDING: ['hold', 'REFUND_PENDING', 'payment.refund.pending', { en: 'Funds received but cannot be delivered. Refund owed to the sender’s address.', fr: 'Fonds reçus mais non livrables. Remboursement dû à l’adresse de l’expéditeur.' }],
-      REFUNDED: ['end', 'REFUNDED', 'payment.refunded', { en: 'Refund broadcast and confirmed. Terminal.', fr: 'Remboursement diffusé et confirmé. Terminal.' }],
+      AWAITING_PAYMENT: ['happy', 'AWAITING_INBOUND', 'payment.awaiting_payment', { en: 'Created from an active quote. A per-payment Lightning invoice or address is issued and watched.', fr: 'Créé depuis un devis actif. Une facture Lightning ou une adresse dédiée est émise et surveillée.' }],
+      PAYMENT_DETECTED: ['happy', 'INBOUND_DETECTED', 'payment.detected', { en: 'A transaction matching this payment was seen on the network. The client’s claim alone never gets here.', fr: 'Une transaction correspondant à ce paiement a été vue sur le réseau. La simple déclaration du client ne suffit jamais.' }],
+      PAYMENT_CONFIRMED: ['happy', 'INBOUND_CONFIRMED', 'payment.confirmed', { en: 'Network, token contract, amount and finality checked; each deposit event credits once.', fr: 'Réseau, contrat, montant et finalité vérifiés ; chaque dépôt n’est crédité qu’une fois.' }],
+      CONVERSION_PROCESSING: ['happy', 'FX_LOCKED', 'payment.processing', { en: 'XAF rate locked and payout float reserved for this payment.', fr: 'Taux XAF bloqué et float réservé pour ce paiement.' }],
+      PAYOUT_PROCESSING: ['happy', 'PAYOUT_REQUESTED', 'payment.processing', { en: 'Payout sent to the routed provider with a persisted idempotency key. Timeouts re-query by key — never resubmit.', fr: 'Paiement envoyé au fournisseur choisi avec une clé d’idempotence persistée. En cas de délai, on re-interroge — jamais de nouvelle soumission.' }],
+      PAYOUT_SUBMITTED: ['happy', 'PAYOUT_CONFIRMED', 'payment.payout_submitted', { en: 'The provider accepted the payout; waiting for the operator’s final confirmation.', fr: 'Le fournisseur a accepté le paiement ; en attente de la confirmation finale de l’opérateur.' }],
+      COMPLETED: ['ok', 'DELIVERED', 'payment.completed', { en: 'The operator confirmed delivery. The reservation is consumed and the ledger balances. Terminal.', fr: 'L’opérateur a confirmé la livraison. La réservation est consommée et le grand livre équilibré. Terminal.' }],
+      MANUAL_REVIEW: ['hold', 'MANUAL_REVIEW', 'payment.manual_review', { en: 'Held for an operator: a compliance flag, an overpayment beyond tolerance, or an ambiguous provider outcome.', fr: 'Retenu pour un opérateur : alerte conformité, sur-paiement hors tolérance ou issue fournisseur ambiguë.' }],
+      REFUNDED: ['hold', 'REFUND_PENDING → REFUNDED', 'payment.refunded', { en: 'Funds arrived but cannot be delivered. refund.status moves awaiting_destination → pending → settled; the refund is paid over Lightning to an invoice the sender supplies.', fr: 'Fonds reçus mais non livrables. refund.status passe de awaiting_destination à pending puis settled ; le remboursement part en Lightning vers une facture fournie par l’expéditeur.' }],
+      EXPIRED: ['end', 'FAILED (expired)', 'payment.expired', { en: 'The payment window passed with no funds. Nothing moved.', fr: 'Le délai de paiement est passé sans fonds. Rien n’a bougé.' }],
+      CANCELLED: ['end', 'FAILED (cancel)', 'payment.cancelled', { en: 'Cancelled by the partner before any funds arrived.', fr: 'Annulé par le partenaire avant l’arrivée de fonds.' }],
+      FAILED: ['end', 'FAILED', 'payment.failed', { en: 'Rejected before delivery with nothing owed. A late inbound for the same payment is still recovered, never lost.', fr: 'Rejeté avant livraison sans rien dû. Un dépôt tardif pour ce paiement est toujours récupéré, jamais perdu.' }],
     };
-    const NEXT = { CREATED: ['QUOTED'], QUOTED: ['AWAITING_FUNDS', 'EXPIRED'], AWAITING_FUNDS: ['FUNDED', 'EXPIRED', 'FAILED'], FUNDED: ['VALIDATING'], VALIDATING: ['LIQUIDITY_RESERVED', 'COMPLIANCE_REVIEW', 'REFUND_PENDING'], COMPLIANCE_REVIEW: ['LIQUIDITY_RESERVED', 'SETTLED', 'REFUND_PENDING'], LIQUIDITY_RESERVED: ['PROCESSING'], PROCESSING: ['SETTLED', 'COMPLIANCE_REVIEW', 'REFUND_PENDING'], REFUND_PENDING: ['REFUNDED', 'COMPLIANCE_REVIEW'], SETTLED: [], EXPIRED: [], FAILED: [], REFUNDED: [] };
-    const happy = ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'FUNDED', 'VALIDATING', 'LIQUIDITY_RESERVED', 'PROCESSING', 'SETTLED'];
+    const NEXT = { AWAITING_PAYMENT: ['PAYMENT_DETECTED', 'EXPIRED', 'CANCELLED'], PAYMENT_DETECTED: ['PAYMENT_CONFIRMED'], PAYMENT_CONFIRMED: ['CONVERSION_PROCESSING', 'MANUAL_REVIEW'], CONVERSION_PROCESSING: ['PAYOUT_PROCESSING'], PAYOUT_PROCESSING: ['PAYOUT_SUBMITTED', 'MANUAL_REVIEW', 'REFUNDED'], PAYOUT_SUBMITTED: ['COMPLETED'], MANUAL_REVIEW: ['PAYOUT_PROCESSING', 'REFUNDED'], REFUNDED: [], COMPLETED: [], EXPIRED: [], CANCELLED: [], FAILED: [] };
+    const happy = ['AWAITING_PAYMENT', 'PAYMENT_DETECTED', 'PAYMENT_CONFIRMED', 'CONVERSION_PROCESSING', 'PAYOUT_PROCESSING', 'PAYOUT_SUBMITTED', 'COMPLETED'];
     const SC = {
       happy: { label: { en: 'Happy path', fr: 'Chemin nominal' }, path: happy },
-      under: { label: { en: 'Underpayment', fr: 'Sous-paiement' }, path: ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'FUNDED', 'VALIDATING', 'COMPLIANCE_REVIEW', 'REFUND_PENDING', 'REFUNDED'] },
-      payfail: { label: { en: 'Payout fails', fr: 'Échec paiement' }, path: ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'FUNDED', 'VALIDATING', 'LIQUIDITY_RESERVED', 'PROCESSING', 'REFUND_PENDING', 'REFUNDED'] },
-      timeout: { label: { en: 'Provider timeout', fr: 'Délai fournisseur' }, path: ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'FUNDED', 'VALIDATING', 'LIQUIDITY_RESERVED', 'PROCESSING', 'COMPLIANCE_REVIEW', 'SETTLED'] },
-      expired: { label: { en: 'Never funded', fr: 'Jamais financé' }, path: ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'EXPIRED'] },
+      review: { label: { en: 'Held for review', fr: 'Mis en revue' }, path: ['AWAITING_PAYMENT', 'PAYMENT_DETECTED', 'PAYMENT_CONFIRMED', 'MANUAL_REVIEW', 'PAYOUT_PROCESSING', 'PAYOUT_SUBMITTED', 'COMPLETED'] },
+      payfail: { label: { en: 'Payout fails', fr: 'Échec paiement' }, path: ['AWAITING_PAYMENT', 'PAYMENT_DETECTED', 'PAYMENT_CONFIRMED', 'CONVERSION_PROCESSING', 'PAYOUT_PROCESSING', 'REFUNDED'] },
+      expired: { label: { en: 'Never funded', fr: 'Jamais financé' }, path: ['AWAITING_PAYMENT', 'EXPIRED'] },
+      cancelled: { label: { en: 'Cancelled', fr: 'Annulé' }, path: ['AWAITING_PAYMENT', 'CANCELLED'] },
     };
     const { smRun, smStep = 0 } = this.state;
     const path = smRun ? SC[smRun].path.slice(0, smStep + 1) : [];
-    const sel = smRun ? path[path.length - 1] : (this.state.smSel ?? 'VALIDATING');
+    const sel = smRun ? path[path.length - 1] : (this.state.smSel ?? 'PAYMENT_CONFIRMED');
     const allowed = NEXT[sel];
     const run = k => { clearInterval(this.smTimer); this.setState({ smRun: k, smStep: 0 }); this.smTimer = setInterval(() => { this.setState(s => { if (s.smStep >= SC[k].path.length - 1) { clearInterval(this.smTimer); return null; } return { smStep: s.smStep + 1 }; }); }, 700); this.timers.push(this.smTimer); };
     const node = (id, last) => {
@@ -227,17 +266,17 @@ class SortedHubView extends React.Component<HubProps, any> {
         color: on ? 'var(--brand-ink)' : 'var(--ink)', border: on ? 'var(--brand-2)' : nxt ? 'var(--accent)' : visited ? 'var(--ink-3)' : 'var(--line)', shadow: on ? 'var(--shadow)' : 'none' };
     };
     const KL = { happy: [{ en: 'Main path', fr: 'Chemin principal' }, 'brand'], ok: [{ en: 'Terminal · success', fr: 'Terminal · succès' }, 'recv'], hold: [{ en: 'Held · recoverable', fr: 'Retenu · récupérable' }, 'warn'], end: [{ en: 'Terminal', fr: 'Terminal' }, 'neutral'] };
-    const exc = ['COMPLIANCE_REVIEW', 'REFUND_PENDING', 'REFUNDED', 'EXPIRED', 'FAILED'];
+    const exc = ['MANUAL_REVIEW', 'REFUNDED', 'EXPIRED', 'CANCELLED', 'FAILED'];
     return {
       smScenarios: Object.entries(SC).map(([k, s]) => ({ label: pick(s.label, lang), active: smRun === k, run: () => run(k) })),
-      smReset: () => { clearInterval(this.smTimer); this.setState({ smRun: null, smSel: 'VALIDATING' }); },
+      smReset: () => { clearInterval(this.smTimer); this.setState({ smRun: null, smSel: 'PAYMENT_CONFIRMED' }); },
       smLanes: [
         { label: lang === 'fr' ? 'Chemin nominal' : 'Main path', nodes: happy.map((id, k) => node(id, k === happy.length - 1)) },
         { label: lang === 'fr' ? 'Exceptions et remboursements' : 'Exceptions & refunds', nodes: exc.map(id => node(id, true)) },
       ],
       smSel: { id: sel, desc: pick(S[sel][3], lang), engine: S[sel][1], hook: S[sel][2], next: allowed, isTerminal: !allowed.length, kind: pick(KL[S[sel][0]][0], lang), tone: KL[S[sel][0]][1] },
       smInvariants: loc([
-        { en: 'A payout is reachable only from LIQUIDITY_RESERVED — locked rate, verified inbound, earmarked float.', fr: 'Un paiement n’est atteignable que depuis LIQUIDITY_RESERVED — taux bloqué, entrée vérifiée, float réservé.' },
+        { en: 'A payout is submitted only with the float earmarked: from CONVERSION_PROCESSING, or from an approved review or a retry that reserves again first.', fr: 'Un paiement n’est soumis qu’avec le float réservé : depuis CONVERSION_PROCESSING, ou depuis une revue approuvée ou une relance qui réserve à nouveau.' },
         { en: 'An ambiguous payout never auto-retries. It re-queries by key or goes to review.', fr: 'Un paiement ambigu n’est jamais relancé automatiquement. On re-interroge par clé ou on passe en revue.' },
         { en: 'Every terminal state balances the ledger. Every transition is an append-only event.', fr: 'Chaque état final équilibre le grand livre. Chaque transition est un événement en ajout seul.' },
         { en: 'A user report never triggers an automatic refund after the provider confirmed success — it opens a dispute.', fr: 'Un signalement ne déclenche jamais de remboursement automatique après succès confirmé — il ouvre un litige.' },
@@ -247,9 +286,9 @@ class SortedHubView extends React.Component<HubProps, any> {
   wGo(step) {
     clearInterval(this.wTimer);
     const s = { wStep: step };
-    if (step === 3) s.wLock = 120;
+    if (step === 3) s.wLock = TTL[this.state.wAsset || 'USDT'];
     this.setState(s);
-    if (step === 3 || step === 4) { this.wTimer = setInterval(() => this.setState(st => ({ wLock: Math.max(0, (st.wLock ?? 120) - 1) })), 1000); this.timers.push(this.wTimer); }
+    if (step === 3 || step === 4) { this.wTimer = setInterval(() => this.setState(st => ({ wLock: Math.max(0, (st.wLock ?? 600) - 1) })), 1000); this.timers.push(this.wTimer); }
     if (step === 5) { this.setState({ wStage: 0 }); this.wTimer = setInterval(() => this.setState(st => { const n = (st.wStage ?? 0) + 1; if (n > 3) { clearInterval(this.wTimer); return { wStep: 6 }; } return { wStage: n }; }), 1300); this.timers.push(this.wTimer); }
   }
   vWallet(lang) {
@@ -261,7 +300,7 @@ class SortedHubView extends React.Component<HubProps, any> {
       delivered: { en: 'Delivered', fr: 'Livré' }, behind: { en: 'Behind the scenes', fr: 'En coulisses' },
       brandNote: { en: 'Wallet chrome is a neutral stand-in — Sorted’s own UI kit would replace it. The payout module follows MoMo›Me patterns.', fr: 'L’habillage du wallet est neutre — le kit UI de Sorted le remplacerait. Le module de paiement suit les modèles MoMo›Me.' },
     }, lang);
-    const { wStep = 0, wPhone = '6 77 12 34 56', wAmt = 50000, wAsset = 'USDT', wLock = 120, wStage = 0 } = this.state;
+    const { wStep = 0, wPhone = '6 77 12 34 56', wAmt = 50000, wAsset = 'USDT', wLock = 600, wStage = 0 } = this.state;
     // A pasted international number (+237 6…) is the same recipient as the local 9 digits.
     const d = wPhone.replace(/\D/g, '').replace(/^237(?=6\d{8}$)/, '');
     const p2 = +d.slice(0, 2), p3 = +d.slice(0, 3);
@@ -271,7 +310,7 @@ class SortedHubView extends React.Component<HubProps, any> {
     const orange = p2 === 69 || (p3 >= 655 && p3 <= 659) || (p3 >= 685 && p3 <= 689);
     const op = valid && (mtn || orange) ? { known: true, id: mtn ? 'MTN' : 'ORANGE', name: mtn ? 'NANA JEAN PAUL' : 'MBALLA ESTHER', label: mtn ? 'MTN MoMo' : 'Orange Money' } : { known: false, invalid: d.length >= 9, id: 'MTN', name: '' };
     const q = a => { const fee = Math.max(MIN_FEE, Math.round(wAmt * FEE[a])); const src = (wAmt + fee) / RATE[a]; return { fee, src, txt: a === 'USDT' ? fmt(src, 2) + ' USDT' : a === 'LN' ? fmt(Math.round(src * 1e8)) + ' sats' : fmt(src, 6) + ' BTC' }; };
-    const A = { USDT: { name: 'USDT · TRON', glyph: '₮', color: 'var(--usdt)', eta: { en: '~1 min', fr: '~1 min' } }, LN: { name: 'Lightning', glyph: 'ϟ', color: 'var(--lightning)', eta: { en: '~10 s', fr: '~10 s' } }, BTC: { name: 'Bitcoin on-chain', glyph: '₿', color: 'var(--lightning)', eta: { en: '10–30 min · rate set on confirmation', fr: '10–30 min · taux fixé à confirmation' } } };
+    const A = { USDT: { name: 'USDT · Ethereum', glyph: '₮', color: 'var(--usdt)', eta: { en: '~3 min', fr: '~3 min' } }, LN: { name: 'Lightning', glyph: 'ϟ', color: 'var(--lightning)', eta: { en: '~10 s', fr: '~10 s' } }, BTC: { name: 'Bitcoin on-chain', glyph: '₿', color: 'var(--lightning)', eta: { en: '10–30 min · rate set on confirmation', fr: '10–30 min · taux fixé à confirmation' } } };
     const cur = q(wAsset);
     const mm = `${Math.floor(wLock / 60)}:${String(wLock % 60).padStart(2, '0')}`;
     const rows = [
@@ -285,12 +324,12 @@ class SortedHubView extends React.Component<HubProps, any> {
     const stg = [[fr ? 'Paiement signé dans Sorted' : 'Signed in Sorted', fr ? 'Transaction diffusée' : 'Transaction broadcast'], [fr ? 'Paiement vérifié' : 'Payment verified', fr ? 'Réseau, jeton, montant, finalité' : 'Network, token, amount, finality'], [fr ? `Envoi vers ${op.label || 'MTN MoMo'}` : `Paying ${op.label || 'MTN MoMo'}`, fr ? 'Liquidité réservée · fournisseur choisi' : 'Liquidity reserved · provider routed'], [fr ? 'Livré' : 'Delivered', fr ? 'Confirmé par l’opérateur' : 'Confirmed by the operator']];
     const SIDE = [
       { h: { en: 'MoMo›Me appears as a destination, not an app.', fr: 'MoMo›Me apparaît comme une destination, pas une app.' }, p: { en: 'No MomoMe account, no custody. Sorted lists corridors enabled for its partner org.', fr: 'Pas de compte MomoMe, pas de garde. Sorted liste les corridors activés pour son org.' } },
-      { h: { en: 'Corridors come from configuration.', fr: 'Les corridors viennent de la configuration.' }, p: { en: 'Cameroon is the first country config. Gabon, Congo, Chad and CAR switch on without code changes in Sorted.', fr: 'Le Cameroun est la première config pays. Gabon, Congo, Tchad et RCA s’activent sans changement de code chez Sorted.' }, call: 'GET /v1/corridors\n→ [{ country: "CM", currency: "XAF",\n     operators: ["MTN", "ORANGE"] }]' },
-      { h: { en: 'Operator and name are resolved before money moves.', fr: 'Opérateur et nom résolus avant tout mouvement.' }, p: { en: 'The operator is read from the number prefix; the name comes from the operator’s own lookup.', fr: 'L’opérateur est déduit du préfixe ; le nom vient de la vérification de l’opérateur.' }, call: `POST /v1/recipients/validate\n{ "phone": "+237${d}" }\n→ { operator: "${op.id}", name_match: "${op.name || '—'}" }` },
-      { h: { en: 'A deterministic quote with an expiry.', fr: 'Un devis déterministe avec expiration.' }, p: { en: 'Rate, fee and source amount are fixed and stored. Lightning and TRON honour a locked rate; on-chain BTC re-quotes on confirmation.', fr: 'Taux, frais et montant source sont fixés et stockés. Lightning et TRON tiennent un taux bloqué ; le BTC on-chain est re-chiffré à confirmation.' }, call: `POST /v1/quotes\n{ "source": { "asset": "${wAsset === 'USDT' ? 'USDT' : 'BTC'}", "network": "${wAsset === 'USDT' ? 'TRON' : wAsset === 'LN' ? 'LIGHTNING' : 'BITCOIN'}" },\n  "destination": { "country": "CM", "amount": "${wAmt}" } }\n→ { id: "qt_7Hc2", source.amount: "${cur.txt}",\n    expires_at: "+${mm}" }` },
-      { h: { en: 'One idempotent call creates the payment.', fr: 'Un appel idempotent crée le paiement.' }, p: { en: 'MomoMe returns where to pay. Sorted signs from the user’s own wallet — MomoMe never sees a key.', fr: 'MomoMe indique où payer. Sorted signe depuis le wallet de l’utilisateur — MomoMe ne voit jamais de clé.' }, call: `POST /v1/payments\nIdempotency-Key: srt_8f31c0e2\n{ "quote_id": "qt_7Hc2", "recipient": { "phone": "+237${d}" } }\n→ { id: "pay_K2q9", status: "AWAITING_PAYMENT",\n    pay_instruction: { address: "T9yD…x3Lq" } }` },
-      { h: { en: 'Verified on-chain, then paid locally.', fr: 'Vérifié on-chain, puis payé localement.' }, p: { en: 'Sorted subscribes to signed webhooks; the wallet updates without polling.', fr: 'Sorted s’abonne aux webhooks signés ; le wallet se met à jour sans interrogation.' }, call: 'payment.funded      → VALIDATING\npayment.processing  → PawaPay · MTN\npayment.settled     → mno_ref MP2610…' },
-      { h: { en: 'Traceable across three systems.', fr: 'Traçable sur trois systèmes.' }, p: { en: 'Blockchain TXID, MomoMe payment ID and the provider reference all sit on one receipt.', fr: 'TXID blockchain, identifiant MomoMe et référence fournisseur figurent sur un seul reçu.' }, call: 'GET /v1/payments/pay_K2q9\n→ { status: "COMPLETED", reference: "MMM-2026-004821" }' },
+      { h: { en: 'Corridors come from configuration.', fr: 'Les corridors viennent de la configuration.' }, p: { en: 'Cameroon is the first country config. Gabon, Congo, Chad and CAR switch on without code changes in Sorted.', fr: 'Le Cameroun est la première config pays. Gabon, Congo, Tchad et RCA s’activent sans changement de code chez Sorted.' }, call: 'GET /v1/corridors   (planned)\n→ [{ country: "CM", currency: "XAF",\n     operators: ["MTN", "ORANGE"] }]' },
+      { h: { en: 'Operator and name are resolved before money moves.', fr: 'Opérateur et nom résolus avant tout mouvement.' }, p: { en: 'The operator is read from the number prefix; the name comes from the operator’s own lookup.', fr: 'L’opérateur est déduit du préfixe ; le nom vient de la vérification de l’opérateur.' }, call: `POST /v1/recipients/validate\n{ "phone": "+237${d}" }\n→ { operator: "${op.id}", name: "${op.name || '—'}",\n    name_status: "verified_by_operator" }` },
+      { h: { en: 'A deterministic quote with an expiry.', fr: 'Un devis déterministe avec expiration.' }, p: { en: 'Rate, fee and source amount are fixed and stored. Lightning and USDT hold a locked rate for 10 min; on-chain BTC is an estimate, re-priced on confirmation.', fr: 'Taux, frais et montant source sont fixés et stockés. Lightning et USDT tiennent un taux bloqué 10 min ; le BTC on-chain est une estimation, re-chiffrée à confirmation.' }, call: `POST /v1/quotes\n{ "source": { "asset": "${wAsset === 'USDT' ? 'USDT' : 'BTC'}", "network": "${wAsset === 'USDT' ? 'ETHEREUM' : wAsset === 'LN' ? 'LIGHTNING' : 'BITCOIN'}" },\n  "destination": { "country": "CM", "amount": "${wAmt}",\n                   "phone": "+237${d}" } }\n→ { id: "qt_7Hc2", source.amount: "${cur.txt}",\n    expires_at: "+${mm}" }` },
+      { h: { en: 'One idempotent call creates the payment.', fr: 'Un appel idempotent crée le paiement.' }, p: { en: 'MomoMe returns where to pay. Sorted signs from the user’s own wallet — MomoMe never sees a key.', fr: 'MomoMe indique où payer. Sorted signe depuis le wallet de l’utilisateur — MomoMe ne voit jamais de clé.' }, call: `POST /v1/payments\nIdempotency-Key: srt_8f31c0e2\n{ "quote_id": "qt_7Hc2", "recipient": { "phone": "+237${d}" } }\n→ { id: "pay_K2q9", status: "AWAITING_PAYMENT",\n    payment_instructions: { code: "${wAsset === 'LN' ? 'lnbc8367…' : wAsset === 'USDT' ? '0x9f3c…a41e' : 'bc1q…7wz'}" } }` },
+      { h: { en: 'Verified on-chain, then paid locally.', fr: 'Vérifié on-chain, puis payé localement.' }, p: { en: 'Sorted subscribes to signed webhooks; the wallet updates without polling.', fr: 'Sorted s’abonne aux webhooks signés ; le wallet se met à jour sans interrogation.' }, call: 'payment.detected    → PAYMENT_DETECTED\npayment.confirmed   → PAYMENT_CONFIRMED\npayment.processing  → PawaPay · MTN\npayment.completed   → COMPLETED' },
+      { h: { en: 'Traceable across three systems.', fr: 'Traçable sur trois systèmes.' }, p: { en: 'Blockchain TXID, MomoMe payment ID and the provider reference all sit on one receipt.', fr: 'TXID blockchain, identifiant MomoMe et référence fournisseur figurent sur un seul reçu.' }, call: 'GET /v1/payments/pay_K2q9\n→ { status: "COMPLETED", reference: "sorted-tx-55102",\n    timeline: { payout_completed_at: "…" } }' },
     ];
     const side = loc(SIDE[wStep], lang);
     const CTRY = [['CM', { en: 'Cameroon', fr: 'Cameroun' }, 'XAF · MTN · Orange', true], ['GA', 'Gabon', 'XAF', false], ['CG', 'Congo', 'XAF', false], ['TD', { en: 'Chad', fr: 'Tchad' }, 'XAF', false], ['CF', { en: 'Central African Rep.', fr: 'Centrafrique' }, 'XAF', false]];
@@ -299,11 +338,15 @@ class SortedHubView extends React.Component<HubProps, any> {
       wHead: wStep === 0 ? 'Sorted' : heads[wStep], wCanBack: wStep > 0 && wStep < 5, wBack: () => this.wGo(wStep - 1), wStart: () => this.wGo(1),
       wCountries: CTRY.map(c => ({ code: c[0], name: pick(c[1], lang), sub: c[2], disabled: !c[3], go: () => c[3] && this.wGo(2), tag: c[3] ? '→' : (fr ? 'Bientôt' : 'Soon'), op: c[3] ? 1 : 0.5, cursor: c[3] ? 'pointer' : 'default', border: c[3] ? 'var(--accent)' : 'var(--line)' })),
       wPhone, wPhoneShown: shown, wSetPhone: e => this.setState({ wPhone: e.target.value }), wOp: op,
-      wAmtStr: fmt(wAmt), wSetAmt: e => this.setState({ wAmt: Math.min(500000, +e.target.value.replace(/\D/g, '') || 0) }),
-      wPresets: [10000, 25000, 50000, 100000].map(v => ({ label: fmt(v), go: () => this.setState({ wAmt: v }), bg: v === wAmt ? 'var(--accent-wash)' : 'var(--surface)', border: v === wAmt ? 'var(--accent)' : 'var(--line)' })),
-      wAssets: Object.keys(A).map(k => ({ name: A[k].name, glyph: A[k].glyph, color: A[k].color, eta: pick(A[k].eta, lang), amount: q(k).txt, go: () => this.setState({ wAsset: k }), bg: k === wAsset ? 'var(--accent-wash)' : 'var(--surface)', border: k === wAsset ? 'var(--accent)' : 'var(--line)' })),
+      wAmtStr: fmt(wAmt), wSetAmt: e => { const n = +e.target.value.replace(/\D/g, '') || 0; this.setState({ wAmt: Math.min(500000, n), wCapped: n > 500000 }); },
+      wAmtHint: wAmt < 500 ? (fr ? 'Minimum 500 XAF par paiement.' : 'Minimum 500 XAF per payment.') : this.state.wCapped ? (fr ? 'Maximum 500 000 XAF par paiement.' : 'Maximum 500 000 XAF per payment.') : (fr ? '500 – 500 000 XAF par paiement' : '500 – 500 000 XAF per payment'),
+      wAmtHintColor: wAmt < 500 || this.state.wCapped ? 'var(--warn-ink)' : 'var(--ink-3)',
+      wPresets: [10000, 25000, 50000, 100000].map(v => ({ label: fmt(v), go: () => this.setState({ wAmt: v, wCapped: false }), bg: v === wAmt ? 'var(--accent-wash)' : 'var(--surface)', border: v === wAmt ? 'var(--accent)' : 'var(--line)' })),
+      wAssets: [...Object.keys(A).map(k => ({ name: A[k].name, glyph: A[k].glyph, color: A[k].color, eta: pick(A[k].eta, lang), amount: q(k).txt, go: () => { if (k !== wAsset) this.setState({ wAsset: k, wLock: TTL[k] }); }, bg: k === wAsset ? 'var(--accent-wash)' : 'var(--surface)', border: k === wAsset ? 'var(--accent)' : 'var(--line)' })),
+        // Sorted's requested rail — not in the API yet (network_unsupported), so not selectable.
+        { name: 'USDT · TRON', glyph: '₮', color: 'var(--ink-3)', eta: fr ? 'Prévu pour Sorted' : 'Planned for Sorted', amount: '—', disabled: true, go: () => {}, bg: 'var(--surface-2)', border: 'var(--line)' }],
       wRows: rows, wXafText: fmt(wAmt) + ' XAF',
-      wLockText: wLock ? (fr ? `Taux bloqué · expire dans ${mm}` : `Rate locked · expires in ${mm}`) : (fr ? 'Devis expiré — actualisez le taux' : 'Quote expired — refresh the rate'), wLockColor: wLock ? (wLock < 30 ? 'var(--warn-ink)' : 'var(--ink-2)') : 'var(--bad)',
+      wLockText: wLock ? (wAsset === 'BTC' ? (fr ? `Estimation · re-chiffrée à confirmation · ${mm}` : `Estimate · re-priced on confirmation · ${mm}`) : (fr ? `Taux bloqué · expire dans ${mm}` : `Rate locked · expires in ${mm}`)) : (fr ? 'Devis expiré — actualisez le taux' : 'Quote expired — refresh the rate'), wLockColor: wLock ? (wLock < 30 ? 'var(--warn-ink)' : 'var(--ink-2)') : 'var(--bad)',
       wStages: stg.map((s, k) => { const done = k < wStage || (k === 3 && wStage >= 3), now = k === wStage && k < 3; return { label: s[0], sub: s[1], glyph: done ? '✓' : now ? '•' : String(k + 1), dotBg: done ? 'var(--recv)' : now ? 'var(--brand)' : 'var(--surface-2)', dotColor: done ? '#fff' : 'var(--ink)', border: now ? 'var(--brand)' : 'var(--line)', color: k <= wStage ? 'var(--ink)' : 'var(--ink-3)' }; }),
       wReceipt: [{ k: fr ? 'Destinataire' : 'Recipient', v: op.name || '—' }, { k: fr ? 'Numéro' : 'Number', v: '+237 ' + shown }, { k: fr ? 'Payé' : 'Paid', v: cur.txt }, { k: fr ? 'Référence' : 'Reference', v: 'MMM-2026-004821' }, { k: 'TXID', v: 'a3f9…e21c' }, { k: fr ? 'Réf. opérateur' : 'Operator ref', v: 'MP261004.1532.C88411' }],
       wHasCta: !!cta, wCtaLabel: cta ? cta.l : '', wCtaDisabled: cta ? cta.dis : true, wCta: () => cta && this.wGo(cta.go),
@@ -315,40 +358,41 @@ class SortedHubView extends React.Component<HubProps, any> {
     const fr = lang === 'fr';
     const L = (en, f) => fr ? f : en;
     const P = [
-      ['MMM-2026-004821', '84,11 USDT', 50000, 'MTN', 'PawaPay', 'SETTLED', '2 min', 'NANA J.P.'],
-      ['MMM-2026-004820', '42 180 sats', 25000, 'ORANGE', 'PawaPay', 'SETTLED', '6 min', 'MBALLA E.'],
-      ['MMM-2026-004819', '168,22 USDT', 100000, 'MTN', 'Peexit', 'PROCESSING', '1 min', 'TCHOUA A.'],
-      ['MMM-2026-004818', '0,000841 BTC', 50000, 'ORANGE', '—', 'COMPLIANCE_REVIEW', '14 min', 'EKANI R.'],
+      ['MMM-2026-004821', '84,11 USDT', 50000, 'MTN', 'PawaPay', 'DELIVERED', '2 min', 'NANA J.P.'],
+      ['MMM-2026-004820', '42 180 sats', 25000, 'ORANGE', 'PawaPay', 'DELIVERED', '6 min', 'MBALLA E.'],
+      ['MMM-2026-004819', '168,22 USDT', 100000, 'MTN', 'Peexit', 'PAYOUT_REQUESTED', '1 min', 'TCHOUA A.'],
+      ['MMM-2026-004818', '0,000841 BTC', 50000, 'ORANGE', '—', 'MANUAL_REVIEW', '14 min', 'EKANI R.'],
       ['MMM-2026-004817', '25,24 USDT', 15000, 'MTN', 'PawaPay', 'REFUND_PENDING', '22 min', 'FOUDA M.'],
-      ['MMM-2026-004816', '84,11 USDT', 50000, 'MTN', '—', 'AWAITING_FUNDS', '3 min', 'NGONO C.'],
-      ['MMM-2026-004815', '16 950 sats', 10000, 'MTN', 'PawaPay', 'SETTLED', '31 min', 'ABENA L.'],
-      ['MMM-2026-004814', '42,05 USDT', 25000, 'ORANGE', '—', 'EXPIRED', '48 min', 'ESSOMBA P.'],
-      ['MMM-2026-004813', '336,44 USDT', 200000, 'MTN', 'PawaPay', 'SETTLED', '1 h', 'BELLO S.'],
+      ['MMM-2026-004816', '84,11 USDT', 50000, 'MTN', '—', 'AWAITING_INBOUND', '3 min', 'NGONO C.'],
+      ['MMM-2026-004815', '16 950 sats', 10000, 'MTN', 'PawaPay', 'DELIVERED', '31 min', 'ABENA L.'],
+      ['MMM-2026-004814', '42,05 USDT', 25000, 'ORANGE', '—', 'FAILED', '48 min', 'ESSOMBA P.'],
+      ['MMM-2026-004813', '336,44 USDT', 200000, 'MTN', 'PawaPay', 'DELIVERED', '1 h', 'BELLO S.'],
       ['MMM-2026-004812', '8,41 USDT', 5000, 'ORANGE', 'PawaPay', 'REFUNDED', '2 h', 'ATANGANA K.'],
     ];
     const over = this.state.adOver || {};
-    const TONE = { SETTLED: 'recv', PROCESSING: 'brand', COMPLIANCE_REVIEW: 'accent', REFUND_PENDING: 'warn', AWAITING_FUNDS: 'neutral', EXPIRED: 'neutral', REFUNDED: 'neutral', FAILED: 'bad' };
+    const TONE = { DELIVERED: 'recv', PAYOUT_REQUESTED: 'brand', MANUAL_REVIEW: 'accent', REFUND_PENDING: 'warn', AWAITING_INBOUND: 'neutral', REFUNDED: 'neutral', FAILED: 'neutral' };
     const provOver = this.state.adProv || {};
     const pay = P.map(p => ({ ref: p[0], src: p[1], xaf: p[2], op: p[3], prov: provOver[p[0]] || p[4], state: over[p[0]] || p[5], age: p[6], recip: p[7] }));
-    const FILT = { all: null, settled: ['SETTLED'], flight: ['AWAITING_FUNDS', 'PROCESSING'], action: ['COMPLIANCE_REVIEW', 'REFUND_PENDING'], closed: ['EXPIRED', 'REFUNDED', 'FAILED'] };
+    const FILT = { all: null, settled: ['DELIVERED'], flight: ['AWAITING_INBOUND', 'PAYOUT_REQUESTED'], action: ['MANUAL_REVIEW', 'REFUND_PENDING'], closed: ['REFUNDED', 'FAILED'] };
     const FL = { all: L('All', 'Tout'), settled: L('Settled', 'Réglés'), flight: L('In flight', 'En cours'), action: L('Needs action', 'À traiter'), closed: L('Closed', 'Clos') };
     const f = this.state.adFilter || 'all', qy = (this.state.adQuery || '').toLowerCase();
     const rows = pay.filter(p => (!FILT[f] || FILT[f].includes(p.state)) && (!qy || (p.ref + p.recip + p.op + p.src).toLowerCase().includes(qy)));
     const selRef = this.state.adSel || 'MMM-2026-004818';
     const s = pay.find(p => p.ref === selRef) || pay[0];
-    const base = ['CREATED', 'QUOTED', 'AWAITING_FUNDS', 'FUNDED', 'VALIDATING', 'LIQUIDITY_RESERVED', 'PROCESSING'];
-    const PATH = { SETTLED: [...base, 'SETTLED'], PROCESSING: base, COMPLIANCE_REVIEW: [...base.slice(0, 5), 'COMPLIANCE_REVIEW'], REFUND_PENDING: [...base, 'REFUND_PENDING'], REFUNDED: [...base, 'REFUND_PENDING', 'REFUNDED'], AWAITING_FUNDS: base.slice(0, 3), EXPIRED: [...base.slice(0, 3), 'EXPIRED'] };
+    // The ops console speaks the engine's own states (shared/types.ts PaymentState).
+    const base = ['QUOTED', 'AWAITING_INBOUND', 'INBOUND_DETECTED', 'INBOUND_CONFIRMED', 'FX_LOCKED', 'PAYOUT_REQUESTED'];
+    const PATH = { DELIVERED: [...base, 'PAYOUT_CONFIRMED', 'DELIVERED'], PAYOUT_REQUESTED: base, MANUAL_REVIEW: [...base.slice(0, 4), 'MANUAL_REVIEW'], REFUND_PENDING: [...base, 'REFUND_PENDING'], REFUNDED: [...base, 'REFUND_PENDING', 'REFUNDED'], AWAITING_INBOUND: base.slice(0, 2), FAILED: [...base.slice(0, 2), 'FAILED'] };
     const path = PATH[s.state] || base;
     const toast = text => { clearTimeout(this.toastT); this.setState({ adToast: text }); this.toastT = setTimeout(() => this.setState({ adToast: null }), 3200); };
     const setSt = (st, msg, prov) => { this.setState(x => ({ adOver: { ...(x.adOver || {}), [s.ref]: st }, ...(prov ? { adProv: { ...(x.adProv || {}), [s.ref]: prov } } : null) })); toast(msg); };
     const ACT = {
-      PROCESSING: [{ label: L('Re-query status', 'Re-interroger'), variant: 'primary', go: () => setSt('SETTLED', L('Provider confirmed delivery by idempotency key — settled. Nothing was resubmitted.', 'Le fournisseur a confirmé par clé d’idempotence — réglé. Rien n’a été resoumis.')) }],
-      COMPLIANCE_REVIEW: [{ label: L('Approve & pay', 'Approuver et payer'), variant: 'primary', go: () => setSt('PROCESSING', L('Approved by ops (step-up verified). Liquidity reserved; payout submitted.', 'Approuvé par ops (authentification renforcée). Liquidité réservée ; paiement soumis.'), 'PawaPay') }, { label: L('Refund sender', 'Rembourser'), variant: 'ghost', go: () => setSt('REFUND_PENDING', L('Decision REJECT recorded. Refund owed to the sender address.', 'Décision REJECT enregistrée. Remboursement dû à l’expéditeur.')) }],
-      REFUND_PENDING: [{ label: L('Retry via Peexit', 'Relancer via Peexit'), variant: 'primary', go: () => setSt('PROCESSING', L('Failover attempt created on Peexit with a new attempt key. First attempt is closed as rejected.', 'Tentative de bascule créée sur Peexit avec une nouvelle clé. La première est close comme rejetée.'), 'Peexit') }, { label: L('Refund', 'Rembourser'), variant: 'ghost', go: () => setSt('REFUNDED', L('Refund broadcast to the sender’s TRON address and recorded in the ledger.', 'Remboursement diffusé vers l’adresse TRON de l’expéditeur et inscrit au grand livre.')) }],
-      SETTLED: [{ label: L('Open dispute', 'Ouvrir un litige'), variant: 'ghost', go: () => toast(L('Dispute opened. Provider proof attached; no automatic refund.', 'Litige ouvert. Preuve fournisseur jointe ; pas de remboursement automatique.')) }],
+      PAYOUT_REQUESTED: [{ label: L('Re-query status', 'Re-interroger'), variant: 'primary', go: () => setSt('DELIVERED', L('Provider confirmed delivery by idempotency key — settled. Nothing was resubmitted.', 'Le fournisseur a confirmé par clé d’idempotence — réglé. Rien n’a été resoumis.')) }],
+      MANUAL_REVIEW: [{ label: L('Approve & pay', 'Approuver et payer'), variant: 'primary', go: () => setSt('PAYOUT_REQUESTED', L('Approved by ops (step-up verified). Liquidity reserved; payout submitted.', 'Approuvé par ops (authentification renforcée). Liquidité réservée ; paiement soumis.'), 'PawaPay') }, { label: L('Refund sender', 'Rembourser'), variant: 'ghost', go: () => setSt('REFUND_PENDING', L('Rejected by ops. Refund owed to the sender — waiting for their Lightning invoice.', 'Rejeté par ops. Remboursement dû à l’expéditeur — en attente de sa facture Lightning.')) }],
+      REFUND_PENDING: [{ label: L('Retry via Peexit', 'Relancer via Peexit'), variant: 'primary', go: () => setSt('PAYOUT_REQUESTED', L('Failover attempt created on Peexit with a new attempt key. First attempt is closed as rejected.', 'Tentative de bascule créée sur Peexit avec une nouvelle clé. La première est close comme rejetée.'), 'Peexit') }, { label: L('Refund', 'Rembourser'), variant: 'ghost', go: () => setSt('REFUNDED', L('Refund paid over Lightning to the invoice the sender supplied, and recorded in the ledger.', 'Remboursement payé en Lightning vers la facture fournie par l’expéditeur, et inscrit au grand livre.')) }],
+      DELIVERED: [{ label: L('Open dispute', 'Ouvrir un litige'), variant: 'ghost', go: () => toast(L('Dispute opened. Provider proof attached; no automatic refund.', 'Litige ouvert. Preuve fournisseur jointe ; pas de remboursement automatique.')) }],
     };
-    const NOTE = { COMPLIANCE_REVIEW: L('Underpaid: 0.000838 of 0.000841 BTC received (−0.36%). Held — never auto-paid short.', 'Sous-payé : 0,000838 sur 0,000841 BTC reçus (−0,36 %). Retenu — jamais payé à découvert.'), REFUND_PENDING: L('PawaPay hard reject: recipient wallet balance limit reached.', 'Rejet PawaPay : plafond de solde du wallet destinataire atteint.') };
-    const funded = path.includes('FUNDED'), paid = path.includes('PROCESSING');
+    const NOTE = { FAILED: L('Expired: no funds arrived before the payment window closed. Nothing moved.', 'Expiré : aucun fonds avant la fin du délai. Rien n’a bougé.'), MANUAL_REVIEW: L('Overpaid beyond the 15 % tolerance: 0.000981 of 0.000841 BTC received. Held for an operator — never paid out automatically.', 'Sur-payé au-delà de la tolérance de 15 % : 0,000981 sur 0,000841 BTC reçus. Retenu pour un opérateur — jamais payé automatiquement.'), REFUND_PENDING: L('PawaPay hard reject: recipient wallet balance limit reached.', 'Rejet PawaPay : plafond de solde du wallet destinataire atteint.') };
+    const funded = path.includes('INBOUND_DETECTED'), paid = path.includes('PAYOUT_REQUESTED');
     // providers
     const W = this.state.rtW || { liq: 30, success: 25, price: 20, speed: 15, health: 10 };
     const PM = { PawaPay: { liq: .92, price: .78, success: .987, speed: .86, health: 1 }, Peexit: { liq: .34, price: .88, success: .961, speed: .72, health: .95 } };
@@ -371,7 +415,17 @@ class SortedHubView extends React.Component<HubProps, any> {
       adFilters: Object.keys(FILT).map(k => ({ label: FL[k], count: pay.filter(p => !FILT[k] || FILT[k].includes(p.state)).length, go: () => this.setState({ adFilter: k }), bg: f === k ? 'var(--accent-wash)' : 'var(--surface)', border: f === k ? 'var(--accent)' : 'var(--line)' })),
       adCols: [L('Reference', 'Référence'), L('Paid in', 'Payé en'), L('Delivers', 'Livre'), L('Operator', 'Opérateur'), L('Provider', 'Fournisseur'), L('Status', 'Statut'), L('Age', 'Âge')],
       adRows: rows.map(p => ({ ...p, xafText: fmt(p.xaf) + ' XAF', tone: TONE[p.state], pick: () => this.setState({ adSel: p.ref }), bg: p.ref === s.ref ? 'var(--accent-wash)' : 'transparent' })),
-      adExport: () => toast(L(`Exported ${rows.length} payments to CSV (partner-scoped).`, `${rows.length} paiements exportés en CSV (limité au partenaire).`)), adExportLabel: L('Export CSV', 'Exporter CSV'),
+      adExport: () => {
+        const head = ['reference', 'paid_in', 'delivers_xaf', 'operator', 'provider', 'status', 'recipient', 'partner'];
+        const cell = x => /[",\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x);
+        const csv = [head, ...rows.map(p => [p.ref, p.src.replace(/\u00a0/g, ' '), p.xaf, p.op, p.prov, p.state, p.recip, 'Sorted'])].map(r => r.map(cell).join(',')).join('\n') + '\n';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        a.download = `sorted-payments-${f}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        toast(L(`Exported ${rows.length} payments to CSV (partner-scoped).`, `${rows.length} paiements exportés en CSV (limité au partenaire).`));
+      }, adExportLabel: L('Export CSV', 'Exporter CSV'),
       adTraceLabel: L('Three-way trace', 'Traçabilité triple'), adTimelineLabel: L('Event history (append-only)', 'Historique (ajout seul)'), adNoAction: L('No action allowed in this state.', 'Aucune action permise dans cet état.'),
       adSel: { ref: s.ref, state: s.state, tone: TONE[s.state], xafText: fmt(s.xaf) + ' XAF', recip: s.recip, src: s.src, partner: 'Sorted',
         ids: [{ k: L('Blockchain TXID', 'TXID blockchain'), v: funded ? 'a3f9…' + s.ref.slice(-4) : '—' }, { k: L('MomoMe payment', 'Paiement MomoMe'), v: 'pay_' + s.ref.slice(-6) }, { k: L('Provider ref', 'Réf. fournisseur'), v: paid && s.prov !== '—' ? (s.prov === 'PawaPay' ? 'pp_' : 'px_') + s.ref.slice(-4) + '…91' : '—' }],
@@ -388,15 +442,15 @@ class SortedHubView extends React.Component<HubProps, any> {
       rcCols: [L('Reference', 'Référence'), L('Chain confirmed', 'Chaîne confirmée'), L('MomoMe recorded', 'MomoMe enregistré'), L('Provider initiated', 'Fournisseur lancé'), L('Provider settled', 'Fournisseur réglé'), L('Result', 'Résultat')],
       rcRows: [['MMM-2026-004821', true, true, true, true], ['MMM-2026-004820', true, true, true, true], ['MMM-2026-004811', true, true, true, null], ['UNATTRIBUTED', true, false, false, false], ['MMM-2026-004809', true, true, true, false], ['MMM-2026-004815', true, true, true, true]].map(r => { const ok = r.slice(1).every(v => v === true), wait = r.includes(null); return { ref: r[0], checks: r.slice(1).map(ck), status: ok ? L('Matched', 'Concordant') : wait ? L('Awaiting callback', 'Rappel attendu') : L('Exception', 'Exception'), tone: ok ? 'recv' : wait ? 'warn' : 'bad' }; }),
       rcExceptions: [
-        { ref: 'MMM-2026-004811', kind: L('Delayed', 'Retardé'), tone: 'warn', h: L('Payout succeeded, confirmation delayed', 'Paiement réussi, confirmation retardée'), p: L('Provider shows success; callback not received. Status re-query scheduled — the payment stays PROCESSING until authoritative confirmation.', 'Le fournisseur indique un succès ; rappel non reçu. Re-interrogation planifiée — le paiement reste PROCESSING jusqu’à confirmation probante.') },
+        { ref: 'MMM-2026-004811', kind: L('Delayed', 'Retardé'), tone: 'warn', h: L('Payout succeeded, confirmation delayed', 'Paiement réussi, confirmation retardée'), p: L('Provider shows success; callback not received. Status re-query scheduled — the payment stays PAYOUT_REQUESTED until authoritative confirmation.', 'Le fournisseur indique un succès ; rappel non reçu. Re-interrogation planifiée — le paiement reste PAYOUT_REQUESTED jusqu’à confirmation probante.') },
         { ref: 'UNATTRIBUTED', kind: L('Orphan', 'Orphelin'), tone: 'bad', h: L('Deposit with no matching intent', 'Dépôt sans intention correspondante'), p: L('12,00 USDT to an expired address. Captured as unattributed; refund requires ops approval.', '12,00 USDT vers une adresse expirée. Capturé comme non attribué ; remboursement soumis à validation ops.') },
         { ref: 'MMM-2026-004809', kind: L('Mismatch', 'Écart'), tone: 'bad', h: L('Provider reversed after initiation', 'Fournisseur annulé après lancement'), p: L('Initiated, then failed at the MNO. Ledger earmark released; refund queued.', 'Lancé puis échoué chez l’opérateur. Réservation libérée ; remboursement en file.') },
       ],
       ptStatus: L('Sandbox → pilot', 'Sandbox → pilote'),
-      ptRows: [[L('Allowed countries', 'Pays autorisés'), 'CM'], [L('Assets · networks', 'Actifs · réseaux'), 'USDT·TRON, BTC·BITCOIN, BTC·LIGHTNING'], [L('Payment methods', 'Moyens de paiement'), 'mobile_money (MTN, ORANGE)'], [L('Per-transaction limit', 'Limite par transaction'), '500 – 500 000 XAF'], [L('Daily · monthly limit', 'Limite jour · mois'), '25 M · 400 M XAF'], [L('Fee configuration', 'Configuration des frais'), L('plan "partner-v1" · 1,0–2,0 % by rail · min 200 XAF', 'plan "partner-v1" · 1,0–2,0 % selon rail · min 200 XAF')], [L('Partner fee', 'Frais partenaire'), L('set by Sorted, collected by MomoMe', 'fixés par Sorted, collectés par MomoMe')], [L('Webhook endpoint', 'Endpoint webhook'), 'https://api.sorted.example/hooks/momome'], [L('Risk profile', 'Profil de risque'), L('standard · wallet screening required', 'standard · filtrage wallet requis')], [L('Scopes', 'Portées'), 'quotes:write payments:* recipients:validate webhooks:manage']].map(([k, v]) => ({ k, v })),
+      ptRows: [[L('Allowed countries', 'Pays autorisés'), 'CM'], [L('Assets · networks', 'Actifs · réseaux'), L('USDT·ETHEREUM, BTC·BITCOIN, BTC·LIGHTNING · USDT·TRON planned', 'USDT·ETHEREUM, BTC·BITCOIN, BTC·LIGHTNING · USDT·TRON prévu')], [L('Payment methods', 'Moyens de paiement'), 'mobile_money (MTN, ORANGE)'], [L('Per-transaction limit', 'Limite par transaction'), '500 – 500 000 XAF'], [L('Daily · monthly limit', 'Limite jour · mois'), '25 M · 400 M XAF'], [L('Fee configuration', 'Configuration des frais'), L('negotiated 1,5 % on every rail · min 200 XAF · volume tiers', 'négocié 1,5 % sur chaque rail · min 200 XAF · paliers de volume')], [L('Partner fee', 'Frais partenaire'), L('planned — set by Sorted, collected by MomoMe', 'prévu — fixés par Sorted, collectés par MomoMe')], [L('Webhook endpoint', 'Endpoint webhook'), 'https://api.sorted.example/hooks/momome'], [L('Risk profile', 'Profil de risque'), L('standard · wallet screening required', 'standard · filtrage wallet requis')], [L('Scopes', 'Portées'), 'quotes:write payments:read payments:write refunds:write recipients:validate webhooks:manage']].map(([k, v]) => ({ k, v })),
       ptGenericH: L('Generic partner model', 'Modèle partenaire générique'), ptGenericP: L('Sorted is one row in the org table. No Sorted-specific branches in the payment engine — the next wallet onboards with the same fields.', 'Sorted est une ligne dans la table des orgs. Aucune branche spécifique dans le moteur — le prochain wallet s’intègre avec les mêmes champs.'),
-      ptCredLabel: L('Credentials', 'Identifiants'), ptKeys: [{ key: 'mm_test_sk_••••3f1a', env: 'TEST', tone: 'neutral' }, { key: 'mm_live_sk_••••—', env: L('NOT ISSUED', 'NON ÉMISE'), tone: 'warn' }],
-      ptRotate: () => toast(L('Test secret rotated. Old secret valid for 24 h, then revoked.', 'Secret test renouvelé. L’ancien reste valide 24 h puis est révoqué.')), ptRotateLabel: L('Rotate secret', 'Renouveler le secret'),
+      ptCredLabel: L('Credentials', 'Identifiants'), ptKeys: [{ key: 'mm_test_••••' + ['3f1a', '9c07', 'e52d', '71b8'][(this.state.ptRot || 0) % 4], env: 'TEST', tone: 'neutral' }, ...(this.state.ptRot ? [{ key: 'mm_test_••••' + ['3f1a', '9c07', 'e52d', '71b8'][(this.state.ptRot - 1) % 4], env: L('EXPIRES IN 24 H', 'EXPIRE DANS 24 H'), tone: 'warn' }] : []), { key: 'mm_live_••••—', env: L('NOT ISSUED', 'NON ÉMISE'), tone: 'neutral' }],
+      ptRotate: () => this.setState(x => ({ ptRot: (x.ptRot || 0) + 1 }), () => toast(L('Test secret rotated with a 24 h grace: the old secret works until then, then is revoked.', 'Secret test renouvelé avec 24 h de grâce : l’ancien fonctionne jusque-là, puis est révoqué.'))), ptRotateLabel: L('Rotate secret', 'Renouveler le secret'),
     };
   }
   vAnalytics(lang) {
@@ -424,7 +478,7 @@ class SortedHubView extends React.Component<HubProps, any> {
       anVolTitle: L(per === 90 ? 'Weekly transactions' : 'Daily transactions', per === 90 ? 'Transactions hebdomadaires' : 'Transactions quotidiennes'), anVolMax: L(`peak ${fmt(mx)}`, `pic ${fmt(mx)}`),
       anBars: vals.map((v, k) => ({ h: (v / mx * 100).toFixed(1) + '%', c: k === vals.length - 1 ? 'var(--accent)' : 'var(--brand)', tip: String(v) })),
       anSplits: [
-        { title: L('Asset · network', 'Actif · réseau'), rows: [['USDT · TRON', '58%', 'var(--usdt)'], ['Lightning', '27%', 'var(--lightning)'], ['Bitcoin on-chain', '9%', 'var(--ink-3)'], ['USDT · ERC-20', '6%', 'var(--usdc)']] },
+        { title: L('Asset · network', 'Actif · réseau'), rows: [['USDT', '64%', 'var(--usdt)'], ['Lightning', '27%', 'var(--lightning)'], ['Bitcoin on-chain', '9%', 'var(--ink-3)']] },
         { title: L('Mobile operator', 'Opérateur mobile'), rows: [['MTN MoMo', '68%', 'var(--mtn)'], ['Orange Money', '32%', 'var(--orange)']] },
         { title: L('Payout provider', 'Fournisseur de paiement'), rows: [['PawaPay', '81%', 'var(--recv)'], ['Peexit', '19%', 'var(--info)']] },
       ].map(s => ({ title: s.title, rows: s.rows.map(r => ({ l: r[0], p: r[1], c: r[2] })) })),
@@ -435,24 +489,26 @@ class SortedHubView extends React.Component<HubProps, any> {
   vDocs(lang) {
     const L = (en, f) => lang === 'fr' ? f : en;
     const MC = { GET: ['var(--info-wash)', 'var(--info)'], POST: ['var(--recv-wash)', 'var(--recv)'] };
+    // Mirrors the real /v1 handlers (server/src/publicApi/*) and projections (core/platform/mapping.ts).
     const E = [
       { g: L('Quotes', 'Devis') },
-      { id: 'q', m: 'POST', p: '/v1/quotes', idem: true, d: L('Price a payout. Destination- or source-amount. Quotes are deterministic, stored, and expire (rail-dependent TTL).', 'Chiffrer un paiement. Montant destination ou source. Les devis sont déterministes, stockés et expirent (TTL selon le rail).'),
-        req: 'POST /v1/quotes\nAuthorization: Bearer mm_test_sk_…\nIdempotency-Key: srt_q_5c1e\n\n{\n  "source": { "asset": "USDT", "network": "TRON" },\n  "destination": {\n    "country": "CM", "currency": "XAF",\n    "amount": "50000"\n  },\n  "payment_method": "mobile_money",\n  "recipient": { "phone": "+237677123456" }\n}',
-        res: '201 Created\n{\n  "data": {\n    "id": "qt_7Hc2", "object": "quote",\n    "status": "active",\n    "source": { "asset": "USDT", "network": "TRON",\n                "amount": "84.11" },\n    "destination": { "country": "CM",\n      "currency": "XAF", "amount": "50000" },\n    "rate": { "pair": "USDT/XAF", "value": "603.40",\n              "locked_until": "2026-10-04T14:04:11Z" },\n    "fees": { "platform": { "amount": "750", "currency": "XAF" },\n              "total": { "amount": "750", "currency": "XAF" } },\n    "estimated_settlement": "PT1M",\n    "expires_at": "2026-10-04T14:04:11Z"\n  },\n  "meta": { "request_id": "req_91af" }\n}' },
-      { id: 'qg', m: 'GET', p: '/v1/quotes/{id}', d: L('Retrieve a quote and its status: active, expired or used.', 'Récupérer un devis et son statut : active, expired ou used.'), req: 'GET /v1/quotes/qt_7Hc2', res: '200 OK\n{ "data": { "id": "qt_7Hc2", "status": "used", … } }' },
+      { id: 'q', m: 'POST', p: '/v1/quotes', idem: true, d: L('Price a payout by destination amount (XAF to deliver) or source amount (asset to send). Quotes are stored and expire: 10 min for Lightning and USDT, 15 min on-chain (an estimate, re-priced at confirmation).', 'Chiffrer un paiement par montant destination (XAF à livrer) ou source (actif à envoyer). Les devis sont stockés et expirent : 10 min en Lightning et USDT, 15 min on-chain (estimation, re-chiffrée à confirmation).'),
+        req: 'POST /v1/quotes\nAuthorization: Bearer mm_test_…\nIdempotency-Key: srt_q_5c1e\n\n{\n  "source": { "asset": "USDT", "network": "ETHEREUM" },\n  "destination": {\n    "country": "CM", "currency": "XAF",\n    "amount": "50000",\n    "phone": "+237677123456"\n  }\n}',
+        res: '201 Created\n{\n  "data": {\n    "id": "qt_7Hc2", "object": "quote",\n    "status": "active",\n    "source": { "asset": "USDT", "network": "ETHEREUM",\n                "amount": "84.110000" },\n    "destination": { "country": "CM",\n      "currency": "XAF", "amount": "50000" },\n    "rate": { "pair": "USDT/XAF", "value": "603.40",\n              "spread_bps": 120, "estimate_only": false,\n              "locked_until": "2026-10-04T14:14:11Z" },\n    "fees": { "platform": { "amount": "750", "currency": "XAF" },\n              "total": { "amount": "750", "currency": "XAF" } },\n    "usd_equivalent": "83.95",\n    "created_at": "2026-10-04T14:04:11Z",\n    "expires_at": "2026-10-04T14:14:11Z"\n  },\n  "meta": { "request_id": "req_91af" }\n}' },
+      { id: 'qg', m: 'GET', p: '/v1/quotes/{id}', d: L('Retrieve a quote and its status: active, expired or used (a used quote names its payment).', 'Récupérer un devis et son statut : active, expired ou used (un devis utilisé indique son paiement).'), req: 'GET /v1/quotes/qt_7Hc2', res: '200 OK\n{ "data": { "id": "qt_7Hc2", "object": "quote",\n  "status": "used", "payment_id": "pay_K2q9" } }' },
       { g: L('Payments', 'Paiements') },
-      { id: 'p', m: 'POST', p: '/v1/payments', idem: true, d: L('Create a payment intent from an active quote. Returns where Sorted should send funds. The same Idempotency-Key always returns the same intent.', 'Créer une intention depuis un devis actif. Indique où Sorted doit envoyer les fonds. La même Idempotency-Key renvoie toujours la même intention.'),
+      { id: 'p', m: 'POST', p: '/v1/payments', idem: true, d: L('Create a payment from an active quote. Returns where the user should pay. The same Idempotency-Key always returns the same payment.', 'Créer un paiement depuis un devis actif. Indique où l’utilisateur doit payer. La même Idempotency-Key renvoie toujours le même paiement.'),
         req: 'POST /v1/payments\nIdempotency-Key: srt_8f31c0e2\n\n{\n  "quote_id": "qt_7Hc2",\n  "recipient": { "phone": "+237677123456" },\n  "reference": "sorted-tx-55102",\n  "metadata": { "sorted_user": "u_8812" }\n}',
-        res: '201 Created\n{\n  "data": {\n    "id": "pay_K2q9", "object": "payment",\n    "status": "AWAITING_PAYMENT",\n    "reference": "MMM-2026-004821",\n    "pay_instruction": {\n      "network": "TRON",\n      "address": "T9yDq…x3Lq",\n      "amount": "84.11", "asset": "USDT",\n      "expires_at": "2026-10-04T14:04:11Z"\n    },\n    "recipient": { "operator": "MTN",\n                   "name_match": "NANA J•••" }\n  }\n}' },
-      { id: 'pg', m: 'GET', p: '/v1/payments/{id}', d: L('Payment status with the three-way trace. Supports long-poll with ?wait=25.', 'Statut du paiement avec traçabilité triple. Long-poll via ?wait=25.'), req: 'GET /v1/payments/pay_K2q9?wait=25', res: '200 OK\n{\n  "data": {\n    "id": "pay_K2q9", "status": "COMPLETED",\n    "fx": { "rate": "603.40", "locked": true },\n    "trace": {\n      "blockchain_txid": "a3f9…e21c",\n      "provider_ref": "pp_7f2a…91",\n      "mno_ref": "MP261004.1532.C88411"\n    }\n  }\n}' },
-      { id: 'pc', m: 'POST', p: '/v1/payments/{id}/cancel', idem: true, d: L('Cancel before funds arrive. After funding, cancellation is refused — use refund rules.', 'Annuler avant l’arrivée des fonds. Après financement, l’annulation est refusée — voir les règles de remboursement.'), req: 'POST /v1/payments/pay_K2q9/cancel\nIdempotency-Key: srt_c_11a0', res: '200 OK\n{ "data": { "status": "CANCELLED" } }\n\n409 Conflict\n{ "error": { "code": "payment_already_funded" } }' },
-      { id: 'pr', m: 'POST', p: '/v1/payments/{id}/refund', idem: true, d: L('Provide a refund destination for a payment in REFUND_PENDING. Never available after a provider-confirmed success.', 'Fournir une destination de remboursement pour un paiement REFUND_PENDING. Jamais disponible après un succès confirmé.'), req: 'POST /v1/payments/pay_K2q9/refund\nIdempotency-Key: srt_r_02bd\n\n{ "destination": { "network": "TRON",\n  "address": "TQm4…sender" } }', res: '202 Accepted\n{ "data": { "status": "REFUND_PENDING",\n  "refund": { "amount": "84.11", "asset": "USDT" } } }' },
+        res: '201 Created\n{\n  "data": {\n    "id": "pay_K2q9", "object": "payment",\n    "status": "AWAITING_PAYMENT",\n    "reference": "sorted-tx-55102",\n    "recipient": { "phone": "+237677123456",\n      "operator": "MTN", "name": "NANA JEAN PAUL",\n      "name_verified": true },\n    "payment_instructions": {\n      "method": "erc20_address",\n      "asset": "USDT", "network": "ETHEREUM",\n      "amount": "84.110000",\n      "code": "0x9f3c…a41e",\n      "uri": "ethereum:0xdAC1…/transfer?…",\n      "expires_at": "2026-10-04T14:14:11Z"\n    }\n  }\n}' },
+      { id: 'pg', m: 'GET', p: '/v1/payments/{id}', d: L('Payment status and timeline. Long-poll by passing the status you already know: the call returns as soon as it changes (wait up to 30 s).', 'Statut et chronologie du paiement. Long-poll en passant le statut connu : l’appel revient dès qu’il change (attente jusqu’à 30 s).'), req: 'GET /v1/payments/pay_K2q9?wait=25&status=AWAITING_PAYMENT', res: '200 OK\n{\n  "data": {\n    "id": "pay_K2q9", "status": "COMPLETED",\n    "timeline": {\n      "payment_detected_at": "…14:05:02Z",\n      "payment_confirmed_at": "…14:05:40Z",\n      "payout_started_at": "…14:05:41Z",\n      "payout_completed_at": "…14:05:50Z"\n    }\n  }\n}' },
+      { id: 'pc', m: 'POST', p: '/v1/payments/{id}/cancel', idem: true, d: L('Cancel before funds arrive. Once funds were received, cancellation is refused — the payment settles or is refunded.', 'Annuler avant l’arrivée des fonds. Une fois les fonds reçus, l’annulation est refusée — le paiement est livré ou remboursé.'), req: 'POST /v1/payments/pay_K2q9/cancel\nIdempotency-Key: srt_c_11a0', res: '200 OK\n{ "data": { "id": "pay_K2q9", "status": "CANCELLED", … } }\n\n409 Conflict\n{ "error": { "code": "payment_not_cancellable" } }' },
+      { id: 'pr', m: 'POST', p: '/v1/payments/{id}/refund', idem: true, d: L('Give the Lightning invoice to refund to, for a payment whose refund.status is awaiting_destination. Needs the refunds:write scope. Never possible after delivery.', 'Fournir la facture Lightning de remboursement, pour un paiement dont refund.status vaut awaiting_destination. Portée refunds:write. Jamais possible après livraison.'), req: 'POST /v1/payments/pay_K2q9/refund\nIdempotency-Key: srt_r_02bd\n\n{ "destination": {\n    "asset": "BTC", "network": "LIGHTNING",\n    "invoice": "lnbc1…" } }', res: '200 OK\n{ "data": { "status": "REFUNDED",\n  "refund": { "status": "pending",\n    "asset": "BTC", "network": "LIGHTNING",\n    "amount_sats": 139420 } } }' },
+      { id: 'pt', m: 'POST', p: '/v1/payments/{id}/retry', idem: true, d: L('Ask for the payout to be tried again — on another rail, or the same one now that it is back. Each attempt gets a new key; nothing is paid twice.', 'Demander une nouvelle tentative de paiement — sur un autre rail, ou le même une fois rétabli. Chaque tentative a une nouvelle clé ; rien n’est payé deux fois.'), req: 'POST /v1/payments/pay_K2q9/retry\nIdempotency-Key: srt_t_7e21', res: '200 OK\n{ "data": { "id": "pay_K2q9",\n  "status": "PAYOUT_PROCESSING", … } }' },
       { g: L('Recipients & corridors', 'Destinataires & corridors') },
-      { id: 'rv', m: 'POST', p: '/v1/recipients/validate', d: L('Resolve operator and account validity. The name is masked; full names are never returned to partners.', 'Résoudre opérateur et validité du compte. Le nom est masqué ; jamais renvoyé en entier.'), req: 'POST /v1/recipients/validate\n{ "phone": "+237677123456" }', res: '200 OK\n{ "data": { "valid": true, "operator": "MTN",\n  "name_match": "NANA J•••",\n  "name_check": "verified" } }\n\n// name_check: verified | unavailable\n// unavailable → show number only, ask user to confirm' },
-      { id: 'co', m: 'GET', p: '/v1/corridors', planned: true, d: L('Countries, currencies, operators, assets and limits enabled for your org. Planned — new endpoint.', 'Pays, devises, opérateurs, actifs et limites activés pour votre org. Prévu — nouvel endpoint.'), req: 'GET /v1/corridors', res: '200 OK\n{ "data": [{\n  "country": "CM", "currency": "XAF",\n  "operators": ["MTN", "ORANGE"],\n  "sources": ["USDT/TRON", "BTC/LIGHTNING",\n              "BTC/BITCOIN"],\n  "limits": { "min": "500", "max": "500000" }\n}] }' },
+      { id: 'rv', m: 'POST', p: '/v1/recipients/validate', d: L('Resolve the operator and the registered name before quoting. Pass the name the user typed to get a match verdict. Capped at 300 lookups per hour per org.', 'Résoudre l’opérateur et le nom enregistré avant le devis. Passez le nom saisi pour obtenir un verdict. Plafonné à 300 vérifications par heure et par org.'), req: 'POST /v1/recipients/validate\n{ "phone": "+237677123456",\n  "name": "Jean Paul Nana" }', res: '200 OK\n{ "data": {\n  "phone": "+237677123456",\n  "country": "CM", "currency": "XAF",\n  "valid": true, "operator": "MTN",\n  "name": "NANA JEAN PAUL",\n  "name_status": "verified_by_operator",\n  "name_match": "match",\n  "active": true } }\n\n// name_status: verified_by_operator |\n//   verified_by_momome | unknown | not_checked' },
+      { id: 'co', m: 'GET', p: '/v1/corridors', planned: true, d: L('Countries, currencies, operators, assets and limits enabled for your org. Planned — not in the API yet.', 'Pays, devises, opérateurs, actifs et limites activés pour votre org. Prévu — pas encore dans l’API.'), req: 'GET /v1/corridors', res: '200 OK\n{ "data": [{\n  "country": "CM", "currency": "XAF",\n  "operators": ["MTN", "ORANGE"],\n  "sources": ["USDT/ETHEREUM", "BTC/LIGHTNING",\n              "BTC/BITCOIN"],\n  "limits": { "min": "500", "max": "500000" }\n}] }' },
       { g: 'Webhooks' },
-      { id: 'wh', m: 'POST', p: '/v1/webhooks', idem: true, d: L('Register an endpoint (max 10 per org). Events are HMAC-signed and retried with backoff from 1 s to 1 h, then dead-lettered.', 'Enregistrer un endpoint (10 max par org). Événements signés HMAC, relancés de 1 s à 1 h puis en file morte.'), req: 'POST /v1/webhooks\n{ "url": "https://api.sorted.example/hooks/momome",\n  "events": ["payment.*", "quote.created"] }', res: '201 Created\n{ "data": { "id": "wh_3d", "secret": "whsec_…" } }\n\n// delivery\nX-MoMoMe-Signature: t=1791…,v1=5f2c…\n{ "id": "evt_9Q1", "type": "payment.settled",\n  "created": "2026-10-04T14:03:52Z",\n  "data": { "payment_id": "pay_K2q9", … } }' },
+      { id: 'wh', m: 'POST', p: '/v1/webhooks', idem: true, d: L('Register an endpoint (max 10 per org). List exact event names, or ["*"] for all. Deliveries are HMAC-signed and retried 1 s → 10 s → 1 min → 10 min → 1 h, then dead-lettered.', 'Enregistrer un endpoint (10 max par org). Listez les noms exacts, ou ["*"] pour tout. Livraisons signées HMAC et relancées 1 s → 10 s → 1 min → 10 min → 1 h, puis en file morte.'), req: 'POST /v1/webhooks\n{ "url": "https://api.sorted.example/hooks/momome",\n  "events": ["payment.completed",\n             "payment.failed", "payment.refunded"] }', res: '201 Created\n{ "data": { "id": "sub_3d9a", "object": "webhook_endpoint",\n  "enabled": true, "secret": "whsec_…",\n  "note": "Store the secret now — it is not shown again." } }\n\n// delivery\nX-MoMoMe-Signature: t=1791139452000,v1=5f2c…\nX-MoMoMe-Event-Id: evt_9Q1\n{ "id": "evt_9Q1", "object": "event",\n  "type": "payment.completed",\n  "created_at": "2026-10-04T14:05:50Z",\n  "livemode": false,\n  "data": { "id": "pay_K2q9", "status": "COMPLETED", … } }' },
     ];
     const sel = this.state.dcSel || 'q';
     const ep = E.find(e => e.id === sel);
@@ -461,30 +517,35 @@ class SortedHubView extends React.Component<HubProps, any> {
       dc: { method: ep.m, path: ep.p, desc: ep.d, req: ep.req, res: ep.res, mBg: MC[ep.m][0], mColor: MC[ep.m][1], tags: [ep.idem && { l: L('Idempotent', 'Idempotent'), tone: 'recv' }, ep.planned && { l: L('Planned', 'Prévu'), tone: 'warn' }].filter(Boolean) },
       dcReqLabel: L('Request', 'Requête'), dcResLabel: L('Response', 'Réponse'), dcMeaning: L('Meaning', 'Signification'),
       dcConcepts: [
-        { h: L('Authentication', 'Authentification'), p: L('Scoped secret keys per environment. Rotate with a 24 h overlap. Never ship keys to the wallet client — call from Sorted’s backend.', 'Clés secrètes à portée par environnement. Rotation avec 24 h de recouvrement. Jamais dans le client wallet — appel depuis le backend Sorted.'), code: 'Authorization: Bearer mm_live_sk_…' },
-        { h: L('Idempotency', 'Idempotence'), p: L('Required on every write. Same key + same body replays the stored response; same key + different body is rejected.', 'Obligatoire sur chaque écriture. Même clé + même corps renvoie la réponse stockée ; corps différent rejeté.'), code: 'Idempotent-Replayed: true' },
-        { h: L('Webhook signatures', 'Signatures webhook'), p: L('HMAC-SHA256 over timestamp + body. Reject if older than 5 minutes. Dedupe by event id.', 'HMAC-SHA256 sur horodatage + corps. Rejeter au-delà de 5 minutes. Dédoublonner par id d’événement.'), code: 'v1 = HMAC(secret, t + "." + body)' },
-        { h: L('Rate limits', 'Limites de débit'), p: L('Per plan, per endpoint. 429 carries Retry-After. Recipient validation has its own 300/h cap.', 'Par plan et endpoint. 429 avec Retry-After. Validation destinataire plafonnée à 300/h.'), code: 'X-RateLimit-Remaining: 118' },
+        { h: L('Authentication', 'Authentification'), p: L('Secret keys per environment, with scopes. Rotation takes an optional grace of up to 24 h. Never ship keys to the wallet app — call from Sorted’s backend.', 'Clés secrètes par environnement, avec portées. Rotation avec délai de grâce optionnel jusqu’à 24 h. Jamais dans l’app wallet — appel depuis le backend Sorted.'), code: 'Authorization: Bearer mm_live_…' },
+        { h: L('Idempotency', 'Idempotence'), p: L('Required on quotes, payments, cancel, refund, retry and webhook creation. Same key + same body replays the stored response; a different body is idempotency_key_reused.', 'Obligatoire sur devis, paiements, annulation, remboursement, relance et création de webhook. Même clé + même corps rejoue la réponse ; corps différent : idempotency_key_reused.'), code: 'Idempotent-Replayed: true' },
+        { h: L('Webhook signatures', 'Signatures webhook'), p: L('HMAC-SHA256 over the millisecond timestamp, a dot and the raw body. The SDK verifiers reject signatures older than 5 minutes; dedupe by event id.', 'HMAC-SHA256 sur l’horodatage en millisecondes, un point et le corps brut. Les SDK rejettent au-delà de 5 minutes ; dédoublonner par id d’événement.'), code: 'v1 = HMAC(secret, t + "." + body)' },
+        { h: L('Rate limits', 'Limites de débit'), p: L('Per plan, per minute, with a stricter bucket for payment endpoints. 429 carries Retry-After. Recipient validation has its own 300/h cap.', 'Par plan et par minute, avec un seau plus strict pour les paiements. 429 avec Retry-After. Validation destinataire plafonnée à 300/h.'), code: 'X-RateLimit-Remaining: 118' },
         { h: L('Environments', 'Environnements'), p: L('Test keys hit the sandbox — simulated chains and providers, no real funds. Live keys are issued after pilot sign-off.', 'Les clés test visent le sandbox — chaînes et fournisseurs simulés, sans fonds réels. Clés live émises après validation du pilote.'), code: 'mm_test_… · mm_live_…' },
-        { h: L('Supported today', 'Supporté aujourd’hui'), p: L('Cameroon · XAF · MTN, Orange. 500 – 500 000 XAF per payment. USDT on TRON is being added.', 'Cameroun · XAF · MTN, Orange. 500 – 500 000 XAF par paiement. USDT sur TRON en cours d’ajout.'), code: 'BTC/LIGHTNING · BTC/BITCOIN · USDT/ETHEREUM' },
+        { h: L('Supported today', 'Supporté aujourd’hui'), p: L('Cameroon · XAF · MTN, Orange. From 500 XAF per payment, up to the operator and org limits. USDT on TRON is planned for Sorted.', 'Cameroun · XAF · MTN, Orange. À partir de 500 XAF par paiement, dans les limites opérateur et org. USDT sur TRON prévu pour Sorted.'), code: 'BTC/LIGHTNING · BTC/BITCOIN · USDT/ETHEREUM · USDC/ETHEREUM' },
       ],
-      dcErrors: [['400', 'invalid_request', L('Malformed body or unsupported field.', 'Corps mal formé ou champ non supporté.')], ['401', 'unauthorized', L('Missing, revoked or wrong-environment key.', 'Clé absente, révoquée ou mauvais environnement.')], ['409', 'idempotency_conflict', L('Key reused with a different body.', 'Clé réutilisée avec un corps différent.')], ['409', 'recipient_unverified', L('Name check unavailable — retry with confirmation_token.', 'Vérification du nom indisponible — réessayer avec confirmation_token.')], ['410', 'quote_expired', L('Quote TTL elapsed; request a new quote.', 'TTL du devis écoulé ; demander un nouveau devis.')], ['422', 'limit_exceeded', L('Per-transaction, daily or monthly limit reached.', 'Limite par transaction, journalière ou mensuelle atteinte.')], ['422', 'liquidity_unavailable', L('Payout float cannot be guaranteed right now.', 'Le float ne peut être garanti pour le moment.')], ['429', 'rate_limited', L('Slow down; honour Retry-After.', 'Ralentir ; respecter Retry-After.')], ['503', 'corridor_unavailable', L('No healthy provider for this operator.', 'Aucun fournisseur disponible pour cet opérateur.')]].map(e => ({ s: e[0], c: e[1], m: e[2] })),
+      dcErrors: [['401', 'unauthorized', L('Missing, revoked or wrong-environment key.', 'Clé absente, révoquée ou mauvais environnement.')], ['403', 'forbidden_scope', L('The key lacks the scope this endpoint needs.', 'La clé n’a pas la portée requise.')], ['409', 'idempotency_key_reused', L('Key reused with a different body.', 'Clé réutilisée avec un corps différent.')], ['409', 'recipient_unverified', L('Confirm the recipient — repeat with confirmation_token and a new Idempotency-Key.', 'Confirmer le destinataire — répéter avec confirmation_token et une nouvelle Idempotency-Key.')], ['410', 'quote_expired', L('Quote window elapsed; request a new quote.', 'Délai du devis écoulé ; demander un nouveau devis.')], ['422', 'validation_failed', L('Malformed body or a missing field.', 'Corps mal formé ou champ manquant.')], ['422', 'network_unsupported', L('Asset/network pair not offered (e.g. USDT on TRON today).', 'Paire actif/réseau non proposée (ex. USDT sur TRON aujourd’hui).')], ['422', 'limit_exceeded', L('Per-transaction, daily or monthly limit reached.', 'Limite par transaction, journalière ou mensuelle atteinte.')], ['429', 'rate_limited', L('Slow down; honour Retry-After.', 'Ralentir ; respecter Retry-After.')], ['503', 'insufficient_liquidity', L('Payout float cannot be guaranteed right now (at payment creation).', 'Le float ne peut être garanti pour le moment (à la création du paiement).')], ['503', 'provider_unavailable', L('No healthy payout provider for this operator.', 'Aucun fournisseur disponible pour cet opérateur.')]].map(e => ({ s: e[0], c: e[1], m: e[2] })),
     };
   }
   vSandbox(lang) {
     const L = (en, f) => lang === 'fr' ? f : en;
     const ev = (type, note, state, dot) => ({ type, note, state, dot });
     const G = 'var(--recv)', Y = 'var(--brand)', R = 'var(--bad)', A = 'var(--accent)', N = 'var(--ink-3)';
-    const head = [ev('quote.created', L('rate locked 120 s', 'taux bloqué 120 s'), 'QUOTED', N), ev('payment.created', 'AWAITING_PAYMENT', 'AWAITING_FUNDS', N)];
-    const fund = [ev('payment.funded', L('84.11 USDT · TRON · 19 conf', '84,11 USDT · TRON · 19 conf'), 'FUNDED', Y), ev('payment.processing', 'PawaPay · MTN', 'PROCESSING', Y)];
+    // The reserved numbers and outcomes are server/src/core/platform/sandbox.ts; events are
+    // the real /v1 types (mapping.ts eventTypeFor). `at` is seconds after POST /v1/payments.
+    const created = (st = 'AWAITING_PAYMENT') => ev('payment.awaiting_payment', L('payment_instructions issued', 'payment_instructions émises'), st, N);
+    const pay = ev('POST /v1/sandbox/payments/{id}/pay', L('stands in for the user’s wallet', 'remplace le wallet de l’utilisateur'), '—', 'var(--info)');
+    const inbound = [ev('payment.detected', L('84.11 USDT · Ethereum', '84,11 USDT · Ethereum'), 'PAYMENT_DETECTED', Y), ev('payment.confirmed', L('contract, amount, finality checked', 'contrat, montant, finalité vérifiés'), 'PAYMENT_CONFIRMED', Y)];
+    const payout = [ev('payment.processing', 'PawaPay · MTN', 'PAYOUT_PROCESSING', Y), ev('payment.payout_submitted', L('accepted by the provider', 'accepté par le fournisseur'), 'PAYOUT_SUBMITTED', Y)];
+    const at = (list, times) => list.map((e, k) => ({ ...e, at: times[k] }));
     const SC = [
-      { id: 'ok', phone: '+237 650 000 001', name: L('Delivered', 'Livré'), desc: L('Happy path end to end.', 'Chemin nominal de bout en bout.'), ev: [...head, ...fund, ev('payment.settled', 'mno_ref MP2610…', 'SETTLED', G)] },
-      { id: 'fail', phone: '+237 650 000 002', name: L('Payout fails → refund', 'Échec → remboursement'), desc: L('Provider hard-rejects after crypto confirmed.', 'Rejet fournisseur après confirmation crypto.'), ev: [...head, ...fund, ev('payment.failed', L('provider rejected: wallet limit', 'rejet : plafond wallet'), 'PROCESSING', R), ev('payment.refund.pending', L('refund owed to sender', 'remboursement dû'), 'REFUND_PENDING', A), ev('payment.refunded', 'txid 7c1b…', 'REFUNDED', N)] },
-      { id: 'timeout', phone: '+237 650 000 003', name: L('Provider timeout', 'Délai fournisseur'), desc: L('Status re-queried by key. Never resubmitted.', 'Statut re-interrogé par clé. Jamais resoumis.'), ev: [...head, ...fund, ev('internal.status_requery', L('attempt 1 · pending', 'tentative 1 · en attente'), 'PROCESSING', N), ev('internal.status_requery', L('attempt 2 · success', 'tentative 2 · succès'), 'PROCESSING', N), ev('payment.settled', L('one payout only', 'un seul paiement'), 'SETTLED', G)] },
-      { id: 'under', phone: '+237 650 000 004', name: L('Underpayment', 'Sous-paiement'), desc: L('Sends 82.40 of 84.11 USDT.', 'Envoie 82,40 sur 84,11 USDT.'), ev: [...head, ev('payment.funded', L('82.40 of 84.11 USDT', '82,40 sur 84,11 USDT'), 'FUNDED', Y), ev('payment.review', L('underpaid — held, not paid short', 'sous-payé — retenu'), 'COMPLIANCE_REVIEW', A), ev('payment.refund.pending', L('ops decision: refund', 'décision ops : remboursement'), 'REFUND_PENDING', A)] },
-      { id: 'exp', phone: '+237 650 000 005', name: L('Quote expires', 'Devis expiré'), desc: L('No funds within the window.', 'Aucun fonds dans le délai.'), ev: [...head, ev('payment.expired', L('nothing moved', 'aucun mouvement'), 'EXPIRED', N)] },
-      { id: 'liq', phone: '+237 650 000 006', name: L('Insufficient liquidity', 'Liquidité insuffisante'), desc: L('Rejected at quote — no intent created.', 'Rejeté au devis — aucune intention créée.'), ev: [ev('422 liquidity_unavailable', L('POST /v1/quotes refused', 'POST /v1/quotes refusé'), '—', R)] },
-      { id: 'dup', phone: '+237 650 000 007', name: L('Duplicate webhook', 'Webhook dupliqué'), desc: L('payment.settled delivered twice.', 'payment.settled livré deux fois.'), ev: [...head, ...fund, ev('payment.settled', 'evt_9Q1', 'SETTLED', G), ev('payment.settled', L('evt_9Q1 again — consumer dedupes', 'evt_9Q1 encore — dédoublonné'), 'SETTLED', N)] },
+      { id: 'ok', phone: '+237 670 123 456', name: L('Delivered', 'Livré'), desc: L('Any number not listed below completes end to end.', 'Tout numéro non listé ci-dessous aboutit de bout en bout.'), ev: at([created(), pay, ...inbound, ...payout, ev('payment.completed', 'mno_ref MP2610…', 'COMPLETED', G)], [0, 4, 4.6, 5.2, 5.4, 6.1, 9.8]) },
+      { id: 'fail', phone: '+237 670 000 001', name: L('Payout fails → refund', 'Échec → remboursement'), desc: L('Every payout attempt is rejected; the payment ends REFUNDED, awaiting a refund invoice.', 'Chaque tentative est rejetée ; le paiement finit REFUNDED, en attente d’une facture de remboursement.'), ev: at([created(), pay, ...inbound, ev('payment.processing', L('attempts r1, r2, r3 rejected', 'tentatives r1, r2, r3 rejetées'), 'PAYOUT_PROCESSING', R), ev('payment.refunded', L('refund.status awaiting_destination', 'refund.status awaiting_destination'), 'REFUNDED', A)], [0, 4, 4.6, 5.2, 5.4, 8.9]) },
+      { id: 'review', phone: '+237 670 100 002', name: L('Manual review', 'Revue manuelle'), desc: L('Held for an operator once the funds are confirmed.', 'Retenu pour un opérateur une fois les fonds confirmés.'), ev: at([created(), pay, ...inbound, ev('payment.manual_review', L('waiting for an operator decision', 'en attente d’une décision opérateur'), 'MANUAL_REVIEW', A)], [0, 4, 4.6, 5.2, 5.3]) },
+      { id: 'liq', phone: '+237 670 200 003', name: L('Insufficient liquidity', 'Liquidité insuffisante'), desc: L('Refused at payment creation — nothing to pay, nothing owed.', 'Refusé à la création du paiement — rien à payer, rien dû.'), ev: at([ev('503 insufficient_liquidity', L('POST /v1/payments refused', 'POST /v1/payments refusé'), '—', R)], [0]) },
+      { id: 'prov', phone: '+237 670 300 004', name: L('Provider unavailable', 'Fournisseur indisponible'), desc: L('No healthy payout provider — refused at creation.', 'Aucun fournisseur disponible — refusé à la création.'), ev: at([ev('503 provider_unavailable', L('POST /v1/payments refused', 'POST /v1/payments refusé'), '—', R)], [0]) },
+      { id: 'exp', phone: '+237 670 400 005', name: L('Payment times out', 'Délai dépassé'), desc: L('The instruction expires after 60 s with no funds.', 'L’instruction expire après 60 s sans fonds.'), ev: at([created(), ev('payment.expired', L('nothing moved', 'aucun mouvement'), 'EXPIRED', N)], [0, 60]) },
+      { id: 'slow', phone: '+237 670 500 006', name: L('Slow rail', 'Rail lent'), desc: L('Completes about 20 s after payment.', 'Aboutit environ 20 s après le paiement.'), ev: at([created(), pay, ...inbound, ...payout, ev('payment.completed', L('~20 s after payment', '~20 s après paiement'), 'COMPLETED', G)], [0, 4, 4.6, 5.2, 5.4, 6.1, 24.3]) },
     ];
     const selId = this.state.sbSc || 'ok';
     const sc = SC.find(s => s.id === selId);
@@ -494,17 +555,31 @@ class SortedHubView extends React.Component<HubProps, any> {
       clearInterval(this.sbT);
       this.setState({ sbLog: [], sbRunning: true, sbPick: null });
       let k = 0;
-      this.sbT = setInterval(() => { if (k >= sc.ev.length) { clearInterval(this.sbT); this.setState({ sbRunning: false }); return; } const e = { ...sc.ev[k], t: '+' + (k * 0.9 + (k > 2 ? 18 : 0)).toFixed(1) + 's', i: k }; k++; this.setState(s => ({ sbLog: [...(s.sbLog || []), e], sbPick: e.i })); }, 750);
+      this.sbT = setInterval(() => { if (k >= sc.ev.length) { clearInterval(this.sbT); this.setState({ sbRunning: false }); return; } const e = { ...sc.ev[k], t: '+' + sc.ev[k].at.toFixed(1) + ' s', i: k }; k++; const last = k >= sc.ev.length; if (last) clearInterval(this.sbT); this.setState(s => ({ sbLog: [...(s.sbLog || []), e], sbPick: e.i, ...(last ? { sbRunning: false } : null) })); }, 750);
       this.timers.push(this.sbT);
     };
     const pk = this.state.sbPick;
     const pe = log.find(e => e.i === pk);
-    const payload = pe ? (pe.t === 'replay' ? `HTTP/1.1 200 OK\nIdempotent-Replayed: true\nIdempotency-Key: ${key}\n\n{ "data": { "id": "pay_sbx_${selId}" } }` : pe.type.startsWith('4') ? `HTTP/1.1 422 Unprocessable Entity\n{\n  "error": {\n    "code": "liquidity_unavailable",\n    "message": "Payout float cannot be guaranteed.",\n    "details": { "retry_after_s": 300 }\n  },\n  "meta": { "request_id": "req_7c20" }\n}` : `POST https://api.sorted.example/hooks/momome\nX-MoMoMe-Signature: t=1791139${String(pe.i).padStart(3, '0')},v1=5f2c9a…\nX-MoMoMe-Event-Id: evt_${selId}${pe.i}\n\n{\n  "id": "evt_${selId}${pe.i}",\n  "type": "${pe.type}",\n  "created": "2026-10-04T14:0${Math.min(9, pe.i)}:12Z",\n  "data": {\n    "payment_id": "pay_sbx_${selId}",\n    "state": "${pe.state}",\n    "recipient": "${sc.phone.replace(/ /g, '')}",\n    "note": "${pe.note}"\n  }\n}`) : '';
+    const pid = 'pay_sbx_' + selId;
+    const payload = !pe ? '' : pe.t === 'replay'
+      ? `HTTP/1.1 200 OK\nIdempotent-Replayed: true\nIdempotency-Key: ${key}\n\n{ "data": { "id": "${pid}", … } }`
+      : /^\d/.test(pe.type)
+        ? `POST /v1/payments\nIdempotency-Key: ${key}\n\nHTTP/1.1 503 Service Unavailable\n{\n  "error": {\n    "code": "${pe.type.split(' ')[1]}",\n    "message": "${pe.type.includes('liquidity') ? 'Payout float cannot be guaranteed right now.' : 'No payout provider is available for this operator.'}",\n    "details": {}\n  },\n  "meta": { "request_id": "req_7c20" }\n}`
+        : pe.type.startsWith('POST')
+          ? `POST /v1/sandbox/payments/${pid}/pay\nAuthorization: Bearer mm_test_…\n\nHTTP/1.1 200 OK\n{ "data": { "id": "${pid}", "status": "AWAITING_PAYMENT", … } }`
+          : `POST https://api.sorted.example/hooks/momome\nX-MoMoMe-Signature: t=${1791139452000 + Math.round(pe.at * 1000)},v1=5f2c9a…\nX-MoMoMe-Event-Id: evt_${selId}${pe.i}\n\n{\n  "id": "evt_${selId}${pe.i}",\n  "object": "event",\n  "type": "${pe.type}",\n  "created_at": "2026-10-04T14:04:${String(Math.min(59, 11 + Math.round(pe.at))).padStart(2, '0')}Z",\n  "livemode": false,\n  "data": {\n    "id": "${pid}", "object": "payment",\n    "status": "${pe.state}",\n    "recipient": { "phone": "${sc.phone.replace(/ /g, '')}" }\n  }\n}`;
     return {
       sbPickLabel: L('Reserved test numbers', 'Numéros de test réservés'),
       sbScenarios: SC.map(s => ({ name: s.name, phone: s.phone, desc: s.desc, pick: () => { clearInterval(this.sbT); this.setState({ sbSc: s.id, sbLog: [], sbRunning: false, sbPick: null }); }, bg: s.id === selId ? 'var(--accent-wash)' : 'var(--surface)', border: s.id === selId ? 'var(--accent)' : 'var(--line)' })),
       sbRun: run, sbRunning: !!this.state.sbRunning, sbRunLabel: L('Run scenario', 'Lancer'),
-      sbReplay: () => this.setState(s => ({ sbLog: [...(s.sbLog || []), { type: '200 Idempotent-Replayed', note: L('same key → stored response, no new payout', 'même clé → réponse stockée, aucun nouveau paiement'), state: '—', dot: 'var(--info)', t: 'replay', i: 100 + (s.sbLog || []).length }] })),
+      sbReplay: () => this.setState(s => {
+        const i = 100 + (s.sbLog || []).length;
+        const entry = sc.ev[0].type.startsWith('5')
+          // A 5xx is not a durable answer, so it is never stored: the same key runs the request again.
+          ? { ...sc.ev[0], note: L('5xx is not stored — the request ran again', '5xx non stocké — la requête a été rejouée'), t: L('retry', 'relance'), at: 0, i }
+          : { type: '200 Idempotent-Replayed', note: L('same key → stored response, no new payout', 'même clé → réponse stockée, aucun nouveau paiement'), state: '—', dot: 'var(--info)', t: 'replay', i };
+        return { sbLog: [...(s.sbLog || []), entry], sbPick: i };
+      }),
       sbNoReplay: !log.length || !!this.state.sbRunning, sbReplayLabel: L('Retry with same key', 'Relancer avec la même clé'),
       sbKey: key, sbEmpty: !log.length, sbEmptyText: L('Pick a number and run it. Events arrive here as Sorted’s endpoint would receive them.', 'Choisissez un numéro et lancez-le. Les événements arrivent ici comme sur l’endpoint de Sorted.'),
       sbLog: log.map(e => ({ ...e, pick: () => this.setState({ sbPick: e.i }), bg: e.i === pk ? 'var(--accent-wash)' : 'transparent' })),
@@ -517,26 +592,26 @@ class SortedHubView extends React.Component<HubProps, any> {
     const G = [
       { g: L('Partner', 'Partenaire'), items: [
         ['Organization', 'live', 'platform/orgs.ts', ['id', 'name', 'status', 'allowed_countries*', 'allowed_assets*', 'allowed_networks*', 'risk_profile*', 'max_exposure_xaf*'], L('The partner. Sorted is one row; starred fields are added for partner scoping.', 'Le partenaire. Sorted est une ligne ; les champs étoilés sont ajoutés.')],
-        ['Credential', 'live', 'platform/credentials.ts', ['id', 'org_id', 'env (test|live)', 'scopes[]', 'secret_hash', 'last_used_at', 'revoked_at'], L('Hashed secret shown once. Rotation keeps a 24 h overlap.', 'Secret haché affiché une fois. Rotation avec 24 h de recouvrement.')],
-        ['PricingPlan', 'extend', 'core/pricing.ts', ['org_id', 'fee_bps_by_rail', 'min_fee_xaf', 'max_fee_xaf', 'fx_spread_bps*', 'partner_fee_bps*', 'volume_tiers'], L('Commercial parameters, never hard-coded.', 'Paramètres commerciaux, jamais codés en dur.')],
+        ['Credential', 'live', 'platform/credentials.ts', ['id', 'org_id', 'env (test|live)', 'scopes[]', 'secret_hash', 'last_used_at', 'revoked_at'], L('Format mm_test_… / mm_live_…; hashed, shown once. Rotation takes an optional grace of up to 24 h.', 'Format mm_test_… / mm_live_… ; haché, affiché une fois. Rotation avec un délai de grâce optionnel jusqu’à 24 h.')],
+        ['PricingPlan', 'extend', 'platform/billing.ts', ['org_id', 'platform_fee_pct', 'negotiated_fee_pct', 'min_fee_xaf', 'tiers[]', 'fx_spread_bps*', 'partner_fee_bps*'], L('Commercial parameters, never hard-coded.', 'Paramètres commerciaux, jamais codés en dur.')],
         ['WebhookEndpoint', 'live', 'interop/outbound.ts', ['id', 'org_id', 'url', 'events[]', 'secret', 'status'], L('Up to 10 per org, SSRF-guarded.', 'Jusqu’à 10 par org, protégés contre le SSRF.')],
       ] },
       { g: L('Payment', 'Paiement'), items: [
         ['Quote', 'live', 'routes/api.ts', ['id', 'org_id', 'source_asset', 'source_network', 'source_amount', 'xaf', 'rate', 'spread_bps', 'fee_xaf', 'issued_at', 'expires_at'], L('Immutable once issued; stores every pricing input.', 'Immuable une fois émis ; stocke chaque entrée de prix.')],
         ['Payment', 'live', 'shared/types.ts', ['id', 'ref', 'org_id', 'quote_id', 'state', 'recipient_msisdn', 'operator', 'provider', 'fx_rate (locked)', 'payout_idempotency_key', 'failure_reason', 'refund_status', 'metadata'], L('The durable intent. FX rate is locked and never recalculated.', 'L’intention durable. Taux bloqué, jamais recalculé.')],
         ['PaymentEvent', 'live', 'Payment.events', ['payment_id', 'state', 'at', 'actor', 'note'], L('Append-only transition history — the audit trail.', 'Historique des transitions en ajout seul — la piste d’audit.')],
-        ['BlockchainTransaction', 'live', 'depositReconcile.ts', ['rail', 'txid / payment_hash', 'vout', 'address', 'token_contract', 'amount', 'confirmations', 'payment_id'], L('Unique on (rail, txid, vout) — a deposit credits once.', 'Unique sur (rail, txid, vout) — un dépôt crédite une fois.')],
-        ['PayoutAttempt', 'live', 'stateMachine.ts', ['payment_id', 'provider', 'attempt_key', 'provider_ref', 'mno_ref', 'status', 'submitted_at'], L('One row per provider attempt; failover creates a new attempt, never a resubmit.', 'Une ligne par tentative ; la bascule crée une tentative, jamais une resoumission.')],
-        ['ComplianceDecision', 'build', 'compliance.ts', ['payment_id', 'decision (APPROVE|REVIEW|REJECT)', 'reasons[]', 'wallet_screen_result', 'decided_by', 'decided_at'], L('New: a recorded decision per payment.', 'Nouveau : une décision tracée par paiement.')],
-        ['Refund', 'live', 'stateMachine.ts', ['payment_id', 'asset', 'amount', 'destination', 'txid', 'status'], L('Refunds go back to the sender’s address, in the source asset.', 'Remboursement vers l’adresse de l’expéditeur, dans l’actif source.')],
+        ['BlockchainTransaction', 'live', 'depositReconcile.ts', ['rail', 'txid / payment_hash', 'address', 'token_contract', 'amount', 'confirmations', 'deposit_event_id', 'payment_id'], L('Each deposit event id credits once — a replayed deposit is ignored.', 'Chaque identifiant de dépôt ne crédite qu’une fois — un dépôt rejoué est ignoré.')],
+        ['PayoutAttempt', 'extend', 'shared/types.ts', ['payout_ref', 'payout_key (ref:rN)', 'payout_attempts', 'provider', 'mno_ref*', 'submitted_at*'], L('Today these are fields on the Payment; each retry gets a new key (ref:r2, ref:r3), never a resubmit. A per-attempt table is an extension.', 'Aujourd’hui des champs du Paiement ; chaque relance a une nouvelle clé (ref:r2, ref:r3), jamais une resoumission. Une table par tentative est une extension.')],
+        ['ComplianceDecision', 'extend', 'platform/paymentMeta.ts', ['payment_id', 'status (CLEAR|REVIEW|BLOCKED)', 'reasons[]', 'at', 'decided_by*', 'wallet_screen_result*'], L('Already persisted per /v1 payment; add who decided and an inbound wallet-screening result.', 'Déjà persistée par paiement /v1 ; ajouter l’auteur de la décision et un filtrage des wallets entrants.')],
+        ['Refund', 'live', 'stateMachine.ts', ['payment_id', 'status (awaiting_destination|pending|settled)', 'asset (BTC)', 'network (LIGHTNING)', 'amount_sats', 'transaction_id'], L('Paid over Lightning to an invoice the sender supplies, whatever the source asset.', 'Payé en Lightning vers une facture fournie par l’expéditeur, quel que soit l’actif source.')],
       ] },
       { g: L('Money', 'Argent'), items: [
         ['JournalEntry', 'live', 'core/ledger.ts', ['txn_id', 'payment_id', 'account', 'direction', 'amount', 'currency'], L('Double entry; per transaction debits equal credits.', 'Partie double ; débits = crédits par transaction.')],
-        ['LiquidityReservation', 'extend', 'platform/liquidity.ts', ['payment_id', 'provider', 'xaf', 'org_id*', 'released_at'], L('Derived from ledger earmarks; adds per-org exposure.', 'Dérivé des réservations du grand livre ; ajoute l’exposition par org.')],
+        ['LiquidityReservation', 'extend', 'platform/liquidity.ts', ['payment_id', 'org_id', 'provider', 'xaf', 'released_at', 'max_exposure_xaf*'], L('A reservation record per payment and org, consumed on completion. Missing: a per-org exposure cap.', 'Une réservation par paiement et par org, consommée à la livraison. Manque : un plafond d’exposition par org.')],
         ['FXRateSnapshot', 'live', 'core/rates.ts', ['pair', 'source_a', 'source_b', 'divergence_bps', 'at'], L('Two feeds; quotes refused if they diverge.', 'Deux sources ; devis refusé si divergence.')],
       ] },
       { g: L('Operations', 'Opérations'), items: [
-        ['IdempotencyRecord', 'live', 'platform/idempotency.ts', ['org_id', 'endpoint', 'key', 'request_hash', 'response', 'created_at'], L('Same key + same body replays; different body is rejected.', 'Même clé + même corps rejoue ; corps différent rejeté.')],
+        ['IdempotencyRecord', 'live', 'platform/idempotency.ts', ['org_id', 'env', 'endpoint', 'key', 'request_hash', 'response', 'created_at'], L('Same key + same body replays; different body is rejected.', 'Même clé + même corps rejoue ; corps différent rejeté.')],
         ['ReconciliationRecord', 'live', 'interop/reconcile.ts', ['payment_id', 'chain_ok', 'ledger_ok', 'provider_initiated', 'provider_settled', 'exception'], L('Three-way match; exceptions page an operator.', 'Rapprochement triple ; les exceptions alertent un opérateur.')],
         ['AuditLog', 'live', 'platform/audit.ts', ['actor', 'org_id', 'action', 'target', 'ip', 'at'], L('Every admin and credential action.', 'Chaque action admin et identifiant.')],
       ] },
@@ -546,14 +621,14 @@ class SortedHubView extends React.Component<HubProps, any> {
     const SEC = [
       [L('Authentication', 'Authentification'), L('Scoped Bearer keys per environment; hashed at rest', 'Clés Bearer à portée par environnement ; hachées'), 'live'],
       [L('Authorisation', 'Autorisation'), L('Scopes per endpoint; ownership deny-by-default', 'Portées par endpoint ; propriété refusée par défaut'), 'live'],
-      [L('Idempotency', 'Idempotence'), L('Required on every money-moving write', 'Obligatoire sur chaque écriture monétaire'), 'live'],
-      [L('Webhook signing', 'Signature webhook'), L('HMAC-SHA256, 5-minute replay window', 'HMAC-SHA256, fenêtre de rejeu 5 min'), 'live'],
-      [L('Rate limiting', 'Limitation de débit'), L('Durable, per plan and endpoint', 'Durable, par plan et endpoint'), 'live'],
+      [L('Idempotency', 'Idempotence'), L('Required on quotes, payments, cancel, refund, retry, webhooks', 'Obligatoire sur devis, paiements, annulation, remboursement, relance, webhooks'), 'live'],
+      [L('Webhook signing', 'Signature webhook'), L('HMAC-SHA256 over t.body; SDK verifiers reject after 5 min', 'HMAC-SHA256 sur t.corps ; les SDK rejettent après 5 min'), 'live'],
+      [L('Rate limiting', 'Limitation de débit'), L('Durable, per plan per minute; stricter bucket for payments', 'Durable, par plan et par minute ; seau plus strict pour les paiements'), 'live'],
       [L('Admin step-up', 'Admin renforcé'), L('Re-auth before retry, refund, approve', 'Ré-authentification avant relance, remboursement, approbation'), 'live'],
       [L('Egress allow-list', 'Liste blanche sortante'), L('Outbound calls only to known hosts', 'Appels sortants vers hôtes connus seulement'), 'live'],
-      [L('Address validation', 'Validation d’adresse'), L('Network + contract checked; TRON added', 'Réseau + contrat vérifiés ; TRON ajouté'), 'extend'],
+      [L('Address validation', 'Validation d’adresse'), L('Network + contract checked on Ethereum; TRON to add', 'Réseau + contrat vérifiés sur Ethereum ; TRON à ajouter'), 'extend'],
       [L('Wallet screening', 'Filtrage wallet'), L('Inbound address risk hook', 'Contrôle de risque des adresses entrantes'), 'build'],
-      [L('PII minimisation', 'Minimisation des données'), L('Masked names to partners; no keys, secrets or tokens in logs', 'Noms masqués ; ni clés, ni secrets, ni jetons dans les logs'), 'live'],
+      [L('PII minimisation', 'Minimisation des données'), L('No keys, secrets or tokens in logs; masking recipient names per org is to add', 'Ni clés, ni secrets, ni jetons dans les logs ; masquer les noms par org reste à faire'), 'extend'],
     ];
     const MET = [[L('Payment success', 'Succès paiement'), '97,6 %'], [L('Quote success', 'Succès devis'), '99,4 %'], [L('Chain confirmation p50', 'Confirmation chaîne p50'), '38 s'], [L('Payout latency p50', 'Latence paiement p50'), '9 s'], [L('API latency p95', 'Latence API p95'), '420 ms'], [L('Refund rate', 'Taux de remboursement'), '0,8 %'], [L('Open recon exceptions', 'Exceptions ouvertes'), '2'], [L('Webhook DLQ', 'File morte webhooks'), '0']];
     return {
@@ -594,7 +669,7 @@ class SortedHubView extends React.Component<HubProps, any> {
                     {g.label}
                   </div>
                   {(g.items || []).map((n, _k2) => <React.Fragment key={_k2}>
-                    <button type="button" onClick={n.go} style={css(`display: flex; align-items: center; gap: 10px; text-align: left; border: 0; cursor: pointer; padding: 9px 10px; border-radius: 11px; font-family: var(--font-display); font-weight: 600; font-size: 14px; background: ${n.bg}; color: ${n.color};`)} className="sh-hover-0">
+                    <button type="button" onClick={n.go} aria-current={n.on ? "page" : undefined} style={css(`display: flex; align-items: center; gap: 10px; text-align: left; border: 0; cursor: pointer; padding: 9px 10px; border-radius: 11px; font-family: var(--font-display); font-weight: 600; font-size: 14px; background: ${n.bg}; color: ${n.color};`)} className="sh-hover-0">
                       <span style={css(`width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; background: ${n.tileBg}; color: ${n.tileColor}; flex: none;`)}>
                         {n.num}
                       </span>
@@ -1177,6 +1252,9 @@ class SortedHubView extends React.Component<HubProps, any> {
                               </span>
                             </span>
                           </div>
+                          <span style={css(`margin-top: -8px; font-size: 11.5px; color: ${v.wAmtHintColor};`)}>
+                            {v.wAmtHint}
+                          </span>
                           <div style={css("display: flex; gap: 6px; flex-wrap: wrap;")}>
                             {(v.wPresets || []).map((p, _k23) => <React.Fragment key={_k23}>
                               <button type="button" onClick={p.go} style={css(`flex: 1 1 60px; cursor: pointer; padding: 8px 6px; border-radius: 9px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--ink); background: ${p.bg}; border: 1.5px solid ${p.border};`)}>
@@ -1189,7 +1267,7 @@ class SortedHubView extends React.Component<HubProps, any> {
                               {v.wt.payWith}
                             </span>
                             {(v.wAssets || []).map((a, _k24) => <React.Fragment key={_k24}>
-                              <button type="button" onClick={a.go} style={css(`display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px; font: inherit; color: var(--ink); cursor: pointer; text-align: left; background: ${a.bg}; border: 1.5px solid ${a.border};`)}>
+                              <button type="button" onClick={a.go} disabled={a.disabled} aria-disabled={a.disabled || undefined} style={css(`display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px; font: inherit; color: var(--ink); cursor: ${a.disabled ? 'not-allowed' : 'pointer'}; opacity: ${a.disabled ? 0.6 : 1}; text-align: left; background: ${a.bg}; border: 1.5px solid ${a.border};`)}>
                                 <span style={css(`width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; color: #fff; background: ${a.color};`)}>
                                   {a.glyph}
                                 </span>
@@ -1866,16 +1944,26 @@ class SortedHubView extends React.Component<HubProps, any> {
                     </p>
                     <div style={css("display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;")}>
                       <div style={css("display: flex; flex-direction: column; gap: 6px; min-width: 0;")}>
-                        <span style={css("font-size: 11px; text-transform: uppercase; letter-spacing: .09em; font-weight: 750; color: var(--ink-3);")}>
-                          {v.dcReqLabel}
+                        <span style={css("display: flex; justify-content: space-between; align-items: center; gap: 8px;")}>
+                          <span style={css("font-size: 11px; text-transform: uppercase; letter-spacing: .09em; font-weight: 750; color: var(--ink-3);")}>
+                            {v.dcReqLabel}
+                          </span>
+                          <button type="button" onClick={v.copyReq} className="sh-copy">
+                            {v.copyLabel("req")}
+                          </button>
                         </span>
                         <pre style={css("margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: oklch(0.2 0.012 68); color: oklch(0.94 0.01 80); border-radius: 16px; padding: 16px;")}>
                           {v.dc.req}
                         </pre>
                       </div>
                       <div style={css("display: flex; flex-direction: column; gap: 6px; min-width: 0;")}>
-                        <span style={css("font-size: 11px; text-transform: uppercase; letter-spacing: .09em; font-weight: 750; color: var(--ink-3);")}>
-                          {v.dcResLabel}
+                        <span style={css("display: flex; justify-content: space-between; align-items: center; gap: 8px;")}>
+                          <span style={css("font-size: 11px; text-transform: uppercase; letter-spacing: .09em; font-weight: 750; color: var(--ink-3);")}>
+                            {v.dcResLabel}
+                          </span>
+                          <button type="button" onClick={v.copyRes} className="sh-copy">
+                            {v.copyLabel("res")}
+                          </button>
                         </span>
                         <pre style={css("margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: oklch(0.2 0.012 68); color: oklch(0.94 0.01 80); border-radius: 16px; padding: 16px;")}>
                           {v.dc.res}
@@ -2104,9 +2192,10 @@ class SortedHubView extends React.Component<HubProps, any> {
   }
 }
 
-/** Opens in the visitor's app language and theme; the hub's own toggles take over from there. */
+/** The hub's EN/FR and Light/Dark switches are the app's own settings, so a choice survives a reload. */
 export function SortedHub() {
-  const { lang } = useI18n();
-  const { theme } = useTheme();
-  return <SortedHubView lang={lang} theme={theme.dark ? "dark" : "light"} />;
+  const { lang, setLang } = useI18n();
+  const { theme, toggleDark } = useTheme();
+  const mode = theme.dark ? "dark" : "light";
+  return <SortedHubView lang={lang} theme={mode} onLang={setLang} onTheme={(m) => { if (m !== mode) toggleDark(); }} />;
 }

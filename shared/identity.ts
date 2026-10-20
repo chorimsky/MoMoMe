@@ -97,7 +97,11 @@ export interface RecipientIdentitySnapshot {
 export interface IdentityProviderHealth {
   name: string;
   configured: boolean;
-  status: "OPERATIONAL" | "DEGRADED" | "DOWN" | "NOT_CONFIGURED" | "SANDBOX";
+  /** UNKNOWN = configured, but nothing has called it yet, so we have no evidence either
+   *  way. Distinct from OPERATIONAL, which is a claim. A provider's in-process counters
+   *  reset on every restart, so OPERATIONAL-by-default meant a broken provider reported
+   *  itself healthy after each deploy until the first sender hit it. */
+  status: "OPERATIONAL" | "DEGRADED" | "DOWN" | "NOT_CONFIGURED" | "SANDBOX" | "UNKNOWN";
   supports: { operators: string[]; countries: string[]; resolve: boolean; verify: boolean };
   latencyMs: number | null;
   successRate: number | null;

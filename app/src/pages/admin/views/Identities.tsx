@@ -233,7 +233,8 @@ function RecipientVerificationCard() {
           {st.priority.map((name) => {
             const p = st.providers.find((x) => x.name === name);
             if (!p) return null;
-            const tone = p.status === "OPERATIONAL" ? "recv" : p.status === "SANDBOX" ? "lightning" : p.status === "NOT_CONFIGURED" ? "ink" : p.status === "DEGRADED" ? "warn" : "bad";
+            // UNKNOWN is "no evidence", not a failure: neutral, like NOT_CONFIGURED.
+            const tone = p.status === "OPERATIONAL" ? "recv" : p.status === "SANDBOX" ? "lightning" : p.status === "NOT_CONFIGURED" || p.status === "UNKNOWN" ? "ink" : p.status === "DEGRADED" ? "warn" : "bad";
             return (
               <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
                 <span><span className="mono" style={{ fontWeight: 650 }}>{name}</span><span style={{ color: "var(--ink-3)", marginLeft: 8 }}>{p.supports.countries.join("/")} · {p.supports.operators.join("/")}</span></span>

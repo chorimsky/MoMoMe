@@ -73,7 +73,7 @@ export const mtnDirect: IdentityProvider = {
     const c = cfg(); const configured = this.configured();
     const rate = stats.calls ? stats.ok / stats.calls : null;
     const lat = stats.latency.length ? Math.round(stats.latency.reduce((a, b) => a + b, 0) / stats.latency.length) : null;
-    return { name: this.name, configured, status: !configured ? "NOT_CONFIGURED" : c.target === "sandbox" ? "SANDBOX" : rate == null ? "OPERATIONAL" : rate < 0.5 ? "DOWN" : rate < 0.9 ? "DEGRADED" : "OPERATIONAL", supports: { operators: ["MTN"], countries: c.countries, resolve: true, verify: true }, latencyMs: lat, successRate: rate, lastError: stats.lastError || undefined };
+    return { name: this.name, configured, status: !configured ? "NOT_CONFIGURED" : c.target === "sandbox" ? "SANDBOX" : rate == null ? "UNKNOWN" : rate < 0.5 ? "DOWN" : rate < 0.9 ? "DEGRADED" : "OPERATIONAL", supports: { operators: ["MTN"], countries: c.countries, resolve: true, verify: true }, latencyMs: lat, successRate: rate, lastError: stats.lastError || undefined };
   },
 };
 const caps = (ok: boolean) => ({ mobile_money: true, receive: ok, send: ok, payout: ok, collection: ok });

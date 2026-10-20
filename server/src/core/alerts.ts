@@ -138,6 +138,9 @@ export async function page(text: string): Promise<{ via: "whatsapp" | "sms" | "c
 export function identityConditions(live: boolean, enabled: boolean, health: IdentityProviderHealth[]): AlertCondition[] {
   if (!live || !enabled) return [];
   const namers = health.filter((h) => h.configured && h.supports.resolve);
+  // UNKNOWN counts as answering ON PURPOSE. A provider's counters reset on restart, so
+  // treating "not yet called" as an outage would page on every single deploy and teach the
+  // operator to skim. The first real resolve sets it to DOWN and this fires then.
   const answering = namers.filter((h) => h.status !== "DOWN" && h.status !== "NOT_CONFIGURED");
   if (answering.length) return [];
   const why = namers.length

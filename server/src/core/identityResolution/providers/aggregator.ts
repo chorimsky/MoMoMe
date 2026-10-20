@@ -47,6 +47,6 @@ export const aggregator: IdentityProvider = {
   },
   async health(): Promise<IdentityProviderHealth> {
     const rate = stats.calls ? stats.ok / stats.calls : null;
-    return { name: this.name, configured: this.configured(), status: !this.configured() ? "NOT_CONFIGURED" : config.pawapay.env !== "production" ? "SANDBOX" : rate != null && rate < 0.5 ? "DOWN" : "OPERATIONAL", supports: { operators: ["*"], countries: Object.keys(ISO3), resolve: false, verify: false }, latencyMs: stats.latency.length ? Math.round(stats.latency.reduce((a, b) => a + b, 0) / stats.latency.length) : null, successRate: rate, lastError: stats.lastError || undefined };
+    return { name: this.name, configured: this.configured(), status: !this.configured() ? "NOT_CONFIGURED" : config.pawapay.env !== "production" ? "SANDBOX" : rate == null ? "UNKNOWN" : rate < 0.5 ? "DOWN" : "OPERATIONAL", supports: { operators: ["*"], countries: Object.keys(ISO3), resolve: false, verify: false }, latencyMs: stats.latency.length ? Math.round(stats.latency.reduce((a, b) => a + b, 0) / stats.latency.length) : null, successRate: rate, lastError: stats.lastError || undefined };
   },
 };

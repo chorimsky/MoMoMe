@@ -80,6 +80,9 @@ export const peexitVerify: IdentityProvider = {
   },
   async health(): Promise<IdentityProviderHealth> {
     const configured = peexitConfigured();
-    return { name: this.name, configured, status: !configured ? "NOT_CONFIGURED" : lastOk === false ? "DOWN" : peexitLive() ? "OPERATIONAL" : "SANDBOX", supports: { operators: ["MTN", "ORANGE"], countries: ["CM"], resolve: true, verify: true }, latencyMs: lastLatency, successRate: lastOk === false ? 0 : 1, lastError };
+    // lastOk === null means this process has never called the provider: report UNKNOWN,
+    // null, null. It used to report OPERATIONAL / 1 / 0 ms, so after every deploy a rail
+    // whose hostname does not even resolve announced itself as healthy.
+    return { name: this.name, configured, status: !configured ? "NOT_CONFIGURED" : lastOk === false ? "DOWN" : !peexitLive() ? "SANDBOX" : lastOk === null ? "UNKNOWN" : "OPERATIONAL", supports: { operators: ["MTN", "ORANGE"], countries: ["CM"], resolve: true, verify: true }, latencyMs: lastOk === null ? null : lastLatency, successRate: lastOk === null ? null : lastOk ? 1 : 0, lastError };
   },
 };

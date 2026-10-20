@@ -204,7 +204,7 @@ export function createApp() {
     const collectRails = (await collectHealth()).filter((c) => c.configured);
     const alerts = activeAlerts();
     // Identity resolution is advisory: a provider outage is reported, never a 503 by itself.
-    const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status, ...(p.lastError ? { lastError: p.lastError } : {}), latencyMs: p.latencyMs })) } : { enabled: false };
+    const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status, ...(p.lastError ? { lastError: p.lastError } : {}), latencyMs: p.latencyMs, successRate: p.successRate })) } : { enabled: false };
     const problems: string[] = [];
     if (!store.durable) problems.push("store is not durable");
     if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");

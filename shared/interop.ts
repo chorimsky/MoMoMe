@@ -38,8 +38,8 @@ export interface ProviderInfo {
   countries: CountryCode[];
   health: ProviderHealth;
   live: boolean;                   // moves real money
-  successRate: number;             // 0..1, recent
-  avgLatencyMs: number;
+  successRate: number | null;      // 0..1, recent; null = never called, so unknown
+  avgLatencyMs: number | null; // null = no successful call to measure
   /** What this provider can hold/route right now, when it exposes it (XAF for payout rails). */
   liquidity?: { currency: string; available: number | null };
 }

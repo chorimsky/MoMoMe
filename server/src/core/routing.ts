@@ -23,8 +23,8 @@ const PROBE_COOLDOWN_MS = 10 * 60_000;
 const health = new HealthTracker(PAYOUTS.map((p) => p.name), { probeCooldownMs: PROBE_COOLDOWN_MS });
 const eligible = (name: string): boolean => health.eligible(name);
 /** Read-only health of one payout rail — for the interoperability layer's routing/ops views. */
-export function payoutHealth(name: string): { eligible: boolean; successRate: number; avgLatencyMs: number } {
-  return { eligible: health.eligible(name), successRate: health.successRate(name), avgLatencyMs: health.avgLatency(name) };
+export function payoutHealth(name: string): { eligible: boolean; successRate: number; avgLatencyMs: number; samples: number } {
+  return { eligible: health.eligible(name), successRate: health.successRate(name), avgLatencyMs: health.avgLatency(name), samples: health.samples(name) };
 }
 const executions: ExecutionLogEntry[] = [];
 
@@ -211,7 +211,10 @@ export function routingSnapshot(): RoutingSnapshot {
     const c = health.counts(p.name);
     return {
       name: p.name, up: health.isUp(p.name),
-      successRatePct: Math.round(successRate(p.name) * 100), avgLatencyMs: avgLatency(p.name),
+      // null, not 100: a rail nobody has called has no success rate. Same rule as the
+      // delivery report ("no rate, not 100") — the admin console already renders null as "—".
+      successRatePct: c.success + c.failure ? Math.round(successRate(p.name) * 100) : null,
+      avgLatencyMs: avgLatency(p.name) || null,
       count: c.success + c.failure, supports: ALL_PROVIDERS.filter((pr) => p.supports(pr)),
     };
   });

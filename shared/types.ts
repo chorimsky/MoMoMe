@@ -728,8 +728,9 @@ export interface AmbassadorSummary {
 export interface AggregatorHealth {
   name: Aggregator;
   up: boolean;
-  successRatePct: number;
-  avgLatencyMs: number;
+  /** null when `count` is 0: the rail has never been called, so it has no rate. */
+  successRatePct: number | null;
+  avgLatencyMs: number | null;
   count: number;
   supports: ProviderId[];
 }

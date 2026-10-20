@@ -94,7 +94,14 @@ export class HealthTracker {
     else { h.downSince = Date.now(); h.forcedDown = true; }
   }
 
+  /** Successes / attempts. Returns 1 when NOTHING has been attempted, because the router
+   *  must not demote a rail it has simply never used. Anything that DISPLAYS this number
+   *  has to consult `samples()` first: 1 means "never failed" OR "never called", and
+   *  presenting the second as the first told an operator that a payout rail whose API
+   *  hostname no longer resolves in DNS was performing perfectly. */
   successRate(name: string): number { const h = this.ensure(name); const t = h.success + h.failure; return t ? h.success / t : 1; }
+  /** Attempts recorded. 0 = this rail has never been called; its rate is unknown, not 100 %. */
+  samples(name: string): number { const h = this.ensure(name); return h.success + h.failure; }
   avgLatency(name: string): number { const h = this.ensure(name); return h.success ? Math.round(h.totalLatencyMs / h.success) : 0; }
   counts(name: string): { success: number; failure: number } { const h = this.ensure(name); return { success: h.success, failure: h.failure }; }
 

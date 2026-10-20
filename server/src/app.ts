@@ -191,7 +191,13 @@ export function createApp() {
     const jobs = jobsHealth();
     const fx = { fresh: ratesFresh(), ...ratesMeta() };
     const store = { backend: usingPostgres() ? "postgres" : "sqlite", durable: persistDurable() };
-    const rails = PAYOUTS.filter((p) => p.configured()).map((p) => ({ name: p.name, live: p.live(), ...payoutHealth(p.name) }));
+    // successRate/avgLatencyMs are null where samples is 0. Reporting the tracker's
+    // "no attempts" default of 1 here presented an unreachable rail as a perfect one.
+    const rails = PAYOUTS.filter((p) => p.configured()).map((p) => {
+      const h = payoutHealth(p.name);
+      return { name: p.name, live: p.live(), eligible: h.eligible, samples: h.samples,
+        successRate: h.samples ? h.successRate : null, avgLatencyMs: h.avgLatencyMs || null };
+    });
     // Money IN is as operational a question as money OUT: which rails can take a payment,
     // for which operator, and are they answering. Only configured rails are listed, exactly
     // as for payouts — an unconfigured adapter is not an outage.

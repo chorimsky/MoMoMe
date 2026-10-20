@@ -11,7 +11,7 @@ export interface Observability {
     timings: { toInboundMs: { p50: number; p95: number } | null; toDeliveredMs: { p50: number; p95: number } | null; payoutMs: { p50: number; p95: number } | null };
     byRail: Array<{ rail: string; method: string; total: number; delivered: number; failed: number; held: number; successRate: number | null; toDeliveredP50Ms: number | null }>;
     reasons: Array<{ reason: string; count: number }> };
-  providers: Array<{ id: string; rail: string; health: string; successRate: number; avgLatencyMs: number }>;
+  providers: Array<{ id: string; rail: string; health: string; successRate: number | null; avgLatencyMs: number | null }>;
   webhooks: { total: number; byStatus: Record<string, number>; byProvider: Record<string, number>; last24hRejected: number };
 }
 import type { RegulatoryReport, RegulatoryBody, RegulatoryFiling, ApiKeyUsage, MomoTransfer,

@@ -60,7 +60,7 @@ export function cryptoProviders(): ProviderInfo[] {
         reaches: methods.filter((m) => railOfMethod(m) === rail),
         countries: Object.values(COUNTRIES).filter((c) => c.active).map((c) => c.code),
         health: healthOf(h, r.configured(), r.trusted()), live: r.trusted(),
-        successRate: h.successRate, avgLatencyMs: h.avgLatencyMs,
+        successRate: h.samples ? h.successRate : null, avgLatencyMs: h.avgLatencyMs || null,
       });
     }
   }
@@ -78,7 +78,7 @@ export async function payoutProviders(country: CountryCode = "CM"): Promise<Prov
       id: p.name, rail: "mobile_money", name: p.name === "peexit" ? "Peexit" : p.name === "pawapay" ? "PawaPay" : p.name,
       reaches, countries: [country],
       health: healthOf(h, p.configured(), p.live()), live: p.live(),
-      successRate: h.successRate, avgLatencyMs: h.avgLatencyMs,
+      successRate: h.samples ? h.successRate : null, avgLatencyMs: h.avgLatencyMs || null,
       liquidity: { currency: COUNTRIES[country].ccy, available: bal },
     });
   }

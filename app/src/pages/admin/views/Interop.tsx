@@ -84,7 +84,7 @@ export function InteropView() {
         <table className="tbl"><thead><tr><th>Provider</th><th>Rail</th><th>Reaches</th><th>Health</th><th>Success</th><th>Latency</th><th>Liquidity</th></tr></thead>
           <tbody>{providers.map((p) => (
             <tr key={`${p.id}-${p.rail}`}><td style={{ fontWeight: 650 }}>{p.name}</td><td>{p.rail}</td><td className="mono" style={{ fontSize: 12 }}>{p.reaches.join(", ")}</td>
-              <td><Pill status={p.health} tone={healthTone[p.health]} /></td><td>{Math.round(p.successRate * 100)}%</td><td>{p.avgLatencyMs ? `${p.avgLatencyMs} ms` : "—"}</td>
+              <td><Pill status={p.health} tone={healthTone[p.health]} /></td><td>{p.successRate == null ? "—" : `${Math.round(p.successRate * 100)}%`}</td><td>{p.avgLatencyMs ? `${p.avgLatencyMs} ms` : "—"}</td>
               <td className="mono">{p.liquidity ? (p.liquidity.available == null ? "—" : `${fmt(Math.round(p.liquidity.available))} ${p.liquidity.currency}`) : ""}</td></tr>
           ))}</tbody></table>
       </Card>

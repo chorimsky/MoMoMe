@@ -50,7 +50,7 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   for (const p of PAYOUTS) {
     if (!p.configured()) continue;
     const h = payoutHealth(p.name);
-    if (!h.eligible) out.push({ key: `rail:${p.name}`, severity: "critical", body: `Payout rail ${p.name} is DOWN (success ${Math.round(h.successRate * 100)} %). Payouts route around it; if it is the only rail for an operator, payouts wait.` });
+    if (!h.eligible) out.push({ key: `rail:${p.name}`, severity: "critical", body: `Payout rail ${p.name} is DOWN (${h.samples ? `success ${Math.round(h.successRate * 100)} % over ${h.samples} call(s)` : "not one call has ever reached it — check the base URL resolves"}). Payouts route around it; if it is the only rail for an operator, payouts wait.` });
   }
   // Payments: stuck payouts and long-held reviews.
   const pays = await store().listPayments();

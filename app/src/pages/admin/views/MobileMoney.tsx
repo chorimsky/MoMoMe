@@ -77,8 +77,8 @@ export function MobileMoneyView() {
               <div style={{ fontWeight: 700, fontSize: 15 }}>{AGG_NAME[a.name] ?? a.name}</div>
               <Pill status={a.up ? "Online" : "Offline"} tone={a.up ? "recv" : "bad"} />
             </div>
-            <KV k="Success rate" v={`${fmt(a.successRatePct)}%`} />
-            <KV k="Avg latency" v={`${fmt(a.avgLatencyMs)} ms`} />
+            <KV k="Success rate" v={a.successRatePct == null ? "— (never called)" : `${fmt(a.successRatePct)}%`} />
+            <KV k="Avg latency" v={a.avgLatencyMs == null ? "—" : `${fmt(a.avgLatencyMs)} ms`} />
             <KV k="Payouts" v={fmt(a.count)} />
             <KV k="Serves" v={a.supports.map((p) => PROVIDERS[p].short).join(" · ")} />
           </div>

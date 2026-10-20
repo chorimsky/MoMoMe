@@ -117,7 +117,8 @@ route("get", "/health", { public: true, cls: "health" }, async () => {
     fx: { fresh: ratesFresh() },
     assets: assets().filter((a) => a.type !== "FIAT" && a.status !== "DISABLED").map((a) => ({ asset: a.code, network: a.network, status: METHOD_OF[`${a.code}/${a.network}`] ? "available" : "planned" })),
     countries: Object.values(COUNTRIES).map((c) => ({ code: c.code, currency: c.ccy, operators: c.providers, status: c.active ? "live" : "planned" })),
-    payout_providers: rails.map((r) => ({ provider: r.provider, status: r.eligible ? "operational" : "degraded", success_rate: r.successRate })),
+    // success_rate is null when we have never called the rail: unknown, not 1.
+    payout_providers: rails.map((r) => ({ provider: r.provider, status: r.eligible ? "operational" : "degraded", success_rate: r.samples ? r.successRate : null })),
     time: new Date().toISOString(),
   };
 });

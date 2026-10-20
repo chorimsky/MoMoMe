@@ -1,0 +1,38 @@
+=== SHORT TICKET / CHAT VERSION ===
+
+Our Peexit integration is down. Both API hostnames return NXDOMAIN — they are not in DNS:
+
+    server.peexit.com    -> NXDOMAIN
+    sandbox.peexit.com   -> NXDOMAIN
+
+peexit.com, app.peexit.com and peex-api-docs.peexit.com all resolve normally, so the zone
+is fine — these two records are missing from it.
+
+Confirmed authoritative at your own nameserver (note the "aa" flag):
+
+    $ dig +noall +comments server.peexit.com @ns-629.awsdns-14.net
+    ;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 56705
+    ;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+
+This is not our SECRETKEY and not the IP allowlist — a request that cannot resolve a
+hostname never reaches either one. Our calls fail in 30-70 ms, which is DNS, not a timeout.
+
+Your own documentation at peex-api-docs.peexit.com still publishes
+"Base URL: https://sandbox.peexit.com/api/v1/", which is one of the two dead names.
+
+REQUEST:
+  1. Restore the DNS records for server.peexit.com and sandbox.peexit.com, OR
+  2. Send us the new production and sandbox base URLs if they were renamed.
+
+Either answer unblocks us today — the base URL is configuration on our side, so a new
+hostname needs no release.
+
+Account: Bitbase Technologies Incorporated (momome) - contact@bitbasetechnology.com
+
+
+=== ONE-LINER, IF YOU NEED IT SHORTER ===
+
+server.peexit.com and sandbox.peexit.com both return NXDOMAIN from your own authoritative
+nameserver (ns-629.awsdns-14.net) — the DNS records are gone, so the API is unreachable for
+everyone, not just us. Your docs site still lists sandbox.peexit.com/api/v1 as the Base URL.
+Please either restore the records or send us the new base URLs.

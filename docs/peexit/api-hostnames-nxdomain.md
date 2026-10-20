@@ -34,6 +34,19 @@ cannot resolve a hostname never reaches your allowlist to be refused by it.
 NS and SOA for `peexit.com` answer normally. So the zone is being served; these two records
 are simply not in it.
 
+## 2b. Your own documentation still points at one of them
+
+`https://peex-api-docs.peexit.com` resolves and serves normally, and the **Base URL** it
+publishes for the sandbox is:
+
+```
+https://sandbox.peexit.com/api/v1/
+```
+
+That is one of the two hostnames returning NXDOMAIN. So the address in your live
+documentation cannot be reached by anybody, which is why we do not think this is our
+configuration.
+
 ## 3. Confirmed at your own authoritative nameserver
 
 NXDOMAIN is returned by Google Public DNS (`8.8.8.8`) **and** by the authoritative Route 53

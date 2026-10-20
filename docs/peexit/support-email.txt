@@ -1,0 +1,58 @@
+Subject: Urgent — server.peexit.com and sandbox.peexit.com do not resolve (NXDOMAIN)
+
+Hello,
+
+Our Peexit integration has stopped working, and the cause is DNS rather than anything in
+the API. Both of the hostnames we use return NXDOMAIN — they are absent from DNS:
+
+    server.peexit.com    -> NXDOMAIN
+    sandbox.peexit.com   -> NXDOMAIN
+
+The rest of the zone is healthy, which is what makes this look like missing records rather
+than an outage:
+
+    peexit.com                -> 32.188.229.100, 100.23.42.72
+    app.peexit.com            -> CloudFront, resolves
+    peex-api-docs.peexit.com  -> resolves
+
+Three things this rules out, so we do not send you down the wrong path:
+
+  1. It is not our SECRETKEY. A request that cannot resolve a hostname never reaches your
+     authentication layer.
+  2. It is not the IP allowlist. For the same reason — the request never arrives, so it is
+     never refused. Our calls fail in 30-70 ms, which is resolution failing, not a timeout.
+  3. It is not our network or a stale cache. NXDOMAIN is returned by Google Public DNS and
+     by your own authoritative Route 53 nameserver, ns-629.awsdns-14.net. An authoritative
+     NXDOMAIN is definitive.
+
+Anyone on your side can confirm it in one line, no account needed:
+
+    dig +noall +comments server.peexit.com @ns-629.awsdns-14.net
+
+Worth noting: your own live documentation at peex-api-docs.peexit.com still publishes
+"Base URL: https://sandbox.peexit.com/api/v1/" — which is one of the two names that does
+not resolve.
+
+What we are asking:
+
+  1. Were these hostnames retired or renamed? If there is a new base URL, please send it.
+     Ours is configuration, so we can switch with no code change and no release.
+  2. If they were not retired, the DNS records are missing and need restoring.
+  3. Please confirm the current production and sandbox base URLs, and whether the IP
+     allowlist still applies to them.
+
+Peexit is one of our two Mobile Money payout rails and the only one that can verify the
+holder of a number, so while it is unreachable we have no failover and our senders are
+paying without the recipient name being confirmed. We would be grateful for a quick answer.
+
+Our integration is complete and tested against your documented contract — disbursement,
+collection, and the Basic-Auth notification callback — so we can verify end to end as soon
+as the hostname resolves.
+
+Full evidence is attached.
+
+Thank you,
+
+[your name]
+Bitbase Technologies Incorporated — momome
+contact@bitbasetechnology.com

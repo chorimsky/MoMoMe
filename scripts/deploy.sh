@@ -78,6 +78,20 @@ ID=""
 for i in 1 2 3; do
   OUT=$(railway up --detach 2>&1) && { ID=$(printf '%s' "$OUT" | grep -o 'id=[a-f0-9-]*' | head -1 | cut -d= -f2 || true); break; }
   echo "$OUT"
+  # Railway REFUSING is not Railway being slow. On 2026-10-21 it answered "Deploys have
+  # been paused temporarily" (platform incident QH8L8B3E, builds paused in every region)
+  # and this loop reported "upload attempt timed out, retrying" three times — sending the
+  # operator to look for a network fault that did not exist. Same lesson as the expired
+  # session that reported a wrong project id: print the provider's own words, and do not
+  # retry something that is not going to change in twenty seconds.
+  case "$OUT" in
+    *"paused"*|*"Paused"*)
+      echo "deploy: Railway is REFUSING deployments, not timing out — it said: $(printf '%s' "$OUT" | grep -i paused | head -1 | sed 's/^[[:space:]]*//')"
+      echo "        This is platform- or account-side. Check https://status.railway.com for an"
+      echo "        open incident; if there is none, the account's deploys are paused (billing"
+      echo "        or plan limits). Nothing was uploaded — re-run this script once it clears."
+      exit 1;;
+  esac
   # Give Railway time to register an upload the client gave up on: three looks, not one.
   FOUND=""
   for w in 1 2 3; do

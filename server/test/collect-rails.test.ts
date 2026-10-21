@@ -11,7 +11,11 @@ async function main() {
   const { referenceFor } = await import("../src/adapters/mtnCollect.js");
   console.log("\nCollection rails — the registry\n");
 
-  ok("both operators and the aggregator are registered", COLLECTORS.map((c) => c.name).sort().join(",") === "mtn,orange,peexit", COLLECTORS.map((c) => c.name).join(","));
+  ok("both operators and both aggregators are registered", COLLECTORS.map((c) => c.name).sort().join(",") === "campay,mtn,orange,peexit", COLLECTORS.map((c) => c.name).join(","));
+  // Everything below that says "the only usable rail" means every rail that can stand in
+  // for a real one. Naming peexit alone stopped being that the moment campay joined, so
+  // the list comes from the registry.
+  const ALL_RAILS = COLLECTORS.map((c) => c.name);
   ok("each rail declares the operator it serves", COLLECTORS.every((c) => c.supports("MTN", "CM") || c.supports("ORANGE", "CM")));
   ok("no rail claims a corridor we do not serve", COLLECTORS.every((c) => !c.supports("MTN", "GA")));
 
@@ -49,7 +53,7 @@ async function main() {
   ok("collection is PINNED to the aggregator by default", getSettings().rails.collect.preferred.MTN === "peexit" && getSettings().rails.collect.preferred.ORANGE === "peexit", JSON.stringify(getSettings().rails.collect.preferred));
   // Switching a rail off must stop it being selected — the reason an operator reaches for
   // this setting is a provider incident, and it has to take effect on the next payment.
-  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: ["peexit"] } } });
+  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: ALL_RAILS } } });
   const off = selectCollector({ provider: "MTN", country: "CM", xaf: 10_000 });
   ok("a rail switched off in Rails is not selected, and the reason says so", off.rail === null && /switched off/.test(off.why), off.why);
   updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: [] } } });
@@ -61,7 +65,7 @@ async function main() {
   updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, minXaf: 0, maxXaf: 0 } } });
 
   console.log("\nStranded operators are reported, not discovered by a customer\n");
-  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: ["peexit"] } } });
+  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: ALL_RAILS } } });
   const stranded = (["MTN", "ORANGE"] as const).filter((p) => selectCollector({ provider: p, country: "CM", xaf: 10_000 }).rail === null);
   ok("switching off the only usable rail leaves both networks with nothing", stranded.length === 2, stranded.join(","));
   updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, disabled: [] } } });
@@ -78,7 +82,9 @@ async function main() {
   ok("…and the quote reports the rate it actually used", quote(100_000).feePct === transferFeePct());
   updateSettings({ pricing: { ...st.pricing, collectFeePct: 0.015 } });
   // A rail's own documented range: recorded by an operator, enforced before the payer is asked.
-  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, railLimits: { peexit: { minXaf: 500, maxXaf: 20_000 } } } } });
+  // Every rail gets the same recorded range: with two aggregators serving MTN, capping
+  // only peexit just moves the payer onto campay instead of refusing the amount.
+  updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, railLimits: Object.fromEntries(ALL_RAILS.map((n) => [n, { minXaf: 500, maxXaf: 20_000 }])) } } });
   ok("an amount outside a rail's RECORDED limits does not reach the payer", selectCollector({ provider: "MTN", country: "CM", xaf: 50_000 }).rail === null);
   ok("…while one inside them does", selectCollector({ provider: "MTN", country: "CM", xaf: 5_000 }).rail?.name === "peexit");
   updateSettings({ rails: { ...getSettings().rails, collect: { ...getSettings().rails.collect, railLimits: {} } } });
@@ -100,7 +106,7 @@ async function main() {
 
   console.log("\nOperator view\n");
   const health = await collectHealth();
-  ok("health lists every rail with its operators and state", health.length === 3 && health.every((h) => Array.isArray(h.operators)), JSON.stringify(health.map((h) => [h.name, h.configured, h.operators.join("/")])));
+  ok("health lists every rail with its operators and state", health.length === COLLECTORS.length && health.every((h) => Array.isArray(h.operators)), JSON.stringify(health.map((h) => [h.name, h.configured, h.operators.join("/")])));
 
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`); process.exit(fail === 0 ? 0 : 1);
 }

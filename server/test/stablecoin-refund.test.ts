@@ -39,6 +39,15 @@ async function main() {
     store.putPayment(pay as never);
     return pay;
   };
+  // This test is about the REFUND path, which is only reached when NO rail can deliver:
+  // onPayoutResult tries failoverPayout first, because the sender wanted delivery, not a
+  // refund. Adding campay on 2026-10-21 gave it somewhere to fail over TO, and the payment
+  // was delivered instead — correct behaviour, and it quietly stopped this test testing
+  // refunds. Take every rail in the registry down so "no rail can deliver" is actually true.
+  const { PAYOUTS } = await import("../src/adapters/payouts.js");
+  const { setAggregatorUp, markRailHardDown } = await import("../src/core/routing.js");
+  for (const rail of PAYOUTS) { markRailHardDown(rail.name, "refund-path test"); setAggregatorUp(rail.name, false); }
+
   console.log("\nStablecoin funding → payout failed → refund over Lightning\n");
   seed("pay_usdt", "USDT", 84.3);
   recordTxn("pay_usdt", [{ account: "inbound_clearing", direction: "debit", amount: 84.3, currency: "USDT" }, { account: "customer_wallet", direction: "credit", amount: 84.3, currency: "USDT" }]);

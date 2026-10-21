@@ -7,6 +7,7 @@ import express, { Router, type Request, type Response } from "express";
 import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
 import { collectorByName } from "../adapters/collect.js";
+import * as campay from "../adapters/campay.js";
 import { parseDlr as parseNexahDlr, verifyDlrSecret as nexahVerifyDlrSecret } from "../adapters/nexah.js";
 import { settleCollectionNow } from "../core/momoTransfer.js";
 import { hint as networkHint } from "../core/network/monitor.js";
@@ -87,8 +88,8 @@ webhooks.post("/payout/:name", express.raw({ type: "*/*" }), (req, res) => handl
 
    The reference a rail sends back is OUR key (the transfer id), because that is what every
    adapter is handed as `idempotencyKey`. */
-webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => {
-  const rail = collectorByName(req.params.name);
+function handleCollectCallback(name: string, req: Request, res: Response): Response | void {
+  const rail = collectorByName(name);
   if (!rail) return res.status(404).json({ error: "unknown_rail" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   if (rail.verifyCallback && !rail.verifyCallback(raw, req.headers)) {
@@ -113,6 +114,29 @@ webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => {
     if (s === "COMPLETED" || s === "FAILED") markProcessed(rec.event.id, null, `collection ${s}`);
     // PENDING or unknown: the rail has not decided, or the key is not ours. Reconcile owns it.
   })());
+}
+webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => handleCollectCallback(req.params.name, req, res));
+
+/* ---------- CamPay: ONE callback URL, both directions ----------
+   Every other rail here has a separate URL per direction, because every other rail lets us
+   register more than one. CamPay has a single callback URL per application and tells us
+   which flow fired in the body: `endpoint` is "collect" or "withdraw". So this route reads
+   that field and hands the request to the same payout / collection handler the dedicated
+   URLs use — no second code path, no duplicated settlement logic.
+
+   The signature is checked inside those handlers via the adapter's verifyCallback, so a
+   forged body cannot steer the dispatch into doing anything: the worst it achieves is
+   being rejected by the other handler instead of this one. */
+webhooks.post("/campay", express.raw({ type: "*/*" }), (req, res) => {
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  const which = campay.callbackEndpoint(raw);
+  if (!which) {
+    recordEvent({ provider: "campay", eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "no endpoint field — cannot tell a payout from a collection" });
+    return res.status(400).json({ error: "missing_endpoint" });
+  }
+  return which === "withdraw"
+    ? handlePayoutCallback("campay", req, res)
+    : handleCollectCallback("campay", req, res);
 });
 
 /* ---------- NEXAH delivery receipts (verification SMS) ----------

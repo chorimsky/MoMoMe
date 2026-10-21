@@ -181,6 +181,27 @@ export const config = {
     proxyUrl: secret("PEEXIT_PROXY_URL") || secret("EGRESS_PROXY_URL"),
   }))(!isProdEnv("PEEXIT_ENV")),
 
+  /** CamPay — a Cameroonian Mobile Money aggregator (MTN + Orange, XAF only). One token
+   *  authenticates every call: `Authorization: Token <permanent access token>`, taken from
+   *  the APP KEYS section of the app. Unlike Peexit there is no IP allowlist, so the rail
+   *  works from wherever the backend runs. Three surfaces we use: POST /collect/ (money in),
+   *  POST /withdraw/ (money out, from a PREFUNDED per-carrier balance) and
+   *  GET /holder_info/ (the name behind a number). Callbacks are signed as an HS256 JWT
+   *  with a SEPARATE webhook key, so the token and the key are distinct secrets.
+   *  Amounts are integers in whole XAF — the API refuses decimals (ER201) — which is what
+   *  the currency actually is, so no scaling is applied anywhere in this adapter. */
+  campay: ((sandbox: boolean) => ({
+    env: sandbox ? "demo" : "production",
+    // The demo host is documented; the production host is not stated in the Postman
+    // collection, so it is overridable and must be confirmed before go-live.
+    apiUrl: env("CAMPAY_API_URL", sandbox ? "https://demo.campay.net/api" : "https://www.campay.net/api"),
+    /** APP KEYS → "permanent access token". Sent as `Authorization: Token <...>`. */
+    token: secret("CAMPAY_PERMANENT_TOKEN"),
+    /** APP KEYS → "webhook key". Verifies the HS256 JWT on every callback. A DIFFERENT
+     *  secret from the token: a leaked token must not also let someone forge callbacks. */
+    webhookKey: secret("CAMPAY_WEBHOOK_KEY"),
+  }))(!isProdEnv("CAMPAY_ENV")),
+
   /** MTN Mobile Money — the operator's OWN Collection API (MoMo Developer portal), as an
    *  alternative to collecting through an aggregator. OAuth2-style: an API user + API key
    *  are exchanged for a short-lived bearer token; `requesttopay` prompts the payer and
@@ -324,6 +345,11 @@ export function ibexConfigured(): boolean {
  *  set — independent of RAILS_MODE — so one can go live before the other. */
 export function pawapayConfigured(): boolean { return !!config.pawapay.apiKey; }
 export function peexitConfigured(): boolean { return !!config.peexit.apiKey; }
+/** CamPay needs only its permanent access token to act. The webhook key is required to
+ *  TRUST a callback, not to make a call, so a rail with a token but no webhook key is
+ *  configured — it simply refuses every callback and settles through the re-query instead. */
+export function campayConfigured(): boolean { return !!config.campay.token; }
+export function campayLive(): boolean { return campayConfigured() && config.campay.env === "production"; }
 /** MTN's own Collection API needs all three: a subscription key, an API user and its key.
  *  Anything less cannot mint a token, so the rail stays unregistered rather than half-live. */
 export function mtnCollectConfigured(): boolean { const m = config.mtnCollect; return !!(m.subscriptionKey && m.apiUser && m.apiKey && m.targetEnvironment); }

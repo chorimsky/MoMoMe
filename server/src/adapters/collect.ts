@@ -27,9 +27,10 @@
    ADD A RAIL: implement CollectAdapter, append it to COLLECTORS. Nothing else changes.
    ============================================================ */
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
-import { peexitConfigured, peexitLive } from "../config.js";
+import { peexitConfigured, peexitLive, campayConfigured, campayLive } from "../config.js";
 import { getSettings } from "../core/settings.js";
 import * as peexit from "./peexit.js";
+import * as campay from "./campay.js";
 import { mtnCollector } from "./mtnCollect.js";
 import { orangeCollector } from "./orangeCollect.js";
 
@@ -137,9 +138,29 @@ const peexitCollector: CollectAdapter = {
   simulates: () => !peexitLive(),
 };
 
+/* ---------------- CamPay ----------------
+   The second aggregator that can take money IN from both Cameroonian operators. Worth
+   having for its own sake: Peexit is the only other one, and while its host does not
+   resolve we have no collection rail at all. priority 20 — behind Peexit, because CamPay's
+   published collection fee (2%) is DEARER than Peexit's, even though its payout fee is
+   cheaper. Cost runs in opposite directions on the two legs; the registry reflects that. */
+const campayCollector: CollectAdapter = {
+  name: "campay",
+  priority: 20,
+  configured: campayConfigured,
+  live: campayLive,
+  supports: (provider, country) => country === "CM" && (provider === "MTN" || provider === "ORANGE"),
+  collect: async (req) => campay.collect({ idempotencyKey: req.idempotencyKey, provider: req.provider, country: req.country, phone: req.phone, xaf: req.xaf, name: req.name }),
+  status: async (key) => campay.collectStatus(key),
+  // No fee endpoint; the real figure arrives per transaction via app_amount.
+  feePct: async () => null,
+  verifyCallback: (raw) => campay.verifyCallbackSignature(raw),
+  simulates: () => !campayLive(),
+};
+
 /** Every known collection rail. Selection is by priority among the rails that serve the
  *  corridor — order here is irrelevant. */
-export const COLLECTORS: CollectAdapter[] = [mtnCollector, orangeCollector, peexitCollector];
+export const COLLECTORS: CollectAdapter[] = [mtnCollector, orangeCollector, peexitCollector, campayCollector];
 
 /** Look up a rail by name (callback dispatch + reconciling a stored collection). */
 export function collectorByName(name: string | undefined): CollectAdapter | undefined {

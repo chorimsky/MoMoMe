@@ -34,7 +34,12 @@ async function main() {
   console.log("\nRegistry lookups");
   ok("payoutByName resolves peexit", payoutByName("peexit") === peexitAdapter);
   ok("payoutByName unknown → undefined", payoutByName("nope") === undefined);
-  ok("payoutsFor(MTN) = [peexit] (pawapay filtered out)", payoutsFor("MTN").length === 1 && payoutsFor("MTN")[0] === peexitAdapter);
+  // campay joined the registry on 2026-10-21 and also serves MTN, so this is no longer a
+  // single-rail corridor. What the assertion is really for survives: pawapay stays out
+  // (its CM corridor is not enabled), and the preferred rail is still first.
+  const mtn = payoutsFor("MTN");
+  ok("payoutsFor(MTN) = [peexit, campay] in priority order", mtn.length === 2 && mtn[0] === peexitAdapter && mtn[1].name === "campay", mtn.map((p) => p.name).join(", "));
+  ok("pawapay is still filtered out of MTN", !mtn.some((p) => p.name === "pawapay"));
   ok("aggregatorByName unknown → primary fallback (never null)", aggregatorByName("ghost") === peexitAdapter);
 
   console.log("\nRouting derives from the registry");

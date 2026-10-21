@@ -18,7 +18,7 @@
    quote, a reused Idempotency-Key, an invalid phone.
    ============================================================ */
 import type { Payment } from "../../../../shared/types.js";
-import { simulatePayoutOutcome } from "../../adapters/peexit.js";
+import { PAYOUTS } from "../../adapters/payouts.js";
 import { store } from "../../db/store.js";
 
 export type Scenario = "PAYMENT_SUCCESS" | "PAYMENT_FAILED" | "MANUAL_REVIEW" | "INSUFFICIENT_LIQUIDITY" | "PROVIDER_UNAVAILABLE" | "PAYMENT_TIMEOUT" | "PAYMENT_DELAYED";
@@ -32,7 +32,14 @@ export const isDelayed = (paymentId: string) => delayed.has(paymentId);
 /** Apply the scenario to a freshly created payment (test environment only). */
 export async function applyScenario(p: Payment, scenario: Scenario): Promise<void> {
   switch (scenario) {
-    case "PAYMENT_FAILED": simulatePayoutOutcome(p.ref, "reject"); simulatePayoutOutcome(`${p.ref}:r2`, "reject"); simulatePayoutOutcome(`${p.ref}:r3`, "reject"); break;
+    // EVERY rail, not just the primary: a rejected payout fails over to the next one, so
+    // arming peexit alone meant PAYMENT_FAILED quietly started DELIVERING once campay
+    // joined the registry. The keys are the first attempt and the failover attempts.
+    case "PAYMENT_FAILED":
+      for (const rail of PAYOUTS) {
+        for (const key of [p.ref, `${p.ref}:r2`, `${p.ref}:r3`]) rail.simulatePayoutOutcome?.(key, "reject");
+      }
+      break;
     case "MANUAL_REVIEW": p.complianceFlags = [...(p.complianceFlags ?? []), "sandbox scenario: manual review"]; await store().putPayment(p); break;
     case "PAYMENT_TIMEOUT": p.payInstruction.expiresAt = new Date(Date.now() + 60_000).toISOString(); await store().putPayment(p); break;
     case "PAYMENT_DELAYED": delayed.add(p.id); break;

@@ -238,7 +238,11 @@ async function main() {
     const pf = await mkPay("+237670000001");
     const paid = await v1(`/sandbox/payments/${pf.body.data.id}/pay`, { key: k, body: {} });
     ok("POST /v1/sandbox/payments/:id/pay stands in for the wallet", paid.status === 200 && paid.body.data.sandbox?.paid === true, JSON.stringify(paid.body).slice(0, 100));
-    const pfDone = await until(pf.body.data.id, ["REFUND_PENDING", "DELIVERED", "MANUAL_REVIEW"]);
+    // A longer window than the 12 s default, on purpose. PAYMENT_FAILED now has to be
+    // refused by EVERY rail before the refund opens, and each rail costs submitWithRetry's
+    // three attempts with 1.5 s + 3 s backoff. With one rail that was ~4.5 s; with campay
+    // in the registry it is ~9 s. The outcome is unchanged — only the road to it is longer.
+    const pfDone = await until(pf.body.data.id, ["REFUND_PENDING", "DELIVERED", "MANUAL_REVIEW"], 30_000);
     const pfPub = await v1(`/payments/${pf.body.data.id}`, { key: k });
     ok("PAYMENT_FAILED → REFUNDED awaiting a destination (and payment.refunded would fire)", pfDone.state === "REFUND_PENDING" && pfPub.body.data.status === "REFUNDED" && pfPub.body.data.refund?.status === "awaiting_destination", `${pfDone.state} ${pfPub.body.data.refund?.status}`);
     const retry = await v1(`/payments/${pf.body.data.id}/retry`, { key: k, idem: idem(), body: {} });

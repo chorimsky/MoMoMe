@@ -98,7 +98,11 @@ async function main() {
   ok("a route that exists but cannot be funded is UNAVAILABLE with LIQUIDITY_UNAVAILABLE and the intent ends LIQUIDITY_FAILED", rb.route === null && rb.routes.every((x) => x.status === "UNAVAILABLE") && big.state === "LIQUIDITY_FAILED" && rb.routes.some((x) => /LIQUIDITY_UNAVAILABLE/.test(x.reason ?? "")), `${big.state} ${rb.routes[0]?.reason ?? ""}`);
 
   console.log("\nTest 9 — provider outage → excluded from routing\n");
-  markRailHardDown("peexit", "test outage"); setAggregatorUp("pawapay", false);
+  // Every rail, from the registry — naming them by hand meant that adding campay on
+  // 2026-10-21 left one rail up and the "every rail down" case silently stopped being
+  // tested. A new rail must break this test or it is not testing what it says.
+  const { PAYOUTS } = await import("../src/adapters/payouts.js");
+  for (const rail of PAYOUTS) { markRailHardDown(rail.name, "test outage"); setAggregatorUp(rail.name, false); }
   const out = await createIntent({ owner: "dev-upi", identity: "+237699000155", amount: 5_000 });
   const ro = out.state === "QUOTED" ? await selectRouteFor(out) : { route: null, routes: [] };
   ok("with every payout rail down no route is AVAILABLE and the intent is PROVIDER_UNAVAILABLE", ro.route === null && ["PROVIDER_UNAVAILABLE", "LIQUIDITY_FAILED"].includes(out.state), out.state);

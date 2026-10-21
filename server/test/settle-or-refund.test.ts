@@ -25,6 +25,11 @@ async function main() {
   const { store } = await import("../src/db/store.js");
   const peexit = await import("../src/adapters/peexit.js");
   const pawapay = await import("../src/adapters/pawapay.js");
+  // "The second rail" is whatever the registry says it is, not a name typed here. campay
+  // joined on 2026-10-21 at priority 5 — between peexit (0) and pawapay (10) — and these
+  // assertions silently stopped describing the system the moment it did.
+  const { payoutsFor } = await import("../src/adapters/payouts.js");
+  const SECOND = payoutsFor("MTN").map((r) => r.name).filter((n) => n !== "peexit")[0] ?? "pawapay";
   const { onPayoutResult, retryTransientHolds, payoutKeyOf, retryDeliveryForSender } = await import("../src/core/stateMachine.js");
   const { setAggregatorUp } = await import("../src/core/routing.js");
   const { issueToken } = await import("../src/core/adminAuth.js"); const { createUser } = await import("../src/core/adminUsers.js");
@@ -49,15 +54,15 @@ async function main() {
     peexit.simulatePayoutOutcome(p.ref, "reject");
     await post(`/api/payments/${p.id}/simulate`, {});
     let cur = await until(p.id, ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
-    ok("delivered through the second rail with a NEW attempt key", cur.state === "DELIVERED" && cur.aggregator === "pawapay" && cur.payoutAttempts === 2 && payoutKeyOf(cur) === `${p.ref}:r2`, `${cur.state} ${cur.aggregator} ${cur.payoutKey}`);
-    ok("the trail says what happened", cur.events.some((e) => /payout failed at peexit .* → retrying on pawapay/.test(e.note ?? "")));
+    ok("delivered through the second rail with a NEW attempt key", cur.state === "DELIVERED" && cur.aggregator === SECOND && cur.payoutAttempts === 2 && payoutKeyOf(cur) === `${p.ref}:r2`, `${cur.state} ${cur.aggregator} ${cur.payoutKey}`);
+    ok("the trail says what happened", cur.events.some((e) => new RegExp(`payout failed at peexit .* → retrying on ${SECOND}`).test(e.note ?? "")), cur.events.map((e) => e.note).filter(Boolean).slice(-1)[0] ?? "");
 
     console.log("\n2. The primary rail ACCEPTS then FAILS (callback) → failover, no refund\n");
     p = await pay("699001111");
     peexit.simulatePayoutOutcome(p.ref, "fail"); // accepted, then the rail reports FAILED
     await post(`/api/payments/${p.id}/simulate`, {});
     cur = await until(p.id, ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
-    ok("a FAILED verdict on the first attempt is re-checked authoritatively and the payout moves to the other rail", cur.state === "DELIVERED" && cur.aggregator === "pawapay" && cur.payoutAttempts === 2, `${cur.state} ${cur.aggregator} ${cur.payoutAttempts}`);
+    ok("a FAILED verdict on the first attempt is re-checked authoritatively and the payout moves to the other rail", cur.state === "DELIVERED" && cur.aggregator === SECOND && cur.payoutAttempts === 2, `${cur.state} ${cur.aggregator} ${cur.payoutAttempts}`);
     const stale = await store().getPayment(p.id);
     await onPayoutResult(`${p.ref}`, "FAILED"); // a late callback for the SUPERSEDED attempt
     ok("a late verdict for a superseded attempt is ignored — the delivered payment stays delivered", (await store().getPayment(p.id))!.state === "DELIVERED" && stale?.state === "DELIVERED");
@@ -65,13 +70,16 @@ async function main() {
     console.log("\n3. Every rail fails → refund claim opens; the SENDER can ask for delivery again\n");
     p = await pay("677002222");
     peexit.simulatePayoutOutcome(p.ref, "reject");
-    setAggregatorUp("pawapay", false); // the second rail is down too
+    // peexit stays UP so the payout is actually attempted (and then rejected); every OTHER
+    // rail is down so there is nowhere to fail over to. Taking them ALL down would hold the
+    // payment at MANUAL_REVIEW before a payout was ever submitted — a different branch.
+    for (const r of payoutsFor("MTN")) if (r.name !== "peexit") setAggregatorUp(r.name, false);
     await post(`/api/payments/${p.id}/simulate`, {});
     cur = await until(p.id, ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
     ok("with no rail left the inbound goes to the refund claim (money never silently held)", cur.state === "REFUND_PENDING" && cur.refundNeedsDestination === true, cur.state);
     const unsettled0 = await (await fetch(`${base}/api/admin/payments/unsettled`, { headers: { "x-admin-token": issueToken({ uid: createUser("settle-admin", "Str0ng-Passw0rd!x", "Super Admin" as never).id, role: "Super Admin" as never }).token } })).json() as Record<string, any>;
     ok("Admin → 'debited, not delivered' lists it with the cause and the action awaiting_sender", unsettled0.rows.some((r: any) => r.ref === p.ref && r.action === "awaiting_sender"), JSON.stringify(unsettled0.rows.find((r: any) => r.ref === p.ref)));
-    setAggregatorUp("pawapay", true); peexit.simulatePayoutOutcome(p.ref, null);
+    for (const r of payoutsFor("MTN")) setAggregatorUp(r.name, true); peexit.simulatePayoutOutcome(p.ref, null);
     const r = await (await post(`/api/payments/${p.id}/retry-delivery`, {})).json() as Record<string, any>;
     cur = await until(p.id, ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
     ok("POST /payments/:id/retry-delivery (the sender) delivers once a rail is back — a new attempt key, no double pay", r.state !== undefined && cur.state === "DELIVERED" && cur.payoutAttempts === 2 && payoutKeyOf(cur) === `${p.ref}:r2` && !cur.refundNeedsDestination, `${cur.state} attempts=${cur.payoutAttempts}`);
@@ -79,11 +87,11 @@ async function main() {
 
     console.log("\n4. A transient hold (float / rail) is retried by the tick, not by a person\n");
     p = await pay("699003333");
-    setAggregatorUp("peexit", false); setAggregatorUp("pawapay", false);
+    for (const r of payoutsFor("MTN")) setAggregatorUp(r.name, false);
     await post(`/api/payments/${p.id}/simulate`, {});
     cur = await until(p.id, ["DELIVERED", "REFUND_PENDING", "MANUAL_REVIEW"]);
     ok("with every rail down the payment holds for review (money in, nothing moved)", cur.state === "MANUAL_REVIEW" && /no payout aggregator|no funded/i.test(cur.events.at(-1)?.note ?? ""), `${cur.state} ${cur.events.at(-1)?.note}`);
-    setAggregatorUp("peexit", true); setAggregatorUp("pawapay", true);
+    for (const r of payoutsFor("MTN")) setAggregatorUp(r.name, true);
     cur.updatedAt = new Date(Date.now() - 10 * 60_000).toISOString(); await store().putPayment(cur);
     const n = await retryTransientHolds();
     cur = await until(p.id, ["DELIVERED", "REFUND_PENDING"]);

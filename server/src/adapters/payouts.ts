@@ -14,9 +14,10 @@
 import { contractedPayoutFee } from "../core/pricing.js";
 import type { ProviderId, CountryCode } from "../../../shared/types.js";
 import type { PayoutStatus } from "./pawapay.js";
-import { pawapayConfigured, pawapayLive, peexitConfigured, peexitLive } from "../config.js";
+import { pawapayConfigured, pawapayLive, peexitConfigured, peexitLive, campayConfigured, campayLive } from "../config.js";
 import * as pawapay from "./pawapay.js";
 import * as peexit from "./peexit.js";
+import * as campay from "./campay.js";
 
 export type { PayoutStatus } from "./pawapay.js";
 export type { DisburseRequest, DisburseResult } from "./pawapay.js";
@@ -60,6 +61,11 @@ export interface PayoutAdapter {
   verifyCallback?(rawBody: string, headers: Record<string, string | string[] | undefined>): boolean;
   /** OPTIONAL parse a verified callback body → normalised events (mirrors parseEvent). */
   parseCallback?(body: unknown): PayoutCallbackEvent[];
+  /** OPTIONAL sandbox rehearsal: force this rail's next result for a key. A scenario that
+   *  means "this payment fails" has to arm EVERY rail, because a failed payout fails over
+   *  to the next one — arming only the primary made the sandbox deliver a payment the
+   *  developer explicitly asked to fail. No-op on a live rail. */
+  simulatePayoutOutcome?(idempotencyKey: string, outcome: "reject" | "fail" | null): void;
 }
 
 /* ---------- Peexit — the primary live payout rail ---------- */
@@ -82,6 +88,32 @@ export const peexitAdapter: PayoutAdapter = {
     return peexit.verifyCallbackAuth(Array.isArray(a) ? a[0] : a);
   },
   parseCallback: (body) => peexit.parsePayoutEvents(body).map((e) => ({ ref: e.ref, status: e.status })),
+  simulatePayoutOutcome: peexit.simulatePayoutOutcome,
+};
+
+/* ---------- CamPay — Cameroon-only, and the cheapest payout rate we have ----------
+   Published 1% on withdrawals against the 1.5% our cost model assumes, no IP allowlist,
+   and a prefunded PER-CARRIER float (ER301 is "insufficient balance … for the specific
+   carrier"), which is why balance() is asked per operator. priority 5: preferred over
+   PawaPay, behind Peexit until it has settled real volume here. */
+export const campayAdapter: PayoutAdapter = {
+  name: "campay",
+  priority: 5,
+  configured: campayConfigured,
+  live: campayLive,
+  // ER102: "only MTN and Orange phone numbers are accepted". Cameroon, XAF, nothing else.
+  supports: (p) => p === "MTN" || p === "ORANGE",
+  disburse: campay.disburse,
+  queryStatus: campay.queryStatus,
+  balance: campay.availableBalanceXaf,
+  statusByKey: campay.statusByKey,
+  // CamPay publishes no fee endpoint. The signed schedule in Admin → Rates & Pricing is
+  // what cost-first routing compares; the ACTUAL fee still lands per transaction, read off
+  // app_amount by the status re-query.
+  payoutFeePct: async (provider) => contractedPayoutFee("campay", provider)?.pct ?? null,
+  verifyCallback: (raw) => campay.verifyCallbackSignature(raw),
+  parseCallback: (body) => campay.parseCallbackEvents(body).filter((e) => e.endpoint !== "collect").map((e) => ({ ref: e.ref, providerRef: e.providerRef })),
+  simulatePayoutOutcome: campay.simulatePayoutOutcome,
 };
 
 /* ---------- PawaPay — second rail, currently OUT of rotation ---------- */
@@ -119,7 +151,7 @@ export const pawapayAdapter: PayoutAdapter = {
 
 /** Every known payout rail. Order is irrelevant — selection is by priority among the
  *  rails that support the corridor. ADD A RAIL: implement PayoutAdapter, append here. */
-export const PAYOUTS: PayoutAdapter[] = [peexitAdapter, pawapayAdapter];
+export const PAYOUTS: PayoutAdapter[] = [peexitAdapter, campayAdapter, pawapayAdapter];
 
 /** Look up a payout rail by name (webhook dispatch + stored-payment reconcile). */
 export function payoutByName(name: string | undefined): PayoutAdapter | undefined {

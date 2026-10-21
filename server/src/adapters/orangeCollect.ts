@@ -38,8 +38,17 @@ import { register, touch } from "../core/persist.js";
 import type { CollectAdapter, CollectRequest, CollectResult, CollectStatus } from "./collect.js";
 
 const base = () => config.orangeCollect.apiUrl.replace(/\/$/, "");
-/** Orange scopes the web-payment path by country (lower-case ISO alpha-2). */
-const webpay = (country: CountryCode) => `${base()}/orange-money-webpay/${country.toLowerCase()}/v1`;
+/** Orange scopes the web-payment path by country in production (lower-case ISO alpha-2:
+ *  `cm` for Cameroon) and by the literal segment `dev` in the sandbox. Using the country
+ *  code against the sandbox reaches nothing — the same shape of bug as MTN's portal host,
+ *  and the same consequence: the one environment this rail could be rehearsed in was
+ *  unreachable.
+ *
+ *  Orange's own reference is behind a merchant login, so `dev`/`OUV` come from several
+ *  independent third-party integrations that agree. Overridable, and the operator should
+ *  confirm both against their portal before go-live. */
+const webpay = (country: CountryCode) =>
+  `${base()}/orange-money-webpay/${config.orangeCollect.pathSegment || country.toLowerCase()}/v1`;
 
 let token: { value: string; expiresAt: number } | null = null;
 let inflight: Promise<string | null> | null = null;
@@ -74,17 +83,22 @@ async function accessToken(): Promise<string | null> {
  *  permanently unreadable at the next restart: status() returns null without the token, so
  *  a customer could complete the payment on Orange's page and we would never learn of it.
  *  Deploys are frequent; this was money in, lost to one of them. */
-const payTokens = new Map<string, { payToken: string; xaf: number; country: CountryCode }>();
+interface OrangeTxn { payToken: string; xaf: number; country: CountryCode; notifToken?: string }
+const payTokens = new Map<string, OrangeTxn>();
 export function payTokenFor(key: string): string | undefined { return payTokens.get(key)?.payToken; }
-export function _rememberPayToken(key: string, payToken: string, xaf: number, country: CountryCode): void {
-  payTokens.set(key, { payToken, xaf, country });
+/** The `notif_token` Orange handed back when the payment was created. Orange echoes it in
+ *  the notification it posts to notif_url, which is the ONLY thing that distinguishes a
+ *  real Orange notification from anyone who has learned the URL. We were discarding it. */
+export function notifTokenFor(key: string): string | undefined { return payTokens.get(key)?.notifToken; }
+export function _rememberPayToken(key: string, payToken: string, xaf: number, country: CountryCode, notifToken?: string): void {
+  payTokens.set(key, { payToken, xaf, country, ...(notifToken ? { notifToken } : {}) });
   touch("orange-collect");   // flush now: a token we cannot re-derive must survive the next restart
 }
 
 /** The hosted page a customer must be sent to, once created. Exposed so a checkout can
  *  redirect; absent until `collect()` has run for that key. */
 const paymentUrls = new Map<string, string>();
-interface OrangeDump { tokens: [string, { payToken: string; xaf: number; country: CountryCode }][]; urls: [string, string][] }
+interface OrangeDump { tokens: [string, OrangeTxn][]; urls: [string, string][] }
 /** The exact pair handed to the persistence layer. Named and exported so a test can drive
  *  a restart through THESE functions rather than a re-implementation of them: on SQLite the
  *  restore runs inside register() at import, which a single process cannot replay. */
@@ -99,6 +113,22 @@ register("orange-collect", _snapshot, _restore);
 export function paymentUrlFor(key: string): string | undefined { return paymentUrls.get(key); }
 /** Test hook, mirroring `_rememberPayToken`: seed what Orange would have handed back. */
 export function _rememberPaymentUrl(key: string, url: string): void { paymentUrls.set(key, url); touch("orange-collect"); }
+
+/** The verification rule, with liveness as an argument rather than read from config.
+ *  Exported because the interesting branch is the LIVE one — a notification proving
+ *  nothing must be refused — and config is evaluated once at import, so a test that reads
+ *  the adapter method in a sandbox process can only ever exercise the sandbox half and
+ *  passes without testing anything. */
+export function notificationIsOrange(rawBody: string, live: boolean): boolean {
+  let body: { order_id?: unknown; notif_token?: unknown };
+  try { body = JSON.parse(rawBody) as typeof body; } catch { return false; }
+  const key = typeof body.order_id === "string" ? body.order_id : "";
+  const known = key ? payTokens.get(key) : undefined;
+  if (!known?.notifToken) return true;          // nothing of ours to compare against
+  const got = typeof body.notif_token === "string" ? body.notif_token : "";
+  if (!got) return !live;                       // live: a notification that proves nothing is refused
+  return got === known.notifToken;
+}
 
 const orangeCollector: CollectAdapter = {
   name: "orange",
@@ -129,9 +159,9 @@ const orangeCollector: CollectAdapter = {
       }),
     }, 15_000);
     if (!res.ok) throw new Error(`Orange collection failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
-    const d = (await res.json()) as { payment_url?: string; pay_token?: string; status?: string };
+    const d = (await res.json()) as { payment_url?: string; pay_token?: string; notif_token?: string; status?: string };
     if (!d.pay_token) throw new Error("Orange collection failed: no pay_token in the response");
-    _rememberPayToken(req.idempotencyKey, d.pay_token, req.xaf, req.country);
+    _rememberPayToken(req.idempotencyKey, d.pay_token, req.xaf, req.country, d.notif_token);
     if (d.payment_url) _rememberPaymentUrl(req.idempotencyKey, d.payment_url);
     // The page the payer must complete. Handed straight back to the caller: this rail is
     // useless without it, because nothing rings the payer's handset.
@@ -157,6 +187,17 @@ const orangeCollector: CollectAdapter = {
       return "PENDING";                              // INITIATED / PENDING / anything unknown
     } catch { return null; }
   },
+
+  /** Orange's notification is authenticated by the `notif_token` it gave us when the
+   *  payment was created, echoed back in the body. Nothing else distinguishes a real
+   *  notification from anyone who has learned the URL.
+   *
+   *  Refuses when we hold a token for that order and the body's does not match, or carries
+   *  none at all on a live rail. Accepts when we hold NO record of the order: there is
+   *  nothing to compare against, and such a callback settles nothing anyway — the handler
+   *  looks the order up by order_id and finds no transfer. Settlement is gated on
+   *  status() either way, exactly as on every other rail here. */
+  verifyCallback(rawBody: string): boolean { return notificationIsOrange(rawBody, orangeCollectLive()); },
 
   async health() {
     if (!orangeCollectConfigured()) return { ok: false, note: "not configured" };

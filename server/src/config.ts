@@ -250,7 +250,13 @@ export const config = {
     returnUrl: secret("ORANGE_MONEY_RETURN_URL"),
     cancelUrl: secret("ORANGE_MONEY_CANCEL_URL"),
     notifUrl: secret("ORANGE_MONEY_NOTIF_URL"),
-    currency: secret("ORANGE_MONEY_CURRENCY", "XAF"),
+    /** Orange's sandbox is a DIFFERENT path segment ("dev", not the country code) and a
+     *  DIFFERENT currency ("OUV", a test currency). Defaulting both to the production
+     *  values made the sandbox unreachable — the same shape of mistake as MTN's host and
+     *  EUR. Orange's reference is behind a merchant login, so these come from several
+     *  independent third-party integrations that agree; confirm against the portal. */
+    pathSegment: env("ORANGE_MONEY_PATH_SEGMENT", sandbox ? "dev" : ""),
+    currency: secret("ORANGE_MONEY_CURRENCY", sandbox ? "OUV" : "XAF"),
   }))(!isProdEnv("ORANGE_MONEY_ENV")),
 
   /** Admin console auth. Per-user accounts gate every /admin/* API and the

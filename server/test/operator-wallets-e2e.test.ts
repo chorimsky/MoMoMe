@@ -57,7 +57,7 @@ const operator = http.createServer((req, res) => {
       const b = body as { order_id?: string };
       const payToken = `PAYTOKEN-${b.order_id}`;
       orangeStatus.set(payToken, "INITIATED");
-      return send(200, { payment_url: `https://webpayment.orange.cm/pay/${payToken}`, pay_token: payToken, notif_token: "n", status: "INITIATED" });
+      return send(200, { payment_url: `https://webpayment.orange.cm/pay/${payToken}`, pay_token: payToken, notif_token: `NOTIF-${b.order_id}`, status: "INITIATED" });
     }
     if (url.endsWith("/transactionstatus") && req.method === "POST") {
       const b = body as { pay_token?: string };
@@ -159,6 +159,31 @@ async function main() {
     orangeStatus.set(`PAYTOKEN-${okey}`, "SUCCESS");
     ok("after the restart the payment settles, because the token survived",
       await orange.orangeCollector.status(okey) === "COMPLETED");
+
+    console.log("\nOrange: the sandbox is a different path and a different currency\n");
+    ok("the web-payment path uses the sandbox segment, not the country code",
+      wp.path.includes("/orange-money-webpay/dev/v1/"), wp.path);
+    ok("the sandbox currency is OUV, Orange's test currency", wb.currency === "OUV", wb.currency);
+
+    console.log("\nOrange: the notification is authenticated by the token Orange gave us\n");
+    ok("the notif_token from creation was kept", orange.notifTokenFor(okey) === `NOTIF-${okey}`, String(orange.notifTokenFor(okey)));
+    const notif = (fields: Record<string, unknown>) => JSON.stringify({ order_id: okey, status: "SUCCESS", ...fields });
+    ok("a notification carrying the right token is accepted",
+      orange.orangeCollector.verifyCallback!(notif({ notif_token: `NOTIF-${okey}` }), {}));
+    ok("a FORGED notification is refused — this is the only thing that proves it is Orange",
+      !orange.orangeCollector.verifyCallback!(notif({ notif_token: "guessed" }), {}));
+    // Both branches, driven through the rule itself: reading the adapter method in a
+    // sandbox process can only ever exercise the sandbox half.
+    ok("a notification proving nothing is REFUSED on a live rail",
+      !orange.notificationIsOrange(notif({}), true));
+    ok("…and accepted in the sandbox, so a rehearsal is not blocked by it",
+      orange.notificationIsOrange(notif({}), false));
+    ok("a forged token is refused whatever the environment",
+      !orange.notificationIsOrange(notif({ notif_token: "guessed" }), true)
+      && !orange.notificationIsOrange(notif({ notif_token: "guessed" }), false));
+    ok("an order we hold no record of is accepted — nothing to compare, and it settles nothing",
+      orange.orangeCollector.verifyCallback!(JSON.stringify({ order_id: "never-seen", status: "SUCCESS" }), {}));
+    ok("a body that is not JSON is refused", !orange.orangeCollector.verifyCallback!("not json", {}));
 
     console.log("\nOrange: only documented terminal words are believed\n");
     orangeStatus.set(`PAYTOKEN-${okey}`, "WAITING_CUSTOMER");

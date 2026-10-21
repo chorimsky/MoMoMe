@@ -49,14 +49,20 @@ async function accessToken(): Promise<string | null> {
       const basic = Buffer.from(`${config.mtnCollect.apiUser}:${config.mtnCollect.apiKey}`).toString("base64");
       const res = await fetchT(`${base()}/collection/token/`, {
         method: "POST",
-        headers: { authorization: `Basic ${basic}`, "Ocp-Apim-Subscription-Key": sub(), "content-length": "0" },
+        // NO manual content-length. undici rejects it outright — "InvalidArgumentError:
+        // invalid content-length header" — so every token request threw, accessToken()
+        // returned null, and this rail could never collect anything. It went unnoticed
+        // because without MTN credentials configured() is false and the rail is never
+        // selected: it would have failed the first time it was ever used for real.
+        // A bodyless POST sets its own content-length.
+        headers: { authorization: `Basic ${basic}`, "Ocp-Apim-Subscription-Key": sub() },
       }, 12_000);
       if (!res.ok) { console.warn(`[mtn-collect] token ${res.status}`); return null; }
       const d = (await res.json()) as { access_token?: string; expires_in?: number };
       if (!d.access_token) return null;
       token = { value: d.access_token, expiresAt: Date.now() + Math.max(60, Number(d.expires_in ?? 3600)) * 1000 };
       return token.value;
-    } catch (e) { console.warn("[mtn-collect] token error", e instanceof Error ? e.message : e); return null; }
+    } catch (e) { console.warn("[mtn-collect] token error", e instanceof Error ? e.message : e, "| cause:", String((e as {cause?: unknown})?.cause)); return null; }
     finally { inflight = null; }
   })();
   return inflight;

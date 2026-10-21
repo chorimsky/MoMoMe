@@ -395,7 +395,23 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Provider failures that won't fix themselves on retry (account/config blocks like
  *  PawaPay's PAYOUTS_NOT_ALLOWED). These take the rail down and refund immediately. */
+/** Blocks the RAIL: a configuration refusal that will not fix itself, so the rail comes
+ *  out of rotation until the probe cooldown. */
 const HARD_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowed/i;
+/** Blocks the RETRY, not the rail. A rail refusing for want of float (CamPay's ER301,
+ *  Peexit's INSUFFICIENT_FUND_TO_PAY_TX) will not have been topped up 1.5 seconds later,
+ *  so the three retries were 4.5 s of waiting that could never succeed — they just delayed
+ *  the failover to a rail that CAN pay. Fail over at once instead.
+ *
+ *  Deliberately NOT in HARD_PAYOUT_FAIL: float is held per carrier on these rails, so an
+ *  empty MTN bucket says nothing about Orange, and blinding the whole rail for ten minutes
+ *  would strand payouts it could still make. The per-operator balance check in
+ *  selectFundedAggregator is what keeps it out of the empty corridor. */
+const NO_RETRY_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowed|insufficient[_ ]?(fund|funds|balance|float)|ER301/i;
+/** Exposed so test/payout-switching.test.ts can assert WHICH of the two a given provider
+ *  message trips — the distinction (stop retrying vs take the rail out) is the whole
+ *  point, and it is invisible from the outside. */
+export const _patterns = { hard: HARD_PAYOUT_FAIL, noRetry: NO_RETRY_PAYOUT_FAIL };
 
 /** Submit a payout, auto-retrying TRANSIENT failures (network/5xx) up to 3 times.
  *  A HARD failure (config block) throws immediately — retrying is futile. disburse is
@@ -409,7 +425,7 @@ async function submitWithRetry(agg: ReturnType<typeof aggregatorByName>, p: Paym
       return await agg.disburse({ idempotencyKey: payoutKeyOf(p), provider: p.recipient.provider, country: p.recipient.country, phone: p.recipient.phone, xaf: p.xaf, name: p.recipient.name });
     } catch (e) {
       lastErr = e;
-      if (HARD_PAYOUT_FAIL.test(e instanceof Error ? e.message : "")) throw e; // config block — stop
+      if (NO_RETRY_PAYOUT_FAIL.test(e instanceof Error ? e.message : "")) throw e; // config block or empty float — retrying cannot help
       if (attempt < 2) await wait(1500 * (attempt + 1)); // transient — back off and retry
     }
   }

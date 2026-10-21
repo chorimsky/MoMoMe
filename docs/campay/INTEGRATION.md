@@ -52,9 +52,16 @@ that operator's float) is nothing like the fix for a malformed payout.
    - `CAMPAY_WEBHOOK_KEY` — APP KEYS → webhook key (a *different* secret)
    - `CAMPAY_ENV=production` when going live; unset/anything else uses the demo host
    - `CAMPAY_API_URL` only if the production base differs from `https://www.campay.net/api`
-3. **In the CamPay dashboard:** set the callback URL to
-   `https://<api-host>/webhooks/campay`, and set its method to **POST** (CamPay can send
-   GET; this route only accepts POST).
+3. **In the CamPay dashboard**, set ONE callback URL for both flows:
+
+   ```
+   https://momome-api-production.up.railway.app/webhooks/campay
+   ```
+
+   and set its method to **POST**. CamPay can be configured to send GET; this route only
+   accepts POST, and a GET will 404. Cash-in and cash-out both arrive here — the route
+   reads `endpoint` ("collect" or "withdraw") and hands the request to the same payout or
+   collection handler the per-rail URLs use, so there is no second settlement path.
 4. **Enable API withdrawals** — "Withdrawals through the API must be allowed under your
    application settings". Without it every payout is refused.
 5. **Fund the float, per carrier.** Withdrawals debit a prefunded balance and `ER301` is

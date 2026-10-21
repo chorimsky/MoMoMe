@@ -12,21 +12,36 @@
    base URL and target environment). Never called on the payment path.
    ============================================================ */
 import { fetchT } from "../../../adapters/http.js";
+import { config } from "../../../config.js";
 import type { IdentityProvider, IdentityContext, ProviderAnswer } from "./types.js";
 import type { NormalizedIdentifier, IdentityProviderHealth } from "../../../../../shared/identity.js";
 import { IdentityError } from "../errors.js";
 
 const env = (k: string, d = "") => (process.env[k] ?? d).trim();
+/* Credentials come from `config.mtnCollect`, NOT from process.env directly. They are the
+   same MTN credentials the collection adapter uses, and config's secret() strips stray
+   surrounding quotes and whitespace — a trailing quote that the collection rail tolerated
+   would have 401'd here, which is precisely the failure already documented on the Peexit
+   key. One source for one credential. */
 const cfg = () => ({
-  base: env("MTN_MOMO_API_URL", env("MTN_MOMO_TARGET_ENV", "sandbox") === "sandbox" ? "https://sandbox.momodeveloper.mtn.com" : "https://proxy.momoapi.mtn.com"),
-  target: env("MTN_MOMO_TARGET_ENV", "sandbox"),
-  subKey: env("MTN_MOMO_SUBSCRIPTION_KEY"), user: env("MTN_MOMO_API_USER"), key: env("MTN_MOMO_API_KEY"),
+  base: config.mtnCollect.apiUrl.replace(/\/$/, ""),
+  target: config.mtnCollect.targetEnvironment || "sandbox",
+  subKey: config.mtnCollect.subscriptionKey, user: config.mtnCollect.apiUser, key: config.mtnCollect.apiKey,
   countries: env("MTN_MOMO_COUNTRIES", "CM").split(",").map((s) => s.trim()).filter(Boolean),
 });
 
 let token: { value: string; expiresAt: number } | null = null;
+let tokenInflight: Promise<string> | null = null;
+/** SINGLE-FLIGHT, as the collection adapter's token already is. Recipient verification is
+ *  called on a sender's keystrokes, so a cold cache meant one token request per concurrent
+ *  resolve — against an endpoint that rate-limits. */
 async function bearer(timeoutMs: number): Promise<string> {
   if (token && token.expiresAt > Date.now() + 30_000) return token.value;
+  if (tokenInflight) return tokenInflight;
+  tokenInflight = mintToken(timeoutMs).finally(() => { tokenInflight = null; });
+  return tokenInflight;
+}
+async function mintToken(timeoutMs: number): Promise<string> {
   const c = cfg();
   const res = await fetchT(`${c.base}/collection/token/`, { method: "POST", headers: { "Ocp-Apim-Subscription-Key": c.subKey, authorization: `Basic ${Buffer.from(`${c.user}:${c.key}`).toString("base64")}` } }, timeoutMs);
   if (res.status === 401 || res.status === 403) throw new IdentityError("IDENTITY_PROVIDER_AUTH_ERROR", "Recipient verification is temporarily unavailable.", `mtn token ${res.status}`);

@@ -34,6 +34,7 @@
 import type { CountryCode, ProviderId } from "../../../shared/types.js";
 import { config, orangeCollectConfigured, orangeCollectLive } from "../config.js";
 import { fetchT } from "./http.js";
+import { register, touch } from "../core/persist.js";
 import type { CollectAdapter, CollectRequest, CollectResult, CollectStatus } from "./collect.js";
 
 const base = () => config.orangeCollect.apiUrl.replace(/\/$/, "");
@@ -65,19 +66,39 @@ async function accessToken(): Promise<string | null> {
 }
 
 /** Orange returns a pay_token when the payment is created and REQUIRES it back to read the
- *  status. Remembered per idempotency key: without it a status call cannot be made at all. */
+ *  status. Remembered per idempotency key: without it a status call cannot be made at all.
+ *
+ *  PERSISTED, and it has to be. Unlike MTN's X-Reference-Id — which this process derives
+ *  from our own key and can always recompute — a pay_token comes FROM Orange and cannot be
+ *  reconstructed. Held only in memory, every collection still with a payer became
+ *  permanently unreadable at the next restart: status() returns null without the token, so
+ *  a customer could complete the payment on Orange's page and we would never learn of it.
+ *  Deploys are frequent; this was money in, lost to one of them. */
 const payTokens = new Map<string, { payToken: string; xaf: number; country: CountryCode }>();
 export function payTokenFor(key: string): string | undefined { return payTokens.get(key)?.payToken; }
 export function _rememberPayToken(key: string, payToken: string, xaf: number, country: CountryCode): void {
   payTokens.set(key, { payToken, xaf, country });
+  touch("orange-collect");   // flush now: a token we cannot re-derive must survive the next restart
 }
 
 /** The hosted page a customer must be sent to, once created. Exposed so a checkout can
  *  redirect; absent until `collect()` has run for that key. */
 const paymentUrls = new Map<string, string>();
+interface OrangeDump { tokens: [string, { payToken: string; xaf: number; country: CountryCode }][]; urls: [string, string][] }
+/** The exact pair handed to the persistence layer. Named and exported so a test can drive
+ *  a restart through THESE functions rather than a re-implementation of them: on SQLite the
+ *  restore runs inside register() at import, which a single process cannot replay. */
+export function _snapshot(): OrangeDump { return { tokens: [...payTokens], urls: [...paymentUrls] }; }
+export function _restore(d: OrangeDump): void {
+  for (const [k, v] of d.tokens ?? []) payTokens.set(k, v);
+  for (const [k, v] of d.urls ?? []) paymentUrls.set(k, v);
+}
+/** Test hook: what a process restart looks like before the snapshot is read back. */
+export function _forgetAll(): void { payTokens.clear(); paymentUrls.clear(); }
+register("orange-collect", _snapshot, _restore);
 export function paymentUrlFor(key: string): string | undefined { return paymentUrls.get(key); }
 /** Test hook, mirroring `_rememberPayToken`: seed what Orange would have handed back. */
-export function _rememberPaymentUrl(key: string, url: string): void { paymentUrls.set(key, url); }
+export function _rememberPaymentUrl(key: string, url: string): void { paymentUrls.set(key, url); touch("orange-collect"); }
 
 const orangeCollector: CollectAdapter = {
   name: "orange",
@@ -111,7 +132,7 @@ const orangeCollector: CollectAdapter = {
     const d = (await res.json()) as { payment_url?: string; pay_token?: string; status?: string };
     if (!d.pay_token) throw new Error("Orange collection failed: no pay_token in the response");
     _rememberPayToken(req.idempotencyKey, d.pay_token, req.xaf, req.country);
-    if (d.payment_url) paymentUrls.set(req.idempotencyKey, d.payment_url);
+    if (d.payment_url) _rememberPaymentUrl(req.idempotencyKey, d.payment_url);
     // The page the payer must complete. Handed straight back to the caller: this rail is
     // useless without it, because nothing rings the payer's handset.
     return { status: "accepted", providerRef: d.pay_token, simulated: false, ...(d.payment_url ? { paymentUrl: d.payment_url } : {}) };

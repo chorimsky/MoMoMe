@@ -212,7 +212,12 @@ export const config = {
    *  operator's to complete with MTN. */
   mtnCollect: ((sandbox: boolean) => ({
     env: sandbox ? "sandbox" : "production",
-    apiUrl: env("MTN_MOMO_API_URL", sandbox ? "https://sandbox.momodeveloper.mtn.com" : "https://momodeveloper.mtn.com"),
+    /** The API gateway, NOT the developer portal. momodeveloper.mtn.com is the portal —
+     *  it resolves to the same address as sandbox.momodeveloper.mtn.com — and a production
+     *  collection sent there would never reach MTN's Collections product. The gateway is
+     *  proxy.momoapi.mtn.com, which is what providers/mtnDirect.ts has always used; the two
+     *  files disagreed, and this one was wrong. */
+    apiUrl: env("MTN_MOMO_API_URL", sandbox ? "https://sandbox.momodeveloper.mtn.com" : "https://proxy.momoapi.mtn.com"),
     /** MTN's own environment name, sent as X-Target-Environment. "sandbox" or the country
      *  environment MTN assigns in production (e.g. "mtncameroon") — never guessed here. */
     targetEnvironment: secret("MTN_MOMO_TARGET_ENV", sandbox ? "sandbox" : ""),
@@ -221,7 +226,11 @@ export const config = {
     apiKey: secret("MTN_MOMO_API_KEY"),
     /** Where MTN posts the result. Optional: the status re-query settles either way. */
     callbackUrl: secret("MTN_MOMO_CALLBACK_URL"),
-    currency: secret("MTN_MOMO_CURRENCY", "XAF"),
+    /** MTN's sandbox accepts EUR and ONLY EUR; production must match the target
+     *  environment's country (XAF for mtncameroon). Defaulting both to XAF made every
+     *  sandbox requesttopay fail, which is the one place we could have rehearsed this rail
+     *  before real money. Everything else in this block already switches on `sandbox`. */
+    currency: secret("MTN_MOMO_CURRENCY", sandbox ? "EUR" : "XAF"),
   }))(!isProdEnv("MTN_MOMO_ENV")),
 
   /** Orange Money — the operator's OWN Web Payment API, as an alternative to an aggregator.

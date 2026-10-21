@@ -46,7 +46,19 @@ const byKey = new Map<string, CampayRecord>();
 const statusByRef = new Map<string, PayoutStatus>();
 const feeByRef = new Map<string, number>();
 const failReasonByRef = new Map<string, string>();
-register("campay", () => [...byKey], (d: [string, CampayRecord][]) => { for (const [k, v] of d) byKey.set(k, v); });
+/** Reverse indexes, so a callback is an O(1) lookup. parseCallbackEvents used to scan
+ *  every record and recompute a SHA-1 per entry to match external_reference — fine at ten
+ *  payouts, a hash of the whole book at a hundred thousand. Both are rebuilt on restore. */
+const byExternalRef = new Map<string, string>();   // what we SENT them → our key
+const byProviderRef = new Map<string, string>();   // their reference    → our key
+function index(ourKey: string, rec: CampayRecord): void {
+  byKey.set(ourKey, rec);
+  byProviderRef.set(rec.providerRef, ourKey);
+  // withdraw sends a derived UUID4; collect sends our key verbatim. Index both spellings
+  // so neither flow needs to know which one the callback will quote back.
+  byExternalRef.set(rec.endpoint === "withdraw" ? payoutIdFor(ourKey) : ourKey, ourKey);
+}
+register("campay", () => [...byKey], (d: [string, CampayRecord][]) => { for (const [k, v] of d) index(k, v); });
 
 /** CamPay wants the country code: 2376XXXXXXXX. Accepts +237… or a bare 9-digit local. */
 export function msisdn(phone: string): string {
@@ -94,7 +106,7 @@ export async function disburse(req: DisburseRequest): Promise<DisburseResult> {
     statusByRef.set(req.idempotencyKey, simFail.get(req.idempotencyKey) === "fail" ? "FAILED" : "COMPLETED");
   }
   const result: CampayRecord = { status: "accepted", providerRef, simulated: !real, endpoint: "withdraw" };
-  byKey.set(req.idempotencyKey, result);
+  index(req.idempotencyKey, result);
   touch("campay");
   return { status: "accepted", providerRef, simulated: !real };
 }
@@ -138,7 +150,7 @@ export async function collect(req: DisburseRequest): Promise<{ status: "accepted
   if (existing) return { status: "accepted", providerRef: existing.providerRef, simulated: existing.simulated };
   if (!campayLive()) {
     const providerRef = id("cmc");
-    byKey.set(req.idempotencyKey, { status: "accepted", providerRef, simulated: true, endpoint: "collect" });
+    index(req.idempotencyKey, { status: "accepted", providerRef, simulated: true, endpoint: "collect" });
     statusByRef.set(req.idempotencyKey, "COMPLETED");
     touch("campay");
     return { status: "accepted", providerRef, simulated: true };
@@ -150,14 +162,20 @@ export async function collect(req: DisburseRequest): Promise<{ status: "accepted
       currency: "XAF",
       from: msisdn(req.phone),            // the payer we collect FROM
       description: `MoMo>Me ${req.idempotencyKey}`,
-      external_reference: payoutIdFor(req.idempotencyKey),
+      // OUR key, verbatim — NOT the derived UUID the withdraw side needs. Only /withdraw/
+      // demands a UUID4; /collect/ takes any unique string. It matters because the
+      // collection callback handler finds the transfer by reading a reference out of the
+      // body, and CamPay's own `reference` is its UUID, not ours. Sending the raw key is
+      // what makes a paid collection settle on the callback instead of waiting for the
+      // reconcile tick — which is the whole reason the collect callback exists.
+      external_reference: req.idempotencyKey,
     }),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`CamPay collection failed: ${res.status} ${text.slice(0, 200)}`);
   const data = JSON.parse(text) as { reference?: string };
   if (!data.reference) throw new Error(`CamPay collection not accepted: ${text.slice(0, 200)}`);
-  byKey.set(req.idempotencyKey, { status: "accepted", providerRef: data.reference, simulated: false, endpoint: "collect" });
+  index(req.idempotencyKey, { status: "accepted", providerRef: data.reference, simulated: false, endpoint: "collect" });
   touch("campay");
   return { status: "accepted", providerRef: data.reference, simulated: false };
 }
@@ -222,14 +240,27 @@ const num = (v: unknown): number | null => {
  *  balance outcome, so "unknown is null, not 0" could never actually be exercised. */
 export function _resetBalanceCache(): void { balCache = null; }
 
+let balInflight: Promise<Balances> | null = null;
 export async function balances(): Promise<Balances> {
   const now = Date.now();
   if (balCache && now - balCache.at < 15_000) return balCache;
+  // SINGLE-FLIGHT. The cache does not bound upstream load on a MISS, and this is read on
+  // every payout selection and every pre-flight — the same reasoning as the Peexit account
+  // read. Concurrent callers share one request.
+  if (balInflight) return balInflight;
+  balInflight = read(now).finally(() => { balInflight = null; });
+  return balInflight;
+}
+
+async function read(now: number): Promise<Balances> {
   const empty: Balances = { at: now, total: null, mtn: null, orange: null };
-  if (!campayLive()) { balCache = empty; return empty; }
+  // A FAILED read is never cached. Caching it made one blip take the rail out of selection
+  // for a full 15 seconds — a null balance is "not funded" to selectFundedAggregator, so
+  // caching "unknown" is caching "do not use this rail".
+  if (!campayLive()) return empty;
   try {
     const res = await camp("/balance/", { method: "GET" });
-    if (!res.ok) { balCache = empty; return empty; }
+    if (!res.ok) return empty;
     const d = (await res.json()) as Record<string, unknown>;
     // CamPay reports per-operator balances; field spellings are not pinned in the docs, so
     // every documented and observed spelling is accepted and anything else stays null.
@@ -244,7 +275,7 @@ export async function balances(): Promise<Balances> {
       orange: pick("orange_balance", "balance_orange", "orange"),
     };
     return balCache;
-  } catch { balCache = empty; return empty; }
+  } catch { return empty; }
 }
 
 export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {
@@ -283,7 +314,21 @@ export function verifyCallbackSignature(rawBody: string): boolean {
   } catch { return false; }
   const expect = crypto.createHmac("sha256", key).update(`${h}.${p}`).digest("base64url");
   const a = Buffer.from(sig), b = Buffer.from(expect);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  // A valid signature proves CamPay minted the TOKEN. It does not, on its own, prove the
+  // token belongs to the body it arrived in: the same token replayed against a forged body
+  // would verify. CamPay does not document the claims, so bind what we can — if the
+  // payload names a reference, it must be the one in the body; if it names none, we cannot
+  // check and accept (settlement is gated on the authoritative re-query either way).
+  try {
+    const claims = JSON.parse(Buffer.from(p, "base64url").toString("utf8")) as Record<string, unknown>;
+    const body = JSON.parse(rawBody) as Record<string, unknown>;
+    for (const field of ["reference", "external_reference"]) {
+      const c = claims[field], b2 = body[field];
+      if (typeof c === "string" && typeof b2 === "string" && c !== b2) return false;
+    }
+  } catch { return false; }
+  return true;
 }
 
 /** A verified callback → our ref(s). CamPay posts ONE event, carrying both references and
@@ -297,12 +342,11 @@ export function parseCallbackEvents(body: unknown): Array<{ ref: string; provide
   // external_reference is the deterministic UUID we derived from our ref, so map it back
   // through what we stored rather than trying to invert the hash.
   const ext = typeof d.external_reference === "string" ? d.external_reference : "";
-  for (const [ourRef, rec] of byKey) {
-    if ((ext && payoutIdFor(ourRef) === ext) || (theirs && rec.providerRef === theirs)) {
-      return [{ ref: ourRef, providerRef: theirs, endpoint: endpoint || rec.endpoint }];
-    }
-  }
-  return [];
+  // Three ways a callback names one of ours: the raw key (collect sends it verbatim), the
+  // derived UUID (withdraw must send a UUID4), or CamPay's own reference. All indexed.
+  const ourRef = (ext && byExternalRef.get(ext)) || (theirs && byProviderRef.get(theirs)) || undefined;
+  if (!ourRef) return [];
+  return [{ ref: ourRef, providerRef: theirs, endpoint: endpoint || byKey.get(ourRef)!.endpoint }];
 }
 
 /** Which direction a callback is about, for routing it to the payout or collection path.

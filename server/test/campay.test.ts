@@ -121,6 +121,15 @@ async function main() {
   ok("the callback maps back to OUR ref", ev.length === 1 && ev[0].ref === "MMM-2026-418001", JSON.stringify(ev));
   ok("an unknown reference maps to nothing", campay.parseCallbackEvents({ reference: "nope", endpoint: "withdraw" }).length === 0);
 
+  console.log("\nWhat we send differs per flow, and it has to\n");
+  replies = [(u) => u.endsWith("/collect/") ? { status: 200, body: { reference: "cp-coll-001", ussd_code: "*126#", operator: "mtn" } } : null];
+  await campay.collect({ idempotencyKey: "trf_abc_123", provider: "MTN" as const, country: "CM" as const, phone: "+237670000009", xaf: 2500 });
+  const cb = seen.find((x) => x.url.endsWith("/collect/"))!.body as { amount: string; currency: string; from: string; external_reference: string };
+  ok("collect sends OUR key verbatim as external_reference", cb.external_reference === "trf_abc_123", cb.external_reference);
+  ok("…NOT the derived UUID the withdraw side needs", !/^[0-9a-f]{8}-[0-9a-f]{4}-4/.test(cb.external_reference));
+  ok("…because the callback handler finds the transfer BY that field", cb.external_reference === "trf_abc_123");
+  ok("collect carries the currency, whole XAF, and the payer", cb.currency === "XAF" && cb.amount === "2500" && cb.from === "237670000009", `${cb.amount} ${cb.currency} ${cb.from}`);
+
   console.log("\nBalance is per carrier, and unknown is never zero\n");
   replies = [(u) => u.endsWith("/balance/") ? { status: 200, body: { total_balance: 900_000, mtn_balance: 600_000, orange_balance: 300_000 } } : null];
   ok("MTN float", await campay.availableBalanceXaf("CM", "MTN") === 600_000);

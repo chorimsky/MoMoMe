@@ -88,6 +88,24 @@ webhooks.post("/payout/:name", express.raw({ type: "*/*" }), (req, res) => handl
 
    The reference a rail sends back is OUR key (the transfer id), because that is what every
    adapter is handed as `idempotencyKey`. */
+/** Which of OUR collections a callback is about. Rails differ in what they call "the
+ *  reference you gave us", so every documented spelling is accepted — and nothing else.
+ *
+ *  `external_reference` is tried FIRST, ahead of `reference`, and the order is the point:
+ *  a rail's own `reference` is ITS id, not ours. CamPay sends both, and reading its uuid
+ *  found no transfer, so every CamPay collection settled nothing on the callback and
+ *  waited for the reconcile tick instead.
+ *
+ *  Exported so test/campay-e2e.test.ts drives THIS function rather than a copy of the
+ *  list, which would keep passing after someone edited the real one. */
+export function referenceFromBody(body: Record<string, unknown>): string | undefined {
+  for (const k of ["external_reference", "externalReference", "track_id", "trackId", "externalId", "external_id", "order_id", "orderId", "reference", "referenceId", "X-Reference-Id"]) {
+    const v = body[k];
+    if (typeof v === "string" && v) return v;
+  }
+  return undefined;
+}
+
 function handleCollectCallback(name: string, req: Request, res: Response): Response | void {
   const rail = collectorByName(name);
   if (!rail) return res.status(404).json({ error: "unknown_rail" });
@@ -100,11 +118,7 @@ function handleCollectCallback(name: string, req: Request, res: Response): Respo
   // every documented spelling of "the reference you gave us" is accepted — and nothing else.
   let key: string | undefined;
   try {
-    const d = JSON.parse(raw) as Record<string, unknown>;
-    for (const k of ["track_id", "trackId", "externalId", "external_id", "order_id", "orderId", "reference", "referenceId", "X-Reference-Id"]) {
-      const v = d[k];
-      if (typeof v === "string" && v) { key = v; break; }
-    }
+    key = referenceFromBody(JSON.parse(raw) as Record<string, unknown>);
   } catch { recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "bad json" }); return res.status(400).json({ error: "bad_json" }); }
   const rec = recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.received", rawBody: raw, providerReference: key ?? null, status: "verified" });
   res.json({ ok: true, ...(rec.duplicate ? { duplicate: true } : {}) }); // ack fast, settle behind it

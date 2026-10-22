@@ -31,6 +31,7 @@
    exists; wiring one into the payment state machine is a separate, deliberate step.
    ============================================================ */
 import { register, touch } from "../core/persist.js";
+import { fetchT } from "./http.js";
 import { buildPain001, parsePain002, parseCamt053, settlementOf, type BankInstruction, type StatementEntry } from "../core/iso20022/messages.js";
 
 /** Where a deferred instruction has got to. Ordered: a state never moves backwards. */
@@ -140,6 +141,8 @@ export class DeferredRail {
   missesToday(now = new Date()): boolean { return now.getUTCHours() >= this.cutoffHour; }
 
   get(key: string): DeferredRow | undefined { return this.rows.get(key); }
+  /** Every row, for health and for the alert that notices money we cannot account for. */
+  allRows(): DeferredRow[] { return [...this.rows.values()]; }
   rowsOf(batchId: string): DeferredRow[] { return (this.batches.get(batchId) ?? []).map((k) => this.rows.get(k)!).filter(Boolean); }
 
   /** Queue an instruction. Idempotent on `key`: the same key twice is the same instruction,
@@ -248,6 +251,73 @@ export class DeferredRail {
     if (!r.availableOn) return true;
     return r.availableOn <= on.toISOString().slice(0, 10);
   }
+}
+
+/* ---------------- transports: how the file actually travels ----------------
+   A bank link is a file in and a file out. The three shapes that cover almost every real
+   counterparty need no dependency:
+
+     • HTTP      — an endpoint that takes the pain.001 and answers with the pain.002.
+     • file drop — a directory pair. SFTP is usually mounted, or handled by a sidecar that
+                   owns the SSH credentials; either way this side is read and write.
+     • in-memory — the simulated bank, for rehearsal.
+
+   SFTP in-process would mean an SSH library, and an SSH implementation inside a money
+   service is a dependency decision to take deliberately rather than slip in here. Mounting
+   the remote directory or terminating SFTP in a sidecar keeps the credential out of this
+   process entirely, which is the better shape anyway. */
+
+/** A bank that accepts the file over HTTPS and answers with the status report. */
+export function httpLink(opts: { submitUrl: string; statementsUrl?: string; headers?: Record<string, string>; timeoutMs?: number }): BankLink {
+  const send = async (url: string, body?: string): Promise<string> => {
+    const res = await fetchT(url, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { ...(body === undefined ? {} : { "content-type": "application/xml" }), ...(opts.headers ?? {}) },
+      ...(body === undefined ? {} : { body }),
+    }, opts.timeoutMs ?? 30_000);
+    const text = await res.text();
+    // A bank refusing the file is not a status report. Throwing keeps the batch in a state
+    // the next run can retry, rather than parsing an error page as zero instructions.
+    if (!res.ok) throw new Error(`bank link ${url}: ${res.status} ${text.slice(0, 200)}`);
+    return text;
+  };
+  return {
+    submit: (pain001) => send(opts.submitUrl, pain001),
+    ...(opts.statementsUrl ? { statements: async () => [await send(opts.statementsUrl!)] } : {}),
+  };
+}
+
+/** A directory pair: we write the instruction file, the bank writes back. What an SFTP
+ *  drop looks like once the transfer itself is somebody else's job.
+ *
+ *  Files are written to a temporary name and then renamed, because a bank polling the
+ *  directory will happily collect a half-written file otherwise — and a truncated pain.001
+ *  is a partial payment run. */
+export function fileDropLink(opts: {
+  outDir: string; inDir: string; statementDir?: string;
+  fs?: { writeFile(p: string, d: string): Promise<void>; rename(a: string, b: string): Promise<void>; readdir(p: string): Promise<string[]>; readFile(p: string): Promise<string>; unlink?(p: string): Promise<void> };
+  waitForReplyMs?: number;
+}): BankLink {
+  const fsx = opts.fs;
+  if (!fsx) throw new Error("fileDropLink: pass a filesystem (node:fs/promises, or a double in tests)");
+  const join = (dir: string, name: string) => `${dir.replace(/\/$/, "")}/${name}`;
+  const readOldest = async (dir: string): Promise<string[]> => {
+    const names = (await fsx.readdir(dir)).filter((n) => /\.(xml|XML)$/.test(n)).sort();
+    return Promise.all(names.map((n) => fsx.readFile(join(dir, n))));
+  };
+  return {
+    async submit(pain001) {
+      const name = `pain001-${Date.now()}.xml`;
+      // temp-then-rename: the bank must never collect a partial file
+      await fsx.writeFile(join(opts.outDir, `.${name}.part`), pain001);
+      await fsx.rename(join(opts.outDir, `.${name}.part`), join(opts.outDir, name));
+      const replies = await readOldest(opts.inDir);
+      // A drop is asynchronous by nature: no reply yet is normal, and an empty status
+      // report is the honest answer — the batch stays SUBMITTED until one arrives.
+      return replies[0] ?? '<?xml version="1.0"?><Document><CstmrPmtStsRpt/></Document>';
+    },
+    statements: () => readOldest(opts.statementDir ?? opts.inDir),
+  };
 }
 
 /** Every deferred rail. EMPTY until a real counterparty exists — a simulator is for

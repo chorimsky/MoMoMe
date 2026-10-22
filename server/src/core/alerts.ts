@@ -19,6 +19,7 @@ import { payoutHealth } from "./routing.js";
 import { availableFloatXaf } from "./stateMachine.js";
 import { notify, otpChannels, otpSmsSender, smsProviderRejecting } from "./notifications.js";
 import { identityEnabled, providersHealth } from "./identityResolution/resolver.js";
+import { DEFERRED } from "../adapters/deferred.js";
 import type { IdentityProviderHealth } from "../../../shared/identity.js";
 import * as whatsapp from "../adapters/whatsapp.js";
 import { smsChannel } from "../adapters/notify.js";
@@ -93,6 +94,11 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
      Senders keep paying — unverified — and nothing anywhere says the verifier is off. */
   out.push(...identityConditions(liveMoney(), identityEnabled(), await providersHealth().catch(() => [])));
 
+  // Deferred rails (banks / MFIs): debited and unproven. DEFERRED is empty until a real
+  // counterparty exists, so this contributes nothing today and starts working the day one
+  // is registered — rather than being remembered then.
+  out.push(...deferredConditions(liveMoney(), DEFERRED.map((d) => ({ name: d.name, rows: d.allRows(), unattributed: 0 }))));
+
   for (const a of low) out.push({ key: `liquidity:${a.sourceId}`, severity: "warning", body: `Low liquidity: ${a.sourceId} has ${Math.round(a.available).toLocaleString("en")} (floor ${a.floor.toLocaleString("en")}).` });
   return out;
 }
@@ -147,6 +153,48 @@ export function identityConditions(live: boolean, enabled: boolean, health: Iden
     ? namers.map((h) => `${h.name} (${h.lastError ?? h.status})`).join(", ")
     : "no configured provider can resolve a name";
   return [{ key: "identity:unverifiable", severity: "critical", body: `Recipient verification is OFF: no provider can say who owns a number, so every sender is told the recipient "can't be verified" and pays unchecked. Mobile Money does not reverse. Cause: ${why}. Admin → Identity shows each provider.` }];
+}
+
+/** Deferred rails: money that LEFT us and cannot be shown to have arrived.
+ *
+ *  On a Mobile Money rail a payout is answered in seconds and a stuck one is already paged
+ *  by payments:stuck. A bank rail is different in a way that defeats that alarm: DEBITED is
+ *  a perfectly normal state to sit in for hours, so nothing looks wrong until it has been
+ *  wrong for a day — and by then the statement that would have proved delivery is one we
+ *  have already read and filed.
+ *
+ *  `hours` is deliberately generous (a working day by default). The point is not to notice
+ *  quickly; it is to notice AT ALL, before a reconciliation at month end finds it.
+ *
+ *  Unattributed lines are a WARNING, not a page: a bank's own fee is an unattributed line
+ *  and is not an incident. A line we cannot explain still has to be seen by somebody. */
+export function deferredConditions(
+  live: boolean,
+  rails: Array<{ name: string; rows: Array<{ key: string; state: string; amount: number; currency: string; submittedAt?: string }>; unattributed?: number }>,
+  now = Date.now(),
+  hours = 24,
+): AlertCondition[] {
+  if (!live) return [];
+  const out: AlertCondition[] = [];
+  for (const rail of rails) {
+    const overdue = rail.rows.filter((r) => r.state === "DEBITED" && r.submittedAt && now - Date.parse(r.submittedAt) > hours * 3_600_000);
+    if (overdue.length) {
+      const total = overdue.reduce((t, r) => t + r.amount, 0);
+      out.push({
+        key: `deferred:${rail.name}:unsettled`,
+        severity: "critical",
+        body: `${overdue.length} payment(s) on ${rail.name} were DEBITED over ${hours}h ago and no statement shows them arriving — ${total.toLocaleString("en")} ${overdue[0].currency} left our account with nothing proving it reached anybody. Refs: ${overdue.slice(0, 3).map((r) => r.key).join(", ")}${overdue.length > 3 ? "…" : ""}. This is not a stuck payout: the bank says it paid us out. Ask the bank for the entries, then Admin → Reconciliation.`,
+      });
+    }
+    if (rail.unattributed) {
+      out.push({
+        key: `deferred:${rail.name}:unattributed`,
+        severity: "warning",
+        body: `${rail.unattributed} line(s) on ${rail.name}'s statement match nothing we instructed. A bank fee looks exactly like this and is fine; a credit or a reversal is not. Admin → Reconciliation lists them.`,
+      });
+    }
+  }
+  return out;
 }
 
 export function otpConditions(live: boolean, otp: { sms: boolean; whatsapp: boolean }, providerRejecting: boolean): AlertCondition[] {

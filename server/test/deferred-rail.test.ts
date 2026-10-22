@@ -141,6 +141,72 @@ async function main() {
   ok("…and the batch mapping, so a statement arriving later can still be matched",
     revived.rowsOf(batchId).length === 2, String(revived.rowsOf(batchId).length));
 
+  console.log("\nThe file drop must never let a bank collect half a payment run\n");
+  const { fileDropLink, httpLink } = await import("../src/adapters/deferred.js");
+  const disk = new Map<string, string>();
+  const order: string[] = [];
+  const fakeFs = {
+    writeFile: async (path: string, data: string) => { disk.set(path, data); order.push(`write:${path}`); },
+    rename: async (a: string, b: string) => { disk.set(b, disk.get(a)!); disk.delete(a); order.push(`rename:${b}`); },
+    readdir: async (dir: string) => [...disk.keys()].filter((k) => k.startsWith(`${dir}/`)).map((k) => k.slice(dir.length + 1)),
+    readFile: async (path: string) => disk.get(path) ?? "",
+  };
+  disk.set("in/sts.xml", '<?xml version="1.0"?><Document><CstmrPmtStsRpt><OrgnlPmtInfAndSts><TxInfAndSts><OrgnlEndToEndId>MMM-700001</OrgnlEndToEndId><TxSts>ACTC</TxSts></TxInfAndSts></OrgnlPmtInfAndSts></CstmrPmtStsRpt></Document>');
+  const drop = fileDropLink({ outDir: "out", inDir: "in", fs: fakeFs });
+  const reply = await drop.submit("<Document/>");
+  ok("the file is written under a hidden temp name FIRST", order[0].startsWith("write:out/."), order[0]);
+  ok("…and only then renamed into place, so a poll never sees a partial file",
+    order[1].startsWith("rename:out/pain001-") && !order[1].includes(".part"), order[1]);
+  ok("no temp file is left behind", ![...disk.keys()].some((k) => k.includes(".part")));
+  ok("a waiting status report is picked up", reply.includes("MMM-700001"));
+
+  const empty = fileDropLink({ outDir: "out", inDir: "nothing-here", fs: fakeFs });
+  const none = await empty.submit("<Document/>");
+  ok("no reply yet is NORMAL on a drop — an empty report, not a crash",
+    (await import("../src/core/iso20022/messages.js")).parsePain002(none).length === 0);
+
+  console.log("\nAn HTTP link refuses an error page rather than parsing it\n");
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/bad")) return new Response("<html>Gateway Timeout</html>", { status: 504 });
+    return new Response('<?xml version="1.0"?><Document><CstmrPmtStsRpt/></Document>', { status: 200 });
+  }) as typeof fetch;
+  try {
+    ok("a 200 is returned as the status report", (await httpLink({ submitUrl: "https://bank.invalid/ok" }).submit("<x/>")).includes("CstmrPmtStsRpt"));
+    let threw = false;
+    await httpLink({ submitUrl: "https://bank.invalid/bad" }).submit("<x/>").catch(() => { threw = true; });
+    ok("a 504 throws — an error page is not a status report saying zero instructions", threw);
+  } finally { globalThis.fetch = realFetch; }
+
+  console.log("\nDebited and unproven has to reach a PERSON\n");
+  const { deferredConditions } = await import("../src/core/alerts.js");
+  const day = 24 * 3_600_000;
+  const row = (key: string, state: string, hoursAgo: number) => ({ key, state, amount: 50_000, currency: "XAF", submittedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString() });
+
+  ok("a payment debited an hour ago is not an incident — that is normal on a bank rail",
+    deferredConditions(true, [{ name: "b", rows: [row("A", "DEBITED", 1)] }]).length === 0);
+  const page = deferredConditions(true, [{ name: "b", rows: [row("A", "DEBITED", 30)] }]);
+  ok("a payment debited 30 hours ago pages", page.length === 1, page[0]?.key);
+  ok("…as critical", page[0]?.severity === "critical");
+  ok("…saying money LEFT us with nothing proving it arrived", /left our account with nothing proving/.test(page[0]?.body ?? ""));
+  ok("…and distinguishing it from a stuck payout, which is a different problem",
+    /not a stuck payout/.test(page[0]?.body ?? ""));
+  ok("…naming the references so somebody can ask the bank about them", /Refs: A/.test(page[0]?.body ?? ""));
+
+  ok("a SETTLED payment never pages, however old",
+    deferredConditions(true, [{ name: "b", rows: [row("A", "SETTLED", 500)] }]).length === 0);
+  ok("a REJECTED one does not either — nothing left us", 
+    deferredConditions(true, [{ name: "b", rows: [row("A", "REJECTED", 500)] }]).length === 0);
+  ok("a SUBMITTED one does not: the bank has not said it debited us",
+    deferredConditions(true, [{ name: "b", rows: [row("A", "SUBMITTED", 500)] }]).length === 0);
+  ok("sandbox never pages", deferredConditions(false, [{ name: "b", rows: [row("A", "DEBITED", 500)] }]).length === 0);
+
+  const warn = deferredConditions(true, [{ name: "b", rows: [], unattributed: 2 }]);
+  ok("a line we cannot explain is a WARNING, not a page — a bank fee looks like this",
+    warn.length === 1 && warn[0].severity === "warning", warn[0]?.severity);
+  ok("…and says so, so nobody treats a fee as an incident", /bank fee looks exactly like this/.test(warn[0]?.body ?? ""));
+
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

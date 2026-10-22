@@ -10,6 +10,7 @@
    ============================================================ */
 import type { InboundAsset, Payment, PaymentState, DisplayStatus, Method } from "../../../shared/types.js";
 import { store } from "../db/store.js";
+import { isDeferredRail } from "../adapters/deferred.js";
 import { captureUnattributed } from "./unattributed.js";
 import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed, notifyRefundReminder } from "./notifications.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
@@ -1052,6 +1053,11 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of await store().listPayments()) {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
+    // A deferred rail is not stuck, it is waiting for a cut-off, and it has no queryStatus
+    // worth asking every minute — its truth arrives on a statement. aggregatorByName()
+    // would fall through to the primary Mobile Money rail and ask IT about a bank payment,
+    // which can only answer "not mine" or, worse, match a colliding reference.
+    if (isDeferredRail(p.aggregator)) continue;
     const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
     if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
   }

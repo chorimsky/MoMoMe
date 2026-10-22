@@ -19,7 +19,7 @@ import { payoutHealth } from "./routing.js";
 import { availableFloatXaf } from "./stateMachine.js";
 import { notify, otpChannels, otpSmsSender, smsProviderRejecting } from "./notifications.js";
 import { identityEnabled, providersHealth } from "./identityResolution/resolver.js";
-import { DEFERRED } from "../adapters/deferred.js";
+import { DEFERRED, isDeferredRail } from "../adapters/deferred.js";
 import type { IdentityProviderHealth } from "../../../shared/identity.js";
 import * as whatsapp from "../adapters/whatsapp.js";
 import { smsChannel } from "../adapters/notify.js";
@@ -55,7 +55,13 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   }
   // Payments: stuck payouts and long-held reviews.
   const pays = await store().listPayments();
-  const stuck = pays.filter((p) => p.state === "PAYOUT_REQUESTED" && now - Date.parse(p.updatedAt) > STUCK_PAYOUT_MIN * 60_000);
+  // 20 minutes is a Mobile Money threshold: those rails answer in seconds, so twenty is
+  // already pathological. A BANK rail is different in kind — PAYOUT_REQUESTED for a day is
+  // normal there, because settlement waits for a cut-off. Paging at 20 minutes on every
+  // deferred payout would be a false alarm per payment, which is how an operator learns to
+  // skim the one alarm that matters. Deferred rails have their own, slower alarm
+  // (deferred:*:unsettled) that watches for DEBITED-and-unproven instead.
+  const stuck = pays.filter((p) => p.state === "PAYOUT_REQUESTED" && !isDeferredRail(p.aggregator) && now - Date.parse(p.updatedAt) > STUCK_PAYOUT_MIN * 60_000);
   if (stuck.length) out.push({ key: "payments:stuck", severity: "critical", body: `${stuck.length} payout(s) in PAYOUT_REQUESTED for over ${STUCK_PAYOUT_MIN} min: ${stuck.slice(0, 3).map((p) => p.ref).join(", ")}${stuck.length > 3 ? "…" : ""}. Admin → Payments.` });
   // A refund the sender has not claimed is money we owe and still hold: page after an hour.
   const unclaimed = pays.filter((p) => p.state === "REFUND_PENDING" && p.refundNeedsDestination && now - Date.parse(p.updatedAt) > 60 * 60_000);

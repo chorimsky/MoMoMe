@@ -207,6 +207,40 @@ async function main() {
     warn.length === 1 && warn[0].severity === "warning", warn[0]?.severity);
   ok("…and says so, so nobody treats a fee as an incident", /bank fee looks exactly like this/.test(warn[0]?.body ?? ""));
 
+  console.log("\nA bank payout is not a stuck payout, and must not look like one\n");
+  const { conditions } = await import("../src/core/alerts.js");
+  const { isDeferredRail } = await import("../src/adapters/deferred.js");
+  const store = await import("../src/core/store.js");
+
+  ok("with no deferred rail registered, nothing is deferred", !isDeferredRail("anybank"));
+  // Register one, the way a real counterparty would be.
+  DEFERRED.push(makeRail(new SimulatedBank(), "anybank"));
+  try {
+    ok("…and now it is recognised", isDeferredRail("anybank"));
+    ok("a Mobile Money rail is still not", !isDeferredRail("peexit") && !isDeferredRail(undefined));
+
+    // A payout sitting in PAYOUT_REQUESTED for two hours: pathological on Mobile Money,
+    // ordinary on a bank rail waiting for a cut-off.
+    const old2h = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const base = { quoteId: "q", displayStatus: "Pending", method: "LIGHTNING", xaf: 50_000, feeXaf: 1_250, totalXaf: 51_250, usd: 84,
+      recipient: { phone: "670123456", country: "CM", provider: "MTN", name: "X", nameSource: "provider" },
+      payInstruction: { method: "LIGHTNING", code: "x", qr: "x", asset: "BTC", amount: 1, amountLabel: "1", expiresAt: old2h, providerRef: "r", provider: "ibex" },
+      events: [], createdAt: old2h, updatedAt: old2h, state: "PAYOUT_REQUESTED", payoutRef: "pr" };
+    store.putPayment({ ...base, id: "pay_mm", ref: "pay_mm", aggregator: "peexit" } as never);
+    const withMm = (await conditions()).find((c) => c.key === "payments:stuck");
+    ok("a Mobile Money payout stuck for two hours still pages", Boolean(withMm), withMm?.key);
+    ok("…naming it", /pay_mm/.test(withMm?.body ?? ""));
+
+    store.putPayment({ ...base, id: "pay_bank", ref: "pay_bank", aggregator: "anybank" } as never);
+    const after = (await conditions()).find((c) => c.key === "payments:stuck");
+    ok("the bank payout is NOT added to the stuck alarm — it is waiting, not stuck",
+      !/pay_bank/.test(after?.body ?? ""), after?.body?.slice(0, 80));
+    ok("…while the Mobile Money one is still there, so nothing was silenced wholesale",
+      /pay_mm/.test(after?.body ?? ""));
+  } finally {
+    DEFERRED.length = 0;
+  }
+
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

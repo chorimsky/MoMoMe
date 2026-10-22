@@ -324,3 +324,7 @@ export function fileDropLink(opts: {
  *  rehearsal, and registering one here would put an imaginary bank in the routing table. */
 export const DEFERRED: DeferredRail[] = [];
 export const deferredByName = (name: string): DeferredRail | undefined => DEFERRED.find((d) => d.name === name);
+/** Is this payment's rail a deferred one? Used wherever the rest of the system assumes a
+ *  payout is answered in seconds — a bank rail sitting in PAYOUT_REQUESTED overnight is
+ *  working correctly, and must not trip an alarm calibrated for Mobile Money. */
+export const isDeferredRail = (name: string | undefined): boolean => Boolean(name) && DEFERRED.some((d) => d.name === name);

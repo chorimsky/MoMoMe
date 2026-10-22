@@ -407,7 +407,7 @@ const HARD_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowe
  *  empty MTN bucket says nothing about Orange, and blinding the whole rail for ten minutes
  *  would strand payouts it could still make. The per-operator balance check in
  *  selectFundedAggregator is what keeps it out of the empty corridor. */
-const NO_RETRY_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowed|insufficient[_ ]?(fund|funds|balance|float)|ER301/i;
+const NO_RETRY_PAYOUT_FAIL = /not[_ ]?allowed|not[_ ]?configured|payouts?_not_allowed|insufficient[_ ]?(fund|funds|balance|float)|ER101|ER102|ER201|ER301/i;
 /** Exposed so test/payout-switching.test.ts can assert WHICH of the two a given provider
  *  message trips — the distinction (stop retrying vs take the rail out) is the whole
  *  point, and it is invisible from the outside. */

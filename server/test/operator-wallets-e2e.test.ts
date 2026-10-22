@@ -191,6 +191,22 @@ async function main() {
     orangeStatus.set(`PAYTOKEN-${okey}`, "FAILED");
     ok("FAILED fails", await orange.orangeCollector.status(okey) === "FAILED");
 
+    console.log("\nEvery status word each adapter maps, exercised — not just the common two\n");
+    // Without this, TIMEOUT, EXPIRED, CANCELLED and Orange's documented SUCCESSFULL
+    // misspelling could be deleted from the mappings and no test would notice.
+    for (const [word, expect] of [["SUCCESSFUL", "COMPLETED"], ["FAILED", "FAILED"], ["REJECTED", "FAILED"],
+                                  ["TIMEOUT", "FAILED"], ["EXPIRED", "FAILED"], ["PENDING", "PENDING"],
+                                  ["ONGOING", "PENDING"], ["SOMETHING_NEW", "PENDING"]] as const) {
+      mtnStatus.set(referenceFor(key), word);
+      ok(`MTN ${word} → ${expect}`, await mtnCollector.status(key) === expect);
+    }
+    for (const [word, expect] of [["SUCCESS", "COMPLETED"], ["SUCCESSFUL", "COMPLETED"], ["SUCCESSFULL", "COMPLETED"],
+                                  ["FAILED", "FAILED"], ["EXPIRED", "FAILED"], ["CANCELLED", "FAILED"], ["CANCELED", "FAILED"],
+                                  ["INITIATED", "PENDING"], ["SOMETHING_NEW", "PENDING"]] as const) {
+      orangeStatus.set(`PAYTOKEN-${okey}`, word);
+      ok(`Orange ${word} → ${expect}`, await orange.orangeCollector.status(okey) === expect);
+    }
+
     console.log("\nConfiguring the operator rail does NOT, by itself, send traffic to it\n");
     // Worth knowing before go-live: collection is PINNED to the aggregator by default
     // (settings.rails.collect.preferred = peexit for both operators), and a pin wins

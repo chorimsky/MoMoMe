@@ -127,6 +127,18 @@ async function liveWithdraw(req: DisburseRequest): Promise<string> {
     // bad request. Name it, because the fix (top up that carrier's float) is nothing like
     // the fix for a malformed payout.
     if (/ER301/.test(text)) throw new Error(`CamPay withdrawal refused: insufficient ${req.provider} float (ER301)`);
+    // CamPay's other documented codes are DETERMINISTIC refusals about this request, not
+    // about CamPay: ER101 a phone number without a country code, ER102 a carrier that is
+    // neither MTN nor Orange, ER201 a decimal amount. None of them become true on a second
+    // attempt, so they must not burn submitWithRetry's three tries and 4.5 s of backoff
+    // before the payment moves on. NO_RETRY_PAYOUT_FAIL matches these codes.
+    const code = /\b(ER101|ER102|ER201)\b/.exec(text)?.[1];
+    if (code) {
+      const why = code === "ER101" ? "the number is not in international form (237…)"
+        : code === "ER102" ? "that carrier is not MTN or Orange"
+        : "the amount is not a whole number";
+      throw new Error(`CamPay withdrawal refused: ${why} (${code})`);
+    }
     throw new Error(`CamPay withdrawal failed: ${res.status} ${text.slice(0, 200)}`);
   }
   let data: { reference?: string; status?: string };

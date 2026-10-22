@@ -161,6 +161,10 @@ async function main() {
   replies = [(u) => u.includes("/holder_info/") ? { status: 200, body: { full_name: "JOHN DOE" } } : null];
   const r1 = await campayHolder.resolve(nid, ctx);
   ok("a name → VERIFIED with the display name", r1.status === "VERIFIED" && r1.displayName === "JOHN DOE");
+  // holder_info returns { full_name } and nothing else, so the wallet's standing is UNKNOWN.
+  // Reporting ACTIVE here would put a fact in a caller's hands that nobody established.
+  ok("…but accountStatus is UNKNOWN — CamPay never said the wallet is open",
+    r1.accountStatus === "UNKNOWN", r1.accountStatus);
   replies = [(u) => u.includes("/holder_info/") ? { status: 404, body: { message: "No name found" } } : null];
   const r2 = await campayHolder.resolve(nid, ctx);
   ok("no name → NOT_FOUND, and NOT a fabricated name", r2.status === "NOT_FOUND" && !r2.displayName);

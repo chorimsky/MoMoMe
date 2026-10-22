@@ -43,7 +43,15 @@ export const campayHolder: IdentityProvider = {
       const name = await holderInfo(id.identifier, ctx.timeoutMs);
       lastLatency = Date.now() - t0; lastOk = true; lastError = undefined;
       if (name) {
-        return { status: "VERIFIED", verified: true, displayName: name, accountStatus: "ACTIVE", capabilities: caps(true), provider: { name: "campay_holder", verifiedAt: new Date().toISOString() } };
+        // accountStatus is UNKNOWN, not ACTIVE. CamPay's holder_info answers { full_name }
+        // and nothing else — it names the holder and says NOTHING about whether the wallet
+        // is open. Claiming ACTIVE on the strength of having a name is the same inference
+        // that /v1/recipients/validate used to make, and it reaches a caller as a fact we
+        // established. Providers that genuinely report status (Peexit's accountStatus,
+        // MTN's /active, Wallet2Cash's isActive) set it from what they said.
+        // capabilities stay true: CamPay will attempt a payout to this number, which is a
+        // statement about the RAIL, not about the account's standing.
+        return { status: "VERIFIED", verified: true, displayName: name, accountStatus: "UNKNOWN", capabilities: caps(true), provider: { name: "campay_holder", verifiedAt: new Date().toISOString() } };
       }
       // 404, or a 200 whose full_name was blank. CamPay answered; it has no name for this
       // number. That is NOT_FOUND — an answer — and the chain must stop here rather than

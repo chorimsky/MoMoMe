@@ -40,6 +40,40 @@ const mine = (ctx: Ctx) => { const m = mpiForOrganization(ctx.orgId); if (!m) th
 const owned = (ctx: Ctx, id: string) => { const m = getMpi(id); if (!m || m.orgId !== ctx.orgId) throw err(404, "identity_not_found", "No such identity for this organization."); return m; };
 
 /* ---------- identities ---------- */
+/** Caller-supplied metadata, made to match the type that claims it.
+ *
+ *  `b.metadata as Record<string, string>` is a CAST: it does nothing at runtime, so what
+ *  actually reached storage was whatever the partner sent — nested objects, arrays, numbers,
+ *  thousands of keys. Two consequences. The declared type lied, so any code downstream that
+ *  trusts it (iterating values, concatenating them, putting them in a header) was working on
+ *  an assumption nothing enforced. And persistence dumps a WHOLE collection as one JSON blob
+ *  on every touch(), so metadata is not stored once — it is rewritten on every subsequent
+ *  change to any record in that collection, on SQLite on a single volume.
+ *
+ *  Limits follow the usual shape for this field (Stripe's are 50 keys / 40 / 500). Keys that
+ *  could shadow object internals are dropped: object spread does not trigger setters so
+ *  there is no prototype-pollution path here today, but `Object.assign` would, and this
+ *  value is passed around and merged. Over-long values are TRUNCATED rather than refused,
+ *  because rejecting a whole payment over a long note is the wrong trade. */
+const META_MAX_KEYS = 50, META_MAX_KEY = 64, META_MAX_VALUE = 500;
+const DANGEROUS = new Set(["__proto__", "constructor", "prototype"]);
+export function cleanMetadata(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  let n = 0;
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (n >= META_MAX_KEYS) break;
+    if (!k || k.length > META_MAX_KEY || DANGEROUS.has(k)) continue;
+    if (raw === null || raw === undefined) continue;
+    // Scalars become their string; anything structured is summarised rather than stored,
+    // so a nested blob cannot be smuggled in as a "string value".
+    const str = typeof raw === "object" ? JSON.stringify(raw) : String(raw);
+    out[k] = str.slice(0, META_MAX_VALUE);
+    n++;
+  }
+  return n ? out : undefined;
+}
+
 route("get", "/identities/me", { scope: "identities:read", cls: "identities" }, async (ctx) => ({ ...ownerMpi(mine(ctx)), balance: { available: String(balanceOf(mine(ctx).id)), currency: "XAF" } }));
 route("post", "/identities", { scope: "identities:write", idempotent: true, cls: "identities" }, async (ctx) => {
   const b = ctx.body; const type = (str(b.type) || "business") as MpiType;
@@ -96,7 +130,7 @@ route("post", "/resolve", { scope: "identities:read", cls: "resolve" }, async (c
 route("post", "/counterparties", { scope: "identities:write", idempotent: true, cls: "counterparties" }, async (ctx) => {
   const b = ctx.body; const contacts = Array.isArray(b.contacts) ? (b.contacts as Array<Record<string, unknown>>).map((c) => ({ type: str(c.type) as AliasType, value: str(c.value) })).filter((c) => ALIAS_TYPES.includes(c.type) && c.value) : [];
   if (!contacts.length) throw err(422, "invalid_request", "Give at least one contact: { type: phone|email|lightning_address|merchant_code|external_id, value }.");
-  const r = createCounterparty(ctx.orgId, { name: str(b.name), contacts, country: (str(b.country).toUpperCase() || "CM") as CountryCode, metadata: b.metadata as Record<string, string> | undefined });
+  const r = createCounterparty(ctx.orgId, { name: str(b.name), contacts, country: (str(b.country).toUpperCase() || "CM") as CountryCode, metadata: cleanMetadata(b.metadata) });
   if (!r.ok) throw err(422, "invalid_request", r.error === "name_required" ? "`name` is required." : `Invalid contact: ${r.error}.`);
   ctx.status = 201; return publicCounterparty(r.counterparty);
 });
@@ -118,7 +152,7 @@ function intentInput(ctx: Ctx, surface: Surface) {
   // API surface: when the organization pays someone else and names no payer, it IS the payer.
   if (!Object.keys(p).length && payee.id !== mine(ctx).id) p.identity = mine(ctx).id;
   const permitted = Array.isArray(b.permitted_methods) ? (b.permitted_methods as unknown[]).map(str).filter((x): x is PaymentMethodId => METHODS.includes(x as PaymentMethodId)) : undefined;
-  return { orgId: ctx.orgId, env: ctx.env, surface, payee, payer: Object.keys(p).length ? { mpi: str(p.identity) || undefined, counterparty: str(p.counterparty) || undefined, name: str(p.name) || undefined, phone: str(p.phone) || undefined } : undefined, amountXaf: amount, currency: str((b.amount as Record<string, unknown>)?.currency ?? b.currency) || "XAF", purpose: b.purpose && typeof b.purpose === "object" ? { type: (str((b.purpose as Record<string, unknown>).type) || "payment") as "payment", reference: str((b.purpose as Record<string, unknown>).reference) || undefined, description: str((b.purpose as Record<string, unknown>).description) || undefined } : undefined, permittedMethods: permitted, ttlMs: num(b.ttl_seconds) > 0 ? num(b.ttl_seconds) * 1000 : undefined, metadata: b.metadata as Record<string, string> | undefined, callbackUrl: str(b.callback_url) || undefined };
+  return { orgId: ctx.orgId, env: ctx.env, surface, payee, payer: Object.keys(p).length ? { mpi: str(p.identity) || undefined, counterparty: str(p.counterparty) || undefined, name: str(p.name) || undefined, phone: str(p.phone) || undefined } : undefined, amountXaf: amount, currency: str((b.amount as Record<string, unknown>)?.currency ?? b.currency) || "XAF", purpose: b.purpose && typeof b.purpose === "object" ? { type: (str((b.purpose as Record<string, unknown>).type) || "payment") as "payment", reference: str((b.purpose as Record<string, unknown>).reference) || undefined, description: str((b.purpose as Record<string, unknown>).description) || undefined } : undefined, permittedMethods: permitted, ttlMs: num(b.ttl_seconds) > 0 ? num(b.ttl_seconds) * 1000 : undefined, metadata: cleanMetadata(b.metadata), callbackUrl: str(b.callback_url) || undefined };
 }
 route("post", "/payment-intents", { scope: "payments:write", idempotent: true, cls: "intents" }, async (ctx) => wrap(() => { const i = createIntent(intentInput(ctx, "api")); meter(ctx.orgId, ctx.env, "payments"); auditCtx(ctx, "intent.created", { type: "payment_intent", id: i.id }); ctx.status = 201; return { ...publicIntent(i), route_preview: (() => { const d = routeFor(i); return "error" in d ? null : { method: d.method, transport: d.transport }; })() }; }));
 route("get", "/payment-intents", { scope: "payments:read", cls: "intents" }, async (ctx) => ({ object: "list", data: intentsOf(ctx.orgId, ctx.env).map(publicIntent) }));
@@ -141,7 +175,7 @@ function invoiceInput(ctx: Ctx, kind: "invoice" | "payment_link" | "qr" | "reque
   const payer = Object.keys(p).length ? { mpi: str(p.identity) || undefined, counterparty: str(p.counterparty) || undefined, name: str(p.name) || undefined, phone: str(p.phone) || undefined, email: str(p.email) || undefined } : undefined;
   if (kind === "request_to_pay" && !payer) throw err(422, "invalid_request", "A request-to-pay needs a known payer: { identity } or { counterparty } or { phone }.");
   const accepted = Array.isArray(b.accepted_methods) ? (b.accepted_methods as unknown[]).map(str).filter((x): x is PaymentMethodId => METHODS.includes(x as PaymentMethodId)) : undefined;
-  return { orgId: ctx.orgId, env: ctx.env, kind, payee, amountXaf: amount, description: str(b.description) || undefined, reference: str(b.reference) || undefined, dueDate: /^\d{4}-\d{2}-\d{2}$/.test(str(b.due_date)) ? str(b.due_date) : undefined, payer, acceptedMethods: accepted, metadata: b.metadata as Record<string, string> | undefined, callbackUrl: str(b.callback_url) || undefined, issue: b.issue !== false };
+  return { orgId: ctx.orgId, env: ctx.env, kind, payee, amountXaf: amount, description: str(b.description) || undefined, reference: str(b.reference) || undefined, dueDate: /^\d{4}-\d{2}-\d{2}$/.test(str(b.due_date)) ? str(b.due_date) : undefined, payer, acceptedMethods: accepted, metadata: cleanMetadata(b.metadata), callbackUrl: str(b.callback_url) || undefined, issue: b.issue !== false };
 }
 route("post", "/invoices", { scope: "invoices:write", idempotent: true, cls: "invoices" }, async (ctx) => wrap(() => { const kind = (str(ctx.body.kind) || "invoice") as "invoice" | "payment_link" | "qr"; if (!["invoice", "payment_link", "qr"].includes(kind)) throw err(422, "invalid_request", "kind must be invoice, payment_link or qr."); const inv = createInvoice(invoiceInput(ctx, kind)); auditCtx(ctx, "invoice.created", { type: "invoice", id: inv.id }); ctx.status = 201; return publicInvoice(inv); }));
 route("post", "/requests", { scope: "invoices:write", idempotent: true, cls: "invoices" }, async (ctx) => wrap(() => { const inv = createInvoice(invoiceInput(ctx, "request_to_pay")); auditCtx(ctx, "request.created", { type: "invoice", id: inv.id }); ctx.status = 201; return publicInvoice(inv); }));
@@ -153,7 +187,7 @@ route("post", "/invoices/:id/cancel", { scope: "invoices:write", idempotent: tru
 route("post", "/payouts", { scope: "payouts:write", idempotent: true, cls: "payouts", paymentEndpoint: true }, async (ctx) => wrap(async () => {
   const b = ctx.body; const d = (b.destination ?? {}) as Record<string, unknown>;
   const payerId = str((b.source as Record<string, unknown>)?.identity); const payer = payerId ? owned(ctx, payerId) : mine(ctx);
-  const p = await createPayout({ orgId: ctx.orgId, env: ctx.env, payer, amountXaf: num((b.amount as Record<string, unknown>)?.value ?? b.amount), destination: { phone: str(d.phone) || undefined, country: str(d.country) || undefined, lightning_address: str(d.lightning_address) || undefined, identity: str(d.identity) || undefined, name: str(d.name) || undefined }, reference: str(b.reference) || undefined, metadata: b.metadata as Record<string, string> | undefined });
+  const p = await createPayout({ orgId: ctx.orgId, env: ctx.env, payer, amountXaf: num((b.amount as Record<string, unknown>)?.value ?? b.amount), destination: { phone: str(d.phone) || undefined, country: str(d.country) || undefined, lightning_address: str(d.lightning_address) || undefined, identity: str(d.identity) || undefined, name: str(d.name) || undefined }, reference: str(b.reference) || undefined, metadata: cleanMetadata(b.metadata) });
   auditCtx(ctx, "payout.created", { type: "payout", id: p.id }, { xaf: p.amount.value, status: p.status });
   ctx.status = 201; return publicPayout(p);
 }));

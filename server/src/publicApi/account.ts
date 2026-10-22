@@ -83,6 +83,46 @@ route("post", "/settlements/:id/cancel", { scope: "settlements:write", idempoten
   return publicSettlement(s);
 });
 
+/* ---------- what a partner may see on a timeline ----------
+   Event notes are INTERNAL. They are written for an operator reading Admin → Payments and
+   they carry, verbatim:
+
+     • a provider's raw error body — `MTN collection failed: 500 {…}` — which is a third
+       party's text, may name their internal identifiers, and is not ours to republish;
+     • the names of our rails, and on a failover the ORDER we tried them in, which is our
+       supplier mix and fallback topology;
+     • operational asides about liquidity and absorbed fees.
+
+   A partner calling GET /v1/transactions/:id was getting all of it. Nothing here is a
+   credential, so this is disclosure rather than compromise — but a payments platform's rail
+   mix is commercially sensitive, and republishing a supplier's error text is not ours to do.
+   Wallet2Cash's own docs make the same promise in the other direction: "An upstream
+   provider/backend failure is never echoed back verbatim."
+
+   So: an ALLOW-list. A note is shown only when we recognise it as one of ours and can state
+   it in our own words. Anything unrecognised is omitted rather than passed through, because
+   the failure mode of a deny-list is that tomorrow's new note leaks by default. The step and
+   its state still appear, so the lifecycle a partner actually needs is unchanged. */
+function publicDetail(note: string | undefined): string | undefined {
+  if (!note) return undefined;
+  const n = note.toLowerCase();
+  if (/payout failed at .* → retrying on/.test(n)) return "the first payout attempt failed; a second was made";
+  if (/also failed/.test(n)) return "a further payout attempt failed";
+  if (/payout failed at provider|rejected after accepting/.test(n)) return "the provider rejected the payout";
+  if (/insufficient|float|liquidity/.test(n) && /fail|refus|reject/.test(n)) return "the payout could not be funded at the time";
+  if (/duplicate payout key/.test(n)) return "held for review: a duplicate payout reference";
+  if (/no payout aggregator|no funded/.test(n)) return "held for review: no payout route was available";
+  if (/compliance|review/.test(n)) return "held for compliance review";
+  if (/cancelled by org/.test(n)) return "cancelled";
+  if (/expired/.test(n)) return "expired";
+  if (/refund/.test(n)) return "a refund was opened";
+  return undefined;   // unrecognised: the state is shown, the note is not
+}
+
+/** Exported for test/security-audit.test.ts: the filter is the security control here, and
+ *  a test that re-implemented it would pass while the real one leaked. */
+export { publicDetail as _publicDetail };
+
 /* ---------- transactions: the unified timeline ---------- */
 async function timelineOf(ctx: Ctx, id: string) {
   const m = metaOf(id); if (!m || m.orgId !== ctx.orgId || m.env !== ctx.env) throw err(404, "payment_not_found", "Payment could not be found.");
@@ -92,9 +132,12 @@ async function timelineOf(ctx: Ctx, id: string) {
   steps.push({ at: p.createdAt, step: "customer_request", detail: `request ${m.requestId}` });
   steps.push({ at: p.createdAt, step: "quote", detail: p.quoteId });
   steps.push({ at: p.createdAt, step: "payment_created", detail: p.id });
-  for (const e of p.events) steps.push({ at: e.at, step: `engine:${e.state}`, ...(e.note ? { detail: e.note } : {}) });
+  for (const e of p.events) steps.push({ at: e.at, step: `engine:${e.state}`, ...(publicDetail(e.note) ? { detail: publicDetail(e.note) } : {}) });
   if (p.payInstruction?.providerRef) steps.push({ at: p.createdAt, step: "digital_asset_instruction", detail: `${SOURCE_OF[p.method].asset}/${SOURCE_OF[p.method].network}` });
-  if (p.payoutRef) steps.push({ at: p.events.find((e) => e.state === "PAYOUT_CONFIRMED")?.at ?? p.updatedAt, step: "provider_transaction", detail: `${p.aggregator ?? "rail"} ${p.payoutRef}` });
+  // The provider's own reference, WITHOUT naming the rail. A partner may need the reference
+  // to raise a dispute through us; which supplier carried it is our commercial information,
+  // and on a failover the sequence of rail names also describes our fallback topology.
+  if (p.payoutRef) steps.push({ at: p.events.find((e) => e.state === "PAYOUT_CONFIRMED")?.at ?? p.updatedAt, step: "provider_transaction", detail: p.payoutRef });
   const ledger = entriesFor(p.id).map((l) => ({ at: l.at, txn_id: l.txnId, account: l.account, direction: l.direction, amount: l.amount, currency: l.currency }));
   const webhooks = eventsOf(`org:${ctx.orgId}`, undefined, 200).filter((e) => (e.event as { data?: { id?: string } })?.data?.id === p.id).map((e) => ({ event_id: e.id, type: e.type, status: e.deliveredAt ? "delivered" : e.dead ? "dead" : "pending", attempts: e.attempts }));
   return { id: p.id, object: "transaction", reference: pub.reference, status: pub.status, payment: pub, compliance: m.compliance ?? null, liquidity_reservation: m.reservationId ?? null, steps: steps.sort((a, b) => a.at.localeCompare(b.at)), ledger, webhooks };

@@ -1206,7 +1206,10 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown, op
   // CDD trigger / near a limit → created, but settlement HOLDS for an operator.
   const screen = await complianceEngine.screenTransaction({ owner, recipientPhone: recipient.phone, recipientName: cleanName || undefined, country: recipient.country, xaf: quote.xaf, merchantCode: (reqBody as { merchantCode?: string }).merchantCode ?? null });
   if (screen.verdict === "blocked") {
-    console.warn(`[compliance] refused payment to ${recipient.provider} ${recipient.phone}: ${screen.flags.join(" | ")}`);
+    // The number of somebody a compliance screen REFUSED is the most sensitive line this
+    // service could write: it ties a person to an AML flag, in a log retained per
+    // deployment. The last four are enough for an operator to match it to the case.
+    console.warn(`[compliance] refused payment to ${recipient.provider} ···${String(recipient.phone ?? "").replace(/\D/g, "").slice(-4)}: ${screen.flags.join(" | ")}`);
     void notify({ kind: "manual_review", audience: "operator", body: `Refused: ${quote.xaf} XAF to ${recipient.provider} ${recipient.phone} — ${screen.flags.join("; ")}` }).catch(() => {});
     return { status: 403, body: { error: "compliance_blocked", message: "This payment can't be processed right now. If you believe this is a mistake, contact support." } };
   }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { register, touch } from "./persist.js";
 import { store } from "../db/store.js";
 
@@ -31,5 +32,12 @@ export async function nextRef(): Promise<string> {
 }
 
 export function id(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  // randomBytes, not Math.random. Nothing minted here is a bearer token TODAY — the
+  // publicly addressable ids (pi_, inv_, po_, mpi_) already use randomBytes, and the
+  // unauthenticated checkout takes one of those. But Math.random is V8's xorshift128+, whose
+  // internal state is recoverable from a handful of outputs, so an id built on it is
+  // predictable to anyone who has seen a few. The day somebody reaches for id() to make
+  // something guessable-must-not-be — a claim link, a one-time reference — that property
+  // decides whether it is safe, and nobody will re-read this function first.
+  return `${prefix}_${Date.now().toString(36)}${randomBytes(5).toString("hex").slice(0, 6)}`;
 }

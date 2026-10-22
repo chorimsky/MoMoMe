@@ -17,6 +17,13 @@ import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
 import type { DisburseRequest, PayoutStatus } from "../adapters/pawapay.js";
 
+/** A Mobile Money number is PII, and these lines go to the platform log and to Sentry,
+ *  where they are retained per deployment and readable by anyone with dashboard access.
+ *  The rest of the codebase already masks (identityResolution/msisdn last4); this path did
+ *  not, so every operator cash-in and cash-out wrote a full recipient number into the log. */
+const mask = (phone: string): string => { const d = String(phone ?? "").replace(/\D/g, ""); return d.length > 4 ? `···${d.slice(-4)}` : "···"; };
+
+
 const ops: MomoOp[] = [];
 // Retain a large window of admin money ops so AML screening + audit don't drop real
 // movements (was 200 — beyond that, large disbursements escaped CTR/sanctions checks).
@@ -198,11 +205,11 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "send_failed";
     record(op);
-    console.error(`[momo] cashout FAILED ${amount} XAF → ${phone} via ${rail} by ${by}: ${op.error}`);
+    console.error(`[momo] cashout FAILED ${amount} XAF → ${mask(phone)} via ${rail} by ${by}: ${op.error}`);
     return { ok: false, error: op.error, op };
   }
   record(op);
-  console.log(`[momo] cashout ${amount} XAF → ${phone} via ${rail} by ${by} (${op.status})`);
+  console.log(`[momo] cashout ${amount} XAF → ${mask(phone)} via ${rail} by ${by} (${op.status})`);
   return { ok: true, op };
   });
 }
@@ -227,11 +234,11 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "deposit_failed";
     record(op);
-    console.error(`[momo] cashin FAILED ${amount} XAF ← ${phone} via ${rail} by ${by}: ${op.error}`);
+    console.error(`[momo] cashin FAILED ${amount} XAF ← ${mask(phone)} via ${rail} by ${by}: ${op.error}`);
     return { ok: false, error: op.error, op };
   }
   record(op);
-  console.log(`[momo] cashin ${amount} XAF ← ${phone} via ${rail} by ${by} (accepted — awaiting payer approval)`);
+  console.log(`[momo] cashin ${amount} XAF ← ${mask(phone)} via ${rail} by ${by} (accepted — awaiting payer approval)`);
   return { ok: true, op };
   });
 }

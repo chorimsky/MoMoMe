@@ -78,6 +78,73 @@ async function main() {
     const own = await fetch(`${root}/api/config`, { headers: { origin: "https://www.momome.xyz" } });
     ok("our own origin is", own.headers.get("access-control-allow-origin") === "https://www.momome.xyz");
   } finally { server.close(); }
+  console.log("\nA partner's timeline must not republish our suppliers' text\n");
+  {
+    const { _publicDetail } = await import("../src/publicApi/account.js") as unknown as { _publicDetail?: (n?: string) => string | undefined };
+    const detail = _publicDetail;
+    if (!detail) { ok("account.ts exports its timeline filter for this test", false, "add `export { publicDetail as _publicDetail }`"); }
+    else {
+      // The exact strings our own code writes into a payment's events.
+      ok("a provider's raw error body is NOT passed through",
+        detail("payout failed at provider: MTN collection failed: 500 {\"err\":\"internal\"}") === "the provider rejected the payout"
+        || detail("payout failed at provider: MTN collection failed: 500 {\"err\":\"internal\"}") === undefined);
+      for (const note of [
+        "MTN collection failed: 500 {\"detail\":\"upstream broke\"}",
+        "CamPay withdrawal failed: 400 {\"errorcode\":\"ER999\"}",
+        "Peexit disbursement failed: 403 <html>nginx</html>",
+        "something nobody has written yet",
+      ]) {
+        const out = detail(note);
+        ok(`"${note.slice(0, 34)}…" never reaches a partner verbatim`, out !== note, String(out));
+        ok("…and no provider name leaks through it", !/mtn|campay|peexit|orange|pawapay/i.test(out ?? ""), String(out));
+      }
+      ok("an unrecognised note is OMITTED, not passed through — a deny-list would leak tomorrow's",
+        detail("a brand new note nobody mapped") === undefined);
+      ok("a note we DO recognise is still explained, in our own words",
+        detail("payout failed at peexit (rejected) → retrying on campay") === "the first payout attempt failed; a second was made");
+      ok("…without naming either rail", !/peexit|campay/i.test(detail("payout failed at peexit (rejected) → retrying on campay") ?? ""));
+    }
+  }
+
+  console.log("\nCaller-supplied metadata is made to match the type that claims it\n");
+  {
+    const { cleanMetadata } = await import("../src/publicApi/connect.js");
+    ok("a normal map survives", JSON.stringify(cleanMetadata({ order: "A-1", note: "ok" })) === '{"order":"A-1","note":"ok"}');
+    ok("a non-object is refused", cleanMetadata("nope") === undefined && cleanMetadata(42) === undefined);
+    ok("an ARRAY is refused — the type says map", cleanMetadata(["a", "b"]) === undefined);
+    ok("null and undefined are refused", cleanMetadata(null) === undefined && cleanMetadata(undefined) === undefined);
+
+    const wide = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, "v"]));
+    ok("a 500-key object is capped at 50", Object.keys(cleanMetadata(wide) ?? {}).length === 50);
+    const long = cleanMetadata({ note: "x".repeat(5_000) })!;
+    ok("an over-long value is truncated, not refused — a long note must not kill a payment",
+      long.note.length === 500);
+    ok("an over-long KEY is dropped", cleanMetadata({ ["k".repeat(200)]: "v", ok: "1" })?.["ok"] === "1"
+      && Object.keys(cleanMetadata({ ["k".repeat(200)]: "v", ok: "1" }) ?? {}).length === 1);
+
+    // The type promised Record<string,string>; the cast delivered whatever arrived.
+    const nested = cleanMetadata({ deep: { a: { b: [1, 2, 3] } }, n: 7, t: true })!;
+    ok("every value really IS a string now", Object.values(nested).every((v) => typeof v === "string"), JSON.stringify(nested));
+    ok("…a nested object is summarised, not stored as structure", nested.deep.startsWith("{"));
+    ok("…and numbers and booleans are stringified", nested.n === "7" && nested.t === "true");
+
+    const poison = JSON.parse('{"__proto__":{"polluted":"yes"},"constructor":{"x":1},"safe":"1"}');
+    const cleaned = cleanMetadata(poison)!;
+    // Object.hasOwn, not `in`: "constructor" is in EVERY object via the prototype chain,
+    // so `in` would have failed this assertion against correct code.
+    ok("keys that could shadow object internals are dropped",
+      !Object.hasOwn(cleaned, "__proto__") && !Object.hasOwn(cleaned, "constructor") && cleaned.safe === "1", JSON.stringify(cleaned));
+    ok("…and nothing was polluted along the way", ({} as Record<string, unknown>).polluted === undefined);
+  }
+
+  console.log("\nIds that could become capabilities are not predictable\n");
+  {
+    const { id } = await import("../src/core/ids.js");
+    const made = Array.from({ length: 200 }, () => id("t"));
+    ok("every id is unique across 200", new Set(made).size === 200);
+    ok("…and the random part is not Math.random's base36 alphabet only", made.every((x) => /^t_[a-z0-9]+[0-9a-f]{6}$/.test(x)), made[0]);
+  }
+
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`); process.exit(fail === 0 ? 0 : 1);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

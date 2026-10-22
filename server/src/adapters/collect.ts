@@ -108,6 +108,46 @@ export interface CollectAdapter {
  *  explicit stand-in for them. */
 const selectable = (c: CollectAdapter): boolean => c.configured() || c.simulates?.() === true;
 
+/* ---------------- health, as an input to SELECTION ----------------
+   CollectAdapter.health() has always been documented as "used by health and by selection".
+   It was only ever used by health. Selection filtered on supports / selectable / disabled
+   and nothing else, so a rail we had already proven unreachable kept being handed payers.
+
+   That was not hypothetical. Peexit's host stopped resolving, collectHealth() reported
+   `ok: false, note: "unreachable: fetch failed"` on every /health/deep — and because
+   peexit is also the PINNED default collection rail, every single collection was still
+   being sent to it while a second configured rail sat idle.
+
+   health() is async and selection is sync, which is why this was never wired. So the
+   verdict is cached here, written by collectHealth() (the uptime monitor calls /health/deep
+   every minute) and refreshed opportunistically off the selection path without blocking it.
+
+   The rule is PREFER, not EXCLUDE: a rail with a recent failing verdict drops to the back,
+   and is only skipped when something else can serve the corridor. A health signal can be
+   stale or wrong, and refusing every collection on the strength of one would be a worse
+   failure than the one being fixed. */
+const HEALTH_TTL_MS = 60_000;
+const healthVerdict = new Map<string, { ok: boolean; at: number; note?: string }>();
+/** True unless we hold a RECENT failing verdict. Unknown is healthy: never having asked is
+ *  not evidence of being down. */
+export function collectRailHealthy(name: string, now = Date.now()): boolean {
+  const v = healthVerdict.get(name);
+  return !v || v.ok || now - v.at > HEALTH_TTL_MS;
+}
+export function _noteCollectHealth(name: string, ok: boolean, note?: string, now = Date.now()): void {
+  healthVerdict.set(name, { ok, at: now, note });
+}
+export function _resetCollectHealth(): void { healthVerdict.clear(); }
+/** Refresh in the background. Never awaited by selection: a payer must not wait on a probe. */
+function refreshHealth(rails: CollectAdapter[]): void {
+  for (const c of rails) {
+    if (!c.health) continue;
+    const v = healthVerdict.get(c.name);
+    if (v && Date.now() - v.at < HEALTH_TTL_MS) continue;
+    void c.health().then((h) => _noteCollectHealth(c.name, h.ok, h.note)).catch(() => _noteCollectHealth(c.name, false, "health check threw"));
+  }
+}
+
 /* ---------------- the aggregator we already collect through ----------------
    Unchanged behaviour: this is the code path core/momoTransfer.ts has always used, now
    behind the interface so it can be one of several rather than the only one. */
@@ -188,8 +228,13 @@ function collectSettings() {
 export function collectorsFor(provider: ProviderId, country: CountryCode = "CM"): CollectAdapter[] {
   const cfg = collectSettings();
   const pref = cfg.preferred(provider);
-  return COLLECTORS
-    .filter((c) => c.supports(provider, country) && selectable(c) && !cfg.disabled.has(c.name))
+  const candidates = COLLECTORS.filter((c) => c.supports(provider, country) && selectable(c) && !cfg.disabled.has(c.name));
+  refreshHealth(candidates);   // fire-and-forget; this call uses whatever verdict is already in hand
+  // A rail we have recently proven unreachable goes last — ahead of nothing except being
+  // unusable. Checked BEFORE the pin, because a pin expresses a preference between rails
+  // that work, not an instruction to keep feeding payers to one that does not.
+  const healthy = candidates.filter((c) => collectRailHealthy(c.name));
+  return (healthy.length ? healthy : candidates)
     // A PINNED rail wins outright — that is what pinning means. Otherwise: rails that can
     // move real money first, then by priority.
     .sort((a, b) =>
@@ -234,6 +279,7 @@ export function selectCollector(input: { provider: ProviderId; country?: Country
 export async function collectHealth(): Promise<Array<{ name: string; configured: boolean; live: boolean; operators: ProviderId[]; ok: boolean | null; note?: string }>> {
   return Promise.all(COLLECTORS.map(async (c) => {
     const h = c.health ? await c.health().catch(() => ({ ok: false, note: "health check threw" })) : null;
+    if (h) _noteCollectHealth(c.name, h.ok, h.note);   // the probe the uptime monitor already runs feeds selection
     return {
       name: c.name,
       configured: c.configured(),

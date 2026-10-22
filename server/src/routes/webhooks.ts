@@ -8,6 +8,14 @@ import { adapterByName } from "../adapters/index.js";
 import { payoutByName } from "../adapters/payouts.js";
 import { collectorByName } from "../adapters/collect.js";
 import * as campay from "../adapters/campay.js";
+import { callbackPathSecret as mtnCallbackSecret } from "../adapters/mtnCollect.js";
+import { timingSafeEqual } from "node:crypto";
+
+/** Constant-time compare that tolerates differing lengths (timingSafeEqual throws). */
+function timingSafeEq(a: string, b: string): boolean {
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 import { parseDlr as parseNexahDlr, verifyDlrSecret as nexahVerifyDlrSecret } from "../adapters/nexah.js";
 import { settleCollectionNow } from "../core/momoTransfer.js";
 import { hint as networkHint } from "../core/network/monitor.js";
@@ -130,6 +138,18 @@ function handleCollectCallback(name: string, req: Request, res: Response): Respo
   })());
 }
 webhooks.post("/collect/:name", express.raw({ type: "*/*" }), (req, res) => handleCollectCallback(req.params.name, req, res));
+/* A rail whose provider signs NOTHING — MTN Collections — can still be given a URL only it
+   knows. The secret is a path segment we chose and handed to MTN in X-Callback-Url; a
+   caller who was never told it cannot produce it. Checked against the configured URL, not
+   against a second variable, so the two can never drift apart. */
+webhooks.post("/collect/mtn/:secret", express.raw({ type: "*/*" }), (req, res) => {
+  const expected = mtnCallbackSecret();
+  if (!expected || !timingSafeEq(req.params.secret, expected)) {
+    recordEvent({ provider: "collect:mtn", eventType: "callback.rejected", rawBody: "", status: "rejected", detail: "bad or missing callback path secret" });
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  return handleCollectCallback("mtn", req, res);
+});
 
 /* ---------- CamPay: ONE callback URL, both directions ----------
    Every other rail here has a separate URL per direction, because every other rail lets us

@@ -93,6 +93,30 @@ export function referenceFor(key: string): string {
   return r;
 }
 
+/** MTN's callback carries NO signature — the Collections API does not sign it, so there is
+ *  nothing in the body to verify and no header to check. Every other rail here proves who
+ *  it is: Peexit with Basic auth, CamPay with an HS256 JWT, Orange with the notif_token it
+ *  handed us. MTN cannot.
+ *
+ *  What we DO control is the URL. X-Callback-Url is ours to choose per request, so a secret
+ *  segment in the path is the one credential available: a caller who has not been told the
+ *  URL cannot produce it. MTN_MOMO_CALLBACK_URL should therefore end in a path only MTN has
+ *  been given, e.g. https://api…/webhooks/collect/mtn/<secret>.
+ *
+ *  This is a lock on the door, not the gate: settlement is decided by status(), which
+ *  re-queries MTN, so an accepted forgery still cannot settle anything. It stops an
+ *  unauthenticated endpoint being usable as a free re-query amplifier.
+ *
+ *  Returns false on a LIVE rail when no secret has been configured — a live rail with an
+ *  open callback is exactly what this is for. Sandbox accepts, so rehearsals are not
+ *  blocked by an operator decision that has not been made yet. */
+export function callbackPathSecret(url = config.mtnCollect.callbackUrl): string {
+  const u = url;
+  if (!u) return "";
+  const m = /\/webhooks\/collect\/mtn\/([^/?#]+)/.exec(u);
+  return m ? m[1] : "";
+}
+
 const mtnCollector: CollectAdapter = {
   name: "mtn",
   // Preferred over an aggregator when it is configured: one hop fewer, and the operator's

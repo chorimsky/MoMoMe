@@ -492,6 +492,14 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.xaf, s.phone, s.country]);
   const ordered = rec ? [...available].sort((a, b) => rec.order.indexOf(a) - rec.order.indexOf(b)) : available;
+  // The router already says per route whether it is viable, and why not. That verdict was
+  // DISPLAYED and not ENFORCED: `available` only asks whether the operator switched a rail
+  // on, so with every route unviable the list was full, Continue was enabled, and the
+  // sender reached Review — a locked rate and "arrives within seconds" — on a rail that
+  // could not pay. Observed on production 2026-10-24 with all four methods reading
+  // "Not available right now · no funded payout rail".
+  const blockedWhy = rec?.unavailable[s.method];
+  const noneViable = Boolean(rec) && available.length > 0 && available.every((k) => rec!.unavailable[k]);
   const badge = (k: Method) => (rec ? rec.recommended === k : k === "LIGHTNING");
 
   const eta = (secs: number) => secs <= 30 ? t("m_eta_seconds") : secs <= 600 ? t("m_eta_minutes") : t("m_eta_onchain");
@@ -539,8 +547,12 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
           </button>
         )}
         {ordered.map((k) => {
-          const on = s.method === k;
           const why = rec?.unavailable[k];
+          // Never render an unusable method as the chosen one. s.method defaults to
+          // LIGHTNING and nothing clears it when the router rules LIGHTNING out, so the
+          // card drew itself with the accent border and a filled radio WHILE disabled —
+          // which reads as "this is your selection" rather than "this cannot be used".
+          const on = s.method === k && !why;
           return (
             <button key={k} onClick={() => { userPicked.current = true; set({ method: k }); track("method_chosen", { method: k }); }} aria-pressed={on} disabled={!!why}
               style={{ cursor: why ? "not-allowed" : "pointer", textAlign: "left", padding: "15px", borderRadius: "var(--r)", display: "flex", gap: 13, alignItems: "center", border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: "var(--surface)", opacity: why ? 0.55 : 1 }}>
@@ -579,6 +591,14 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
           Continue button is simply disabled — a blank screen with a dead button and no
           reason given. Say it, and offer the one route that does not depend on a crypto
           rail. */}
+      {/* Every ROUTE unviable (as opposed to every rail switched off above): the rails are
+          on, the router cannot complete any of them right now. Said once, plainly, instead
+          of four identical sub-labels under a button that still worked. */}
+      {noneViable && (
+        <div role="alert" style={{ marginTop: 12, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>
+          {t("m_none_routable")}
+        </div>
+      )}
       {available.length === 0 && (
         <div role="status" style={{ marginTop: 12, padding: "12px 14px", borderRadius: "var(--r)", border: "1px solid var(--warn)", background: "var(--send-wash)", fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>
           {t("m_none_available")}
@@ -587,7 +607,7 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
 
       <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
         {!fixed && <button className="btn btn-ghost" onClick={back} style={{ flex: "none", width: 56 }} aria-label={t("back")}>←</button>}
-        <button className="btn btn-primary" onClick={next} disabled={busy || available.length === 0} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>
+        <button className="btn btn-primary" onClick={next} disabled={busy || available.length === 0 || !!blockedWhy} style={{ flex: 1, padding: "16px" }}>{busy ? <Spinner size={16} color="var(--accent-ink)" /> : t("continue")}</button>
       </div>
     </FlowCard>
   );

@@ -146,6 +146,33 @@ async function main() {
     ok(`${label} throws rather than being guessed at`, t);
   }
 
+  console.log("\nA bank's file is not bounded by our request limits — so the parser bounds it\n");
+  {
+    // A statement arrives as a FILE. Its size and shape are the counterparty's, and a
+    // corrupt or hostile one must fail as a REFUSAL, not as a crash inside ingestion.
+    const deepXml = (n: number) => "<a>".repeat(n) + "x" + "</a>".repeat(n);
+    ok("a realistically nested document parses (camt.053 is about ten deep)",
+      Boolean(parseXml(deepXml(20))));
+    let msg = "";
+    try { parseXml(deepXml(5_000)); } catch (e) { msg = (e as Error).message; }
+    ok("a document nested 5 000 deep is REFUSED", /nested deeper than/.test(msg), msg.slice(0, 60));
+    ok("…with a RangeError nowhere in sight — a refusal, not a stack overflow",
+      !/call stack/i.test(msg), msg.slice(0, 60));
+
+    // The traversal itself must not be the thing that crashes, whatever built the tree.
+    const { deep: deepFind } = await import("../src/core/iso20022/xml.js");
+    let node: { name: string; text: string; children: unknown[]; attrs: Record<string, string> } = { name: "leaf", text: "", children: [], attrs: {} };
+    for (let i = 0; i < 20_000; i++) node = { name: "a", text: "", children: [node], attrs: {} };
+    let crashed = false;
+    try { deepFind(node as never, "leaf"); } catch (e) { crashed = /call stack/i.test((e as Error).message); }
+    ok("a 20 000-deep tree built some other way does not overflow the traversal", !crashed);
+
+    let big = "";
+    try { parseXml(`<r>${"<n/>".repeat(600_000)}</r>`); } catch (e) { big = (e as Error).message; }
+    ok("an absurd number of elements is refused rather than chewed through",
+      /more than .* elements/.test(big), big.slice(0, 60));
+  }
+
   console.log(`\n${fail === 0 ? "✅" : "❌"} ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

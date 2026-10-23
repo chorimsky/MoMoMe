@@ -45,6 +45,17 @@ function decode(s: string): string {
   });
 }
 
+/* A bank statement arrives as a FILE, so unlike a request body it is not bounded by the
+   32 kb JSON cap — its size and shape are the counterparty's, and a corrupt or hostile one
+   must fail as a refusal rather than as a crash.
+
+   A real camt.053 nests about ten deep. A hundred is already absurd, and ten thousand took
+   the recursive descendant walk past V8's stack: a RangeError thrown from inside statement
+   ingestion, which is a worse failure than a rejected file because of where it surfaces.
+   Both limits refuse with a sentence naming the limit. */
+const MAX_DEPTH = 100;
+const MAX_ELEMENTS = 500_000;
+
 /** Parse a document into a tree. Throws on anything it cannot read exactly. */
 export function parseXml(src: string): XNode {
   if (/<!DOCTYPE/i.test(src)) throw new Error("xml: DOCTYPE is not accepted");
@@ -52,7 +63,7 @@ export function parseXml(src: string): XNode {
   const root: XNode = { name: "#document", text: "", children: [], attrs: {} };
   const stack: XNode[] = [root];
   const tag = /<\s*(\/?)\s*([A-Za-z_][\w.\-]*(?::[A-Za-z_][\w.\-]*)?)([^>]*?)(\/?)\s*>/g;
-  let last = 0, m: RegExpExecArray | null;
+  let last = 0, elements = 0, m: RegExpExecArray | null;
   while ((m = tag.exec(s)) !== null) {
     const [whole, closing, qualified, attrSrc, selfClose] = m;
     const text = s.slice(last, m.index);
@@ -71,9 +82,13 @@ export function parseXml(src: string): XNode {
       const key = a[1].includes(":") ? a[1].slice(a[1].indexOf(":") + 1) : a[1];
       if (key !== "xmlns") attrs[key] = decode(a[2]);
     }
+    if (++elements > MAX_ELEMENTS) throw new Error(`xml: more than ${MAX_ELEMENTS} elements — refusing to parse`);
     const node: XNode = { name, text: "", children: [], attrs };
     top.children.push(node);
-    if (!selfClose) stack.push(node);
+    if (!selfClose) {
+      if (stack.length > MAX_DEPTH) throw new Error(`xml: nested deeper than ${MAX_DEPTH} elements — refusing to parse`);
+      stack.push(node);
+    }
   }
   if (stack.length !== 1) throw new Error(`xml: ${stack.length - 1} unclosed element(s), innermost <${stack[stack.length - 1].name}>`);
   if (!root.children.length) throw new Error("xml: no root element");
@@ -101,9 +116,20 @@ export const all = (node: XNode | undefined, name: string): XNode[] => node?.chi
 export function deep(node: XNode | undefined, name: string): XNode[] {
   if (!node) return [];
   const out: XNode[] = [];
-  const walk = (n: XNode) => { for (const c of n.children) { if (c.name === name) out.push(c); walk(c); } };
-  walk(node);
-  return out;
+  // ITERATIVE. The recursive version blew V8's stack on a document nested ten thousand
+  // deep — a RangeError raised from inside statement ingestion rather than a refused file.
+  // parseXml now caps depth, so this is belt and braces: a tree built some other way (a
+  // test double, a future reader) must not be able to crash a traversal either.
+  const stack: XNode[] = [node];
+  while (stack.length) {
+    const n = stack.pop()!;
+    for (let i = n.children.length - 1; i >= 0; i--) {
+      const c = n.children[i];
+      if (c.name === name) out.push(c);
+      stack.push(c);
+    }
+  }
+  return out.reverse();
 }
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]!));

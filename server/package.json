@@ -37,7 +37,7 @@
     "ogg-opus-decoder": "^1.7.5",
     "pg": "^8.23.0",
     "qrcode": "^1.5.4",
-    "undici": "^8.10.0"
+    "undici": "^8.10.2"
   },
   "devDependencies": {
     "@noble/curves": "^2.4.0",

@@ -1214,6 +1214,15 @@ export interface ReportsSnapshot {
     invoiceTtlMin: Partial<Record<Method, number>>;
     lostVolumeXaf: number;      // what the unpaid intents would have delivered
   };
+  /** How long each stage of the lifecycle took in the window, derived from the transition
+   *  timestamps on the payments themselves — nothing is instrumented on the money path.
+   *  Percentiles are `null` below a handful of completed samples (`note` says so) and a
+   *  payment that has not finished a stage is excluded from it: reporting "time so far" as
+   *  "time taken" would flatter exactly the stage that is currently stuck. */
+  stageLatency: Array<{
+    key: string; what: string; samples: number;
+    p50: number | null; p95: number | null; p99: number | null; max: number | null; note?: string;
+  }>;
   /** Why payments did not complete in the window, most common first. `reason` is the note
    *  the state machine wrote on the terminal transition (e.g. "invoice expired — not paid"),
    *  normalised so amounts and ids do not split one cause into many rows. */

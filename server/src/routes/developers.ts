@@ -221,9 +221,13 @@ developers.post("/orgs/:org/credentials", guard("credentials.read"), (req, res) 
   const apps = applicationsOf(req.params.org);
   const appId = str(b.application_id) || apps[0]?.id;
   const scopes = Array.isArray(b.scopes) ? (b.scopes as unknown[]).map(str).filter((s): s is Scope => (ALL_SCOPES as string[]).includes(s)) : undefined;
-  const r = createCredential({ orgId: req.params.org, appId, env, label: str(b.label), scopes, createdBy: uid, ipAllowlist: Array.isArray(b.ip_allowlist) ? (b.ip_allowlist as unknown[]).map(str).filter(Boolean) : undefined });
+  // expires_in_days is optional, and omitting it keeps the old behaviour (a permanent
+  // key). Capped at two years: a "short-lived" credential good for a decade is just a
+  // permanent one with extra steps.
+  const days = typeof b.expires_in_days === "number" && Number.isFinite(b.expires_in_days) && b.expires_in_days > 0 ? Math.min(730, Math.round(b.expires_in_days)) : undefined;
+  const r = createCredential({ orgId: req.params.org, appId, env, label: str(b.label), scopes, createdBy: uid, ipAllowlist: Array.isArray(b.ip_allowlist) ? (b.ip_allowlist as unknown[]).map(str).filter(Boolean) : undefined, ...(days ? { expiresInDays: days } : {}) });
   if (!r.ok) return bad(res, r.error === "live_not_enabled" ? 403 : 400, r.error, r.error === "live_not_enabled" ? "Live credentials are enabled once your organization is verified. Request activation from the dashboard." : "Could not create the credential.");
-  audit({ orgId: req.params.org, actor: actor(req), action: "credential.created", target: { type: "credential", id: r.credential.id }, details: { env, scopes: r.credential.scopes }, ip: clientIp(req) });
+  audit({ orgId: req.params.org, actor: actor(req), action: "credential.created", target: { type: "credential", id: r.credential.id }, details: { env, scopes: r.credential.scopes, ...(r.credential.expiresAt ? { expiresAt: r.credential.expiresAt } : {}) }, ip: clientIp(req) });
   res.status(201).json({ credential: r.credential, secret: r.secret, note: "Copy the secret now — it is shown once." });
 });
 developers.post("/orgs/:org/credentials/:id/rotate", guard("credentials.read"), (req, res) => {

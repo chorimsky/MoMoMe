@@ -27,6 +27,16 @@ export interface Credential {
   id: string; orgId: string; appId: string; env: Environment; label: string;
   hint: string; scopes: Scope[]; status: "active" | "revoked";
   createdAt: string; createdBy: string; revokedAt?: string; lastUsedAt?: string;
+  /** When this credential stops being accepted. Optional, and absent means it never
+   *  expires — which is what every credential issued before this field existed is, so
+   *  nothing an organization already deployed stops working.
+   *
+   *  §14 of the blueprint asks for short-lived machine credentials. A permanent bearer
+   *  secret with good hygiene around it (scopes, IP allow-list, rotation with grace) is
+   *  still a permanent bearer secret: nothing about it gets safer with age, and a key that
+   *  leaked a year ago is as good today as it was then. An expiry is the one property that
+   *  bounds a leak nobody noticed. */
+  expiresAt?: string;
   ipAllowlist?: string[];
   /** Optional HMAC signing requirement (enterprise): every request must carry X-MoMoMe-Signature. */
   requireSigning?: boolean;
@@ -47,7 +57,26 @@ export function parseSecret(secret: string | undefined): { env: Environment; bod
   return m ? { env: m[1] as Environment, body: m[2] } : null;
 }
 
-export function createCredential(input: { orgId: string; appId: string; env: Environment; label: string; scopes?: Scope[]; createdBy: string; ipAllowlist?: string[] }): { ok: true; credential: Credential; secret: string } | { ok: false; error: string } {
+/** An explicit instant wins; otherwise a number of days from now. A non-positive or
+ *  unparseable value is ignored rather than treated as "already expired" — minting a
+ *  credential that cannot be used would be a confusing way to report a bad input. */
+function expiryOf(input: { expiresAt?: string; expiresInDays?: number }): string | undefined {
+  if (input.expiresAt) { const t = Date.parse(input.expiresAt); if (Number.isFinite(t) && t > Date.now()) return new Date(t).toISOString(); return undefined; }
+  if (typeof input.expiresInDays === "number" && Number.isFinite(input.expiresInDays) && input.expiresInDays > 0) {
+    return new Date(Date.now() + Math.round(input.expiresInDays * 86_400_000)).toISOString();
+  }
+  return undefined;
+}
+/** Expired as of `t`. An absent expiry is never expired. */
+export const credentialExpired = (c: { expiresAt?: string }, t = Date.now()): boolean => {
+  if (!c.expiresAt) return false;
+  const at = Date.parse(c.expiresAt);
+  // An UNPARSEABLE expiry must not silently mean "valid forever": that would turn a typo
+  // in an admin form into a credential nobody can retire by date. Treat it as expired.
+  return !Number.isFinite(at) || t > at;
+};
+
+export function createCredential(input: { orgId: string; appId: string; env: Environment; label: string; scopes?: Scope[]; createdBy: string; ipAllowlist?: string[]; expiresAt?: string; expiresInDays?: number }): { ok: true; credential: Credential; secret: string } | { ok: false; error: string } {
   const org = getOrganization(input.orgId); const app = getApplication(input.appId);
   if (!org || org.status !== "active") return { ok: false, error: "organization_unavailable" };
   if (!app || app.orgId !== org.id || app.archivedAt) return { ok: false, error: "application_invalid" };
@@ -55,10 +84,12 @@ export function createCredential(input: { orgId: string; appId: string; env: Env
   const scopes = (input.scopes && input.scopes.length ? input.scopes : ALL_SCOPES).filter((s) => ALL_SCOPES.includes(s));
   if (!scopes.length) return { ok: false, error: "scopes_invalid" };
   const secret = `mm_${input.env}_${crypto.randomBytes(16).toString("hex")}`;
+  const expiresAt = expiryOf(input);
   const c: Stored = {
     id: `cred_${crypto.randomBytes(8).toString("hex")}`, orgId: org.id, appId: app.id, env: input.env,
     label: input.label.trim().slice(0, 80) || "Untitled", hint: `${secret.slice(0, 12)}…${secret.slice(-4)}`,
     scopes, status: "active", createdAt: now(), createdBy: input.createdBy, hash: sha(secret),
+    ...(expiresAt ? { expiresAt } : {}),
     ...(input.ipAllowlist?.length ? { ipAllowlist: input.ipAllowlist.slice(0, 20) } : {}),
   };
   creds.set(c.id, c); byHash.set(c.hash, c.id); touch("platform_credentials");
@@ -77,15 +108,25 @@ export function revokeCredential(id: string): boolean {
  *  after `graceMs` (default 0 — immediately) so a deploy can swap without an outage. */
 export function rotateCredential(id: string, by: string, graceMs = 0): ReturnType<typeof createCredential> {
   const c = creds.get(id); if (!c || c.status === "revoked") return { ok: false, error: "credential_not_found" };
-  const r = createCredential({ orgId: c.orgId, appId: c.appId, env: c.env, label: c.label, scopes: c.scopes, createdBy: by, ipAllowlist: c.ipAllowlist });
+  // Rotation carries the LIFETIME forward, not the instant: a key issued for 90 days is
+  // replaced by one good for 90 more. Copying expiresAt would hand the replacement the
+  // remainder of the old key's life, so rotating an almost-expired key would mint one that
+  // expires the same week — the opposite of what rotating it was for.
+  const lifetimeDays = c.expiresAt ? Math.max(1, Math.round((Date.parse(c.expiresAt) - Date.parse(c.createdAt)) / 86_400_000)) : undefined;
+  const r = createCredential({ orgId: c.orgId, appId: c.appId, env: c.env, label: c.label, scopes: c.scopes, createdBy: by, ipAllowlist: c.ipAllowlist, ...(lifetimeDays ? { expiresInDays: lifetimeDays } : {}) });
   if (!r.ok) return r;
   if (graceMs > 0) setTimeout(() => revokeCredential(id), graceMs).unref?.(); else revokeCredential(id);
   return r;
 }
-export function updateCredential(id: string, patch: { label?: string; scopes?: Scope[]; ipAllowlist?: string[] | null; requireSigning?: boolean }): Credential | undefined {
+export function updateCredential(id: string, patch: { label?: string; scopes?: Scope[]; ipAllowlist?: string[] | null; requireSigning?: boolean; expiresAt?: string | null }): Credential | undefined {
   const c = creds.get(id); if (!c) return undefined;
   if (patch.label) c.label = patch.label.trim().slice(0, 80);
   if (patch.scopes) { const s = patch.scopes.filter((x) => ALL_SCOPES.includes(x)); if (s.length) c.scopes = s; }
+  // null clears the expiry (back to a permanent key — an explicit operator choice); a
+  // string sets it, and only to the future: accepting a past instant here would be a way
+  // to disable a credential by the back door, which is what revoke() is for and says.
+  if (patch.expiresAt === null) delete c.expiresAt;
+  else if (typeof patch.expiresAt === "string") { const t = Date.parse(patch.expiresAt); if (Number.isFinite(t) && t > Date.now()) c.expiresAt = new Date(t).toISOString(); }
   if (patch.ipAllowlist === null) delete c.ipAllowlist; else if (patch.ipAllowlist) c.ipAllowlist = patch.ipAllowlist.slice(0, 20);
   if (patch.requireSigning !== undefined) c.requireSigning = patch.requireSigning;
   touch("platform_credentials"); return pub(c);
@@ -95,7 +136,7 @@ export interface AuthContext { credential: Credential; org: Organization; env: E
 
 /** Resolve a presented secret. Returns the context, or a reason. The environment check
  *  is the CALLER's (index.ts knows which deployment this is). */
-export function authenticate(secret: string | undefined, ip?: string): { ok: true; ctx: AuthContext } | { ok: false; reason: "malformed" | "unknown" | "revoked" | "org_suspended" | "ip_not_allowed" } {
+export function authenticate(secret: string | undefined, ip?: string): { ok: true; ctx: AuthContext } | { ok: false; reason: "malformed" | "unknown" | "revoked" | "expired" | "org_suspended" | "ip_not_allowed" } {
   const parsed = parseSecret(secret);
   if (!parsed) return { ok: false, reason: "malformed" };
   const h = sha(secret!.trim());
@@ -104,6 +145,7 @@ export function authenticate(secret: string | undefined, ip?: string): { ok: tru
   // Constant-time confirmation even though the map lookup already matched (defence in depth).
   if (!c || !crypto.timingSafeEqual(Buffer.from(c.hash, "hex"), Buffer.from(h, "hex"))) return { ok: false, reason: "unknown" };
   if (c.status === "revoked") return { ok: false, reason: "revoked" };
+  if (credentialExpired(c)) return { ok: false, reason: "expired" };
   const org = getOrganization(c.orgId);
   if (!org || org.status !== "active") return { ok: false, reason: "org_suspended" };
   if (c.ipAllowlist?.length && ip && !c.ipAllowlist.includes(ip)) return { ok: false, reason: "ip_not_allowed" };
@@ -118,5 +160,18 @@ export function credentialByHash(hashHex: string): Credential | undefined { cons
 /** Adopt a credential record verified elsewhere (sandbox side). */
 export function adoptCredential(c: Credential, hashHex: string): void { creds.set(c.id, { ...c, hash: hashHex }); byHash.set(hashHex, c.id); touch("platform_credentials"); }
 export const secretHash = sha;
+
+/** TEST ONLY. Back-date a credential so a lifetime-dependent path (rotation renewing the
+ *  LIFETIME rather than copying the instant) can be exercised without a test that waits
+ *  three months. It exists because getCredential returns a copy: a test that mutates that
+ *  copy asserts nothing, which is how the first version of the rotation test passed while
+ *  proving nothing. Underscored like the other reset helpers so it is never mistaken for
+ *  part of the API. */
+export function _setCredentialTimestamps(id: string, dates: { createdAt?: string; expiresAt?: string }): boolean {
+  const c = creds.get(id); if (!c) return false;
+  if (dates.createdAt) c.createdAt = dates.createdAt;
+  if (dates.expiresAt) c.expiresAt = dates.expiresAt;
+  touch("platform_credentials"); return true;
+}
 
 export function _resetCredentials(): void { creds.clear(); byHash.clear(); }

@@ -3,7 +3,7 @@
    reads `message`, and `details` carries what is safe to say (never provider payloads).
    ============================================================ */
 export type ErrorCode =
-  | "unauthorized" | "credential_revoked" | "organization_suspended" | "ip_not_allowed" | "environment_mismatch" | "forbidden_scope"
+  | "unauthorized" | "credential_revoked" | "credential_expired" | "organization_suspended" | "ip_not_allowed" | "environment_mismatch" | "forbidden_scope"
   | "rate_limited" | "validation_failed" | "idempotency_key_required" | "idempotency_key_invalid" | "idempotency_key_reused" | "idempotency_in_progress"
   | "quote_not_found" | "quote_expired" | "quote_already_used" | "asset_unsupported" | "network_unsupported" | "amount_out_of_range" | "country_unsupported" | "currency_unsupported"
   | "payment_not_found" | "payment_not_cancellable" | "payment_not_refundable" | "recipient_invalid" | "recipient_unverified" | "recipient_reserved"

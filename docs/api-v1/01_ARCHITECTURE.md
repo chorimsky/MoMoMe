@@ -36,7 +36,7 @@ request → X-Request-Id (or req_…) → Authorization: Bearer mm_<env>_… →
 ```
 
 Errors: `{ error: { code, message, details }, meta: { request_id } }`. Codes are stable
-strings (`unauthorized`, `forbidden_scope`, `environment_mismatch`, `idempotency_key_reused`,
+strings (`unauthorized`, `forbidden_scope`, `credential_expired`, `environment_mismatch`, `idempotency_key_reused`,
 `quote_expired`, `payment_not_found`, `limit_exceeded`, `not_permitted`, `rate_limited`, `validation_failed`,
 `recipient_invalid`, `insufficient_liquidity`, `provider_unavailable`, …). The full list
 is in `publicApi/errors.ts` and in the OpenAPI document.

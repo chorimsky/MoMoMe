@@ -57,6 +57,10 @@ async function authOf(req: Request, ip: string): Promise<AuthContext> {
   if (!r.ok && r.reason === "unknown" && deploymentEnv() === "test" && secret.startsWith("mm_test_") && syncConfigured()) { if (await verifyWithOrigin(secret)) r = authenticate(secret, ip); }
   if (!r.ok) {
     if (r.reason === "revoked") throw err(401, "credential_revoked", "This credential has been revoked.");
+    // Told apart from revoked on purpose: revoked means somebody decided, expired means
+    // nobody did. The remedy is different (rotate, not ask why it was revoked), so saying
+    // "revoked" would send a developer looking for a decision that was never taken.
+    if (r.reason === "expired") throw err(401, "credential_expired", "This credential has expired. Rotate it from the dashboard to get a new secret with the same scopes.");
     if (r.reason === "org_suspended") throw err(403, "organization_suspended", "This organization is suspended. Contact support.");
     if (r.reason === "ip_not_allowed") throw err(403, "ip_not_allowed", "This credential does not accept requests from this IP address.");
     throw err(401, "unauthorized", "Unknown or malformed API credential.");

@@ -39,6 +39,7 @@ import { settle, confirmInbound, cancelPayment, adminRetryWhy, adminRefund, comp
 import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
+import { stageStats } from "../core/stageLatency.js";
 import { id, nextRef } from "../core/ids.js";
 import {
   config, isLive, liveMoney, ibexConfigured, ibexLive, phoenixdConfigured, phoenixdTrusted, deployEnv, databaseHost,
@@ -3482,6 +3483,11 @@ api.get("/admin/reports", async (req, res) => {
         attempts: ps.length, paid: paidPs.length, conversionPct: ps.length ? Math.round((paidPs.length / ps.length) * 100) : null, reliabilityPct: paidPs.length ? Math.round((done.length / paidPs.length) * 100) : null };
     }),
     funnel,
+    // How long each stage of the lifecycle actually took in this window, derived from the
+    // transition timestamps already on these payments (core/stageLatency). §35 of the
+    // blueprint asks for actuals before targets; this is the half that was unmeasured.
+    // Percentiles are withheld below a handful of samples rather than guessed.
+    stageLatency: stageStats(all),
     failures: { total: 0, attempts: 0, reasons: [] }, // filled below
   };
   // Why payments fail — the operator's first question after "how many". Grouped by the

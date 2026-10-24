@@ -363,7 +363,88 @@ const DISPLAY: Partial<Record<PaymentState, DisplayStatus>> = {
   MANUAL_REVIEW: "Pending",
 };
 
+/* ── THE LEGAL TRANSITION TABLE ────────────────────────────────────────────────────────
+   Every edge the money path is allowed to take, declared in one place.
+
+   WHY: transition() used to write whatever state it was handed. Correctness lived entirely
+   in the ~forty call-site guards of the form `if (p.state !== "PAYOUT_REQUESTED") return`.
+   Those guards are good and they are why the system is correct today — but an edge that no
+   guard covers is admitted silently, and that is not a theoretical failure: a verdict on a
+   superseded payout attempt was accepted that way, and would have refunded money a second
+   rail was still carrying.
+
+   A table cannot replace the guards. A guard knows WHY an edge is legal here and now (this
+   attempt is current, this refund has no destination yet); the table only knows WHETHER the
+   edge exists at all. It is the backstop for the edge nobody thought to guard.
+
+   LOG-ONLY by default. An undeclared edge is reported, not refused, because a table written
+   from reading the code is a hypothesis about a system that has been running for months —
+   refusing on it would turn a wrong row of mine into a stuck payment. Set
+   TRANSITION_TABLE_ENFORCE=true only once the log has been clean for a deployment.
+   ──────────────────────────────────────────────────────────────────────────────────────── */
+const LEGAL: Record<PaymentState, readonly PaymentState[]> = {
+  // Nothing has moved yet: the invoice is served, abandoned, or screened.
+  QUOTED: ["AWAITING_INBOUND", "FAILED", "MANUAL_REVIEW"],
+  // A rail can report a payment as detected first, or jump straight to confirmed.
+  AWAITING_INBOUND: ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FAILED", "MANUAL_REVIEW"],
+  INBOUND_DETECTED: ["INBOUND_CONFIRMED", "FAILED", "MANUAL_REVIEW"],
+  // Money is in and booked. The only way forward is a locked rate.
+  INBOUND_CONFIRMED: ["FX_LOCKED", "MANUAL_REVIEW"],
+  // Rate locked, float earmarked: pay out, hold for a person, or give it back. The
+  // self-edge is a RE-PRICE: the state does not change but the XAF does — an under- or
+  // over-payment delivered pro-rata at the locked rate, or a hold released with a fresh
+  // rate after the FX feed went stale. Found by the log-only phase, not by reading.
+  FX_LOCKED: ["FX_LOCKED", "PAYOUT_REQUESTED", "MANUAL_REVIEW", "REFUND_PENDING"],
+  // The self-edge is the FAILOVER: a new attempt on another rail under a new idempotency
+  // key, with the payment never leaving PAYOUT_REQUESTED.
+  PAYOUT_REQUESTED: ["PAYOUT_CONFIRMED", "PAYOUT_REQUESTED", "REFUND_PENDING", "MANUAL_REVIEW", "FAILED"],
+  PAYOUT_CONFIRMED: ["DELIVERED", "MANUAL_REVIEW"],
+  // Delivered is final for the money. A person can still open a case on it.
+  DELIVERED: ["MANUAL_REVIEW"],
+  // The operator's desk: everything that holds here can be released, refunded or closed.
+  MANUAL_REVIEW: ["PAYOUT_REQUESTED", "FX_LOCKED", "INBOUND_CONFIRMED", "REFUND_PENDING", "REFUNDED", "FAILED", "MANUAL_REVIEW"],
+  // A refund claim can be paid, re-opened on a new invoice, or abandoned for delivery
+  // instead (the sender asking us to try another rail rather than take the money back).
+  REFUND_PENDING: ["REFUNDED", "REFUND_PENDING", "PAYOUT_REQUESTED", "MANUAL_REVIEW"],
+  // A refund whose own payout failed comes back for another invoice.
+  REFUNDED: ["REFUND_PENDING", "MANUAL_REVIEW"],
+  // FAILED is not terminal, and that is on purpose: an invoice that expired unpaid is
+  // FAILED with nothing booked, and a customer who pays it LATE still lands on their own
+  // payment — which must then settle rather than strand real money on an expired invoice.
+  // "invoice expired" was the largest single failure class in production in September, so
+  // this edge is the recovery for the commonest real incident, not an oddity.
+  FAILED: ["INBOUND_CONFIRMED", "MANUAL_REVIEW"],
+};
+
+/** Undeclared edges seen since boot: `FROM→TO` → how many, and the last note. Surfaced so
+ *  the log-only phase can be read from the admin console instead of from Railway's log tail,
+ *  which truncates this service to a handful of lines. */
+const illegalEdges = new Map<string, { count: number; lastAt: string; lastRef: string; lastNote?: string }>();
+export const transitionViolations = (): Array<{ edge: string; count: number; lastAt: string; lastRef: string; lastNote?: string }> =>
+  [...illegalEdges.entries()].map(([edge, v]) => ({ edge, ...v })).sort((a, b) => b.count - a.count);
+export const _resetTransitionViolations = (): void => illegalEdges.clear();
+const enforcing = (): boolean => (process.env.TRANSITION_TABLE_ENFORCE ?? "").trim().toLowerCase() === "true";
+
+/** Thrown only when TRANSITION_TABLE_ENFORCE is on. Named so a caller can tell it apart
+ *  from a provider failure — an illegal edge is OUR bug, never the rail's. */
+export class IllegalTransition extends Error {
+  constructor(public from: PaymentState, public to: PaymentState, public ref: string) {
+    super(`illegal state transition ${from} → ${to} on ${ref}`);
+  }
+}
+
+/** Is this edge declared? Exported for the test that enumerates the table. */
+export const edgeAllowed = (from: PaymentState, to: PaymentState): boolean => (LEGAL[from] ?? []).includes(to);
+export const _legalTable = LEGAL;
+
 async function transition(p: Payment, state: PaymentState, note?: string): Promise<void> {
+  if (!edgeAllowed(p.state, state)) {
+    const edge = `${p.state}→${state}`;
+    const seen = illegalEdges.get(edge);
+    illegalEdges.set(edge, { count: (seen?.count ?? 0) + 1, lastAt: new Date().toISOString(), lastRef: p.ref, lastNote: note });
+    console.error(`[transition] UNDECLARED EDGE ${edge} on ${p.ref}${note ? ` · ${note}` : ""} — either the table is wrong or this is a bug. Not refused (log-only).`);
+    if (enforcing()) throw new IllegalTransition(p.state, state, p.ref);
+  }
   // Identity Resolution v2: the recipient identity snapshot is frozen from the moment money
   // is in. The money path never edits it; this guards any future caller that might.
   if (p.recipientIdentity && p.events.some((e) => e.state === "INBOUND_CONFIRMED")) {

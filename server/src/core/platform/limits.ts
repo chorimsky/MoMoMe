@@ -146,4 +146,27 @@ export async function checkLimits(s: LimitSubject): Promise<LimitCheck> {
   const thresholds = applicable.map((r) => r.requireApprovalAboveXaf).filter((x): x is number => typeof x === "number" && Number.isFinite(x) && x > 0);
   return { ok: true, rules: applicable.map((r) => r.id), ...(thresholds.length ? { approvalAboveXaf: Math.min(...thresholds) } : {}) };
 }
+/** The rules in force RIGHT NOW that are bound to this credential specifically. Used by the
+ *  agent fail-closed check: an organization-wide default is not a delegation, so a rule that
+ *  matches every credential does not count — otherwise declaring a principal an agent would
+ *  be satisfied by the environment default and mean nothing. */
+export function delegationsFor(credentialId: string, env: "live" | "test", t = Date.now()): LimitRule[] {
+  return listLimitRules().filter((r) =>
+    r.enabled && inWindow(r, t) &&
+    (r.scope.credentialIds?.includes(credentialId) ?? false) &&
+    (!r.scope.envs?.length || r.scope.envs.includes(env)));
+}
+
+/** Is this credential an agent that has not been given any authority yet? The whole
+ *  fail-closed rule in one predicate, so it can be asserted directly: the route that
+ *  enforces it only ever runs on a LIVE deployment, which a test deployment cannot be, and
+ *  a rule that can only be exercised in production is a rule nobody has checked. */
+export function agentWithoutDelegation(credential: { id: string; kind?: "server" | "agent" }, env: "live" | "test", t = Date.now()): boolean {
+  if (credential.kind !== "agent") return false;
+  // The sandbox is exempt: an environment that exists to be rehearsed in must not refuse,
+  // or the lesson an integrator takes away is to skip the sandbox.
+  if (env !== "live") return false;
+  return delegationsFor(credential.id, env, t).length === 0;
+}
+
 export function _resetLimits(): void { rules.clear(); for (const r of DEFAULTS) rules.set(r.id, r); }

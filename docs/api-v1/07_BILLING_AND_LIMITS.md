@@ -64,6 +64,35 @@ create payments and this one is not too big — it is simply not one this creden
 recipient check only `allowed_count` is returned, never the list: that list is somebody's
 phone book.
 
+## Agent principals
+
+A credential may declare what kind of principal holds it: `server` (the default, and what
+every existing credential is) or `agent` — something that interprets instructions and can
+decide to act. Declaring `agent` only ever takes authority away.
+
+`POST /orgs/:org/credentials/:id/kind` with `{ "kind": "agent" }`. It is its own endpoint,
+not a field on the credential edit: §15 of the blueprint says changing an agent's authority
+must be independently authorized, and a `kind` that could ride along in a label change is
+precisely the side effect that forbids. Rotation preserves the kind, or rotating an agent's
+key would quietly promote it.
+
+**An agent with no delegation in force cannot create live payments** —
+`403 not_permitted`, with `details.credential_kind: "agent"`. "In force" is strict, and the
+strictness is the point:
+
+- a rule **bound to this credential** (`scope.credentialIds`) counts;
+- the environment default does **not**, because it bounds every caller and so bounds an
+  agent no differently — accepting it would make the declaration mean nothing;
+- an organization-wide rule does not either: that is a policy, not a delegation;
+- a disabled rule, a lapsed one (`notAfter` in the past) and one scoped to the other
+  environment are all not in force.
+
+The sandbox is exempt. An environment that exists to be rehearsed in must not refuse, or the
+only lesson an integrator takes from it is to skip it.
+
+An agent cannot widen its own authority: the rules live on the organization's limit table,
+and editing them is a dashboard action by a person holding `credentials.manage_live`.
+
 ## The domain journal
 
 `core/journal.ts` is one **versioned** internal record of what happened (`v`, type, subject,

@@ -23,8 +23,26 @@ export type Scope = "quotes:write" | "payments:read" | "payments:write" | "refun
   | "identities:read" | "identities:write" | "invoices:read" | "invoices:write" | "payouts:read" | "payouts:write" | "balances:read";
 export const ALL_SCOPES: Scope[] = ["quotes:write", "payments:read", "payments:write", "refunds:write", "webhooks:manage", "settlements:read", "settlements:write", "account:read", "usage:read", "recipients:validate", "identities:read", "identities:write", "invoices:read", "invoices:write", "payouts:read", "payouts:write", "balances:read"];
 
+/** What kind of principal holds this credential.
+ *
+ *  "server" is every credential that exists today and the default for every new one, so
+ *  declaring this changes nothing by itself.
+ *
+ *  "agent" means something that INTERPRETS instructions and can decide to act — an AI
+ *  agent, an autonomous service. §15 of the blueprint says such a principal must operate
+ *  under explicit, bounded authority, and the only way to make that true rather than
+ *  aspirational is to refuse to let it move money until the bounds exist. So an agent
+ *  credential is FAIL-CLOSED: no delegation bound to it in force → it cannot create live
+ *  payments at all. It is a restriction, never a grant: an agent credential can do strictly
+ *  less than the server credential it was promoted from, and nothing it does can widen its
+ *  own authority, because the rules live on the organization's limit table and changing
+ *  them is a dashboard action by a person with the right role. */
+export type PrincipalKind = "server" | "agent";
+
 export interface Credential {
   id: string; orgId: string; appId: string; env: Environment; label: string;
+  /** Absent means "server" — the only thing any existing credential can be. */
+  kind?: PrincipalKind;
   hint: string; scopes: Scope[]; status: "active" | "revoked";
   createdAt: string; createdBy: string; revokedAt?: string; lastUsedAt?: string;
   /** When this credential stops being accepted. Optional, and absent means it never
@@ -76,7 +94,7 @@ export const credentialExpired = (c: { expiresAt?: string }, t = Date.now()): bo
   return !Number.isFinite(at) || t > at;
 };
 
-export function createCredential(input: { orgId: string; appId: string; env: Environment; label: string; scopes?: Scope[]; createdBy: string; ipAllowlist?: string[]; expiresAt?: string; expiresInDays?: number }): { ok: true; credential: Credential; secret: string } | { ok: false; error: string } {
+export function createCredential(input: { orgId: string; appId: string; env: Environment; label: string; scopes?: Scope[]; createdBy: string; ipAllowlist?: string[]; expiresAt?: string; expiresInDays?: number; kind?: PrincipalKind }): { ok: true; credential: Credential; secret: string } | { ok: false; error: string } {
   const org = getOrganization(input.orgId); const app = getApplication(input.appId);
   if (!org || org.status !== "active") return { ok: false, error: "organization_unavailable" };
   if (!app || app.orgId !== org.id || app.archivedAt) return { ok: false, error: "application_invalid" };
@@ -90,6 +108,7 @@ export function createCredential(input: { orgId: string; appId: string; env: Env
     label: input.label.trim().slice(0, 80) || "Untitled", hint: `${secret.slice(0, 12)}…${secret.slice(-4)}`,
     scopes, status: "active", createdAt: now(), createdBy: input.createdBy, hash: sha(secret),
     ...(expiresAt ? { expiresAt } : {}),
+    ...(input.kind === "agent" ? { kind: "agent" as const } : {}),
     ...(input.ipAllowlist?.length ? { ipAllowlist: input.ipAllowlist.slice(0, 20) } : {}),
   };
   creds.set(c.id, c); byHash.set(c.hash, c.id); touch("platform_credentials");
@@ -113,11 +132,21 @@ export function rotateCredential(id: string, by: string, graceMs = 0): ReturnTyp
   // remainder of the old key's life, so rotating an almost-expired key would mint one that
   // expires the same week — the opposite of what rotating it was for.
   const lifetimeDays = c.expiresAt ? Math.max(1, Math.round((Date.parse(c.expiresAt) - Date.parse(c.createdAt)) / 86_400_000)) : undefined;
-  const r = createCredential({ orgId: c.orgId, appId: c.appId, env: c.env, label: c.label, scopes: c.scopes, createdBy: by, ipAllowlist: c.ipAllowlist, ...(lifetimeDays ? { expiresInDays: lifetimeDays } : {}) });
+  const r = createCredential({ orgId: c.orgId, appId: c.appId, env: c.env, label: c.label, scopes: c.scopes, createdBy: by, ipAllowlist: c.ipAllowlist, ...(lifetimeDays ? { expiresInDays: lifetimeDays } : {}), ...(c.kind ? { kind: c.kind } : {}) });
   if (!r.ok) return r;
   if (graceMs > 0) setTimeout(() => revokeCredential(id), graceMs).unref?.(); else revokeCredential(id);
   return r;
 }
+/** Declare (or undeclare) a credential an agent. Deliberately NOT part of
+ *  updateCredential: §15 says changing an agent's authority must be an independently
+ *  authorized operation, and a `kind` that could ride along in a label edit would be
+ *  exactly the side effect that rule forbids. */
+export function setPrincipalKind(id: string, kind: PrincipalKind): Credential | undefined {
+  const c = creds.get(id); if (!c) return undefined;
+  if (kind === "agent") c.kind = "agent"; else delete c.kind;
+  touch("platform_credentials"); return pub(c);
+}
+
 export function updateCredential(id: string, patch: { label?: string; scopes?: Scope[]; ipAllowlist?: string[] | null; requireSigning?: boolean; expiresAt?: string | null }): Credential | undefined {
   const c = creds.get(id); if (!c) return undefined;
   if (patch.label) c.label = patch.label.trim().slice(0, 80);

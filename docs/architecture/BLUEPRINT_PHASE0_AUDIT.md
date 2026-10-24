@@ -242,11 +242,22 @@ and tested against the simulator; no bank, MFI or switch is connected.
 **Cost:** none technically. It is a commercial gap, and the blueprint is explicit that
 expansion is gated on agreements.
 
-### 3.10 Sandbox completes synchronously
-**Observation, not a defect.** A simulated payout settles inline after ~900 ms
-(`stateMachine.ts`), so a sandbox integration can pass without ever handling the async
-contract §16 requires it to handle. Worth a deliberate delay or an explicit "pending" mode
-in sandbox.
+### 3.10 Sandbox completes synchronously — *overstated when first written*
+**Corrected 2026-10-24.** A closer read says the §16 contract IS met: `POST
+/v1/sandbox/payments/:id/pay` backgrounds the settle and replies with the payment still
+`AWAITING_PAYMENT`, so an integrator cannot learn the outcome without polling or
+subscribing. The original wording implied the API conflated acceptance with completion. It
+does not.
+
+What remains is narrower and real: the default simulated rail settles in about a second, so
+an integrator who never tries the `PAYMENT_DELAYED` number can poll once, see `COMPLETED`,
+and ship code that assumes a payment finishes inside the request — when in production the
+payer's own wait is minutes. The sandbox misleads about **timing**, not about the contract.
+
+Fixed by being explicit rather than by making every rehearsal artificially slow: the pay
+reply now says "accepted, not settled", tells the caller to poll or subscribe, and names the
+number that rehearses a slow rail. A deliberate default delay was considered and rejected —
+it would slow every integrator's test suite to protect the ones who do not read.
 
 ### 3.11 Production is 10 commits behind `main`
 **Verified:** last deployed `781970c`; `main` at `efd7f80`.
@@ -267,7 +278,8 @@ work is no longer evidence. This section records what moved.
 | 3.5 no event spine | **Done, first producers.** `core/journal.ts`: versioned envelope, registered sinks, never throws, undeclared types kept and flagged. Producers: every transition, and every undeclared edge. Not a queue; partner delivery keeps its own retry/DLQ/replay. | below |
 | 3.4 credentials never expire | **Done.** Optional `expiresAt` (`expires_in_days`, capped at 730), `401 credential_expired` distinct from revoked, rotation renews the lifetime rather than the remainder. Absent = permanent, so nothing deployed stops working. | below |
 | 3.7 per-stage latency unmeasured | **Done, derived.** `core/stageLatency.ts` computes p50/p95/p99 for seven stages from the transition timestamps already on the payments — no new writes on the money path, and retrospective over existing history. Percentiles withheld below 5 samples; a payment still in a stage is excluded from it. On `GET /api/admin/reports`. | below |
-| 3.2 no agent principal | **Not started, deliberately.** It was blocked on 3.3, which is now done — the authority record has something to say. Still blocked on the question in §5.4. | — |
+| 3.2 no agent principal | **Partly done: the fail-closed half.** `kind: "agent"` is declarable (its own endpoint, preserved across rotation), and an agent with no delegation in force cannot create LIVE payments. It is a restriction only — no autonomy was granted, so it does not presume an answer to §5.4. What is still not built is anything that lets an agent act on its own: no agent-tool surface, no MCP, no machine-to-machine initiation. | below |
+| 3.10 sandbox synchronous | **Corrected, then fixed narrowly.** The original finding overstated it (the API does distinguish accepted from completed). The real residue was timing realism; the pay reply now says so and names the slow-rail rehearsal number. | below |
 
 ## 4. Recommended first slice
 

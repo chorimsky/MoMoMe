@@ -19,7 +19,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { rateLimitDurableMiddleware, clientIp } from "../core/ratelimit.js";
 import { createUser, verifyPassword, getUser, userByEmail, setPassword, createOrganization, getOrganization, updateOrganization, membershipsOf, membersOf, addMember, removeMember, can, createApplication, applicationsOf, archiveApplication, ROLES, type OrgRole, type Permission } from "../core/platform/orgs.js";
-import { createCredential, listCredentials, getCredential, revokeCredential, rotateCredential, updateCredential, ALL_SCOPES, type Scope, type Environment } from "../core/platform/credentials.js";
+import { createCredential, listCredentials, getCredential, revokeCredential, rotateCredential, updateCredential, setPrincipalKind, ALL_SCOPES, type Scope, type Environment } from "../core/platform/credentials.js";
 import { issueDevToken, verifyDevToken } from "../core/platform/devAuth.js";
 import { audit, auditOf } from "../core/platform/audit.js";
 import { listSubscriptions, eventsOf, replayEvent, subscribe, updateSubscription, removeSubscription, enqueueEvent, getSubscription } from "../core/interop/outbound.js";
@@ -229,6 +229,24 @@ developers.post("/orgs/:org/credentials", guard("credentials.read"), (req, res) 
   if (!r.ok) return bad(res, r.error === "live_not_enabled" ? 403 : 400, r.error, r.error === "live_not_enabled" ? "Live credentials are enabled once your organization is verified. Request activation from the dashboard." : "Could not create the credential.");
   audit({ orgId: req.params.org, actor: actor(req), action: "credential.created", target: { type: "credential", id: r.credential.id }, details: { env, scopes: r.credential.scopes, ...(r.credential.expiresAt ? { expiresAt: r.credential.expiresAt } : {}) }, ip: clientIp(req) });
   res.status(201).json({ credential: r.credential, secret: r.secret, note: "Copy the secret now — it is shown once." });
+});
+// Declaring a credential an agent is its OWN endpoint, not a field on the edit: §15 says
+// changing an agent's authority must be independently authorized, and a `kind` that could
+// ride along in a label change is exactly the side effect that forbids. Requires the same
+// role as managing credentials for that environment.
+developers.post("/orgs/:org/credentials/:id/kind", guard("credentials.read"), (req, res) => {
+  const uid = (req as DevReq).dev.uid; const c = getCredential(req.params.id);
+  if (!c || c.orgId !== req.params.org) return bad(res, 404, "not_found", "No such credential.");
+  if (!can(uid, req.params.org, c.env === "live" ? "credentials.manage_live" : "credentials.manage_test")) return bad(res, 403, "forbidden", "Your role cannot change this credential.");
+  const kind = str((req.body ?? {}).kind);
+  if (kind !== "agent" && kind !== "server") return bad(res, 400, "bad_request", "kind must be \"agent\" or \"server\".");
+  const updated = setPrincipalKind(c.id, kind);
+  audit({ orgId: req.params.org, actor: actor(req), action: "credential.kind_changed", target: { type: "credential", id: c.id }, details: { from: c.kind ?? "server", to: kind }, ip: clientIp(req) });
+  res.json({
+    credential: updated,
+    // Say what the declaration COSTS the holder, because that is the whole point of it.
+    ...(kind === "agent" ? { note: "This credential is now an agent principal: on live it cannot create payments until a limit rule bound to it is in force. Bind its recipients, operators, countries, funding methods and ceilings first." } : {}),
+  });
 });
 developers.post("/orgs/:org/credentials/:id/rotate", guard("credentials.read"), (req, res) => {
   const uid = (req as DevReq).dev.uid; const c = getCredential(req.params.id);

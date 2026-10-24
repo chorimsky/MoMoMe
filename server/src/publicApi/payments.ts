@@ -17,7 +17,7 @@ import type { CountryCode, Payment } from "../../../shared/types.js";
 import { quoteOwner } from "./quotes.js";
 import { publicPayment, publicState, SOURCE_OF, TERMINAL } from "../core/platform/mapping.js";
 import { putMeta, metaOf, metasOf, paymentByReference } from "../core/platform/paymentMeta.js";
-import { checkLimits } from "../core/platform/limits.js";
+import { checkLimits, agentWithoutDelegation } from "../core/platform/limits.js";
 import { reserveXaf, attachPayment, release } from "../core/platform/liquidity.js";
 import { meter } from "../core/platform/usage.js";
 import { planOfOrg } from "../core/platform/billing.js";
@@ -68,6 +68,18 @@ route("post", "/payments", { scope: "payments:write", idempotent: true, cls: "pa
   const metadata: Record<string, string> = {};
   if (b.metadata && typeof b.metadata === "object") {
     for (const [k, v] of Object.entries(b.metadata as Record<string, unknown>).slice(0, 20)) if (/^[\w.-]{1,40}$/.test(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")) metadata[k] = String(v).slice(0, 200);
+  }
+
+  // AN AGENT WITHOUT BOUNDS CANNOT MOVE MONEY. §15 of the blueprint asks that an agent
+  // operate under explicit delegated authority; a principal declared an agent and then left
+  // under the organization's default limits would satisfy the words and none of the intent,
+  // because the default bounds every caller and therefore bounds this one no differently.
+  //
+  // So the check is for a delegation bound to THIS credential and in force now — not merely
+  // for some rule that happens to match. Fail-closed, and only in live: the sandbox exists
+  // to be rehearsed in, and refusing there would teach nothing except to avoid the sandbox.
+  if (agentWithoutDelegation(ctx.auth.credential, ctx.env)) {
+    throw err(403, "not_permitted", "This credential is registered as an agent and has no delegation in force, so it cannot create live payments. An agent's authority has to be stated: add a limit rule bound to this credential (recipients, operators, countries, funding methods, ceilings, validity) from the dashboard.", { credential_kind: "agent", how_to_proceed: "Bind at least one enabled limit rule to this credential, then retry." });
   }
 
   // Limits (configurable, org-aware), before anything is reserved or minted.
@@ -213,5 +225,19 @@ route("post", "/sandbox/payments/:id/pay", { scope: "payments:write", cls: "sand
   if (publicState(p) === "EXPIRED") throw err(409, "validation_failed", "This payment's instruction has expired.", { status: "EXPIRED" });
   const delay = isDelayed(p.id) ? 20_000 : 0;
   if (delay) setTimeout(() => background(engineSettle(p)), delay).unref?.(); else background(engineSettle(p));
-  return { ...publicPayment(p), sandbox: { paid: true, settles_in_seconds: delay / 1000 } };
+  // This reply means ACCEPTED, never COMPLETED — the settle runs in the background, exactly
+  // as a real rail's does. The default simulated rail is fast enough (about a second) that
+  // an integrator can poll once, see COMPLETED, and ship code that assumes a payment
+  // finishes inside the request. In production the payer's own wait is minutes. So say so
+  // here, and name the number that rehearses a slow rail: the sandbox misleads about TIMING
+  // even when it is honest about the contract, and the fix for that is to be explicit
+  // rather than to make every rehearsal artificially slow.
+  return {
+    ...publicPayment(p),
+    sandbox: {
+      paid: true, settles_in_seconds: delay / 1000,
+      note: "Accepted, not settled. Poll this payment or subscribe to payment.* — never assume a payment completes within the request.",
+      ...(delay ? {} : { rehearse_a_slow_rail: SCENARIO_NUMBERS.find((n) => n.scenario === "PAYMENT_DELAYED")?.phone }),
+    },
+  };
 });

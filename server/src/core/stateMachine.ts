@@ -12,6 +12,7 @@ import type { InboundAsset, Payment, PaymentState, DisplayStatus, Method } from 
 import { store } from "../db/store.js";
 import { isDeferredRail } from "../adapters/deferred.js";
 import { captureUnattributed } from "./unattributed.js";
+import { emit as journalEmit } from "./journal.js";
 import { notifyDelivered, notifyPayoutFailed, notifyHeldForReview, notifyUnattributed, notifyRefundReminder } from "./notifications.js";
 import { PROVIDER_PAYOUT_MAX, XAF_FLOAT_MAX, MIN_XAF, btcToMsat } from "../../../shared/domain.js";
 import { isLive, aggregatorLive, liveMoney } from "../config.js";
@@ -443,6 +444,10 @@ async function transition(p: Payment, state: PaymentState, note?: string): Promi
     const seen = illegalEdges.get(edge);
     illegalEdges.set(edge, { count: (seen?.count ?? 0) + 1, lastAt: new Date().toISOString(), lastRef: p.ref, lastNote: note });
     console.error(`[transition] UNDECLARED EDGE ${edge} on ${p.ref}${note ? ` · ${note}` : ""} — either the table is wrong or this is a bug. Not refused (log-only).`);
+    // Also to the journal: a log-only phase is only as good as somebody's ability to read it
+    // later, and Railway keeps a handful of lines of this service. Guarded, because an
+    // observability write must never be the thing that fails a settlement.
+    try { journalEmit({ type: "transition.undeclared", subject: { type: "payment", id: p.id }, actor: { type: "system" }, data: { edge, ref: p.ref, ...(note ? { note } : {}) } }); } catch { /* never a settlement failure */ }
     if (enforcing()) throw new IllegalTransition(p.state, state, p.ref);
   }
   // Identity Resolution v2: the recipient identity snapshot is frozen from the moment money
@@ -973,9 +978,16 @@ async function confirmInboundLocked(paymentId: string, actualAmount?: number, ev
     await parkForReview(p, "insufficient XAF float");
     return;
   }
-  // Operator approval threshold: large payouts hold for manual sign-off.
-  if (p.xaf >= getSettings().ops.payoutApprovalXaf) {
-    await parkForReview(p, `above approval threshold (${getSettings().ops.payoutApprovalXaf.toLocaleString()} XAF)`);
+  // Approval threshold: large payouts hold for manual sign-off. Two thresholds can apply —
+  // the operator's global one, and a per-delegation one stamped on the payment when a
+  // machine credential's limit rule asked for it. The LOWER wins, always: a delegation may
+  // tighten what needs a person, never loosen it, so a caller who somehow influenced the
+  // stamped value can only cause MORE of its own payments to hold for review.
+  const globalApproval = getSettings().ops.payoutApprovalXaf;
+  const delegated = typeof p.approvalAboveXaf === "number" && Number.isFinite(p.approvalAboveXaf) && p.approvalAboveXaf > 0 ? p.approvalAboveXaf : Infinity;
+  const approvalAt = Math.min(globalApproval, delegated);
+  if (p.xaf >= approvalAt) {
+    await parkForReview(p, `above approval threshold (${approvalAt.toLocaleString()} XAF${delegated < globalApproval ? ", set by this credential's delegation" : ""})`);
     return;
   }
   // Trust gate: a flagged / very-low-trust merchant needs manual confirmation.

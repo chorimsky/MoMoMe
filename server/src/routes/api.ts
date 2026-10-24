@@ -1269,6 +1269,9 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown, op
     }
   }
 
+  const delegation = (reqBody ?? {}) as { approvalAboveXaf?: unknown };
+  const approvalAboveXaf = typeof delegation.approvalAboveXaf === "number" && Number.isFinite(delegation.approvalAboveXaf) && delegation.approvalAboveXaf > 0
+    ? Math.round(delegation.approvalAboveXaf) : undefined;
   const payment: Payment = {
     id: id("pay"),
     ref,
@@ -1285,6 +1288,11 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown, op
     ...(quote.feeBy === "merchant" ? { feeBy: "merchant" as const } : {}),
     usd: quote.usd,
     spreadBps: quote.spreadBps, // locked spread → exact revenue attribution
+    // A delegation's approval threshold, stamped at creation (see Payment.approvalAboveXaf).
+    // Safe to take from the request body: the settlement engine uses the LOWER of this and
+    // the operator's global threshold, so the only thing a caller can do by supplying it is
+    // make its own payments hold for a person.
+    ...(approvalAboveXaf ? { approvalAboveXaf } : {}),
     payInstruction: instruction,
     events: [
       { at: now, state: "QUOTED" },

@@ -202,6 +202,12 @@ export interface Payment {
   feeBy?: "customer" | "merchant";
   /** FX spread (bps) locked at quote time — carried for revenue attribution. */
   spreadBps?: number;
+  /** A per-delegation approval threshold that applied when this payment was CREATED (from
+   *  a limit rule's requireApprovalAboveXaf). Stamped rather than looked up at settlement
+   *  for the same reason the spread is: the rule may have changed by then, and the policy
+   *  that governs a payment is the one that was in force when it was accepted. Only ever
+   *  tightens — the operator's global threshold still applies, and the lower wins. */
+  approvalAboveXaf?: number;
   /** The real inbound payment instruction (address / invoice) for this payment. */
   payInstruction: PayInstruction;
   /** When the payer sent the OTHER stablecoin to the address (USDC to a USDT address): the

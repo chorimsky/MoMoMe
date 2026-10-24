@@ -254,6 +254,19 @@ in sandbox.
 includes two money-path fixes. Nothing in Phase 1 should start before the deploy, or Phase 1
 will be reasoning about the wrong system.
 
+## 3b. What has been done since this audit was written
+
+The audit is left as it was written, because an audit that quietly edits itself to match the
+work is no longer evidence. This section records what moved.
+
+| Gap | State | Commit |
+| --- | --- | --- |
+| 3.11 production behind `main` | **Deployed** `88e4e10`. The health gate FAILED on `collection rail down: peexit` — the vendor outage, not the build; a provider-reachability check that the previous build would fail identically right now. Not rolled back: reverting removes two money-path fixes and does not make Peexit reachable. | — |
+| 3.1 no transition table | **Done, log-only.** `TRANSITION_TABLE_ENFORCE` off. The log-only phase earned itself on its first full-suite run: two edges the table denied and the engine really takes (`FX_LOCKED→FX_LOCKED`, a re-price; `FAILED→INBOUND_CONFIRMED`, an expired invoice paid late — the recovery for September's largest failure class). Enforcing on day one would have broken both. | `2e6cfe4` |
+| 3.3 delegation money-only | **Done.** `allow` (recipients, destination operators, countries, funding methods), `scope.credentialIds`, `notBefore`/`notAfter`, `requireApprovalAboveXaf` stamped on the payment and applied as the lower of it and the global threshold. Absent list = no constraint, so existing rules are unchanged. | below |
+| 3.5 no event spine | **Done, first producers.** `core/journal.ts`: versioned envelope, registered sinks, never throws, undeclared types kept and flagged. Producers: every transition, and every undeclared edge. Not a queue; partner delivery keeps its own retry/DLQ/replay. | below |
+| 3.2 no agent principal | **Not started, deliberately.** It was blocked on 3.3, which is now done — the authority record has something to say. Still blocked on the question in §5.4. | — |
+
 ## 4. Recommended first slice
 
 Not the whole of Phase 1 — the part that is unblocked, verifiable, and reversible.

@@ -7,6 +7,10 @@ export type ErrorCode =
   | "rate_limited" | "validation_failed" | "idempotency_key_required" | "idempotency_key_invalid" | "idempotency_key_reused" | "idempotency_in_progress"
   | "quote_not_found" | "quote_expired" | "quote_already_used" | "asset_unsupported" | "network_unsupported" | "amount_out_of_range" | "country_unsupported" | "currency_unsupported"
   | "payment_not_found" | "payment_not_cancellable" | "payment_not_refundable" | "recipient_invalid" | "recipient_unverified" | "recipient_reserved"
+  // A delegation refusal is NOT a limit breach and not a scope error: the credential is
+  // allowed to create payments, and this payment is not too big — it is simply not one
+  // this credential may make (recipient, operator, country or funding method).
+  | "not_permitted"
   | "limit_exceeded" | "compliance_blocked" | "compliance_review" | "insufficient_liquidity" | "provider_unavailable" | "service_paused"
   | "webhook_not_found" | "webhook_url_invalid" | "webhook_limit"
   | "settlement_not_found" | "settlement_invalid" | "insufficient_balance"

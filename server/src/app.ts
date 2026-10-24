@@ -18,6 +18,7 @@ import { cron } from "./routes/cron.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
 import { jobsHealth } from "./jobs.js";
+import { installJournalProducers } from "./core/journalProducers.js";
 import { ratesFresh, ratesMeta } from "./core/rates.js";
 import { usingPostgres } from "./db/store.js";
 import { persistDurable } from "./core/persist.js";
@@ -140,6 +141,9 @@ export function appVersion(): string | null {
 }
 
 export function createApp() {
+  // The domain journal's producers, before any route can cause a transition. Idempotent,
+  // so the tests that build several apps install it once.
+  installJournalProducers();
   const app = express();
   // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
   // client IP (rate limiting, webhook IP allowlist), not a spoofable XFF.

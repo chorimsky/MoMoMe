@@ -72,10 +72,32 @@ route("post", "/payments", { scope: "payments:write", idempotent: true, cls: "pa
 
   // Limits (configurable, org-aware), before anything is reserved or minted.
   const src = SOURCE_OF[quote.method];
-  const lim = await checkLimits({ orgId: ctx.orgId, env: ctx.env, plan: planOfOrg(ctx.orgId).id, country, asset: src.asset, currency: "XAF", operator: chk.provider, xaf: quote.xaf });
+  const lim = await checkLimits({
+    orgId: ctx.orgId, env: ctx.env, plan: planOfOrg(ctx.orgId).id, country, asset: src.asset, currency: "XAF", operator: chk.provider, xaf: quote.xaf,
+    // What the delegation needs in order to have an opinion: which machine is asking, who
+    // it wants to pay, and how the payment would be funded.
+    credentialId: ctx.auth.credential.id, recipient: chk.local, method: quote.method,
+  });
   if (!lim.ok) {
+    // Two kinds of refusal now arrive here, and they must not be reported as one. A
+    // ceiling breach is "too much" and names a number; a delegation refusal is "not
+    // permitted" and names a list. Rendering the second with the first's words told a
+    // developer their payment "exceeds the recipient not allowed: 670123456" — accurate
+    // about nothing. `allowed` is only echoed for the operator/country/method lists,
+    // never for recipients: that list is somebody's phone book.
+    const isAllowList = lim.limit.endsWith("_not_allowed");
+    if (isAllowList) {
+      const noun = lim.limit.replace(/_not_allowed$/, "").replace(/_/g, " ");
+      const list = Array.isArray(lim.ceiling) ? lim.ceiling : [];
+      throw err(403, "not_permitted", `This credential may not pay that ${noun} (${String(lim.value)}). Its delegation "${lim.rule.name}" restricts which ${noun}s it can pay.`, {
+        limit: lim.limit, value: lim.value, rule: lim.rule.name,
+        ...(lim.limit === "recipient_not_allowed" ? { allowed_count: list.length } : { allowed: list }),
+      });
+    }
     const isCount = lim.limit.endsWith("count") || lim.limit.startsWith("velocity");
-    throw err(422, "limit_exceeded", `This payment exceeds the ${lim.limit.replace(/_/g, " ")}: ${lim.ceiling.toLocaleString("en")}${isCount ? " payments" : " XAF"} (would be ${lim.value.toLocaleString("en")}).`, { limit: lim.limit, ceiling: lim.ceiling, value: lim.value, rule: lim.rule.name });
+    const ceiling = typeof lim.ceiling === "number" ? lim.ceiling.toLocaleString("en") : String(lim.ceiling);
+    const value = typeof lim.value === "number" ? lim.value.toLocaleString("en") : String(lim.value);
+    throw err(422, "limit_exceeded", `This payment exceeds the ${lim.limit.replace(/_/g, " ")}: ${ceiling}${isCount ? " payments" : " XAF"} (would be ${value}).`, { limit: lim.limit, ceiling: lim.ceiling, value: lim.value, rule: lim.rule.name });
   }
 
   // Sandbox scenarios (test environment only) that refuse at creation.
@@ -88,7 +110,7 @@ route("post", "/payments", { scope: "payments:write", idempotent: true, cls: "pa
   const rsv = await reserveXaf(ctx.orgId, quote.xaf, { allowUnknown: ctx.env === "test" });
   if (!rsv.ok) throw err(503, "insufficient_liquidity", rsv.reason === "unknown_balance" ? "The payout float is momentarily unknown. Retry shortly." : "Not enough XAF liquidity for this payout right now. Retry shortly or reduce the amount.", { available_xaf: rsv.available });
 
-  const body = { quoteId, recipient: { phone: chk.local, country, provider: chk.provider, name: str(rec.name).slice(0, 80), nameSource: str(rec.name) ? "user" : "unknown" }, ...(str(b.confirmation_token) ? { riskToken: str(b.confirmation_token) } : {}) };
+  const body = { quoteId, recipient: { phone: chk.local, country, provider: chk.provider, name: str(rec.name).slice(0, 80), nameSource: str(rec.name) ? "user" : "unknown" }, ...(str(b.confirmation_token) ? { riskToken: str(b.confirmation_token) } : {}), ...(lim.approvalAboveXaf ? { approvalAboveXaf: lim.approvalAboveXaf } : {}) };
   let r;
   try { r = await createPaymentCore(ctx.req, body); }
   catch (e) { release(rsv.reservation.id, "core_error"); throw e; }

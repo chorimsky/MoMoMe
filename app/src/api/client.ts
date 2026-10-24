@@ -129,7 +129,15 @@ export function setElevationPrompt(fn: (() => Promise<string | null>) | null): v
    payments. */
 const SENDER_KEY = "mm_sender_id";
 function newId(): string {
-  return crypto.randomUUID?.() ?? `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  if (crypto.randomUUID) return crypto.randomUUID();
+  // The fallback used Math.random, which is NOT a safe way to mint this value. While the
+  // LEGACY_SENDER_UNTIL window is open the sender id is accepted as a bearer identity with
+  // no signature, so a guessable one is a guessable account. crypto.getRandomValues is
+  // available far more widely than randomUUID (which additionally needs a secure context),
+  // so the fallback path is where the weak generator was, not where it was needed.
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return `s_${Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")}`;
 }
 // True when senderId was minted THIS load (no prior localStorage value) — such an
 // id was never enrolled server-side, so early unsigned requests are safely accepted

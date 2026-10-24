@@ -1199,7 +1199,9 @@ export async function createPaymentCore(req: ExpressRequest, bodyIn: unknown, op
   // Attribute the payment to the authenticated device (resolved at the top of the route,
   // before the risk tokens, so those bind to the verified owner too). A senderId-less
   // payment would be world-readable via mayViewPayment's ownerless bypass — refuse.
-  if (owner === undefined) return { status: 401, body: { error: "no_device", message: "Unrecognised device." } };
+  // block(), not a bare return: the quote was claimed a few lines above, and burning a
+  // locked rate on a request we are refusing anyway makes the sender re-quote for nothing.
+  if (owner === undefined) return block(401, "no_device", "Unrecognised device.");
 
   // ── compliance screen BEFORE anything is minted ────────────────────────────────────
   // Watchlist hit or velocity limit → refused now (nothing is created, nothing to refund).

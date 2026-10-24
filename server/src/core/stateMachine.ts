@@ -969,7 +969,7 @@ async function pollPayout(ref: string): Promise<void> {
     if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved
     try {
       const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
-      if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(ref, status, p.payoutRef); return; }
+      if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(payoutKeyOf(p), status, p.payoutRef); return; }
     } catch (e) { console.error("poll payout", ref, e); }
   }
 }
@@ -986,7 +986,13 @@ export async function onPayoutResult(refOrKey: string, status: PayoutStatus, pro
   const ref = refOrKey.replace(/:r\d+$/, "");
   const p0 = await store().findPaymentByRef(ref);
   if (!p0) return;
-  if (refOrKey !== ref && payoutKeyOf(p0) !== refOrKey) { console.warn(`[settle] ${ref}: ignoring ${status} for superseded payout attempt ${refOrKey}`); return; }
+  // The key must be the CURRENT attempt's, in BOTH directions. The first version only
+  // checked the suffixed form, so a late verdict carrying the BARE ref — which is exactly
+  // what attempt 1 was submitted under — was honoured after a failover had moved the
+  // payment to `${ref}:r2`. Attempt 1's "FAILED" then refunded a payout that attempt 2 was
+  // still carrying, and its "COMPLETED" would have marked delivered with r2 in flight at
+  // another rail. A verdict on a superseded attempt says nothing about the live one.
+  if (refOrKey !== payoutKeyOf(p0)) { console.warn(`[settle] ${ref}: ignoring ${status} for superseded payout attempt ${refOrKey} (current ${payoutKeyOf(p0)})`); return; }
   // Per-payment lock: the callback, the status poll AND the reconcile backstop can all
   // fire for one payout — serialize so the delivery leg + identity provisioning run once.
   return store().lockPayment(p0.id, () => onPayoutResultLocked(ref, status, providerRef));
@@ -1059,7 +1065,7 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
     // which can only answer "not mine" or, worse, match a colliding reference.
     if (isDeferredRail(p.aggregator)) continue;
     const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
-    if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(p.ref, status);
+    if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(payoutKeyOf(p), status);
   }
 }
 

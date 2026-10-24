@@ -87,6 +87,19 @@ export function runBootChecks(): void {
   if (config.admin.passwordIsDefault && (config.publicUrl.startsWith("https://") || liveMoney())) {
     console.warn("⚠️  ADMIN_PASSWORD is not set — the admin console is using the default password. Set ADMIN_PASSWORD in the environment.");
   }
+  // THE SENDER-ID BEARER WINDOW. While it is open, `x-mm-sender: <id>` is accepted as an
+  // identity with NO signature — that is its purpose, to carry installs that enrolled
+  // before device signing existed. It is also, for as long as it lasts, an account's id
+  // being its password: anyone who learns one reads that person's payments and contacts.
+  // It closes on a DATE, silently, so nothing otherwise says it is still open, and an
+  // extension to "buy time" would be invisible. On a live deployment, say it every boot.
+  if (liveMoney()) {
+    const until = Date.parse(process.env.LEGACY_SENDER_UNTIL ?? "2026-11-01T00:00:00Z");
+    if (Number.isFinite(until) && Date.now() < until) {
+      const days = Math.ceil((until - Date.now()) / 86_400_000);
+      console.warn(`⚠️  Un-enrolled devices are still accepted WITHOUT a signature for ${days} more day(s) (LEGACY_SENDER_UNTIL=${new Date(until).toISOString().slice(0, 10)}) — until then a leaked sender id is full access to that account. Close it early by setting LEGACY_SENDER_UNTIL to a past date once the signing app has rolled out.`);
+    }
+  }
   // PawaPay callbacks are UNVERIFIED (v2 uses RFC-9421 asymmetric signatures, not
   // implemented), so the endpoint fails closed on a live rail. Payouts still settle via
   // the authoritative queryStatus re-query — say so plainly rather than implying the

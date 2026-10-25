@@ -71,6 +71,7 @@ export const EVENT_TYPES = [
   "limit.refused",
   "delegation.refused",
   "transition.undeclared",
+  "intelligence.answered",
 ] as const;
 
 const CAP = 5_000;

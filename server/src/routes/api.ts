@@ -40,6 +40,8 @@ import { background } from "../core/background.js";
 import { ensureFreshRates } from "../jobs.js";
 import { store } from "../db/store.js";
 import { stageStats } from "../core/stageLatency.js";
+import { explainPayment, TRANSACTION_INTELLIGENCE } from "../core/intelligence/transactions.js";
+import { intelAuditLog } from "../core/intelligence/contract.js";
 import { id, nextRef } from "../core/ids.js";
 import {
   config, isLive, liveMoney, ibexConfigured, ibexLive, phoenixdConfigured, phoenixdTrusted, deployEnv, databaseHost,
@@ -225,6 +227,11 @@ function sectionForPath(sub: string): Section | null {
     users: "administration", audit: "administration",
     testing: "testing",
     platform: "platform",                   // API v1: organizations, credentials, plans, limits, settlements
+    // Asking about a payment is looking at a payment. Keyed on the first segment, so a
+    // capability for a different audience (financial intelligence → "reports") needs its
+    // own prefix rather than inheriting this one — and test/admin-sections.test.ts fails
+    // the moment an /admin route has no section at all, which is how this was caught.
+    intelligence: "payments",
   };
   return map[p] ?? null;
 }
@@ -3401,6 +3408,32 @@ api.get("/admin/mobile-money", async (_req, res) => {
 api.get("/admin/analytics", (req, res) => {
   const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
   res.json(analyticsReport(days));
+});
+
+/* ---------- intelligence (admin) ----------
+   One capability so far (transactions). The route stays capability-generic so the second
+   one is a registry entry rather than a new endpoint — the whole point of the shared
+   contract in core/intelligence. */
+api.get("/admin/intelligence/capabilities", async (_req, res) => {
+  res.json({ capabilities: [TRANSACTION_INTELLIGENCE] });
+});
+api.get("/admin/intelligence/payment/:ref", async (req, res) => {
+  // The capability's own declared section, checked here as well as by the prefix gate
+  // above. Belt and braces with a purpose: the route reads the declaration, so a
+  // capability that declares "reports" cannot be reachable by someone who may only see
+  // payments just because its URL happens to start with /admin/intelligence.
+  const role = (req as unknown as AdminReq).session?.role;
+  if (!role || !canAccess(role, TRANSACTION_INTELLIGENCE.section)) return res.status(403).json({ error: "forbidden", message: "Your role cannot ask this." });
+  // Who asked, for the audit entry. The same read every other admin route uses.
+  const who = getUser((req as unknown as AdminReq).session?.uid ?? "")?.username ?? (req as unknown as AdminReq).session?.uid ?? "admin";
+  const a = await explainPayment(String(req.params.ref), who);
+  if (!a) return res.status(404).json({ error: "not_found", message: "No payment with that reference or id." });
+  res.json(a);
+});
+api.get("/admin/intelligence/audit", async (_req, res) => {
+  // The audit is the point of the contract, so it is readable without a model being
+  // configured and without any question having been asked.
+  res.json({ entries: intelAuditLog(200) });
 });
 
 api.get("/admin/reports", async (req, res) => {

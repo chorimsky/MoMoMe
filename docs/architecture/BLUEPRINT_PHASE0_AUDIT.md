@@ -279,6 +279,7 @@ work is no longer evidence. This section records what moved.
 | 3.4 credentials never expire | **Done.** Optional `expiresAt` (`expires_in_days`, capped at 730), `401 credential_expired` distinct from revoked, rotation renews the lifetime rather than the remainder. Absent = permanent, so nothing deployed stops working. | below |
 | 3.7 per-stage latency unmeasured | **Done, derived.** `core/stageLatency.ts` computes p50/p95/p99 for seven stages from the transition timestamps already on the payments — no new writes on the money path, and retrospective over existing history. Percentiles withheld below 5 samples; a payment still in a stage is excluded from it. On `GET /api/admin/reports`. | below |
 | 3.2 no agent principal | **Partly done: the fail-closed half.** `kind: "agent"` is declarable (its own endpoint, preserved across rotation), and an agent with no delegation in force cannot create LIVE payments. It is a restriction only — no autonomy was granted, so it does not presume an answer to §5.4. What is still not built is anything that lets an agent act on its own: no agent-tool surface, no MCP, no machine-to-machine initiation. | below |
+| 3.6 intelligence one domain deep | **Contract generalised, one capability built.** `shared/intelligence.ts` + `core/intelligence/contract.ts` lift the capital copilot's discipline into a shared door: claims carry the engine's numbers and their evidence, facts are labelled apart from inferences and hypotheses, scope is enforced outside the capability, every exchange is audited, and the answer exists with no model configured. The guard is the point: a model's phrasing is checked against the computed figures and **discarded** if it contains one the engine did not produce. First capability: transaction intelligence (`GET /api/admin/intelligence/payment/:ref`). Scope call made without the operator's input after repeated instruction to proceed — see §5a. | below |
 | 3.10 sandbox synchronous | **Corrected, then fixed narrowly.** The original finding overstated it (the API does distinguish accepted from completed). The real residue was timing realism; the pay reply now says so and names the slow-rail rehearsal number. | below |
 
 ## 4. Recommended first slice
@@ -296,6 +297,24 @@ Not the whole of Phase 1 — the part that is unblocked, verifiable, and reversi
 5. **Versioned event record** (§3.5), written once, fanned out to today's four stores.
 
 Each step is one commit, behind the one gate, with the whole thing reversible by reverting.
+
+## 5a. A scope call made without an answer
+
+§3.6 was listed as needing the operator's input, because choosing which of §20's eleven
+capabilities to build is choosing what their operators need to ask. After repeated
+instruction to proceed, that call was made here rather than left open, and it is recorded
+so it can be disagreed with cheaply:
+
+- **Built:** the shared contract, plus **transaction intelligence** only. Chosen because it
+  is the question asked first after any incident, and because its evidence already exists in
+  full — the payment carries every transition, the journal carries what was refused, the
+  registry carries who was asked. It needed no new collection, which also makes it the test
+  of whether the event spine was worth building.
+- **Not built:** the other ten capabilities in §20. Each is a registry entry plus a claims
+  function against the shared contract now, not a new subsystem — which is the only part of
+  this that was architecture rather than product.
+- **Still the operator's:** whether any of them should be able to ACT. Nothing here can:
+  the contract has no execution path at all, by construction rather than by configuration.
 
 ## 5. Questions only the operator can answer
 

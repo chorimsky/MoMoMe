@@ -17,6 +17,7 @@ process.env.CAMPAY_PERMANENT_TOKEN = "test-token-not-a-real-credential";
 process.env.CAMPAY_WEBHOOK_KEY = "test-webhook-key";
 process.env.CAMPAY_ENV = "production";
 process.env.CAMPAY_API_URL = "https://campay.carrier.invalid/api";
+process.env.HEALTH_DETAIL_TOKEN = "carrier-float-detail-token";
 
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}${d ? `  (${d})` : ""}`); pass++; } else { console.log(`  ✗ ${n}${d ? `  (${d})` : ""}`); fail++; } };
@@ -67,13 +68,17 @@ async function main() {
   const server = createApp().listen(0);
   await new Promise<void>((res) => server.once("listening", () => res()));
   const port = (server.address() as { port: number }).port;
-  const h = await (await fetch(`http://127.0.0.1:${port}/health/deep`)).json() as Record<string, any>;
+  const h = await (await fetch(`http://127.0.0.1:${port}/health/deep`, { headers: { "x-health-token": "carrier-float-detail-token" } })).json() as Record<string, any>;
   server.close();
   const rail = (h.rails ?? []).find((x: { name: string }) => x.name === "campay");
   ok("the rail reports its per-carrier floats", rail && rail.byProvider && rail.byProvider.MTN === 0, JSON.stringify(rail?.byProvider));
   ok("spendable is 0, not 4 900", rail?.spendableXaf === 0, String(rail?.spendableXaf));
   ok("…so the rail is NOT called routable", rail?.routable === false, String(rail?.routable));
   ok("and the problem is named for the operator", (h.problems ?? []).some((p: string) => /not allocated to a carrier float/.test(p)), JSON.stringify(h.problems));
+  // A rail that serves NO corridor has no carrier float to strand money on. Reporting it
+  // as a funding misconfiguration is noise, and it false-alarmed the deploy gate.
+  const strandedMsg = (h.problems ?? []).find((p: string) => /not allocated to a carrier float/.test(p)) ?? "";
+  ok("a rail that supports no corridor is NOT called stranded", !/pawapay/i.test(strandedMsg), strandedMsg);
 
   console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"} — ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

@@ -259,7 +259,12 @@ export function createApp() {
     // Money in the account but none of it on a carrier float: every payout is refused while
     // the balance looks healthy. It is a specific, fixable misconfiguration, so name it
     // rather than leaving the operator to infer it from payments that will not go.
-    const stranded = rails.filter((r) => r.live && (r.balanceXaf ?? 0) > 0 && (r.spendableXaf ?? 0) <= 0);
+    // Only a rail that HAS carrier floats can have funds stranded off them. PawaPay serves
+    // no corridor today (supports() is gated off), so it has none — and the first version of
+    // this check read "no spendable float" as "stranded", reporting a rail that is simply
+    // out of rotation as a funding misconfiguration. A problem nobody can act on is noise,
+    // and on a deploy gate that diffs problem strings it is a false alarm with consequences.
+    const stranded = rails.filter((r) => r.live && Object.keys(r.byProvider).length > 0 && (r.balanceXaf ?? 0) > 0 && (r.spendableXaf ?? 0) <= 0);
     if (stranded.length) problems.push(`funds not allocated to a carrier float: ${stranded.map((r) => `${r.name} holds ${Math.round(r.balanceXaf ?? 0)} XAF, none of it on an MTN or Orange float`).join("; ")}`);
     // Carry the REASON, not just the name. "collection rail down: peexit" sent an operator
     // looking at credentials and wallets for four days; the rail was answering perfectly and

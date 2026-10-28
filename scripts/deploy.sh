@@ -24,7 +24,22 @@ SHA=$(git rev-parse HEAD)
 if [ -n "$(git status --porcelain | grep -v '^??')" ]; then
   echo "note: working tree has uncommitted changes — they will NOT be deployed (HEAD $SHA is)."
 fi
-ROOT=$(mktemp -d /tmp/momome-deploy.XXXXXX); trap 'rm -rf "$ROOT"' EXIT
+# THE BASELINE, read from the build that is live right now, before anything is uploaded.
+# The gate's question is "did this build make anything worse?", and the only moment the
+# "before" can be observed is now. A problem already present is reported and tolerated; a
+# new one fails the deploy. Captured best-effort: if the service cannot be read at all the
+# file stays empty, which means NO tolerance — an unknown starting state fails closed.
+BASELINE=$(mktemp /tmp/momome-baseline.XXXXXX)
+curl -s -m 10 "$URL/health/deep" 2>/dev/null | python3 -c 'import sys,json
+try:
+    for p in (json.load(sys.stdin).get("problems") or []): print(p)
+except Exception: pass' > "$BASELINE" || true
+if [ -s "$BASELINE" ]; then
+  echo "deploy: the live build already reports $(wc -l < "$BASELINE" | tr -d " ") problem(s); they will not be counted against ${SHA:0:7}:"
+  sed 's/^/  · /' "$BASELINE"
+fi
+
+ROOT=$(mktemp -d /tmp/momome-deploy.XXXXXX); trap 'rm -rf "$ROOT" "$BASELINE"' EXIT
 git archive "$SHA" | tar -x -C "$ROOT"
 printf '%s\n' "$SHA" > "$ROOT/BUILD_VERSION"      # what /health/deep will report as `version`
 cd "$ROOT"
@@ -147,7 +162,7 @@ print('; '.join((x.get('meta') or {}).get('configErrors') or []) if x else '')" 
   sleep 15
 done
 [ "${ST:-}" = "SUCCESS" ] || { echo "deploy: timed out waiting for Railway ($ST)"; exit 1; }
-if bash "$REPO/scripts/deploy-gate.sh" "$URL" "$SHA"; then
+if bash "$REPO/scripts/deploy-gate.sh" "$URL" "$SHA" "$BASELINE"; then
   echo "deploy: ${SHA:0:7} is live and gated on $TARGET"
   exit 0
 fi

@@ -61,9 +61,9 @@ export function OverviewView() {
                   <div style={{ marginBottom: 14 }}><ProviderChip id={p.id} /></div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
                     <span style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Success rate</span>
-                    <span className="num" style={{ fontSize: 16, fontWeight: 750, color: "var(--recv)" }}>{fmt(p.ratePct, 1)}%</span>
+                    <span className="num" style={{ fontSize: 16, fontWeight: 750, color: p.ratePct == null ? "var(--ink-3)" : "var(--recv)" }}>{p.ratePct == null ? "—" : `${fmt(p.ratePct, 1)}%`}</span>
                   </div>
-                  <Bar pct={p.ratePct} tone="recv" />
+                  <Bar pct={p.ratePct ?? 0} tone={p.ratePct == null ? "ink" : "recv"} />
                   <div style={{ marginTop: 12 }}>
                     <KV k="Volume" v={`${fmt(p.volumeXaf)} XAF`} />
                   </div>

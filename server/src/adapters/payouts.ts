@@ -61,6 +61,12 @@ export interface PayoutAdapter {
   verifyCallback?(rawBody: string, headers: Record<string, string | string[] | undefined>): boolean;
   /** OPTIONAL parse a verified callback body → normalised events (mirrors parseEvent). */
   parseCallback?(body: unknown): PayoutCallbackEvent[];
+  /** OPTIONAL: did the LAST real call reach this rail, and how did it fail? Lets the router
+   *  tell a CONFIGURATION failure (401 key refused, 403 IP not allowlisted — neither of
+   *  which a retry fixes) from a transient one, instead of re-asking every few seconds for
+   *  days. Peexit's balance read 403'd every 15 s for four days while the tracker, which
+   *  only learns from payout ATTEMPTS, went on calling the rail eligible. */
+  reachability?(): { ok: boolean; status: number; reason: string } | null;
   /** OPTIONAL sandbox rehearsal: force this rail's next result for a key. A scenario that
    *  means "this payment fails" has to arm EVERY rail, because a failed payout fails over
    *  to the next one — arming only the primary made the sandbox deliver a payment the
@@ -89,6 +95,7 @@ export const peexitAdapter: PayoutAdapter = {
   },
   parseCallback: (body) => peexit.parsePayoutEvents(body).map((e) => ({ ref: e.ref, status: e.status })),
   simulatePayoutOutcome: peexit.simulatePayoutOutcome,
+  reachability: peexit.reachability,
 };
 
 /* ---------- CamPay — Cameroon-only, and the cheapest payout rate we have ----------
@@ -114,6 +121,7 @@ export const campayAdapter: PayoutAdapter = {
   verifyCallback: (raw) => campay.verifyCallbackSignature(raw),
   parseCallback: (body) => campay.parseCallbackEvents(body).filter((e) => e.endpoint !== "collect").map((e) => ({ ref: e.ref, providerRef: e.providerRef })),
   simulatePayoutOutcome: campay.simulatePayoutOutcome,
+  reachability: campay.reachability,
 };
 
 /* ---------- PawaPay — second rail, currently OUT of rotation ---------- */

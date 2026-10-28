@@ -100,8 +100,15 @@ export async function discoverRoutes(intent: PaymentIntent, dest: PaymentAddress
     // was shown while the real cause was a rail we could not reach at all. Report the two
     // apart — the same unknown-is-not-zero distinction payoutReady() already makes and this
     // check used to collapse.
+    // "No funded payout rail" is true but useless when the rail IS reachable and its float
+    // is simply short for THIS carrier — which is the live case: an account holding money,
+    // none of it allocated to the MTN or Orange float the payout would debit. Name the
+    // carrier and the figure, so the fix (top up that carrier) is readable from the refusal.
+    const carrierFloats = await Promise.all(reachable.map(async (p) => ({ name: p.name, bal: await p.balance(country, operator).catch(() => null) })));
+    const short = carrierFloats.filter((c) => c.bal != null && c.bal < intent.amount);
     liquidityDetail = agg ? `${agg.name}; float ${Math.round(float)} XAF`
       : reachable.length === 0 && unreadable.length ? `no payout rail reachable (${unreadable.join(",")})`
+      : short.length ? `${operator} float short: ${short.map((c) => `${c.name} ${Math.round(c.bal!)} XAF`).join(", ")} (need ${intent.amount})`
       : "no funded payout rail";
   }
   destChecks.push({ name: "liquidity", ok: liquidityOk, detail: liquidityDetail });

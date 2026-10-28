@@ -218,7 +218,7 @@ function RecipientVerificationCard() {
       )}
       {st.enabled && sandboxOnly && (
         <div style={{ fontSize: 13, color: "var(--warn-ink)", lineHeight: 1.5, marginBottom: 12 }}>
-          Only the sandbox stand-in is answering — fixtures, not the operators. In production this means no real provider is configured: the Peexit verify-wallet provider needs only the existing PEEXIT_API_KEY.
+          Only the sandbox stand-in is answering — fixtures, not the operators. In production this means no real provider is configured: CamPay's holder lookup needs only the existing CAMPAY_PERMANENT_TOKEN.
         </div>
       )}
       <Grid cols={4} style={{ marginBottom: 12 }}>

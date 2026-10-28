@@ -1,6 +1,9 @@
 /* ============================================================
-   Mobile Money — providers, routing and configuration for the active payout rail.
-   Data: api.adminMobileMoney() (aggregator name derived from live config).
+   Mobile Money — providers, routing and the configuration of EVERY payout rail.
+   There is no "active rail": there is a registry. The page used to show one aggregator
+   chosen by a guess that always resolved to Peexit while it was configured, so an
+   unreachable vendor was presented as the live payout configuration.
+   Data: api.adminMobileMoney().
    ============================================================ */
 import { useEffect, useState } from "react";
 import type { MobileMoneyInfo, RoutingSnapshot, MomoOp, MomoRailBalance, MomoFeeInfo, ProviderId, MomoTransfer } from "@shared/types.js";
@@ -41,20 +44,41 @@ export function MobileMoneyView() {
               <div style={{ fontWeight: 700, fontSize: 15 }}>{PROVIDERS[p.id].name}</div>
               <Pill status={p.status} tone={p.status === "Online" ? "recv" : p.status === "Maintenance" ? "warn" : "bad"} />
             </div>
-            <KV k="Success rate" v={`${fmt(p.successRatePct)}%`} />
+            {/* No payments means NO EVIDENCE, not a perfect record. This read "100%" for a
+                provider nothing had ever been sent to. */}
+            <KV k="Success rate" v={p.successRatePct == null ? "— no payments yet" : `${fmt(p.successRatePct)}% · ${fmt(p.samples)} payment${p.samples === 1 ? "" : "s"}`} />
             <KV k="Max payout" v={`${fmt(p.maxPayoutXaf)} XAF`} />
           </div>
         ))}
       </Grid>
 
       <Grid cols={2} gap={16}>
-        <Card title={`${data.aggregator} configuration`} sub="Active payout rail · managed via environment variables in production.">
-          <Grid cols={1} gap={12} style={{ marginTop: 4 }}>
-            <Field label="Environment" value={data.environment} />
-            <Field label="Payout confirmation" value={data.payoutConfirmation} />
-            <Field label="Webhook URL" value={data.webhookUrl} mono />
-            <Field label="API key" value={data.apiKeyMasked} mono />
-          </Grid>
+        <Card title="Payout rails" sub="Every configured rail · managed via environment variables in production.">
+          <div style={{ marginTop: 4, display: "grid", gap: 14 }}>
+            {data.rails.length === 0 && <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No payout rail is configured.</div>}
+            {data.rails.map((r) => (
+              <div key={r.key} style={{ borderTop: "1px solid var(--line-2)", paddingTop: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+                  <span style={{ fontWeight: 750, fontSize: 14 }}>{r.name}</span>
+                  {/* Reachability is a DIFFERENT fact from configured/live: Peexit was both,
+                      and unreachable, for four days. null = never called in this process. */}
+                  <Pill
+                    status={r.reachable === true ? "reachable" : r.reachable === false ? "unreachable" : "not called yet"}
+                    tone={r.reachable === true ? "recv" : r.reachable === false ? "bad" : "ink"}
+                  />
+                </div>
+                <Grid cols={1} gap={9}>
+                  <Field label="Environment" value={r.environment} />
+                  <Field label="Webhook URL" value={r.webhookUrl} mono />
+                  <Field label="API key" value={r.apiKeyMasked} mono />
+                  {r.reachNote && <Field label="Last call" value={r.reachNote} />}
+                </Grid>
+              </div>
+            ))}
+            <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 11 }}>
+              <Field label="Payout confirmation" value={data.payoutConfirmation} />
+            </div>
+          </div>
         </Card>
         <Card title="Routing rules" sub="Country → preferred providers">
           <div style={{ marginTop: 4 }}>
@@ -147,7 +171,9 @@ function MomoOpsPanel() {
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
           {balances.map((b) => {
-            const isPayout = b.label.toLowerCase().includes("payout");
+            // b.kind, not a substring of b.label: "CamPay float · MTN" contains no "payout"
+            // and was being described to the operator as a collected balance.
+            const isPayout = b.kind === "payout";
             const underfunded = isPayout && b.balanceXaf != null && b.balanceXaf <= 0;
             return (
               <div key={b.label} className="card" style={{ padding: 16 }}>
@@ -159,8 +185,8 @@ function MomoOpsPanel() {
                 </div>
                 <div style={{ fontSize: 11.5, color: underfunded ? "var(--bad)" : "var(--ink-3)", marginTop: 4 }}>
                   {b.balanceXaf == null ? "Not live / unreachable"
-                    : underfunded ? "Empty — top up the payout float on a live rail to enable payouts"
-                    : isPayout ? "Available for payouts (disbursement balance)"
+                    : underfunded ? `Empty — top up this float${b.provider ? ` for ${b.provider}` : ""} before a payout can go`
+                    : isPayout ? `Spendable on payouts${b.provider ? ` to ${b.provider}` : ""}`
                     : "Collected balance (filled by cash-in)"}
                 </div>
               </div>

@@ -282,7 +282,7 @@ async function accountBalancesUncached(): Promise<Acct> {
       if (!r.ok) {
         lastReach = { ok: false, status: r.status, at: new Date().toISOString(),
           reason: r.status === 403
-            ? "403 — egress IP not on Peexit's allowlist (server.peexit.com 403s any non-allowlisted source regardless of SECRETKEY)"
+            ? `403 — egress IP not on Peexit's allowlist (${config.peexit.apiUrl} 403s any non-allowlisted source regardless of SECRETKEY)`
             : r.status === 401 ? "401 — SECRETKEY rejected"
             : `HTTP ${r.status}` };
         // Do NOT swallow this silently. An unreadable balance becomes null →
@@ -294,7 +294,7 @@ async function accountBalancesUncached(): Promise<Acct> {
         // (e.g. after moving hosts), not of a bad key or an unfunded wallet.
         console.warn(
           r.status === 403
-            ? `[peexit] ${path} → 403 (nginx). server.peexit.com is IP-allowlisted and 403s ANY non-allowlisted egress regardless of SECRETKEY — this egress IP is almost certainly not on Peexit's allowlist. Balance is UNKNOWN, not zero.`
+            ? `[peexit] ${path} → 403. ${config.peexit.apiUrl} is IP-allowlisted and 403s ANY non-allowlisted egress regardless of SECRETKEY — this egress IP is almost certainly not on Peexit's allowlist. Balance is UNKNOWN, not zero.`
             : `[peexit] ${path} → HTTP ${r.status}; balance is UNKNOWN, not zero.`,
         );
         return {};

@@ -51,10 +51,21 @@ const OBLIGATIONS: Array<{ area: string; basis: string; status: OblStatus; note:
   { area: "Crypto / VASP authorization", basis: "COBAC Décision D-2022/071 (banks barred from crypto settlement)", status: "legal", note: "No code fix: obtain a licensed payment-institution partner for the XAF leg and local counsel. Structural risk." },
 ];
 
-/* Technical-partner registry (BEAC Instruction 002/2026 disclosure). */
+/* Technical-partner registry (BEAC Instruction 002/2026 disclosure).
+ *
+ * THIS LIST IS A DISCLOSURE, not a UI decoration, and it is hand-maintained — so it drifts
+ * every time a rail is added and nobody remembers this file. It did: CamPay was processing
+ * payouts, collections AND recipient-name lookups, and NEXAH was sending every one-time
+ * code, while neither appeared here. Anything added to the payout, collection, crypto or
+ * messaging registries belongs in this list on the same change. */
 const PARTNERS = [
   { name: "IBEX Hub", role: "Crypto inbound (Lightning / on-chain / stablecoin)", country: "US / global", status: "OAuth2 API partner" },
-  { name: "Peexit (Peex)", role: "Mobile Money disbursement + collection (MTN/Orange)", country: "Cameroon", status: "Payment aggregator" },
+  // Also our recipient-name provider: holder_info returns the operator-registered name
+  // behind a number, so this partner processes subscriber personal data, not only payments.
+  { name: "CamPay", role: "Mobile Money payout + collection (MTN/Orange); recipient-name lookup", country: "Cameroon", status: "Payment aggregator" },
+  { name: "Peexit (Peex)", role: "Mobile Money disbursement + collection (MTN/Orange)", country: "Cameroon", status: "Payment aggregator — gateway migration in progress" },
+  // Sends every one-time code: processes subscriber phone numbers.
+  { name: "NEXAH (Wandatech)", role: "SMS one-time codes — phone-number verification", country: "Cameroon", status: "SMS gateway" },
   { name: "PawaPay", role: "Mobile Money payout (MTN) — out of rotation", country: "Multi-market", status: "Aggregator (inactive)" },
 ];
 

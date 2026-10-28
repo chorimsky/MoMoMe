@@ -25,6 +25,7 @@ let pass = 0, fail = 0;
 const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}${d ? `  (${d})` : ""}`); pass++; } else { console.log(`  ✗ ${n}${d ? `  (${d})` : ""}`); fail++; } };
 
 let campayUp = true;
+let statusBroken = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: unknown, init?: unknown) => {
   const url = String((input as { url?: string })?.url ?? input);
@@ -33,7 +34,8 @@ globalThis.fetch = (async (input: unknown, init?: unknown) => {
   if (url.includes("campay.test.invalid")) {
     if (!campayUp) throw new TypeError("fetch failed");
     if (url.includes("/balance/")) return J({ total_balance: 500000, mtn_balance: 300000, orange_balance: 200000 });
-    if (url.includes("/withdraw/")) return J({ reference: "cp_wd_1", status: "PENDING" });
+    if (url.includes("/transaction/") && statusBroken) throw new TypeError("fetch failed");
+    if (url.includes("/withdraw/")) return J({ reference: "cp_wd_" + Math.random().toString(36).slice(2, 8), status: "PENDING" });
     if (url.includes("/collect/")) return J({ reference: "cp_col_1", status: "PENDING" });
     return J({});
   }
@@ -76,6 +78,26 @@ async function main() {
   campay._resetBalanceCache();
   const noneOut = await momo.cashout("237670000126", "CM", 1000, "tester");
   ok("cash-out refuses the same way", noneOut.ok === false && noneOut.error === "rail_unavailable", String(noneOut.error));
+
+  console.log("\nA submitted payout is never turned into a failure by a status read\n");
+  // The rail ACCEPTS the withdrawal, then the status endpoint fails. Before the split these
+  // shared one catch, so the op was recorded "failed" while CamPay was paying it — and an
+  // operator who resubmits past the 5-minute dedup window sends the money twice.
+  campayUp = true; campay._resetBalanceCache();
+  statusBroken = true;
+  const after = await momo.cashout("237670000127", "CM", 2000, "tester", "Status Breaks");
+  ok("the payout is still reported as submitted", after.ok === true, after.error ?? "");
+  ok("…and is NOT recorded as failed", after.op?.status !== "failed", String(after.op?.status));
+  ok("…it holds a provider reference, so reconcile can re-query it", !!after.op?.providerRef, String(after.op?.providerRef));
+  statusBroken = false;
+
+  console.log("\nA rail that was never REACHED is not reported as a refusal\n");
+  // A transport failure on submit means we do not know whether the rail received it — the
+  // keys are deterministic, so it may have. Saying "failed" asserts money did not move.
+  campayUp = false; campay._resetBalanceCache();
+  const unver = await momo.cashout("237670000128", "CM", 1500, "tester");
+  ok("it is refused before submitting when the balance cannot be read", unver.ok === false && unver.error === "rail_unavailable", String(unver.error));
+  campayUp = true; campay._resetBalanceCache();
 
   console.log("\nThe operator is told which of the two happened\n");
   const { momoErrMessage } = await import("../src/routes/api.js");

@@ -330,7 +330,11 @@ export interface AdminOverview {
   successRatePct: number;
   failed: number;
   pending: number;
-  providers: Array<{ id: ProviderId; ratePct: number; volumeXaf: number }>;
+  /** ratePct is null when this provider has no SETTLED payment to measure. It used to
+   *  default to 100, so the dashboard an operator opens first showed a flawless success
+   *  rate for a provider nothing had ever been delivered to. `settled` is the evidence
+   *  count behind the figure. */
+  providers: Array<{ id: ProviderId; ratePct: number | null; settled: number; volumeXaf: number }>;
   spark: number[];
 }
 
@@ -1024,7 +1028,17 @@ export interface MomoOp {
   transferId?: string;
 }
 /** A rail's live Mobile Money wallet balance (XAF), null when unavailable. */
-export interface MomoRailBalance { rail: MomoRail; label: string; balanceXaf: number | null; }
+export interface MomoRailBalance {
+  rail: MomoRail; label: string; balanceXaf: number | null;
+  /** WHICH SIDE this balance funds. The console used to infer it by testing whether the
+   *  label contained the word "payout" — which silently mislabelled CamPay's carrier
+   *  floats ("CamPay float · MTN") as collected balances, i.e. as the opposite of what
+   *  they are. Meaning belongs in the data, not in a substring of its display name. */
+  kind: "payout" | "collect";
+  /** The carrier this float is spendable on, when the rail funds per carrier (CamPay).
+   *  null when the rail holds one balance for both (Peexit's disbursement_solde). */
+  provider?: ProviderId | null;
+}
 /** The rail's fee schedule (XAF or %, as the rail reports it), for cost-aware ops.
  *  Values are null when the rail doesn't expose them. `pctOf` marks whether a value
  *  is a percentage (true) or a flat XAF amount (false/undefined). */
@@ -1158,15 +1172,30 @@ export interface DeliverySnapshot {
 
 /* ---------- mobile money ---------- */
 export interface MobileMoneyInfo {
-  /** Human name of the active payout aggregator (e.g. "Peexit") — the rail whose
-   *  environment/webhook/key are shown below. Derived from live config, not hardcoded. */
-  aggregator: string;
+  /** EVERY configured payout rail, not one "active" one. This used to be a single
+   *  `aggregator` chosen by a two-way guess that resolved to Peexit whenever Peexit was
+   *  configured — so while Peexit's host was unreachable the console still presented its
+   *  environment, webhook and key as the live payout configuration, and CamPay (the rail
+   *  actually paying) could not be displayed at all. */
+  rails: Array<{
+    key: string; name: string; environment: string; webhookUrl: string; apiKeyMasked: string;
+    live: boolean;
+    /** Did the LAST real call reach it? null = never called in this process — unknown,
+     *  which is not the same as healthy. */
+    reachable: boolean | null;
+    reachNote?: string;
+  }>;
   environment: string;
-  webhookUrl: string;
-  apiKeyMasked: string;
   /** Payouts are confirmed asynchronously by the rail's callback (+ reconciliation backstop). */
   payoutConfirmation: string;
-  providers: Array<{ id: ProviderId; status: "Online" | "Offline" | "Maintenance"; successRatePct: number; maxPayoutXaf: number }>;
+  providers: Array<{
+    id: ProviderId; status: "Online" | "Offline" | "Maintenance" | "Unknown";
+    /** null when nothing has been attempted. It used to default to 100, so an operator
+     *  read "Online · 100%" off a provider no payment had ever been sent to. */
+    successRatePct: number | null;
+    samples: number;
+    maxPayoutXaf: number;
+  }>;
   routing: Array<{ country: CountryCode; providers: ProviderId[] }>;
 }
 

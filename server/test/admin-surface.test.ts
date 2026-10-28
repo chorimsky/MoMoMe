@@ -60,6 +60,41 @@ async function main() {
     ok("CamPay's key is MASKED, never echoed", typeof cp?.apiKey === "string" && !cp.apiKey.includes("test-token-not-a-real-credential"), String(cp?.apiKey));
     ok("CamPay carries a reachability field", "reachability" in (cp ?? {}), JSON.stringify(cp?.reachability));
 
+    console.log("\nMobile Money: every rail, and no evidence is not a perfect record\n");
+    const mm = await get("/admin/mobile-money");
+    ok("the endpoint answers a Super Admin", mm.status === 200, String(mm.status));
+    const railNames = (mm.body.rails ?? []).map((r: { key: string }) => r.key);
+    ok("CamPay is present as a payout rail", railNames.includes("campay"), railNames.join(","));
+    // The page used to show ONE "active" rail, chosen by a guess that resolved to Peexit
+    // whenever Peexit was configured — so an unreachable vendor was displayed as the live
+    // payout configuration and CamPay could not appear at all.
+    ok("there is no single 'active aggregator' field any more", !("aggregator" in mm.body), JSON.stringify(Object.keys(mm.body)));
+    const mmCp = (mm.body.rails ?? []).find((r: { key: string }) => r.key === "campay");
+    ok("each rail states reachability separately from configured/live", mmCp && "reachable" in mmCp, JSON.stringify(mmCp && { live: mmCp.live, reachable: mmCp.reachable }));
+    ok("rail keys are MASKED, never echoed", typeof mmCp?.apiKeyMasked === "string" && !mmCp.apiKeyMasked.includes("test-token-not-a-real-credential"), String(mmCp?.apiKeyMasked));
+    // The invariant, not one fixture's shape: a rate exists exactly when evidence does.
+    // The seeded sandbox has payments for some providers and none for others, which is
+    // precisely the mix that used to render "100%" beside both.
+    const provs = (mm.body.providers ?? []) as Array<{ id: string; status: string; successRatePct: number | null; samples: number }>;
+    ok("every provider reports a sample count", provs.length > 0 && provs.every((p) => typeof p.samples === "number"), provs.map((p) => `${p.id}:${p.samples}`).join(" "));
+    ok("a rate is present exactly when payments exist", provs.every((p) => (p.samples === 0) === (p.successRatePct === null)),
+      provs.map((p) => `${p.id} n=${p.samples} rate=${p.successRatePct}`).join(" | "));
+    const unproven = provs.filter((p) => p.samples === 0);
+    ok("a provider with no payments is Unknown, never Online", unproven.every((p) => p.status === "Unknown"),
+      unproven.length ? unproven.map((p) => `${p.id}:${p.status}`).join(" ") : "(every provider has payments in this fixture)");
+
+    console.log("\nThe dashboard's first screen makes no claim it cannot support\n");
+    const ov = await get("/admin/overview");
+    ok("the endpoint answers a Super Admin", ov.status === 200, String(ov.status));
+    const ovp = (ov.body.providers ?? []) as Array<{ id: string; ratePct: number | null; settled: number }>;
+    ok("every provider carries its evidence count", ovp.length > 0 && ovp.every((p) => typeof p.settled === "number"),
+      ovp.map((p) => `${p.id}:${p.settled}`).join(" "));
+    // The same invariant as the Mobile Money page: a rate exists exactly when evidence does.
+    ok("a rate is present exactly when settled payments exist", ovp.every((p) => (p.settled === 0) === (p.ratePct === null)),
+      ovp.map((p) => `${p.id} n=${p.settled} rate=${p.ratePct}`).join(" | "));
+    ok("…and never reads 100% off nothing", ovp.every((p) => !(p.settled === 0 && p.ratePct === 100)),
+      ovp.map((p) => `${p.id}:${p.ratePct}`).join(" "));
+
     console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"} — ${pass} passed, ${fail} failed\n`);
   } finally { server.close(); }
   process.exit(fail === 0 ? 0 : 1);

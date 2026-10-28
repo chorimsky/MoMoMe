@@ -23,6 +23,29 @@ const PROBE_COOLDOWN_MS = 10 * 60_000;
 const health = new HealthTracker(PAYOUTS.map((p) => p.name), { probeCooldownMs: PROBE_COOLDOWN_MS });
 const eligible = (name: string): boolean => health.eligible(name);
 /** Read-only health of one payout rail — for the interoperability layer's routing/ops views. */
+/** Read a rail's balance AND learn from how the read failed.
+ *
+ *  A null balance is "unknown", and the router already refuses to pay out on unknown. But
+ *  nothing recorded WHY, so a rail whose IP allowlist or key is wrong was re-asked on every
+ *  payment, every pre-flight and every health probe — for days, filling the log with the
+ *  same 403 and keeping the rail "eligible" because the tracker only learns from payout
+ *  attempts. 401 and 403 are our credential or our egress: no retry fixes them, so the rail
+ *  goes hard-down and the tracker's probe cooldown reopens it periodically instead.
+ *
+ *  Anything else (a timeout, a 5xx, a DNS blip) stays untouched — those may well be
+ *  transient, and taking a rail out for one of them would be the opposite mistake. */
+async function balanceOf(p: PayoutAdapter, country: CountryCode, provider?: ProviderId): Promise<number | null> {
+  const bal = await p.balance(country, provider).catch(() => null);
+  if (bal == null && p.live()) {
+    const r = p.reachability?.();
+    if (r && !r.ok && (r.status === 401 || r.status === 403)) {
+      if (health.isUp(p.name)) console.warn(`[route] ${p.name}: ${r.reason} — taking the rail out of rotation; no retry fixes a refused key or a non-allowlisted egress. It will be re-probed after the cooldown.`);
+      health.markHardDown(p.name);
+    }
+  }
+  return bal;
+}
+
 export function payoutHealth(name: string): { eligible: boolean; successRate: number; avgLatencyMs: number; samples: number } {
   return { eligible: health.eligible(name), successRate: health.successRate(name), avgLatencyMs: health.avgLatency(name), samples: health.samples(name) };
 }
@@ -74,7 +97,7 @@ export async function selectFundedAggregator(provider: ProviderId, country: Coun
     const funded: Array<{ p: PayoutAdapter; bal: number; fee: number | null }> = [];
     const seen: Array<{ a: string; bal: number | null }> = [];
     for (const p of real) {
-      const bal = await p.balance(country, provider);
+      const bal = await balanceOf(p, country, provider);
       seen.push({ a: p.name, bal });
       if (bal != null && bal >= amountXaf) funded.push({ p, bal, fee: p.payoutFeePct ? await p.payoutFeePct(provider, country).catch(() => null) : null });
     }
@@ -135,7 +158,7 @@ export async function aggregatorFloatXaf(): Promise<number> {
     // contributing 10,000 of the 13,440 XAF the treasury believed it had.
     if (!ALL_PROVIDERS.some((prov) => p.supports(prov))) { why.push(`${p.name}: out of rotation (supports no corridor) — balance not counted`); continue; }
     if (!eligible(p.name)) { why.push(`${p.name}: marked unhealthy by the rail health tracker`); continue; }
-    const bal = await p.balance("CM");
+    const bal = await balanceOf(p, "CM");
     // Record what each rail DID contribute, not only why it contributed nothing. A single
     // summed figure cannot tell an operator which wallet needs funding.
     if (bal != null && Number.isFinite(bal)) { sum += bal; any = true; why.push(`${p.name}: ${bal} XAF`); }
@@ -172,7 +195,7 @@ export async function payoutReady(provider: ProviderId, country: CountryCode, am
   // produces. Report the two apart.
   let anyKnown = false;
   for (const p of live) {
-    const bal = await p.balance(country, provider);
+    const bal = await balanceOf(p, country, provider);
     if (bal != null) anyKnown = true;
     if (bal != null && bal >= amountXaf) return { ok: true };
   }

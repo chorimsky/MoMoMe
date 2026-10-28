@@ -189,11 +189,14 @@ export async function balances(_country: CountryCode): Promise<MomoRailBalance[]
     campayLive() ? campay.availableBalanceXaf("CM", "ORANGE").catch(() => null) : Promise.resolve(null),
   ]);
   return [
-    { rail: "peexit", label: "Peexit payout wallet", balanceXaf: payout },
-    { rail: "peexit", label: "Peexit collection wallet", balanceXaf: collect },
+    { rail: "peexit" as const, label: "Peexit payout wallet", balanceXaf: payout, kind: "payout" as const, provider: null },
+    { rail: "peexit" as const, label: "Peexit collection wallet", balanceXaf: collect, kind: "collect" as const, provider: null },
     ...(campayLive() ? [
-      { rail: "campay" as const, label: "CamPay float · MTN", balanceXaf: cpMtn },
-      { rail: "campay" as const, label: "CamPay float · Orange", balanceXaf: cpOrange },
+      // CamPay funds PER CARRIER, and a payout debits the carrier's float — not the
+      // account total. Reporting them separately is what lets an operator see that money
+      // sitting in the account is not money a payout can spend.
+      { rail: "campay" as const, label: "CamPay float · MTN", balanceXaf: cpMtn, kind: "payout" as const, provider: "MTN" as const },
+      { rail: "campay" as const, label: "CamPay float · Orange", balanceXaf: cpOrange, kind: "payout" as const, provider: "ORANGE" as const },
     ] : []),
   ];
 }
@@ -241,23 +244,48 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   if (bal < amount) return { ok: false, error: "insufficient_balance" };
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashout", provider, rail, phone, amount, by, status: "accepted" };
+  // THE SUBMIT AND THE STATUS READ ARE DIFFERENT RISKS and must not share a catch.
+  // They did: a successful disburse followed by a status re-query that merely timed out
+  // landed in the catch below and recorded the payout as FAILED — while the rail was
+  // paying it. An operator reading "failed" resubmits, and past the 5-minute dedup window
+  // that is a second real disbursement. A status read can only ever ADD information; it
+  // must never turn a submitted payout into a failed one.
   try {
     const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount, name };
     const res = rail === "peexit" ? await peexit.disburse(req) : rail === "campay" ? await campay.disburse(req) : await pawapay.disburse(req);
     op.providerRef = res.providerRef;
-    // Real rails settle async; reflect the current status if already terminal.
+  } catch (e) {
+    const why = e instanceof Error ? e.message : "send_failed";
+    // "Refused" and "never reached" are not the same outcome. A rail that REFUSED named a
+    // reason and moved no money. A transport failure means we do not know whether the
+    // request arrived — and the rail keys are deterministic, so it may well have. Calling
+    // that "failed" tells the operator money definitely did not move, which we cannot
+    // know. Record it as submitted-but-unverified and let reconcile establish the truth.
+    const unreachable = /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|socket hang up|timeout|aborted/i.test(why);
+    if (unreachable) {
+      op.status = "accepted";
+      op.error = `unverified: ${why} — the rail was not reached; status will be re-queried`;
+      record(op);
+      console.error(`[momo] cashout UNVERIFIED ${amount} XAF → ${mask(phone)} via ${rail} by ${by}: ${why}`);
+      return { ok: false, error: "rail_unreachable_unverified", op };
+    }
+    op.status = "failed"; op.error = why;
+    record(op);
+    console.error(`[momo] cashout FAILED ${amount} XAF → ${mask(phone)} via ${rail} by ${by}: ${op.error}`);
+    return { ok: false, error: op.error, op };
+  }
+  // Submitted. From here nothing may mark it failed except the RAIL's own verdict.
+  try {
     const status = rail === "peexit" ? await peexit.queryStatus(opId) : rail === "campay" ? await campay.queryStatus(opId) : await pawapay.queryStatus(opId);
     if (status) op.status = statusLabel(status);
     // A payout accepted-then-rejected (e.g. INSUFFICIENT_FUND_TO_PAY_TX) → capture why.
     if (op.status === "failed") op.error = (rail === "peexit" ? peexit.failReason(opId) : rail === "campay" ? campay.failReason(opId) : undefined) ?? "rejected by the rail";
     if (rail === "peexit") op.feeXaf = peexit.feeXafFor(opId); // actual fee, when the row reported it
     else if (rail === "campay") op.feeXaf = campay.feeXafFor(opId);
-
   } catch (e) {
-    op.status = "failed"; op.error = e instanceof Error ? e.message : "send_failed";
-    record(op);
-    console.error(`[momo] cashout FAILED ${amount} XAF → ${mask(phone)} via ${rail} by ${by}: ${op.error}`);
-    return { ok: false, error: op.error, op };
+    // Could not read the status of a payout we DID submit. It stays "accepted" and the
+    // reconcile loop terminalises it; it is not a failure of the payout.
+    console.warn(`[momo] cashout ${opId}: submitted, status unread (${e instanceof Error ? e.message : e}) — reconcile will re-query`);
   }
   record(op);
   console.log(`[momo] cashout ${amount} XAF → ${mask(phone)} via ${rail} by ${by} (${op.status})`);

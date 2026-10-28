@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import crypto from "node:crypto";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
@@ -191,7 +192,20 @@ export function createApp() {
   // The probe an uptime monitor and the deploy gate should hit: 503 unless the store is
   // durable, the money jobs have completed recently on a jobs instance, and the FX cache
   // is fresh when real money is on. Cheap (no rail calls) so it can run every minute.
+  /** PUBLIC, and it has to stay public: the deploy gate and any uptime monitor read it,
+   *  and neither carries a credential. But it was returning the TREASURY BALANCE of every
+   *  rail, the live alert keys and the deployed commit to anyone who asked — which tells a
+   *  stranger how much float we hold and the exact moments we cannot pay out. The gate only
+   *  ever reads `problems` and `version`, so the figures can go without breaking anything.
+   *
+   *  With HEALTH_DETAIL_TOKEN set and sent as x-health-token, the full detail is returned
+   *  for operators and dashboards. Without it, the verdict is intact and the numbers are
+   *  not. */
   app.get("/health/deep", async (_req, res) => {
+    const wantToken = (process.env.HEALTH_DETAIL_TOKEN ?? "").trim();
+    const gotToken = String(_req.headers["x-health-token"] ?? "").trim();
+    const detailed = !!wantToken && gotToken.length === wantToken.length
+      && crypto.timingSafeEqual(Buffer.from(gotToken), Buffer.from(wantToken));
     const jobs = jobsHealth();
     const fx = { fresh: ratesFresh(), ...ratesMeta() };
     const store = { backend: usingPostgres() ? "postgres" : "sqlite", durable: persistDurable() };
@@ -205,9 +219,26 @@ export function createApp() {
     const rails = await Promise.all(PAYOUTS.filter((p) => p.configured()).map(async (p) => {
       const h = payoutHealth(p.name);
       const balanceXaf = await p.balance("CM").catch(() => null);
+      // THE FIGURE THE ROUTER GATES ON IS THE PER-CARRIER ONE. This read the rail's TOTAL
+      // (no provider argument) while selectFundedAggregator and payoutReady both pass the
+      // provider — and CamPay funds a float PER CARRIER (ER301 is "insufficient balance for
+      // the specific carrier"). So the console reported "4 900 XAF, routable" while every
+      // payment was being refused against a carrier float of nearly nothing. An operator
+      // reading that number has no way to see the refusal coming.
+      const byProvider: Record<string, number | null> = {};
+      for (const prov of ["MTN", "ORANGE"] as const) {
+        if (p.supports(prov)) byProvider[prov] = await p.balance("CM", prov).catch(() => null);
+      }
+      const spendable = Object.values(byProvider).filter((v): v is number => v != null);
+      const spendableXaf = spendable.length ? Math.max(...spendable) : null;
       return { name: p.name, live: p.live(), eligible: h.eligible, samples: h.samples,
         successRate: h.samples ? h.successRate : null, avgLatencyMs: h.avgLatencyMs || null,
-        balanceXaf, routable: h.eligible && balanceXaf != null };
+        balanceXaf, byProvider, spendableXaf,
+        // Routable means a payout could actually be CHOSEN right now. The carrier float
+        // decides that, not the account total — and a float of 0 is readable but cannot
+        // carry anything, so it is not routable either. "Unreadable" stays distinguishable:
+        // balanceXaf and byProvider report null for a rail we could not ask.
+        routable: h.eligible && spendableXaf != null && spendableXaf > 0 };
     }));
     // Money IN is as operational a question as money OUT: which rails can take a payment,
     // for which operator, and are they answering. Only configured rails are listed, exactly
@@ -225,9 +256,36 @@ export function createApp() {
     if (jobs.stale) problems.push(jobs.lastTickAt ? "money jobs have not completed in the last 3 minutes" : "money jobs have never completed since this build started");
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
-    if (collectRails.some((c) => c.ok === false)) problems.push(`collection rail down: ${collectRails.filter((c) => c.ok === false).map((c) => c.name).join(", ")}`);
+    // Money in the account but none of it on a carrier float: every payout is refused while
+    // the balance looks healthy. It is a specific, fixable misconfiguration, so name it
+    // rather than leaving the operator to infer it from payments that will not go.
+    const stranded = rails.filter((r) => r.live && (r.balanceXaf ?? 0) > 0 && (r.spendableXaf ?? 0) <= 0);
+    if (stranded.length) problems.push(`funds not allocated to a carrier float: ${stranded.map((r) => `${r.name} holds ${Math.round(r.balanceXaf ?? 0)} XAF, none of it on an MTN or Orange float`).join("; ")}`);
+    // Carry the REASON, not just the name. "collection rail down: peexit" sent an operator
+    // looking at credentials and wallets for four days; the rail was answering perfectly and
+    // refusing our source IP. A short cause here is the difference between a diagnosis and a
+    // search. The note is trimmed so a public probe does not echo a whole vendor URL back.
+    const downCollect = collectRails.filter((c) => c.ok === false);
+    if (downCollect.length) problems.push(`collection rail down: ${downCollect.map((c) => {
+      const why = (c.note ?? "").replace(/\s+/g, " ").trim();
+      const short = /not on .*allowlist|403/i.test(why) ? "egress IP not allowlisted"
+        : /401|token|secretkey/i.test(why) ? "credential refused"
+        : /unreachable|fetch failed|ENOTFOUND/i.test(why) ? "unreachable"
+        : why.slice(0, 48);
+      return short ? `${c.name} (${short})` : c.name;
+    }).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
+    // Redact the money for an anonymous caller: the VERDICT is public, the figures are not.
+    // A problem string may carry a figure too (the stranded-float one names the amount), so
+    // strip digits from those rather than leaking the balance through the back door.
+    const safeProblems = detailed ? problems : problems.map((t) => t.replace(/\b\d[\d\s.,]*\s*XAF/gi, "an amount"));
+    const safeRails = detailed ? rails : rails.map(({ balanceXaf, byProvider, spendableXaf, ...rest }) => {
+      void balanceXaf; void byProvider;
+      // Keep the one bit a monitor legitimately needs — can this rail carry a payment —
+      // without saying how much it holds.
+      return { ...rest, funded: spendableXaf == null ? null : spendableXaf > 0 };
+    });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems: safeProblems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails: safeRails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

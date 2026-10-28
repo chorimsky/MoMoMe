@@ -1417,7 +1417,7 @@ api.post("/payments/:id/cancel", rateLimitDurableMiddleware("cancel", 30, 60_000
   res.json(await store().getPayment(p.id) ?? p);
 });
 
-api.post("/payments/:id/confirm", async (req, res) => {
+api.post("/payments/:id/confirm", rateLimitMiddleware("payment_confirm", 30, 60_000), async (req, res) => {
   const p = await store().getPayment(req.params.id);
   if (!p) return res.status(404).json({ error: "no_payment", message: "Payment not found." });
   // Only the payment's own sender may drive its confirmation (BOLA guard, matching
@@ -2175,7 +2175,9 @@ api.get("/admin/overview", async (_req, res) => {
       // Real success rate from this provider's settled (non-pending) payments.
       const settled = all.filter((p) => p.recipient.provider === pid && p.displayStatus !== "Pending");
       const done = settled.filter((p) => p.displayStatus === "Completed");
-      return { id: pid, ratePct: settled.length ? Math.round((done.length / settled.length) * 100) : 100, volumeXaf: done.reduce((s, p) => s + p.xaf, 0) };
+      // No settled payment means NO EVIDENCE. 100 here is not a cautious default, it is a
+      // claim — and it was the first number on the operator's home screen.
+      return { id: pid, ratePct: settled.length ? Math.round((done.length / settled.length) * 100) : null, settled: settled.length, volumeXaf: done.reduce((s, p) => s + p.xaf, 0) };
     }),
     spark,
   };
@@ -3392,16 +3394,28 @@ api.get("/admin/delivery", async (_req, res) => {
 /* ---------- mobile money ---------- */
 api.get("/admin/mobile-money", async (_req, res) => {
   const all = (await store().listPayments());
-  // Show the ACTIVE payout rail's config, not a hardcoded one. Peexit serves both
-  // MTN and Orange today (PawaPay is out of rotation); fall back to PawaPay only if
-  // it's the sole configured rail, else default to the Peexit view.
-  const activeRail: "peexit" | "pawapay" = peexitConfigured() || !pawapayConfigured() ? "peexit" : "pawapay";
-  const railKey = activeRail === "peexit" ? config.peexit.apiKey : config.pawapay.apiKey;
+  // EVERY configured payout rail. This was a two-way guess between Peexit and PawaPay that
+  // resolved to Peexit whenever Peexit was merely CONFIGURED — so with Peexit's hostname
+  // withdrawn from DNS the console still showed its environment, webhook and key as the
+  // live payout configuration, while CamPay, the rail actually paying, had no way to appear
+  // at all. There is no "active rail": there is a registry, and the operator needs to see
+  // all of it, with reachability stated per rail rather than implied by selection.
+  const railDefs = [
+    { key: "peexit", name: "Peexit", configured: peexitConfigured(), live: peexitLive(), apiKey: config.peexit.apiKey, reach: peexit.reachability() },
+    { key: "campay", name: "CamPay", configured: campayConfigured(), live: campayLive(), apiKey: config.campay.token, reach: campay.reachability() },
+    { key: "pawapay", name: "PawaPay", configured: pawapayConfigured(), live: pawapayLive(), apiKey: config.pawapay.apiKey, reach: null as null | { ok: boolean; reason: string } },
+  ];
   const info: import("../../../shared/types.js").MobileMoneyInfo = {
-    aggregator: activeRail === "peexit" ? "Peexit" : "PawaPay",
+    rails: railDefs.filter((r) => r.configured).map((r) => ({
+      key: r.key, name: r.name,
+      environment: r.live ? "Production" : "Sandbox",
+      webhookUrl: `${config.publicUrl}/webhooks/${r.key}`,
+      apiKeyMasked: r.apiKey ? `${r.key}_••••${r.apiKey.slice(-4)}` : `${r.key}_sandbox_••••`,
+      live: r.live,
+      reachable: r.reach ? r.reach.ok : null,
+      ...(r.reach ? { reachNote: r.reach.reason } : {}),
+    })),
     environment: isLive() ? "Production" : "Sandbox",
-    webhookUrl: `${config.publicUrl}/webhooks/${activeRail}`,
-    apiKeyMasked: railKey ? `${activeRail}_••••${railKey.slice(-4)}` : `${activeRail}_sandbox_••••`,
     payoutConfirmation: "Async callback + reconciliation",
     providers: (() => {
       // Status from real aggregator health: a provider is Online when an
@@ -3412,9 +3426,16 @@ api.get("/admin/mobile-money", async (_req, res) => {
         const done = ps.filter((p) => p.displayStatus === "Completed").length;
         const serving = aggs.filter((a) => a.supports.includes(id));
         const anyUp = serving.some((a) => a.up);
-        const rate = ps.length ? Math.round((done / ps.length) * 100) : 100;
-        const status: "Online" | "Offline" | "Maintenance" = !anyUp && serving.length ? "Offline" : ps.length && rate < 60 ? "Maintenance" : "Online";
-        return { id, status, successRatePct: rate, maxPayoutXaf: PROVIDER_PAYOUT_MAX[id] };
+        // A rate of 100 for a provider nothing has been sent to is the same untruth as a
+        // rail health of 1 for a rail nobody has called: it reads as "flawless" when it
+        // means "no evidence". Report null, and let the console say so.
+        const rate = ps.length ? Math.round((done / ps.length) * 100) : null;
+        const status: "Online" | "Offline" | "Maintenance" | "Unknown" =
+          !anyUp && serving.length ? "Offline"
+          : rate == null ? "Unknown"
+          : rate < 60 ? "Maintenance"
+          : "Online";
+        return { id, status, successRatePct: rate, samples: ps.length, maxPayoutXaf: PROVIDER_PAYOUT_MAX[id] };
       });
     })(),
     routing: (Object.keys(COUNTRIES) as Array<keyof typeof COUNTRIES>).map((cc) => ({ country: cc, providers: COUNTRIES[cc].providers })),

@@ -128,6 +128,28 @@ export async function createTransfer(input: CreateInput): Promise<CreateResult> 
   if (!dest.ok) return { ok: false, status: 422, error: dest.error, message: dest.message };
   if (dest.route === "direct" && "phone" in dest.to && dest.to.phone === from.party.phone && dest.to.country === from.party.country) return { ok: false, status: 400, error: "same_number", message: "The payer and the recipient are the same number." };
 
+  // DOUBLE-SUBMIT GUARD. The rail calls below are idempotent on the transfer's id — but
+  // that id is minted fresh per request, so two POSTs are two different transfers, each
+  // collecting and each disbursing. A double-tap, or a client retrying after a timeout it
+  // could not interpret, moved the money twice. The admin cash-out path has carried
+  // `recentDuplicate()` for exactly this reason; the public endpoint had nothing.
+  //
+  // Returning the EXISTING transfer (rather than an error) is what makes a retry safe: the
+  // caller gets the same id and the same state it would have got had the first response
+  // arrived, which is the behaviour an idempotent API owes a client that never heard back.
+  const dupWindowMs = 90_000;
+  const dupNow = Date.now();
+  const toKey = "phone" in dest.to ? `${dest.to.country}:${dest.to.phone}` : dest.to.lightningAddress;
+  const prior = [...transfers.values()].find((t) =>
+    t.owner === input.owner && t.xaf === xaf
+    && t.from.phone === from.party.phone && t.from.country === from.party.country
+    && ("phone" in t.to ? `${t.to.country}:${t.to.phone}` : t.to.lightningAddress) === toKey
+    && dupNow - Date.parse(t.createdAt) < dupWindowMs);
+  if (prior) {
+    console.warn(`[momo-transfer] duplicate submission within ${dupWindowMs / 1000}s — returning existing ${prior.id} instead of creating a second transfer`);
+    return { ok: true, transfer: prior };
+  }
+
   // Compliance before any money moves — the same engine as every payment.
   const screen = await compliance.screenTransaction({ owner: input.owner, recipientPhone: "phone" in dest.to ? dest.to.phone : dest.to.lightningAddress, recipientName: input.toName, country: "phone" in dest.to ? dest.to.country : from.party.country, xaf });
   if (screen.verdict === "blocked") return { ok: false, status: 403, error: "compliance_blocked", message: "This transfer cannot be made." };

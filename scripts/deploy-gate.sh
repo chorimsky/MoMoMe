@@ -89,7 +89,10 @@ except Exception: pass'
     fi
     if [ -n "$(printf '%s' "$now" | sed '/^$/d')" ]; then
       echo "gate: degraded, but by nothing new — pre-existing problem(s) only:"
-      printf '  · %s\n' "$(printf '%s\n' "$now")"
+      printf '%s' "$body" | python3 -c 'import sys,json
+try:
+    for p in (json.load(sys.stdin).get("problems") or []): print("  ·", p)
+except Exception: pass' 
     elif [ "$code" = "503" ]; then
       # Degraded with nothing named. Not tolerable: it means something answered unhealthy
       # and could not say what, which is the one state a baseline comparison cannot reason

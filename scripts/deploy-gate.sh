@@ -22,12 +22,33 @@ BASE="${1:?base url}"; WANT="${2:-}"; BASELINE_FILE="${3:-}"
 # minutes per failing case, and so CI can choose its own patience.
 TRIES="${GATE_TRIES:-40}"; NAP="${GATE_SLEEP:-15}"
 
-problems_of() { # stdin: /health/deep body → one problem per line
+problems_of() { # stdin: /health/deep body → one problem KIND per line
+  # COMPARE KINDS, NOT SENTENCES. The first version diffed whole problem strings, and a
+  # problem string carries detail that moves on its own: which rails are affected, why, and
+  # (before the figures were redacted) how much. So a build that merely DESCRIBED an
+  # existing condition better — naming the cause, or dropping a rail that never belonged in
+  # the list — read as a brand-new problem and failed the gate. That happened twice in a row
+  # on builds whose only crime was improved diagnostics, which is how a gate teaches people
+  # to ignore it.
+  #
+  # The kind is the text before the first colon: "payout rail down", "collection rail down",
+  # "funds not allocated to a carrier float". A NEW KIND is what this gate exists to catch.
+  # Detail within a kind is reported in full below, just not counted as new.
   python3 -c 'import sys,json
 try:
     d = json.load(sys.stdin)
-    for p in (d.get("problems") or []): print(p)
+    for p in (d.get("problems") or []):
+        print(str(p).split(":")[0].strip().lower())
 except Exception: pass'
+}
+
+# The baseline file holds whatever the previous build reported — full sentences. Reduce it
+# to kinds with exactly the same rule, so both sides of the comparison speak one language.
+kinds_of() { # stdin: one problem per line → one kind per line
+  python3 -c 'import sys
+for line in sys.stdin:
+    t = line.strip()
+    if t: print(t.split(":")[0].strip().lower())'
 }
 
 BASELINE=""
@@ -55,10 +76,15 @@ except Exception: print("")')
   if { [ "$code" = "200" ] || [ "$code" = "503" ]; } && { [ -z "$WANT" ] || [ "${WANT:0:7}" = "$ver" ]; }; then
     now=$(printf '%s' "$body" | problems_of)
     # Which problems are new? comm needs sorted input; both sides may be empty.
-    new=$(comm -13 <(printf '%s\n' "$BASELINE" | sed '/^$/d' | sort) <(printf '%s\n' "$now" | sed '/^$/d' | sort) || true)
+    new=$(comm -13 <(printf '%s\n' "$BASELINE" | kinds_of | sort -u) <(printf '%s\n' "$now" | sed '/^$/d' | sort -u) || true)
     if [ -n "$new" ]; then
-      echo "gate: FAILED — this build introduced problem(s) that were not there before:"
+      echo "gate: FAILED — this build introduced a NEW KIND of problem:"
       printf '  ✗ %s\n' "$new"
+      echo "gate: the full problem text from the live build:"
+      printf '%s' "$body" | python3 -c 'import sys,json
+try:
+    for p in (json.load(sys.stdin).get("problems") or []): print("     ·", p)
+except Exception: pass' 
       printf '%s\n' "$body"; exit 1
     fi
     if [ -n "$(printf '%s' "$now" | sed '/^$/d')" ]; then

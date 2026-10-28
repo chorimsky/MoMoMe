@@ -36,6 +36,13 @@ PEEXIT="collection rail down: peexit"
 run_case "a pre-existing vendor problem is tolerated"  503 "{$V,\"problems\":[\"$PEEXIT\"]}"                         "$PEEXIT" 200 0
 # …and the thing that must not be lost by making it tolerant.
 run_case "a NEW problem still fails the deploy"        503 "{$V,\"problems\":[\"$PEEXIT\",\"ledger is not durable\"]}" "$PEEXIT" 200 1
+# The two false failures that prompted the kind-based comparison. Both were builds whose
+# only change was describing an EXISTING condition better — one named the cause, the other
+# dropped a rail that never belonged in the list. Under string comparison each read as a
+# brand-new problem and failed a good deploy.
+run_case "the same problem, now naming its cause, is not new"  503 "{$V,\"problems\":[\"collection rail down: peexit (egress IP not allowlisted)\"]}"  "collection rail down: peexit" 200 0
+run_case "the same problem, with a rail removed from it, is not new"  503 "{$V,\"problems\":[\"funds not allocated to a carrier float: campay holds an amount\"]}"  "funds not allocated to a carrier float: campay holds an amount; pawapay holds an amount" 200 0
+
 run_case "an unknown starting state fails closed"      503 "{$V,\"problems\":[\"$PEEXIT\"]}"                         ""        200 1
 run_case "a clean build on a clean baseline passes"    200 "{$V,\"problems\":[]}"                                    ""        200 0
 run_case "a problem this build FIXED is not held against it" 200 "{$V,\"problems\":[]}"                              "$PEEXIT" 200 0

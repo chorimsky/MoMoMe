@@ -24,6 +24,7 @@ import { idemFingerprint, IDEM_MISMATCH, idemLookup, idemStore, validIdemKey } f
 import { engine as complianceEngine } from "../core/interop/compliance.js";
 import { lastWebhookTimes } from "./webhooks.js";
 import * as peexit from "../adapters/peexit.js";
+import * as campay from "../adapters/campay.js";
 import { pawapayAdapter, PAYOUTS } from "../adapters/payouts.js";
 import { listUnattributed, resolveUnattributed } from "../core/unattributed.js";
 import { listNotifications, notificationHealth, sendOtp, notify, canSendOtp, otpChannels, smsProviderRejecting, notifyDeletionRequest, notifyTestReport, type OtpChannel } from "../core/notifications.js";
@@ -45,7 +46,7 @@ import { intelAuditLog } from "../core/intelligence/contract.js";
 import { id, nextRef } from "../core/ids.js";
 import {
   config, isLive, liveMoney, ibexConfigured, ibexLive, phoenixdConfigured, phoenixdTrusted, deployEnv, databaseHost,
-  pawapayConfigured, pawapayLive, peexitConfigured, peexitLive,
+  pawapayConfigured, pawapayLive, peexitConfigured, peexitLive, campayConfigured, campayLive,
 } from "../config.js";
 import { getSettings, updateSettings, refreshSettingsIfStale } from "../core/settings.js";
 import * as treasury from "../core/treasury.js";
@@ -100,7 +101,7 @@ import { allIntents, syncIntent, getIntent } from "../core/upi/intents.js";
 import { chainTxs } from "../core/upi/chain.js";
 import { canaryConfig, executedVolume24h } from "../core/upi/canary.js";
 import { shadowFromV1 } from "../core/upi/shadow.js";
-import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl } from "../core/identityResolution/resolver.js";
+import { identityEnabled, identityMode, cachedSnapshot, resolveIdentity, providersHealth, capabilityConfig, cacheTtl, providerOrder, providersDisabled, providerChain } from "../core/identityResolution/resolver.js";
 import { metricsSnapshot as identityMetrics, auditRows as identityAudit, windowStats as identityWindow, identityEnumerationExceeded } from "../core/identityResolution/audit.js";
 import { identifierHash } from "../core/identityResolution/msisdn.js";
 import { recordCount as identityRecordCount, cacheTtlVerifiedSec } from "../core/identityResolution/cache.js";
@@ -2658,7 +2659,14 @@ api.get("/admin/identity-resolution", async (_req, res) => {
     enabled: identityEnabled(), mode: identityMode(),
     cache: { ttlSec: cacheTtl(), ttlVerifiedSec: cacheTtlVerifiedSec(), records: identityRecordCount() },
     providers, capabilities: capabilityConfig(), metrics: identityMetrics(), last24h: identityWindow(24), audit: identityAudit(30),
-    priority: (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,peexit_verify,pawapay,sandbox").split(",").map((x) => x.trim()),
+    // The order the RESOLVER uses, asked of the resolver. This used to re-parse the env var
+    // here against a second hardcoded default — which drifted, omitted campay_holder, and so
+    // showed the operator a chain that did not contain the provider actually answering.
+    // `effective` is who would really be asked for CM/MTN right now: configured, supporting,
+    // not disabled and not resting.
+    priority: providerOrder(),
+    disabled: providersDisabled(),
+    effective: providerChain("CM", "MTN").map((p) => p.name),
   });
 });
 /** Support lookup: an operator checking a disputed number. Purpose SUPPORT, audited under the
@@ -2954,7 +2962,7 @@ function momoErrStatus(e?: string): number {
   if (e === "duplicate") return 409;
   return e === "rail_unavailable" || e === "peexit_cashin_unavailable" ? 503 : e === "bad_number" || e === "bad_amount" || e === "insufficient_balance" ? 400 : 502;
 }
-function momoErrMessage(e?: string): string {
+export function momoErrMessage(e?: string): string {
   switch (e) {
     case "bad_number": return "That doesn't look like a supported MTN/Orange number.";
     case "bad_amount": return "Enter a valid amount.";
@@ -2962,9 +2970,20 @@ function momoErrMessage(e?: string): string {
     case "duplicate": return "An identical operation was just submitted — not repeating it (avoids a double payment). Wait a moment if this is intentional.";
     case "rail_unavailable": return "That rail isn't live/reachable right now.";
     case "peexit_cashin_unavailable": return "Orange cash-in via Peexit isn't available yet (Collect API not wired).";
-    // Anything else is the raw provider/rail error (a rejected payout/deposit) —
-    // surface it verbatim; this is an operator tool, the real reason is what helps.
-    default: return e ? `Rail rejected the operation — ${e}` : "The operation couldn't be completed. Please try again.";
+    // Anything else is the raw provider/rail error — surfaced verbatim, because this is an
+    // operator tool and the real reason is what helps. But NOT all of it is a rejection: a
+    // transport failure means nobody answered, and calling that "rejected by the rail" sent
+    // an operator to check the account, the key and the float of a rail that had never been
+    // reached. Say which of the two it was.
+    //
+    // And do NOT claim the operation did not happen. A failed fetch can still have been
+    // received — the response is what was lost — so a retry is the operator's decision to
+    // make against the rail's own records, not something to invite blindly.
+    default:
+      if (!e) return "The operation couldn't be completed. Please try again.";
+      return /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|socket hang up|network|timeout/i.test(e)
+        ? `Couldn't reach the rail — ${e}. Nothing answered, so this may or may not have been received: check the rail's own records before retrying.`
+        : `Rail rejected the operation — ${e}`;
   }
 }
 
@@ -3639,6 +3658,12 @@ api.get("/admin/rails", async (_req, res) => {
         // reachability is a distinct fact from "configured" — a 403 here means the egress
         // is not allowlisted, NOT that the key or the wallet is wrong.
         reachability: peexit.reachability() },
+      // CamPay was missing from this list entirely while being a registered payout rail —
+      // so an operator could not see the env it was in, whether its key was accepted, or
+      // that it was answering, for the one rail that was still working. Its reachability is
+      // recorded on the same balance read the payout path makes.
+      { name: "CamPay", env: config.campay.env, configured: campayConfigured(), live: campayLive(), apiUrl: config.campay.apiUrl, apiKey: mask(config.campay.token),
+        reachability: campay.reachability() },
     ],
     // Egress-IP allowlist state: what we leave from, what is registered, and whether they
     // agree. This is the failure that silently broke Peexit on a hosting move.

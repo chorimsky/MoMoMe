@@ -243,6 +243,19 @@ export function failReason(idempotencyKey: string): string | undefined { return 
  *  a rail we could not read is not a rail with no money. */
 interface Balances { at: number; total: number | null; mtn: number | null; orange: number | null }
 let balCache: Balances | null = null;
+
+/** Whether the LAST real call to CamPay reached it, mirroring the Peexit adapter.
+ *
+ *  Without this the collection rail reported `ok: null` — unknown — and /health/deep only
+ *  raises a problem for `ok === false`, so an unknown rail is silently treated as a well
+ *  one. While Peexit's host was gone CamPay was our ONLY collection rail, and it was the
+ *  one the probe could not see. The balance read already authenticates and is cached for
+ *  15 s, so recording its outcome costs nothing and is the same call the payout path makes. */
+export interface CampayReachability { ok: boolean; status: number; at: string; reason: string }
+let lastReach: CampayReachability | null = null;
+export function reachability(): CampayReachability | null { return lastReach; }
+/** Tests only — the reachability record is process-global, like the balance cache. */
+export function _resetReachability(): void { lastReach = null; }
 const num = (v: unknown): number | null => {
   const n = typeof v === "string" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) ? n : null;
@@ -272,7 +285,12 @@ async function read(now: number): Promise<Balances> {
   if (!campayLive()) return empty;
   try {
     const res = await camp("/balance/", { method: "GET" });
-    if (!res.ok) return empty;
+    if (!res.ok) {
+      lastReach = { ok: false, status: res.status, at: new Date().toISOString(),
+        reason: res.status === 401 || res.status === 403 ? `${res.status} — CamPay rejected the permanent access token` : `HTTP ${res.status}` };
+      return empty;
+    }
+    lastReach = { ok: true, status: res.status, at: new Date().toISOString(), reason: "ok" };
     const d = (await res.json()) as Record<string, unknown>;
     // CamPay reports per-operator balances; field spellings are not pinned in the docs, so
     // every documented and observed spelling is accepted and anything else stays null.
@@ -287,7 +305,10 @@ async function read(now: number): Promise<Balances> {
       orange: pick("orange_balance", "balance_orange", "orange"),
     };
     return balCache;
-  } catch { return empty; }
+  } catch (e) {
+    lastReach = { ok: false, status: 0, at: new Date().toISOString(), reason: `unreachable: ${e instanceof Error ? e.message : e}` };
+    return empty;
+  }
 }
 
 export async function availableBalanceXaf(_country: CountryCode, provider?: ProviderId): Promise<number | null> {

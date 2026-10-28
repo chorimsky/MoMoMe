@@ -124,6 +124,12 @@ if ((process.env.RESET_DEMO_TRUST ?? "").trim() === "1") {
 // PROCESS_ROLE=api serves requests only (a scaled-out replica); =worker runs the timers
 // only; the default `all` is the single-container deployment. See jobs.ts.
 if (runsJobs()) {
+  // One tick NOW, then every 30 s. A restart used to leave the money jobs idle for the
+  // first half-minute — the reconcile backstops (stuck payouts, lost inbound webhooks) are
+  // exactly what a process wants to run as soon as it is back, not after a delay. Same
+  // shape as the FX loop below, which already does this. reconcileTick is idempotent and
+  // self-guarding, so an immediate run cannot double anything.
+  void reconcileTick();
   setInterval(() => void reconcileTick(), 30_000).unref();
   /* SMS credit for verification codes. Running out does not degrade gracefully — every
      one-time code stops at once, and merchant verification, "own your number" and account

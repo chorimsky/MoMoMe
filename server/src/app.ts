@@ -218,7 +218,11 @@ export function createApp() {
     const identity = identityEnabled() ? { enabled: true, mode: identityMode(), providers: (await providersHealth()).filter((p) => p.configured).map((p) => ({ name: p.name, status: p.status, ...(p.lastError ? { lastError: p.lastError } : {}), latencyMs: p.latencyMs, successRate: p.successRate })) } : { enabled: false };
     const problems: string[] = [];
     if (!store.durable) problems.push("store is not durable");
-    if (jobs.stale) problems.push("money jobs have not completed in the last 3 minutes");
+    // `startingUp` is NOT a problem: the loop first fires 30 s after boot, and a build that
+    // came up ten seconds ago has not failed at anything. Saying otherwise made every
+    // deploy gate itself on a stopwatch. It is still REPORTED in `jobs`, so a reader can
+    // see the difference rather than being told nothing is wrong.
+    if (jobs.stale) problems.push(jobs.lastTickAt ? "money jobs have not completed in the last 3 minutes" : "money jobs have never completed since this build started");
     if (liveMoney() && !fx.fresh) problems.push("FX rates are stale");
     if (rails.some((r) => !r.eligible)) problems.push(`payout rail down: ${rails.filter((r) => !r.eligible).map((r) => r.name).join(", ")}`);
     if (collectRails.some((c) => c.ok === false)) problems.push(`collection rail down: ${collectRails.filter((c) => c.ok === false).map((c) => c.name).join(", ")}`);

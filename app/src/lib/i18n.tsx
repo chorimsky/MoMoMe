@@ -279,6 +279,13 @@ export const STRINGS: Dict = {
   // rail is funded. The sender does not need that distinction, but they do need to be told
   // once, plainly, rather than reading it four times under a button that still worked.
   m_none_routable: ["No payment method can be completed right now — we can't pay out to Mobile Money at the moment. This is on our side, not yours. Nothing has been charged. Please try again shortly.", "Aucun moyen de paiement ne peut aboutir pour le moment — nous ne pouvons pas effectuer de versement Mobile Money actuellement. Le problème vient de nous, pas de vous. Rien n'a été débité. Réessayez dans un instant."],
+  // A failed route check carries an operator-facing `detail` ("unreachable: peexit",
+  // "no payout rail reachable (peexit)") — precise, auditable, and meaningless to a sender,
+  // who should never read our payout vendor's name off a payment screen. These two say the
+  // same thing in the only terms that matter to them: it is ours, not theirs, and nothing
+  // was taken. Anything we have no phrase for still falls back to the raw detail.
+  m_why_rail_unreachable: ["We can't reach our Mobile Money payout partner right now. This is on our side, not yours.", "Nous ne parvenons pas à joindre notre partenaire de versement Mobile Money pour le moment. Le problème vient de nous, pas de vous."],
+  m_why_no_payout: ["We can't pay out to Mobile Money right now. This is on our side, not yours.", "Nous ne pouvons pas effectuer de versement Mobile Money pour le moment. Le problème vient de nous, pas de vous."],
   m_none_available: ["No payment method is available right now. This is on our side, not yours — please try again shortly, or contact support.", "Aucun moyen de paiement n’est disponible pour le moment. Le problème vient de nous, pas de vous — réessayez dans un instant ou contactez le support."],
   m_indicative: ["Amounts are indicative — your exact rate is locked on the next step.", "Montants indicatifs — votre taux exact est fixé à l'étape suivante."],
   m_none: ["No payment methods are available right now. Please try again shortly.", "Aucun moyen de paiement n'est disponible pour le moment. Réessayez bientôt."],

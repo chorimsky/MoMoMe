@@ -36,7 +36,14 @@ export interface IdentityResolutionStatus {
   metrics: Record<string, number | { p50: number | null; p95: number | null; n: number }>;
   last24h: { hours: number; total: number; verified: number; notFound: number; inactive: number; unavailable: number; timeouts: number; unknown: number; cacheHits: number; latency: { p50: number | null; p95: number | null }; byProvider: Record<string, { total: number; verified: number; failed: number }> };
   audit: Array<{ requestId: string; actor: string; purpose: string; identifierHash: string; country: string; operator: string | null; provider: string; status: string; error?: string; latencyMs: number; cache: string; at: string }>;
+  /** Every known provider in chain order — an ORDERING, not an allow-list: a provider the
+   *  operator did not name is ranked last, never dropped. */
   priority: string[];
+  /** Switched off by name (IDENTITY_PROVIDER_DISABLED). Being off has to be said out loud. */
+  disabled: string[];
+  /** Who would actually be asked for CM/MTN right now: configured, supporting, not disabled
+   *  and not resting. The difference between this and `priority` is the useful fact. */
+  effective: string[];
 }
 export interface UnsettledRow { id: string; ref: string; state: string; ageMin: number; xaf: number; method: string; recipient: string; aggregator: string | null; attempts: number; cause: string; action: "awaiting_rail" | "awaiting_sender" | "refund_in_flight" | "retry" | "review" }
 export interface UpiOverview {

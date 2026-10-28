@@ -15,6 +15,8 @@ import { store, usingPostgres } from "../db/store.js";
 import { background } from "./background.js";
 import * as pawapay from "../adapters/pawapay.js";
 import * as peexit from "../adapters/peexit.js";
+import * as campay from "../adapters/campay.js";
+import { peexitLive, campayLive, pawapayLive } from "../config.js";
 import type { DisburseRequest, PayoutStatus } from "../adapters/pawapay.js";
 
 /** A Mobile Money number is PII, and these lines go to the platform log and to Sentry,
@@ -100,6 +102,16 @@ export async function reconcilePendingCashins(): Promise<void> {
       }
       continue;
     }
+    // A CamPay row had no branch here at all: once this tool could create one, it would
+    // have sat at "accepted" forever however the rail settled it — the same half-wired
+    // settlement the pawapay branch above was added to fix. Re-query by the op id, which is
+    // the rail idempotency key.
+    if (o.rail === "campay") {
+      const s2 = await (o.kind === "cashin" ? campay.collectStatus(o.id) : campay.queryStatus(o.id)).catch(() => null);
+      if (s2 === "COMPLETED") { o.status = "completed"; o.feeXaf = campay.feeXafFor(o.id) ?? o.feeXaf; persistOp(o); }
+      else if (s2 === "FAILED") { o.status = "failed"; o.error = o.error ?? (campay.failReason(o.id) ?? "rejected by the rail"); persistOp(o); }
+      continue;
+    }
     if (o.rail !== "peexit") continue;
     if ((o.kind === "cashin" || o.kind === "transfer_in") && o.status === "accepted") {
       const s = await peexit.collectStatus(o.id).catch(() => null);
@@ -129,22 +141,60 @@ export async function reconcilePendingCashins(): Promise<void> {
  *  activated (deposits + payouts NOT_ALLOWED), so it's bypassed here until PawaPay
  *  enables it — at which point restore MTN→pawapay. Routing is per-operator only via
  *  the wallet balance (Peexit keeps separate MTN-CM / Orange-cm wallets). */
-function railFor(_provider: ProviderId): MomoRail { return "peexit"; }
+/** WHICH RAIL CARRIES AN OPERATOR'S CASH-OUT / CASH-IN.
+ *
+ *  This returned the string "peexit" unconditionally. That was fine while Peexit was the
+ *  only rail; it stopped being fine when Peexit's hostname was withdrawn from DNS, because
+ *  every operator operation — whatever the console offered — still went to Peexit and came
+ *  back "fetch failed". CamPay was live, funded and answering, and unreachable from this
+ *  tool: not deprioritised, not disabled, simply never named.
+ *
+ *  Now: the first LIVE rail that actually answers. Reachability is decided by whether the
+ *  rail's balance can be read — the adapters cache that for 15 s and the payout path reads
+ *  it anyway, so this costs no extra call. A rail that cannot be read is not chosen, but if
+ *  NONE can be, the first live one is returned so the caller raises a real error against a
+ *  real rail instead of silently doing nothing. */
+async function railFor(provider: ProviderId, country: CountryCode = "CM"): Promise<MomoRail> {
+  const live: MomoRail[] = [];
+  if (peexitLive()) live.push("peexit");
+  if (campayLive()) live.push("campay");
+  // PawaPay serves no CM corridor today (its account is not activated), so it ranks last
+  // and only when something is live at all.
+  if (pawapayLive()) live.push("pawapay");
+  if (!live.length) return "peexit";
+  for (const r of live) {
+    const bal = await railBalance(r, country, provider).catch(() => null);
+    if (bal != null) return r;
+  }
+  return live[0];
+}
 const statusLabel = (s: PayoutStatus): MomoOp["status"] => (s === "COMPLETED" ? "completed" : s === "FAILED" ? "failed" : "accepted");
 const railBalance = (rail: MomoRail, country: CountryCode, provider: ProviderId) =>
-  rail === "peexit" ? peexit.availableBalanceXaf(country, provider) : pawapay.availableBalanceXaf(country);
+  rail === "peexit" ? peexit.availableBalanceXaf(country, provider)
+  : rail === "campay" ? campay.availableBalanceXaf(country, provider)
+  : pawapay.availableBalanceXaf(country);
 
 /** Accurate account balances (XAF): the PAYOUT balance (disbursement_solde, shared by
  *  both operators — gates every cash-out) and the COLLECTION balance (collect_solde,
  *  what cash-in fills). null when unreachable. */
 export async function balances(_country: CountryCode): Promise<MomoRailBalance[]> {
-  const [payout, collect] = await Promise.all([
+  // CamPay's float is read PER CARRIER — ER301 is "insufficient balance for the specific
+  // carrier", so a single total would let an operator believe a cash-out can go when the
+  // MTN side is empty and the Orange side is not. It was absent from this list entirely,
+  // which is why the treasury view showed nothing but two unreachable Peexit wallets.
+  const [payout, collect, cpMtn, cpOrange] = await Promise.all([
     peexit.availableBalanceXaf("CM").catch(() => null),
     peexit.collectBalanceXaf().catch(() => null),
+    campayLive() ? campay.availableBalanceXaf("CM", "MTN").catch(() => null) : Promise.resolve(null),
+    campayLive() ? campay.availableBalanceXaf("CM", "ORANGE").catch(() => null) : Promise.resolve(null),
   ]);
   return [
     { rail: "peexit", label: "Peexit payout wallet", balanceXaf: payout },
     { rail: "peexit", label: "Peexit collection wallet", balanceXaf: collect },
+    ...(campayLive() ? [
+      { rail: "campay" as const, label: "CamPay float · MTN", balanceXaf: cpMtn },
+      { rail: "campay" as const, label: "CamPay float · Orange", balanceXaf: cpOrange },
+    ] : []),
   ];
 }
 
@@ -184,7 +234,7 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   // (above) terminalizes pending rows so a resubmit is rarely needed.
   const dup = await recentDuplicate("cashout", phone, amount, by, 5 * 60_000);
   if (dup) return { ok: false, error: "duplicate", op: dup };
-  const rail = railFor(provider);
+  const rail = await railFor(provider, country);
   // Rail must be live + funded ≥ amount (mirrors the send-flow pre-flight gate).
   const bal = await railBalance(rail, country, provider);
   if (bal == null) return { ok: false, error: "rail_unavailable" };
@@ -193,14 +243,15 @@ export async function cashout(phone: string, country: CountryCode, amount: numbe
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashout", provider, rail, phone, amount, by, status: "accepted" };
   try {
     const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount, name };
-    const res = rail === "peexit" ? await peexit.disburse(req) : await pawapay.disburse(req);
+    const res = rail === "peexit" ? await peexit.disburse(req) : rail === "campay" ? await campay.disburse(req) : await pawapay.disburse(req);
     op.providerRef = res.providerRef;
     // Real rails settle async; reflect the current status if already terminal.
-    const status = rail === "peexit" ? await peexit.queryStatus(opId) : await pawapay.queryStatus(opId);
+    const status = rail === "peexit" ? await peexit.queryStatus(opId) : rail === "campay" ? await campay.queryStatus(opId) : await pawapay.queryStatus(opId);
     if (status) op.status = statusLabel(status);
     // A payout accepted-then-rejected (e.g. INSUFFICIENT_FUND_TO_PAY_TX) → capture why.
-    if (op.status === "failed") op.error = (rail === "peexit" ? peexit.failReason(opId) : undefined) ?? "rejected by the rail";
+    if (op.status === "failed") op.error = (rail === "peexit" ? peexit.failReason(opId) : rail === "campay" ? campay.failReason(opId) : undefined) ?? "rejected by the rail";
     if (rail === "peexit") op.feeXaf = peexit.feeXafFor(opId); // actual fee, when the row reported it
+    else if (rail === "campay") op.feeXaf = campay.feeXafFor(opId);
 
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "send_failed";
@@ -224,12 +275,17 @@ export async function cashin(phone: string, country: CountryCode, amount: number
   return withMomoLock(async () => {
   const dup = await recentDuplicate("cashin", phone, amount, by);
   if (dup) return { ok: false, error: "duplicate", op: dup };
-  const rail = railFor(provider);
+  const rail = await railFor(provider, country);
+  // Cash-out checks the rail is reachable before it tries; cash-in did not, so a rail whose
+  // host no longer resolved surfaced its raw transport error to the operator — "Rail
+  // rejected the operation — fetch failed", which reads as a refusal by the rail when in
+  // fact nothing was ever reached. Ask the same question first, and say the same thing.
+  if ((await railBalance(rail, country, provider).catch(() => null)) == null) return { ok: false, error: "rail_unavailable" };
   const opId = id("mmo");
   const op: MomoOp = { id: opId, at: new Date().toISOString(), kind: "cashin", provider, rail, phone, amount, by, status: "accepted" };
   try {
     const req: DisburseRequest = { idempotencyKey: opId, provider, country, phone, xaf: amount, name };
-    const res = rail === "peexit" ? await peexit.collect(req) : await pawapay.deposit(req);
+    const res = rail === "peexit" ? await peexit.collect(req) : rail === "campay" ? await campay.collect(req) : await pawapay.deposit(req);
     op.providerRef = res.providerRef;
   } catch (e) {
     op.status = "failed"; op.error = e instanceof Error ? e.message : "deposit_failed";

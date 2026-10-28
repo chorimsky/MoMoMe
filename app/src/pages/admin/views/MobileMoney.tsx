@@ -12,7 +12,7 @@ import { fmt } from "../../../lib/format.js";
 import { useAdminUser } from "../AdminGate.js";
 import { Failed, Loading } from "./Overview.js";
 
-const AGG_NAME: Record<string, string> = { pawapay: "PawaPay", peexit: "Peexit" };
+const AGG_NAME: Record<string, string> = { pawapay: "PawaPay", peexit: "Peexit", campay: "CamPay" };
 
 export function MobileMoneyView() {
   const [data, setData] = useState<MobileMoneyInfo | null>(null);
@@ -110,7 +110,8 @@ export function MobileMoneyView() {
 }
 
 /* ============================================================
-   Cash-in / cash-out — manual Mobile Money ops. Both operators route via Peexit
+   Cash-in / cash-out — manual Mobile Money ops. The number's prefix picks the OPERATOR;
+   the RAIL is the first live one that answers (Peexit, then CamPay) — not a fixed choice
    (PawaPay is out of rotation until its account is activated). Viewing balances is
    open to the Mobile Money section; running an op requires fund-movement rights
    (Ops Manager / Super Admin), enforced server-side too.
@@ -141,7 +142,7 @@ function MomoOpsPanel() {
 
   return (
     <div style={{ marginTop: 26 }}>
-      <SectionTitle t="Cash-in / Cash-out" s="Manual Mobile Money operations, routed by the number's operator (both via Peexit)." />
+      <SectionTitle t="Cash-in / Cash-out" s="Manual Mobile Money operations. The operator's prefix decides MTN or Orange; the rail is whichever is live and answering when you submit, and the result names it." />
       {err && <div style={{ fontSize: 13, color: "var(--bad)", marginBottom: 12 }}>{err}</div>}
       {balances && (
         <Grid cols={2} gap={16} style={{ marginBottom: 16 }}>
@@ -158,7 +159,7 @@ function MomoOpsPanel() {
                 </div>
                 <div style={{ fontSize: 11.5, color: underfunded ? "var(--bad)" : "var(--ink-3)", marginTop: 4 }}>
                   {b.balanceXaf == null ? "Not live / unreachable"
-                    : underfunded ? "Empty — top up the Peexit payout balance to enable payouts"
+                    : underfunded ? "Empty — top up the payout float on a live rail to enable payouts"
                     : isPayout ? "Available for payouts (disbursement balance)"
                     : "Collected balance (filled by cash-in)"}
                 </div>
@@ -308,10 +309,21 @@ function MomoForm({ balances, fees, onDone, onOp }: { balances: MomoRailBalance[
   // Live operator detection (same prefix logic the backend routes on).
   const provider = digits.length >= 8 ? detectProvider(digits, "CM") : null;
   const opLabel = provider === "ORANGE" ? "Orange" : provider === "MTN" ? "MTN" : null;
-  // Cash-out AND a rebalance both DEBIT the shared Peexit PAYOUT wallet
-  // (disbursement_solde) — a rebalance disburses to the treasury number first.
+  // WHICH WALLET THIS ACTUALLY DEBITS. A rebalance is Peexit-only (it exists because Peexit
+  // has two wallets). A cash-out goes to whichever live rail ANSWERS — the server tries
+  // Peexit then CamPay — so mirror that choice here instead of asserting one.
+  //
+  // This used to find the balance by matching the label "payout", which only ever matched
+  // "Peexit payout wallet". Once CamPay's rows arrived (labelled "float"), the match
+  // silently returned nothing: no balance shown and the over-balance guard disabled, for
+  // the one rail that was going to be debited.
   const debitsPayout = kind === "cashout" || kind === "transfer";
-  const payoutBal = balances.find((b) => b.label.toLowerCase().includes("payout"))?.balanceXaf ?? null;
+  const peexitPayout = balances.find((b) => /peexit payout/i.test(b.label))?.balanceXaf ?? null;
+  // CamPay's float is per carrier — ER301 is "insufficient balance for the SPECIFIC
+  // carrier", so the MTN float says nothing about an Orange payout.
+  const carrierFloat = provider ? (balances.find((b) => /campay/i.test(b.label) && new RegExp(provider, "i").test(b.label))?.balanceXaf ?? null) : null;
+  const railName = kind === "transfer" ? "Peexit" : peexitPayout != null ? "Peexit" : carrierFloat != null ? "CamPay" : null;
+  const payoutBal = kind === "transfer" ? peexitPayout : railName === "Peexit" ? peexitPayout : carrierFloat;
   const overBalance = debitsPayout && payoutBal != null && amt > payoutBal;
   const unknownOperator = digits.length >= 8 && !provider;
   const valid = !!provider && amt > 0 && !overBalance;
@@ -397,12 +409,12 @@ function MomoForm({ balances, fees, onDone, onOp }: { balances: MomoRailBalance[
       <div style={{ marginTop: 8, fontSize: 12, minHeight: 17 }}>
         {provider && (
           <span style={{ color: "var(--ink-3)" }}>
-            {opLabel} · via Peexit
+            {opLabel} · {railName ? `via ${railName}` : "no rail is reachable right now"}
             {debitsPayout && payoutBal != null && <> · payout wallet <span className="num" style={{ color: payoutBal <= 0 || overBalance ? "var(--bad)" : "var(--ink-2)", fontWeight: 650 }}>{fmt(payoutBal)} XAF</span></>}
           </span>
         )}
         {unknownOperator && <span style={{ color: "var(--warn)" }}>Unrecognized operator — use an MTN (67x / 650–4 / 680–4) or Orange (69x / 655–9 / 685–9) number.</span>}
-        {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the Peexit payout wallet.</span>}
+        {overBalance && <span style={{ color: "var(--bad)", marginLeft: 8 }}>Amount exceeds the {railName === "CamPay" ? `CamPay ${opLabel} float` : "Peexit payout wallet"}.</span>}
       </div>
 
       {/* cost preview */}

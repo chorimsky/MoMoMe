@@ -9,7 +9,7 @@ const ok = (n: string, c: boolean, d = "") => { if (c) { console.log(`  ✓ ${n}
 
 async function main() {
   const { createApp } = await import("../src/app.js");
-  const { reconcileTick, jobsHealth, processRole, runsJobs, servesHttp } = await import("../src/jobs.js");
+  const { reconcileTick, jobsHealth, processRole, runsJobs, servesHttp, _setJobsClockForTests } = await import("../src/jobs.js");
   const alerts = await import("../src/core/alerts.js");
   const { listNotifications } = await import("../src/core/notifications.js");
   const { updateSettings } = await import("../src/core/settings.js");
@@ -24,7 +24,19 @@ async function main() {
 
     console.log("\nDeep health\n");
     let h = await j("/health/deep");
-    ok("before the first tick the probe is 503: money jobs have not run", h.status === 503 && h.body.problems.some((p: string) => /money jobs/.test(p)), `${h.status} ${JSON.stringify(h.body.problems)}`);
+    // This used to assert 503 the instant the process came up, on the grounds that the jobs
+    // had not run. They had not run because the loop's first turn is 30 s away — the build
+    // had not failed at anything, and saying it had cost four days of blocked deploys: the
+    // gate reads /health/deep within seconds of the service answering, so every good build
+    // failed on a stopwatch. "Has not ticked YET" and "has stopped ticking" are different
+    // states and the probe now says which. Both halves are asserted here, because dropping
+    // the 503 entirely would hide a worker whose loop is genuinely dead.
+    ok("while starting up the probe is 200 and SAYS it is starting", h.status === 200 && h.body.jobs?.startingUp === true && h.body.jobs?.stale === false, `${h.status} ${JSON.stringify(h.body.jobs)}`);
+    // Same process, no tick, but now up for longer than the grace: that IS a failure.
+    _setJobsClockForTests({ startedAt: Date.now() - 10 * 60_000, lastTickAt: null });
+    h = await j("/health/deep");
+    ok("a process up past the grace with no tick is 503, and says it never completed", h.status === 503 && h.body.problems.some((p: string) => /money jobs have never completed/.test(p)), `${h.status} ${JSON.stringify(h.body.problems)}`);
+    _setJobsClockForTests({ startedAt: Date.now(), lastTickAt: null });
     await reconcileTick();
     h = await j("/health/deep");
     ok("after a tick it is 200 with store, jobs, fx and rails sections", h.status === 200 && h.body.ok === true && h.body.store?.durable !== undefined && h.body.jobs.lastTickAt && Array.isArray(h.body.rails), `${h.status} ${JSON.stringify(h.body.problems)}`);

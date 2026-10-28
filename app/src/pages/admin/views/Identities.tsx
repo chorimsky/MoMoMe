@@ -237,12 +237,22 @@ function RecipientVerificationCard() {
             const tone = p.status === "OPERATIONAL" ? "recv" : p.status === "SANDBOX" ? "lightning" : p.status === "NOT_CONFIGURED" || p.status === "UNKNOWN" ? "ink" : p.status === "DEGRADED" ? "warn" : "bad";
             return (
               <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--line-2)", fontSize: 12.5 }}>
-                <span><span className="mono" style={{ fontWeight: 650 }}>{name}</span><span style={{ color: "var(--ink-3)", marginLeft: 8 }}>{p.supports.countries.join("/")} · {p.supports.operators.join("/")}</span></span>
+                <span><span className="mono" style={{ fontWeight: 650 }}>{name}</span><span style={{ color: "var(--ink-3)", marginLeft: 8 }}>{p.supports.countries.join("/")} · {p.supports.operators.join("/")}</span>
+                  {/* Three states an operator confuses at their peril: switched OFF by hand,
+                      ranked but unable to answer (unconfigured / resting), and actually in
+                      the chain. The console used to show only a list and let the reader
+                      assume all of it was live. */}
+                  {(st.disabled ?? []).includes(name)
+                    ? <span style={{ color: "var(--warn)", marginLeft: 8, fontSize: 11.5 }}>switched off</span>
+                    : (st.effective ?? []).includes(name)
+                      ? <span style={{ color: "var(--recv)", marginLeft: 8, fontSize: 11.5 }}>in the chain</span>
+                      : <span style={{ color: "var(--ink-3)", marginLeft: 8, fontSize: 11.5 }}>not answering</span>}
+                </span>
                 <span style={{ display: "flex", gap: 8, alignItems: "center" }}>{p.lastError && <span className="mono" style={{ fontSize: 11, color: "var(--send)" }}>{p.lastError}</span>}<Pill status={p.status.replace("_", " ").toLowerCase()} tone={tone} /></span>
               </div>
             );
           })}
-          {answering.length === 0 && <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>No provider is configured — nothing can answer. Peexit's verify-wallet needs only the existing PEEXIT_API_KEY.</div>}
+          {answering.length === 0 && <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>No provider is configured — nothing can answer. CamPay's holder lookup needs only the existing CAMPAY_PERMANENT_TOKEN.</div>}
         </div>
         <div>
           <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, color: "var(--ink-3)", marginBottom: 6 }}>Cameroon coverage</div>

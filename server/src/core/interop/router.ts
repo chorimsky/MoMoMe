@@ -16,7 +16,7 @@ import type { Method, ProviderId, QuoteRequest, Quote } from "../../../../shared
 import type { PaymentAddress, PaymentIntent, PaymentQuote, PaymentRoute } from "../../../../shared/interop.js";
 import { METHOD_META, MIN_XAF } from "../../../../shared/domain.js";
 import { activeRails, railHealth, methodServable } from "../../adapters/index.js";
-import { payoutsFor } from "../../adapters/payouts.js";
+import { payoutsFor, type PayoutAdapter } from "../../adapters/payouts.js";
 import { payoutHealth, selectFundedAggregator } from "../routing.js";
 import { getSettings } from "../settings.js";
 import { liveMoney } from "../../config.js";
@@ -64,13 +64,45 @@ export async function discoverRoutes(intent: PaymentIntent, dest: PaymentAddress
   const simulated = !liveMoney();
   const payoutRails = operator ? payoutsFor(operator).filter((p) => p.configured()) : [];
   const payoutEligible = payoutRails.filter((p) => payoutHealth(p.name).eligible);
-  destChecks.push({ name: "payout_rail_operational", ok: payoutEligible.length > 0 || simulated, detail: payoutEligible.map((p) => p.name).join(",") || (simulated ? "simulated (sandbox deployment)" : "none eligible") });
+  // "Eligible" is the health tracker's opinion, and the tracker only learns from payout
+  // ATTEMPTS. A rail nobody has tried since its API hostname stopped resolving is therefore
+  // still eligible, with a success rate of 1 — Peexit sat in exactly that state for days:
+  // reported operational, named to the sender as the destination party, and incapable of
+  // paying anyone. A rail whose balance we cannot read is not operational, whatever the
+  // tracker believes. The read is the adapter's own 15 s-cached one, so asking costs no
+  // extra network call on the send path.
+  const reachable: PayoutAdapter[] = [];
+  const unreadable: string[] = [];
+  if (operator) {
+    for (const p of payoutEligible) {
+      // A sandbox rail has no real wallet: null there means "not live", not "unreachable".
+      if (!p.live()) { reachable.push(p); continue; }
+      const bal = await p.balance(country, operator).catch(() => null);
+      if (bal != null && Number.isFinite(bal)) reachable.push(p);
+      else unreadable.push(p.name);
+    }
+  }
+  destChecks.push({
+    name: "payout_rail_operational",
+    ok: reachable.length > 0 || simulated,
+    detail: reachable.length ? reachable.map((p) => p.name).join(",")
+      : simulated ? "simulated (sandbox deployment)"
+      : unreadable.length ? `unreachable: ${unreadable.join(",")}`
+      : payoutEligible.length ? "none eligible"
+      : "no payout rail configured for this operator",
+  });
   let liquidityOk = false; let liquidityDetail = "";
   if (operator) {
     const agg = await selectFundedAggregator(operator, country, intent.amount, false).catch(() => null);
     const float = await availableFloatXaf().catch(() => 0);
     liquidityOk = !!agg && float >= intent.amount;
-    liquidityDetail = agg ? `${agg.name}; float ${Math.round(float)} XAF` : "no funded payout rail";
+    // "No funded payout rail" reads as "we are out of money", and that is what the sender
+    // was shown while the real cause was a rail we could not reach at all. Report the two
+    // apart — the same unknown-is-not-zero distinction payoutReady() already makes and this
+    // check used to collapse.
+    liquidityDetail = agg ? `${agg.name}; float ${Math.round(float)} XAF`
+      : reachable.length === 0 && unreadable.length ? `no payout rail reachable (${unreadable.join(",")})`
+      : "no funded payout rail";
   }
   destChecks.push({ name: "liquidity", ok: liquidityOk, detail: liquidityDetail });
 
@@ -100,7 +132,7 @@ export async function discoverRoutes(intent: PaymentIntent, dest: PaymentAddress
       steps: [
         { rail, provider: cryptoRail?.name ?? "-", currency: quote?.sourceCurrency ?? (method === "USDT" || method === "USDC" ? method : "BTC"), role: "source", party: cryptoRail?.name === "phoenixd" ? "MoMo›Me node" : cryptoRail?.name === "sandbox" ? "Simulator (no real money)" : "IBEX Hub (licensed crypto rail)" },
         { rail, provider: "momome", currency: dest.currency ?? "XAF", role: "conversion", party: "MoMo›Me (orchestration, FX lock, fee)" },
-        { rail: "mobile_money", provider: payoutEligible[0]?.name ?? payoutRails[0]?.name ?? (simulated ? "sandbox" : "-"), currency: dest.currency ?? "XAF", role: "destination", party: `${payoutEligible[0]?.name ?? (simulated ? "simulated payout" : "payout aggregator")} → ${operator ?? "operator"}` },
+        { rail: "mobile_money", provider: reachable[0]?.name ?? (simulated ? "sandbox" : "-"), currency: dest.currency ?? "XAF", role: "destination", party: `${reachable[0]?.name ?? (simulated ? "simulated payout" : "payout aggregator")} → ${operator ?? "operator"}` },
       ],
       sourceRail: rail, sourceProvider: cryptoRail?.name ?? "-", sourceCurrency: quote?.sourceCurrency ?? "?",
       conversionRequired: true,

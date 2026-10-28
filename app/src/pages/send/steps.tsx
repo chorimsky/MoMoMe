@@ -463,6 +463,13 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
     return () => { alive = false; };
   }, [s.xaf, !!onMomo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sender-facing wording for a failed route check. Returns null when we have no phrase for
+  // it, so the caller falls back to the operator detail.
+  const whyCopy = (name?: string, detail?: string): string | null =>
+    name === "payout_rail_operational" || /unreachable|not reachable/.test(detail ?? "") ? t("m_why_rail_unreachable")
+    : name === "liquidity" ? t("m_why_no_payout")
+    : null;
+
   // THE ROUTER PICKS. One call gives the ranked routes for this destination and amount:
   // the top viable one is preselected and badged, the rest stay a tap away, and a method
   // the router cannot use right now says why instead of failing after the tap. If the
@@ -477,7 +484,11 @@ export function MethodStep({ s, set, back, next, busy, methods, onMomo, onAbroad
         if (!alive || !r) return;
         const viable = r.routes.filter((x) => x.viable).map((x) => x.method);
         const unavailable: Partial<Record<Method, string>> = {};
-        for (const x of r.routes) if (!x.viable) { const bad = x.checks.find((c) => !c.ok); unavailable[x.method] = bad?.detail ?? bad?.name ?? "unavailable"; }
+        // The check's `detail` is written for an operator and names the rail ("unreachable:
+        // peexit"). A sender should not read our payout vendor off a payment screen, so the
+        // checks we have words for get those words; anything else still shows the detail
+        // rather than a shrug.
+        for (const x of r.routes) if (!x.viable) { const bad = x.checks.find((c) => !c.ok); unavailable[x.method] = whyCopy(bad?.name, bad?.detail) ?? bad?.detail ?? bad?.name ?? "unavailable"; }
         const top = r.routes.find((x) => x.id === r.recommended)?.method ?? viable[0] ?? null;
         setRec({ recommended: top, order: [...viable, ...r.routes.filter((x) => !x.viable).map((x) => x.method)], unavailable });
         // The sender's own habit beats the router's default: a person who paid with USDT

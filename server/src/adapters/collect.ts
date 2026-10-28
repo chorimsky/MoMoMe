@@ -194,6 +194,11 @@ const campayCollector: CollectAdapter = {
   status: async (key) => campay.collectStatus(key),
   // No fee endpoint; the real figure arrives per transaction via app_amount.
   feePct: async () => null,
+  // Same shape as the Peexit collector above. Without it this rail answered `ok: null`,
+  // and /health/deep only counts `ok === false` as a problem — so the one collection rail
+  // we had left could have been failing every call and the probe would still have said
+  // nothing was wrong.
+  health: async () => { const r = campay.reachability(); return { ok: !r || r.ok, note: r ? r.reason : undefined }; },
   verifyCallback: (raw) => campay.verifyCallbackSignature(raw),
   simulates: () => !campayLive(),
 };

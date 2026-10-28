@@ -45,9 +45,49 @@ const restingUntil = new Map<string, { until: number; why: string }>();
 export function restProvider(name: string, why: string, now = Date.now()): void { restingUntil.set(name, { until: now + BREAKER_MS(), why }); }
 export function _resetBreakers(): void { restingUntil.clear(); }
 export function providerResting(name: string, now = Date.now()): { why: string } | null { const r = restingUntil.get(name); return r && r.until > now ? { why: r.why } : null; }
+const DEFAULT_ORDER = "mtn_direct,orange_direct,campay_holder,peexit_verify,pawapay,sandbox";
+/** Providers that may be appended to the chain merely because nobody excluded them.
+ *  `sandbox` is NOT one: it is a stand-in that always answers, so auto-appending it lets a
+ *  simulated VERIFIED reach a sender the moment a real provider rests — and hides a
+ *  misconfigured verifier from the developer who could still fix it. Live deployments were
+ *  never exposed (the stand-in is not authoritative, so liveMoney() already filtered it),
+ *  but dev and test are exactly where a broken chain should be loud. To use the stand-in,
+ *  name it. */
+const AUTO_APPEND = DEFAULT_ORDER.split(",").map((s) => s.trim()).filter((k) => k !== "sandbox");
+/** WHO MAY ANSWER "who owns this number?" — anyone who can, in the operator's preferred
+ *  order. Verification is deliberately agnostic of settlement: the rail that will carry the
+ *  money has nothing to do with which provider can name the holder. CamPay can name an MTN
+ *  subscriber whether the payout leaves via CamPay, Peexit or anyone else.
+ *
+ *  IDENTITY_PROVIDER_PRIORITY is an ORDERING, NOT AN ALLOW-LIST. It used to be both, and
+ *  that silently broke verification for everyone: the production value was written when the
+ *  only verifier was Peexit, so when Peexit's hostname was withdrawn from DNS the chain had
+ *  nowhere to go — while `campay_holder`, configured, authoritative and the only provider we
+ *  have that returns a real NAME, was excluded for the sole reason that it had not been
+ *  invented when someone typed that string. Senders paid unverified for three days.
+ *  Omission must not disable a working verifier. A provider left out of the list is now
+ *  simply ranked after the ones named in it.
+ *
+ *  Switching a provider OFF stays possible — but it has to be said out loud, in
+ *  IDENTITY_PROVIDER_DISABLED, rather than achieved by forgetting to mention it. */
+/** The ranked order of EVERY known provider, configured or not — what the console shows as
+ *  "chain order". Exported so the admin surface reports what the resolver actually does
+ *  instead of re-deriving the list from the same env var with its own default, which is how
+ *  the console came to display a chain that did not include the provider doing the work. */
+export function providerOrder(): string[] {
+  const named = (process.env.IDENTITY_PROVIDER_PRIORITY ?? DEFAULT_ORDER).split(",").map((s) => s.trim()).filter((s) => s in ALL);
+  return [...named, ...AUTO_APPEND.filter((k) => k in ALL && !named.includes(k))];
+}
+/** Providers an operator has switched off by name (IDENTITY_PROVIDER_DISABLED). */
+export function providersDisabled(): string[] {
+  return (process.env.IDENTITY_PROVIDER_DISABLED ?? "").split(",").map((s) => s.trim()).filter((s) => s in ALL);
+}
+
 export function providerChain(country: string, operator: string | null, now = Date.now()): IdentityProvider[] {
-  const order = (process.env.IDENTITY_PROVIDER_PRIORITY ?? "mtn_direct,orange_direct,campay_holder,peexit_verify,pawapay,sandbox").split(",").map((s) => s.trim()).filter((s) => s in ALL);
-  return order.map((k) => ALL[k]).filter((p) => p.configured() && p.supports(country, operator) && (p.authoritative || p.name === "pawapay" || !liveMoney()) && !providerResting(p.name, now));
+  const named = (process.env.IDENTITY_PROVIDER_PRIORITY ?? DEFAULT_ORDER).split(",").map((s) => s.trim()).filter((s) => s in ALL);
+  const rest = AUTO_APPEND.filter((k) => k in ALL && !named.includes(k));
+  const disabled = new Set((process.env.IDENTITY_PROVIDER_DISABLED ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  return [...named, ...rest].map((k) => ALL[k]).filter((p) => !disabled.has(p.name) && p.configured() && p.supports(country, operator) && (p.authoritative || p.name === "pawapay" || !liveMoney()) && !providerResting(p.name, now));
 }
 export async function providersHealth(): Promise<IdentityProviderHealth[]> {
   return Promise.all(Object.values(ALL).map(async (p) => { const h = await p.health(); const r = providerResting(p.name); return r ? { ...h, status: "DOWN" as const, lastError: h.lastError ?? r.why } : h; }));

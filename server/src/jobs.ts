@@ -53,8 +53,36 @@ export const runsJobs = () => processRole() !== "api";
 export const servesHttp = () => processRole() !== "worker";
 
 let lastTickAt: number | null = null, lastTickMs = 0, lastTickError: string | null = null;
+/** When this process started. "Has never ticked" and "ticked, but long ago" are different
+ *  states, and treating them the same made every fresh deploy look broken: the jobs loop
+ *  first fires 30 s after boot, the deploy gate reads /health/deep within seconds of the
+ *  process answering, so a perfectly good build reported "money jobs have not completed in
+ *  the last 3 minutes" — which was true, and meant nothing. A process that has been up for
+ *  ten seconds has not FAILED to tick; it has not had the chance. */
+let mutableStartedAt = Date.now();
+/** How long a process may be up having never ticked before that is genuinely wrong. The
+ *  loop runs every 30 s, so three minutes is five missed turns, not a slow start. */
+const FIRST_TICK_GRACE_MS = 3 * 60_000;
+/** TEST ONLY. Move this process's clock so the four states (starting, never-ticked-too-long,
+ *  recently ticked, stopped ticking) can be asserted without a test that waits minutes. */
+export function _setJobsClockForTests(x: { startedAt?: number; lastTickAt?: number | null }): void {
+  if (x.startedAt !== undefined) mutableStartedAt = x.startedAt;
+  if (x.lastTickAt !== undefined) lastTickAt = x.lastTickAt;
+}
 /** For the deep health probe: when the money jobs last completed on THIS instance. */
-export const jobsHealth = () => ({ role: processRole(), lastTickAt: lastTickAt ? new Date(lastTickAt).toISOString() : null, lastTickMs, lastTickError, stale: runsJobs() && (lastTickAt == null || Date.now() - lastTickAt > 3 * 60_000) });
+export const jobsHealth = () => {
+  const sinceStart = Date.now() - mutableStartedAt;
+  const neverTicked = lastTickAt == null;
+  return {
+    role: processRole(),
+    lastTickAt: lastTickAt ? new Date(lastTickAt).toISOString() : null,
+    lastTickMs, lastTickError,
+    // Says which of the two it is, so a reader (and the deploy gate) can tell a build that
+    // is starting from one whose money jobs have stopped.
+    startingUp: runsJobs() && neverTicked && sinceStart <= FIRST_TICK_GRACE_MS,
+    stale: runsJobs() && (neverTicked ? sinceStart > FIRST_TICK_GRACE_MS : Date.now() - lastTickAt! > 3 * 60_000),
+  };
+};
 
 /** Run `fn` only if this instance holds the cluster-wide job lock. On Postgres that is a
  *  session-level advisory lock held for the duration of the tick (a second instance sees

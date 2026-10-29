@@ -1,78 +1,56 @@
-# Message to the Peexit team — migration follow-up
+# Message to the Peexit team
 
-*Updated 28 October 2026, after receiving the new connection parameters. Replaces the
-earlier outage report: the question is no longer "what happened" but "confirm these four
-details so we can reconnect cleanly."*
+*Updated 29 October 2026, after testing the new gateway end to end and confirming our own
+egress address. Fill in your name before sending.*
+
+## What we established on our side
+
+| Layer | Result |
+| --- | --- |
+| DNS — `px-gw-c2810.peexit.com` | resolves: `18.236.19.78`, `32.190.82.249` |
+| TCP + TLS | completes normally |
+| HTTP | **403** from `server: awselb/2.0`, on every path |
+| With vs without `SECRETKEY` | identical — the refusal is before any application logic |
+| GET vs POST, any `Host` header, either ALB IP | identical |
+| From our production egress (`152.55.177.87`) | **also 403** |
+
+Our outbound address is `152.55.177.87` — the exact IP Peexit whitelisted for us. It has
+not changed. So this is a blanket deny at their load balancer, and nothing on our side
+changes it.
+
+One caveat worth stating: we measure our egress address by asking an IP-echo service, and
+that is the address a request *to that service* leaves from. If the platform routes to
+different destinations through different NAT addresses, the IP Peexit's load balancer sees
+could differ. Only their logs can settle it — which is why that is the first question.
 
 ---
 
-**Subject: New gateway received — four confirmations needed to complete our cutover
-(account Umdeny)**
+**Subject: 403 on px-gw-c2810 from the IP you whitelisted (account Umdeny)**
 
 Hello,
 
-Thank you for the new connection parameters. We have received:
+We've moved to `https://px-gw-c2810.peexit.com/api` and every request returns **403** from
+your load balancer (`server: awselb/2.0`) — on every path, with and without our SECRETKEY,
+so it is being refused before it reaches your application.
 
-- New server endpoint: `https://px-gw-c2810.peexit.com/api/`
-- Whitelisted IP: `152.55.177.87`
+We've confirmed our outbound address is **152.55.177.87**, the exact IP you whitelisted for
+us, and it has not changed.
 
-We have repointed our integration at the new gateway and confirmed it resolves and responds.
-Four things would let us complete the cutover without a round of avoidable failures.
+Three things would unblock us:
 
-**1. The exact base path — `/api` or `/api/v1`?**
+1. **Which source IP do you see on the rejected requests?** Your ALB logs will show it.
+   That is the one fact we cannot determine from outside, and it settles immediately
+   whether the allowlist entry is simply attached to the wrong place.
+2. **Please confirm the allowlist for 152.55.177.87 is applied to the new gateway.** We
+   suspect it is still attached to the retired `server.peexit.com`.
+3. **Please confirm the base path** — should our calls be
+   `/api/disbursement/request_payment` or `/api/v1/disbursement/request_payment`? We cannot
+   test this ourselves: the 403 happens before routing, so every path looks identical.
 
-Our previous production base was `https://server.peexit.com/api/v1`, so our calls were:
+Once we are reconnected we will also want to confirm the notification callback credentials
+and whether our SECRETKEY is unchanged — but those can wait until traffic flows.
 
-```
-POST  /api/v1/disbursement/request_payment
-GET   /api/v1/disbursement/all_requests?track_id=...
-GET   /api/v1/disbursement/me
-GET   /api/v1/collection/me
-```
-
-The new endpoint is written as `/api/` without a version segment. Should our calls now be
-`/api/disbursement/request_payment`, or is the version still present as
-`/api/v1/disbursement/request_payment`? We cannot determine this ourselves — the gateway
-correctly returns 403 to any non-allowlisted source before routing, so every path looks
-identical from outside your allowlist.
-
-**2. The API Secret Key**
-
-You noted the access key will arrive through a separate channel. Please confirm:
-
-- which channel it will come from, so we can recognise it and reject anything else;
-- whether our existing SECRETKEY is now revoked, or remains valid against the new gateway.
-
-We will not send live traffic using a key that arrives by any route we have not confirmed
-with you directly.
-
-**3. Allowlist coverage**
-
-Please confirm `152.55.177.87` is allowlisted for **all** the surfaces we use, not only
-disbursement:
-
-- disbursement (`request_payment`, `all_requests`, `me`)
-- collection (`me`, and collection requests)
-- `holder_info` — the account-name lookup
-
-Our senders see the registered name behind a recipient's number before they confirm a
-payment, so `holder_info` is part of the customer path, not just an internal call.
-
-**4. Callbacks**
-
-Our notification callback is authenticated with HTTP Basic credentials we registered with
-you. Please confirm the callback URL and those credentials carried over to the new gateway,
-or tell us if they must be re-registered.
-
-**One request for the future**
-
-The previous hostnames (`server.peexit.com`, `sandbox.peexit.com`) were removed from DNS
-before we had the replacement, so our first indication was payouts failing. If you have a
-status page or an incident/migration mailing list, please add us. If there is a sandbox
-equivalent of the new gateway, we would like that endpoint too — we rehearse against sandbox
-before sending live money.
-
-Thank you for getting this to us.
+Thank you,
 
 [Your name]
 MoMo›Me

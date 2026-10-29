@@ -44,6 +44,27 @@ except Exception: pass'
 
 # The baseline file holds whatever the previous build reported — full sentences. Reduce it
 # to kinds with exactly the same rule, so both sides of the comparison speak one language.
+# WHOSE PROBLEM IS IT? The gate asks "did THIS BUILD make anything worse?", and for that
+# the problem kinds divide in two.
+#
+#   BUILD-OWNED  — the store is not durable, the money jobs have stopped, FX is stale.
+#                  A deploy can genuinely cause these, and a new one must fail.
+#   ENVIRONMENTAL — a rail is down, a vendor refuses our IP, a float is empty. A code
+#                  deploy does not cause these, and they OSCILLATE on their own: the rail
+#                  health tracker resets on restart, balance caches warm up, and a
+#                  hard-down rail becomes eligible again for one probe every cooldown. So
+#                  the same unchanged production reports a different set minute to minute.
+#
+# Comparing a single baseline sample against a single post-deploy sample therefore failed
+# three good builds in a row: the old build happened to be between probes, the new one had
+# warmed up, and the diff showed problems that had been there all week.
+#
+# Environmental kinds are reported in full and never fail the gate. What still protects the
+# deploy is everything the build genuinely owns: the version must be the one we uploaded,
+# the synthetic quote — the call every customer path starts with — must work, and any
+# BUILD-OWNED problem that was not there before fails.
+ENVIRONMENTAL='^(payout rail down|collection rail down|funds not allocated to a carrier float|rail unreachable)$'
+
 kinds_of() { # stdin: one problem per line → one kind per line
   python3 -c 'import sys
 for line in sys.stdin:
@@ -77,8 +98,15 @@ except Exception: print("")')
     now=$(printf '%s' "$body" | problems_of)
     # Which problems are new? comm needs sorted input; both sides may be empty.
     new=$(comm -13 <(printf '%s\n' "$BASELINE" | kinds_of | sort -u) <(printf '%s\n' "$now" | sed '/^$/d' | sort -u) || true)
+    # Drop the kinds a deploy cannot cause — but ONLY when we have a baseline to reason
+    # from. With no baseline the starting state is unknown, and an unknown state still
+    # fails closed: that is a different situation (the service may never have been up, or
+    # something may be badly wrong) and tolerating anything there would be assuming.
+    if [ -n "$BASELINE" ]; then
+      new=$(printf '%s\n' "$new" | sed '/^$/d' | grep -vE "$ENVIRONMENTAL" || true)
+    fi
     if [ -n "$new" ]; then
-      echo "gate: FAILED — this build introduced a NEW KIND of problem:"
+      echo "gate: FAILED — this build introduced a NEW KIND of problem it owns:"
       printf '  ✗ %s\n' "$new"
       echo "gate: the full problem text from the live build:"
       printf '%s' "$body" | python3 -c 'import sys,json

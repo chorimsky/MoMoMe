@@ -36,6 +36,15 @@ PEEXIT="collection rail down: peexit"
 run_case "a pre-existing vendor problem is tolerated"  503 "{$V,\"problems\":[\"$PEEXIT\"]}"                         "$PEEXIT" 200 0
 # …and the thing that must not be lost by making it tolerant.
 run_case "a NEW problem still fails the deploy"        503 "{$V,\"problems\":[\"$PEEXIT\",\"ledger is not durable\"]}" "$PEEXIT" 200 1
+# The third false failure: problems that come from LEARNED state. A rail's health resets on
+# restart, balance caches warm up, and a hard-down rail goes eligible again for one probe
+# every cooldown — so the same unchanged production reports a different set minute to
+# minute. The old build happened to be between probes; the new one had warmed up.
+run_case "an environmental problem appearing after warm-up is not the build's fault"  503 "{$V,\"problems\":[\"$PEEXIT\",\"payout rail down: peexit\",\"funds not allocated to a carrier float: campay holds an amount\"]}"  "$PEEXIT" 200 0
+# But a BUILD-OWNED problem appearing beside them still fails: the exemption is for the
+# kinds a deploy cannot cause, not a blanket tolerance.
+run_case "a build-owned problem still fails beside environmental ones"  503 "{$V,\"problems\":[\"payout rail down: peexit\",\"money jobs have not completed in the last 3 minutes\"]}"  "$PEEXIT" 200 1
+
 # The two false failures that prompted the kind-based comparison. Both were builds whose
 # only change was describing an EXISTING condition better — one named the cause, the other
 # dropped a rail that never belonged in the list. Under string comparison each read as a

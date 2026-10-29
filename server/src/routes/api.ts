@@ -212,7 +212,10 @@ api.post("/admin/elevate", async (req, res) => {
 
 /* Map a request sub-path (mount-relative, e.g. "/liquidity") to its console
    section, for the role gate. */
-function sectionForPath(sub: string): Section | null {
+/** Exported for test/admin-coverage.test.ts: an unmapped route fails closed with 403, so
+ *  every registered admin route must resolve to a section. A pure lookup — the test calls
+ *  it directly rather than invoking handlers that would move money. */
+export function sectionForPath(sub: string): Section | null {
   const p = sub.replace(/^\//, "").split("/")[0] ?? "";
   const map: Record<string, Section> = {
     overview: "overview", payments: "payments", quotes: "payments", unattributed: "payments", delivery: "delivery",

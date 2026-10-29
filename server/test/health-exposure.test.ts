@@ -72,9 +72,20 @@ async function main() {
     ok("per-carrier floats are returned", (auth.body.rails ?? []).some((r: Record<string, unknown>) => r.byProvider));
     ok("alert keys are returned with the token too", Array.isArray(auth.body.alerts));
 
+    console.log("\nThe egress address: the one fact that fixes an allowlist outage\n");
+    // It lived only behind an admin login, so during Peexit's four-day 403 the number
+    // needed to fix it required somebody to open the console. It is our outbound address,
+    // so it is token-gated like the money — never public.
+    ok("no egress block for an anonymous caller", !("egress" in anon.body), JSON.stringify(anon.body.egress ?? null));
+    ok("the whole response mentions no IP address", !/\b\d{1,3}(\.\d{1,3}){3}\b/.test(text), text.slice(0, 160));
+    ok("with the token it is present", !!auth.body.egress, JSON.stringify(auth.body.egress ?? null));
+    ok("…and says whether it matches what the rail expects", auth.body.egress && "matches" in auth.body.egress && "expected" in auth.body.egress,
+      JSON.stringify(auth.body.egress ?? null));
+
     console.log("\nA wrong token is not a token\n");
     const bad = await get({ "x-health-token": "wrong-token-of-same-len--" });
     ok("balances stay hidden", (bad.body.rails ?? []).every((r: Record<string, unknown>) => !("balanceXaf" in r)));
+    ok("…and so does the egress address", !("egress" in bad.body), JSON.stringify(bad.body.egress ?? null));
 
     console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"} — ${pass} passed, ${fail} failed\n`);
   } finally { server.close(); }

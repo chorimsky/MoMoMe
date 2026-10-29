@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import crypto from "node:crypto";
+import { egressStatus } from "./core/egress.js";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
@@ -280,6 +281,14 @@ export function createApp() {
       return short ? `${c.name} (${short})` : c.name;
     }).join(", ")}`);
     if (alerts.some((a) => a.key.startsWith("network:unmatched") || a.key === "payments:stuck")) problems.push("open critical alert");
+    // The address a rail sees us leave from — the single fact that decides whether an
+    // IP-allowlisted vendor accepts us, and the thing that cost four days when Peexit's
+    // allowlist went stale. It lived only behind an admin login, so during an outage the
+    // one number needed to fix it required somebody to open the console. Token-gated, not
+    // public: it is our outbound address, and it is only read for an authenticated caller
+    // so anonymous polling (the deploy gate) never pays for the lookup. The module caches
+    // for 10 minutes and never throws.
+    const egress = detailed ? await egressStatus().catch(() => null) : null;
     // Redact the money for an anonymous caller: the VERDICT is public, the figures are not.
     // A problem string may carry a figure too (the stranded-float one names the amount), so
     // strip digits from those rather than leaking the balance through the back door.
@@ -290,7 +299,7 @@ export function createApp() {
       // without saying how much it holds.
       return { ...rest, funded: spendableXaf == null ? null : spendableXaf > 0 };
     });
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems: safeProblems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails: safeRails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), version: appVersion() });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems: safeProblems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails: safeRails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), ...(egress ? { egress } : {}), version: appVersion() });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

@@ -177,7 +177,12 @@ function unresolved(key: string, why: string): void {
 
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
-  if (!local) return null;
+  // No local record means we cannot even ASK: the re-query is keyed on the rail reference
+  // this map holds. It survives a restart (disburse persists it), so reaching here means
+  // something lost it — and the payout then has no route to a verdict at all. Silence here
+  // was the worst of the lot, because it returns before any network call and so none of
+  // the diagnostics below can ever fire.
+  if (!local) { unresolved(idempotencyKey, "no local record of this payout — cannot re-query the rail; it has no route to a verdict"); return null; }
   if (local.simulated) return statusByRef.get(idempotencyKey) ?? "COMPLETED";
   const cached = statusByRef.get(idempotencyKey) ?? "PENDING";
   if (!peexitLive()) return cached;
@@ -194,7 +199,16 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     // reconcileStuckPayouts only acts on COMPLETED or FAILED, so a payout the rail has no
     // record of sits in PAYOUT_REQUESTED for ever with the crypto held and the sender
     // watching a spinner. Nothing anywhere said why. Say why.
-    if (res.status === 404 || !res.ok) { unresolved(idempotencyKey, res.status === 404 ? "404 — not in the rail's 3-day listing (too new, or older than the window)" : `HTTP ${res.status} from all_requests`); return cached; }
+    if (res.status === 404 || !res.ok) {
+      // A 404 because the ENDPOINT does not exist on this gateway and a 404 meaning "no
+      // transactions in your 3-day listing" are the same status code and need opposite
+      // fixes — one is our integration pointing at a route that moved, the other is a
+      // payout simply outside the lookup window. Peexit's own message says which, so carry
+      // a little of the body rather than making someone guess.
+      const why = await res.text().catch(() => "");
+      unresolved(idempotencyKey, `HTTP ${res.status} from /disbursement/all_requests — rail said: ${why.replace(/\s+/g, " ").trim().slice(0, 160) || "(empty body)"}`);
+      return cached;
+    }
     const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string; fees?: number }>;
     // Require an EXACT track_id match — the endpoint "returns our requests from the
     // last 3 days", so if Peexit's server-side track_id filter is ignored/loose, a
@@ -206,6 +220,11 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     if (!row) { unresolved(idempotencyKey, `the rail returned ${Array.isArray(arr) ? arr.length : 0} row(s), none with this track_id — it has no record of this payout`); return cached; }
     if (!row.status) { unresolved(idempotencyKey, "the rail's row for this payout carries no status field"); return cached; }
     const mapped = mapStatus(row.status);
+    // A payout the rail is STILL holding is the other half of the picture. The first
+    // version of this logging made the three "cannot establish" cases loud and left this
+    // one silent — so "the rail says pending" and "nothing is running at all" still looked
+    // identical from the outside, which was the whole problem. Rate-limited the same way.
+    if (mapped === "PENDING") unresolved(idempotencyKey, `the rail reports "${row.status}" — accepted and not yet settled`);
     statusByRef.set(idempotencyKey, mapped);
     // Capture the rejection reason (e.g. INSUFFICIENT_FUND_TO_PAY_TX) so callers can
     // explain WHY a payout failed instead of a bare "failed".

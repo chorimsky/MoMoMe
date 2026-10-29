@@ -1092,7 +1092,22 @@ export async function onPayoutResult(refOrKey: string, status: PayoutStatus, pro
 }
 async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerRef?: string): Promise<void> {
   const p = await store().findPaymentByRef(ref); // fresh read under the lock
-  if (!p || p.state !== "PAYOUT_REQUESTED") return; // already resolved / unknown
+  // A payout escalated to MANUAL_REVIEW for being unresolvable is still IN FLIGHT: the
+  // rail holds it under the same key, and its verdict — whenever it arrives — is the truth
+  // about money that may already have moved. Dropping it there was why escalating at all
+  // was unsafe: the recipient could be paid while the payment never delivered.
+  const escalatedPayout = p?.state === "MANUAL_REVIEW" && !!p.payoutUnresolvedSince;
+  if (!p || (p.state !== "PAYOUT_REQUESTED" && !escalatedPayout)) return; // already resolved / unknown
+  if (escalatedPayout) {
+    // Return it to the money path rather than confirming from the desk. MANUAL_REVIEW
+    // deliberately cannot reach PAYOUT_CONFIRMED or DELIVERED (transition-table.test.ts):
+    // the desk RELEASES a payment, it does not declare money moved. Going back through
+    // PAYOUT_REQUESTED means the verdict is applied by exactly the same code that applies
+    // every other verdict, with no second path to deliver money by.
+    console.warn(`[settle] ${ref}: late ${status} for a payout escalated as unresolvable — returning it to the payout path`);
+    await transition(p, "PAYOUT_REQUESTED", "rail answered after escalation");
+  }
+  if (p.payoutUnresolvedSince) p.payoutUnresolvedSince = undefined; // resolved: no longer in limbo
 
   // Feed the route-selection engine: success rate, latency, availability.
   if (status === "COMPLETED" || status === "FAILED") {
@@ -1148,7 +1163,7 @@ async function onPayoutResultLocked(ref: string, status: PayoutStatus, providerR
 }
 
 /** Backstop for lost callbacks: re-query payouts stuck in PAYOUT_REQUESTED. */
-export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
+export async function reconcileStuckPayouts(maxAgeMs = 60_000, unresolvedEscalateMs = 30 * 60_000): Promise<void> {
   const cutoff = Date.now() - maxAgeMs;
   for (const p of await store().listPayments()) {
     if (p.state !== "PAYOUT_REQUESTED" || Date.parse(p.updatedAt) > cutoff) continue;
@@ -1158,7 +1173,28 @@ export async function reconcileStuckPayouts(maxAgeMs = 60_000): Promise<void> {
     // which can only answer "not mine" or, worse, match a colliding reference.
     if (isDeferredRail(p.aggregator)) continue;
     const status = await aggregatorByName(p.aggregator ?? "peexit").queryStatus(payoutKeyOf(p));
-    if (status === "COMPLETED" || status === "FAILED") await onPayoutResult(payoutKeyOf(p), status);
+    if (status === "COMPLETED" || status === "FAILED") { await onPayoutResult(payoutKeyOf(p), status); continue; }
+    // NO VERDICT. This loop only ever acted on COMPLETED or FAILED, so a payout the rail
+    // will not resolve — it has no record of it, its status endpoint moved, it answers
+    // "pending" for ever — kept the payment in PAYOUT_REQUESTED indefinitely. The sender
+    // watched a spinner, the crypto stayed held, and the only signal was an alert nobody
+    // could act on from the payment itself.
+    //
+    // After unresolvedEscalateMs the payment moves to the operator's desk. This ABANDONS
+    // NOTHING: the payout key is unchanged, the rail still holds the request, and a late
+    // verdict is still honoured (onPayoutResult accepts MANUAL_REVIEW while
+    // payoutUnresolvedSince is set). What changes is that the payment stops pretending to
+    // be in progress, and a person is given something they can act on.
+    const age = Date.now() - Date.parse(p.updatedAt);
+    if (age > unresolvedEscalateMs) {
+      await store().lockPayment(p.id, async () => {
+        const fresh = await store().getPayment(p.id);
+        if (!fresh || fresh.state !== "PAYOUT_REQUESTED") return;   // resolved while we waited
+        fresh.payoutUnresolvedSince = new Date().toISOString();
+        console.warn(`[settle] ${fresh.ref}: payout unresolved for ${Math.round(age / 60_000)} min on ${fresh.aggregator ?? "?"} — moving to review. The rail still holds it under ${payoutKeyOf(fresh)}; a late verdict will still settle it.`);
+        await transition(fresh, "MANUAL_REVIEW", `payout unresolved for ${Math.round(age / 60_000)} min — rail gave no verdict`);
+      });
+    }
   }
 }
 

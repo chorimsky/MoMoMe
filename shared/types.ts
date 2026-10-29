@@ -218,6 +218,12 @@ export interface Payment {
   /** Idempotency key of the CURRENT payout attempt at the rail: the ref for the first
    *  attempt, `${ref}:r2` for a failover to another rail. Never reused across attempts. */
   payoutKey?: string;
+  /** Set when a payout has been in flight so long that no verdict is coming on its own,
+   *  and the payment has been moved to MANUAL_REVIEW so a person can act. The payout is
+   *  NOT abandoned: the key above is unchanged, and a late verdict from the rail is still
+   *  honoured (onPayoutResult accepts MANUAL_REVIEW while this is set). Cleared the moment
+   *  the payout resolves either way. */
+  payoutUnresolvedSince?: string;
   /** How many payout attempts have been submitted (1 = the original). */
   payoutAttempts?: number;
   /** Which aggregator the routing engine chose for this payout. */

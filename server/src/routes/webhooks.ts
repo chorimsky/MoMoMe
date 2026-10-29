@@ -57,12 +57,21 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   if (adapter.verifyCallback && !adapter.verifyCallback(raw, req.headers)) {
     recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
+    // A rejected payout callback was recorded and never SAID. It is one of the two ways a
+    // payout reaches a verdict (the other is our own re-query), so a rail posting
+    // settlements we refuse — wrong credentials after a gateway migration, say — leaves
+    // payments pending for ever with nothing in the log to explain it. Refusing is right;
+    // refusing in silence is not.
+    console.warn(`[webhook] ${name}: payout callback REFUSED — its auth did not verify. If the rail believes it is notifying us, every payout it settles will stay PENDING on our side. Check the callback credentials registered with ${name}.`);
     return res.status(401).json({ error: "unauthorized" });
   }
   let events;
   try { events = adapter.parseCallback ? adapter.parseCallback(JSON.parse(raw)) : []; }
   catch { recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "bad json" }); return res.status(400).json({ error: "bad_json" }); }
   const rec = recordEvent({ provider: name, eventType: "callback.received", rawBody: raw, providerReference: events[0]?.providerRef ?? events[0]?.ref ?? null, status: "verified" });
+  // The positive case too: "the rail is notifying us and we accepted it" is the fact that
+  // distinguishes a quiet rail from a quiet integration.
+  console.log(`[webhook] ${name}: payout callback accepted — ${events.length} event(s)${events[0]?.ref ? ` for ${events[0].ref}` : ""}`);
   res.json({ ok: true, ...(rec.duplicate ? { duplicate: true } : {}) }); // ack fast; settle in background
   if (rec.duplicate) return; // the same bytes again: already handled, never twice
   if (events.length === 0) {

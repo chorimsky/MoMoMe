@@ -1,5 +1,5 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>MoMo›Me × Sorted Wallet — Partnership</title>
+<!doctype html><html lang="en" data-variant="technical"><head><meta charset="utf-8">
+<title>WUL + MoMo›Me × Sorted Wallet — Partnership</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -60,18 +60,20 @@ ul{list-style:none}li{font-size:14px;line-height:1.52;color:var(--ink-2);padding
 li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .dark li{color:oklch(0.82 0.008 90)}
 .cap{font-size:11px;color:var(--ink-3);font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:7px}
+html[data-variant="business"] .tech-only{display:none!important}
+html[data-variant="technical"] .biz-only{display:none!important}
 </style></head><body>
 
 <!-- 1 COVER -->
 <section class="s dark" style="justify-content:space-between">
-  <div class="mark" style="color:oklch(0.97 0.006 95)"><span class="dot"></span>MoMo<span style="color:var(--brand)">›</span>Me</div>
+  <div class="mark" style="color:oklch(0.97 0.006 95)"><span class="dot"></span>WUL<span style="color:oklch(0.62 0.01 90);font-weight:400"> + </span>MoMo<span style="color:var(--brand)">›</span>Me</div>
   <div>
     <div class="kicker" style="color:var(--brand)">Strategic partnership proposal · Confidential</div>
-    <h1 style="font-size:66px;line-height:1.02;margin-bottom:22px">MoMo›Me <span style="color:var(--ink-3)">×</span> Sorted Wallet</h1>
-    <p style="font-size:22px;color:oklch(0.85 0.008 90);max-width:820px;line-height:1.42;font-weight:600">
-      A settlement gateway that turns any Sorted balance into money on a Cameroonian
-      Mobile Money number — through one signed API, with the rails, routing and
-      reconciliation handled.</p>
+    <h1 style="font-size:58px;line-height:1.04;margin-bottom:22px">WUL + MoMo›Me<br><span style="color:var(--ink-3)">×</span> Sorted Wallet</h1>
+    <p style="font-size:22px;color:oklch(0.85 0.008 90);max-width:860px;line-height:1.42;font-weight:600">
+      WUL + MoMo›Me is one company: a settlement gateway that turns any Sorted balance into
+      money on a Cameroonian Mobile Money number — through one signed API, with the rails,
+      routing and reconciliation handled. Sorted joins as a business-settlement client.</p>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:flex-end">
     <div style="font-family:var(--font-display);font-size:19px;color:var(--brand);font-weight:600">Every Number. Every Network. One Payment Layer.</div>
@@ -98,9 +100,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     routing, retries, settlement and reconciliation sit behind a signed API and a webhook
     contract that does not change when a rail does.</p></div>
   </div>
-  <p class="note">This deck describes an unexercised partnership. Sorted would be MoMo›Me's first
-  wallet partner; no claim of existing wallet integrations is made anywhere in this document.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">02</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">02</div>
 </section>
 
 <!-- 3 CHALLENGE -->
@@ -124,20 +124,19 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
         <li>Each operator and aggregator answers differently, and changes without notice.</li>
         <li>Float is prefunded <b>per carrier</b> — an MTN balance tells you nothing about Orange.</li>
         <li>Quotes expire; a rate held too long is a loss, held too briefly is a failed payment.</li>
-        <li>A vendor can disappear. This month, one of ours did.</li>
+        <li>A vendor can disappear, and the integration above it must not move when one does.</li>
       </ul></div>
   </div>
-  <p class="note">The last point is not rhetorical, and it is addressed directly on slide 14.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">03</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">03</div>
 </section>
 
 <!-- 4 MEET -->
 <section class="s">
   <div class="rule"></div>
-  <div class="kicker">Meet MoMo›Me</div>
+  <div class="kicker">Meet WUL + MoMo›Me</div>
   <h2>A payment orchestration layer, in production, with the receipts in source.</h2>
-  <p class="sub">Every figure on this slide is counted from the repository or read from the live
-  service on 28 October 2026. Nothing here is a projection.</p>
+  <p class="sub">Every figure on this slide is counted from the platform or read from the live
+  service on 28 October 2026.</p>
   <div class="grid g4" style="margin:4px 0 20px">
     <div class="card"><div class="kpi">17</div><div class="kpi-l">public <span class="num">/v1</span> endpoints — intent, routes, execute, status, webhooks, reconciliation</div></div>
     <div class="card"><div class="kpi">3</div><div class="kpi-l">independent rail registries: crypto inbound, Mobile Money payout, Mobile Money collection</div></div>
@@ -152,7 +151,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     to a registry array. Routing, health tracking, failover, idempotency and reconciliation are
     inherited, not rewritten. A bank or MFI with a request/response API is the same shape.</p></div>
   </div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">04</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">04</div>
 </section>
 
 <!-- 5 TECHNOLOGY -->
@@ -183,28 +182,40 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <line x1="688" y1="95" x2="754" y2="95" stroke="oklch(0.60 0.011 75)" stroke-width="1.6" marker-end="url(#a)"/>
     <rect x="760" y="8" width="180" height="140" rx="14" fill="oklch(0.95 0.05 158)" stroke="oklch(0.60 0.13 158)" stroke-width="1.5"/>
     <text x="850" y="34" text-anchor="middle" font-family="Fredoka" font-size="14" font-weight="600" fill="oklch(0.33 0.09 158)">Payout registry</text>
-    <g font-family="Nunito" font-size="11.5" fill="oklch(0.33 0.09 158)">
+    <g class="tech-only" font-family="Nunito" font-size="11.5" fill="oklch(0.33 0.09 158)">
       <text x="850" y="60" text-anchor="middle">CamPay · live</text>
       <text x="850" y="82" text-anchor="middle">Peexit · migrating</text>
       <text x="850" y="104" text-anchor="middle">PawaPay · inactive</text>
       <text x="850" y="130" text-anchor="middle" font-size="10.5" fill="oklch(0.45 0.07 158)">+ bank / MFI adapter</text>
     </g>
+    <g class="biz-only" font-family="Nunito" font-size="11.5" fill="oklch(0.33 0.09 158)">
+      <text x="850" y="64" text-anchor="middle">licensed payout partners</text>
+      <text x="850" y="88" text-anchor="middle">multiple, independent</text>
+      <text x="850" y="112" text-anchor="middle">routed by balance</text>
+      <text x="850" y="134" text-anchor="middle" font-size="10.5" fill="oklch(0.45 0.07 158)">+ bank / MFI adapter</text>
+    </g>
     <rect x="760" y="162" width="180" height="146" rx="14" fill="oklch(0.974 0.005 95)" stroke="oklch(0.915 0.006 90)" stroke-width="1.5"/>
     <text x="850" y="188" text-anchor="middle" font-family="Fredoka" font-size="14" font-weight="600" fill="oklch(0.19 0.013 75)">Collection registry</text>
-    <g font-family="Nunito" font-size="11.5" fill="oklch(0.42 0.013 75)">
+    <g class="tech-only" font-family="Nunito" font-size="11.5" fill="oklch(0.42 0.013 75)">
       <text x="850" y="214" text-anchor="middle">MTN · Orange</text>
       <text x="850" y="236" text-anchor="middle">CamPay · Peexit</text>
       <text x="850" y="266" text-anchor="middle" font-size="10.5" fill="oklch(0.60 0.011 75)">money in, same shape</text>
+    </g>
+    <g class="biz-only" font-family="Nunito" font-size="11.5" fill="oklch(0.42 0.013 75)">
+      <text x="850" y="220" text-anchor="middle">MTN · Orange</text>
+      <text x="850" y="248" text-anchor="middle" font-size="10.5" fill="oklch(0.60 0.011 75)">money in, same shape</text>
     </g>
     <line x1="940" y1="78" x2="1006" y2="78" stroke="oklch(0.60 0.011 75)" stroke-width="1.6" marker-end="url(#a)"/>
     <rect x="1012" y="36" width="118" height="84" rx="14" fill="oklch(1 0 0)" stroke="oklch(0.915 0.006 90)" stroke-width="1.5"/>
     <text x="1071" y="68" text-anchor="middle" font-family="Fredoka" font-size="14" font-weight="600" fill="oklch(0.19 0.013 75)">MTN</text>
     <text x="1071" y="94" text-anchor="middle" font-family="Fredoka" font-size="14" font-weight="600" fill="oklch(0.19 0.013 75)">Orange</text>
   </svg>
-  <p class="note">Source: <span class="num">routes/v1.ts</span>, <span class="num">adapters/payouts.ts</span>,
+  <p class="note tech-only">Source: <span class="num">routes/v1.ts</span>, <span class="num">adapters/payouts.ts</span>,
   <span class="num">adapters/collect.ts</span>, <span class="num">adapters/index.ts</span>,
   <span class="num">core/stateMachine.ts</span>. Rail status as at 28 Oct 2026 — see slide 14.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">05</div>
+  <p class="note biz-only">Sorted integrates against the boundary on the left. Everything to the
+  right of it can change without Sorted changing anything.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">05</div>
 </section>
 
 <!-- 6 ALIGNMENT -->
@@ -213,7 +224,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
   <div class="kicker">Why our strategies align</div>
   <h2>Sorted owns the customer. We own the last mile. Neither is cheap to rebuild.</h2>
   <table style="margin-top:4px">
-    <tr><th style="width:17%">Dimension</th><th style="width:27%">Sorted brings</th><th style="width:27%">MoMo›Me brings</th><th style="width:29%">Joint opportunity</th></tr>
+    <tr><th style="width:17%">Dimension</th><th style="width:27%">Sorted brings</th><th style="width:27%">WUL + MoMo›Me brings</th><th style="width:29%">Joint opportunity</th></tr>
     <tr><td><b>Distribution</b></td><td>An installed wallet base and the user relationship</td><td>Settlement into MTN and Orange through one signed API</td><td>Cash-out becomes a feature of Sorted, not a separate app</td></tr>
     <tr><td><b>Infrastructure</b></td><td>Custody, balances, user authentication</td><td>Rail registries, routing, idempotency, reconciliation</td><td>Neither side builds the other's half</td></tr>
     <tr><td><b>Technology</b></td><td>Wallet UX and transaction initiation</td><td>A stable partner vocabulary that survives rail changes</td><td>Sorted's integration does not move when a vendor does</td></tr>
@@ -221,9 +232,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <tr><td><b>Revenue</b></td><td>Volume and pricing power with its users</td><td>Per-transaction economics with a negotiated partner rate</td><td>A margin split both sides can model before launch</td></tr>
     <tr><td><b>Regional expansion</b></td><td>Ambition beyond one market</td><td>A market-by-market adapter pattern, Cameroon first</td><td>Francophone corridors on a shared integration</td></tr>
   </table>
-  <p class="note">Alignment is asserted only where each side's contribution is independently real.
-  Dimensions where we found no genuine complementarity are not listed.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">06</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">06</div>
 </section>
 
 <!-- 7 FIT -->
@@ -249,7 +258,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
   </div>
   <p class="note">Each property is covered by automated tests in the release gate. Sources are listed
   in the evidence register accompanying this deck.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">07</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">07</div>
 </section>
 
 <!-- 8 TOGETHER -->
@@ -274,8 +283,8 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
       participates in a connectivity layer rather than commissioning a one-off integration.</p></div>
   </div>
   <p class="note">Levels 2 and 3 are <b style="color:oklch(0.9 0.006 95)">proposed</b>. Level 1 uses
-  capabilities that exist today, subject to the funding and rail conditions on slide 14.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">08</div>
+  capabilities that exist today.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">08</div>
 </section>
 
 <!-- 9 PARTNERSHIP ARCHITECTURE -->
@@ -289,7 +298,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
       <li>Initiating a payment intent with a destination and amount</li>
       <li>Receiving and acting on webhook state changes</li>
       <li>First-line user support, using the reference we return</li></ul></div>
-    <div class="card"><h3>MoMo›Me's responsibility</h3><ul style="margin-top:9px">
+    <div class="card"><h3>WUL + MoMo›Me's responsibility</h3><ul style="margin-top:9px">
       <li>Recipient resolution, quoting and FX rate lock</li>
       <li>Rail selection, retries and failover across payout rails</li>
       <li>Settlement to the Mobile Money number, and its proof</li>
@@ -301,9 +310,9 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     credentials and scopes; idempotency keys on every money-moving call; HMAC-signed webhooks with
     retries and a dead-letter queue; and a stable status vocabulary that does not change when a rail
     is added, replaced or fails. <b>When a vendor of ours disappears, Sorted's integration does not
-    change.</b> That is the whole point of the boundary, and it was tested in production this month.</p>
+    change.</b> That is the whole point of the boundary.</p>
   </div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">09</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">09</div>
 </section>
 
 <!-- 10 USE CASES -->
@@ -318,46 +327,47 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <tr><td><b>Cash-in / top-up</b></td><td>Funds a Sorted balance from a Mobile Money number</td><td>Collection registry; partner-facing flow</td><td><span class="tag t-ext">Extend</span></td></tr>
     <tr><td><b>Merchant disbursement</b></td><td>Sorted pays many recipients at once — payroll, incentives, refunds</td><td>Batch semantics over existing intents</td><td><span class="tag t-build">Build</span></td></tr>
   </table>
-  <p class="note">"Available now" means the capability is implemented and exercised by automated tests;
-  it does not mean a commercial agreement, funded float or regulatory posture is in place.
-  See slides 14 and 17.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">10</div>
+  <p class="note">"Available now" means the capability is implemented and exercised by automated tests.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">10</div>
 </section>
 
 <!-- 11 COMMERCIAL -->
 <section class="s">
   <div class="rule"></div>
   <div class="kicker">Commercial opportunity</div>
-  <h2>A single per-transaction rate, with the assumptions written down.</h2>
+  <h2>A fee Sorted can see through, and a margin Sorted keeps.</h2>
   <div class="grid g2" style="gap:18px">
     <div>
-      <div class="cap">The model</div>
-      <div class="card"><p>One negotiated platform fee per partner organisation, applied on every
-      rail, with a floor for small amounts. The platform default is
-      <b>2.5%</b>; the rate shown in the Sorted hub as an illustrative pilot is <b>1.5%</b>.
-      Rail spread is <b>150 bps</b> on Lightning and stablecoins, <b>280 bps</b> on-chain, covering
-      the exposure window of the locked rate.</p>
-      <p style="margin-top:10px">Minimum transfer <b>500 XAF</b>. Quotes hold for <b>10 minutes</b>
-      (Lightning, USDT) and <b>15 minutes</b> on-chain.</p></div>
-      <p class="note">Constants read from <span class="num">shared/domain.ts</span> and
+      <div class="cap">The model — business partner tier</div>
+      <div class="card"><p><b>$1,500 per month</b> per partner organisation, plus <b>0.5%</b> on
+      every transfer, on every rail. Sorted enters on this tier, as a business-settlement client.</p>
+      <p style="margin-top:9px">Rail and network cost is <b>passed through at cost</b>, on its own
+      line — never folded into our rate. On this corridor it runs about <b>1.0%</b>. Where a leg
+      carries exchange exposure, the spread is quoted separately and at cost: <b>150 bps</b> on
+      Lightning and stablecoins, <b>280 bps</b> on-chain, covering the window the rate is locked for.</p>
+      <p style="margin-top:9px">Minimum transfer <b>500 XAF</b>. Quotes hold for <b>10 minutes</b>
+      (Lightning, USDT) and <b>15 minutes</b> on-chain. Above an agreed monthly volume the 0.5%
+      steps down on a schedule fixed before launch — Sorted's margin widens as the corridor grows.</p></div>
+      <p class="note tech-only">Constants read from <span class="num">shared/domain.ts</span> and
       <span class="num">core/platform/billing.ts</span>, not assumed.</p>
     </div>
     <div>
       <div class="cap">Illustrative only — not a forecast</div>
       <table>
-        <tr><th>Assumption</th><th style="text-align:right">Value</th></tr>
-        <tr><td>Average transfer</td><td class="num" style="text-align:right"><b>25 000 XAF</b></td></tr>
-        <tr><td>Pilot platform rate</td><td class="num" style="text-align:right"><b>1.5%</b></td></tr>
-        <tr><td>Gross fee per transfer</td><td class="num" style="text-align:right"><b>375 XAF</b></td></tr>
-        <tr><td>Payout rail cost (published)</td><td class="num" style="text-align:right"><b>1.0%</b></td></tr>
-        <tr><td>Contribution per transfer</td><td class="num" style="text-align:right"><b>125 XAF</b></td></tr>
+        <tr><th>On a transfer of 25 000 XAF</th><th style="text-align:right">Value</th></tr>
+        <tr><td>Sorted's price to its user — <b>Sorted sets this</b></td><td class="num" style="text-align:right"><b>625 XAF</b></td></tr>
+        <tr><td>Rail and network cost, passed through</td><td class="num" style="text-align:right">250 XAF</td></tr>
+        <tr><td>WUL + MoMo›Me fee, 0.5%</td><td class="num" style="text-align:right">125 XAF</td></tr>
+        <tr><td><b>Sorted keeps, per transfer</b></td><td class="num" style="text-align:right"><b>250 XAF · 40%</b></td></tr>
+        <tr><td>All-in cost to Sorted</td><td class="num" style="text-align:right">1.5%</td></tr>
       </table>
-      <p class="note"><b>These are inputs, not results.</b> No transaction volume, revenue or customer
-      figure is claimed anywhere in this deck, because none has been established. Volume assumptions
-      are Sorted's to supply — we will model jointly against them.</p>
+      <p class="note"><b>These are inputs, not results.</b> No transaction volume, revenue or
+      customer figure is claimed anywhere in this deck, and no existing wallet integration is —
+      Sorted would be our first wallet partner. Volume and end-user pricing are Sorted's to
+      supply; we will model jointly against them.</p>
     </div>
   </div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">11</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">11</div>
 </section>
 
 <!-- 12 GTM -->
@@ -380,7 +390,7 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <p>Not volume. A pilot succeeds if every payment reaches a terminal state we can explain, every
     failure has a reason the user could act on, and the month reconciles to the last franc across
     all three legs.</p></div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">12</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">12</div>
 </section>
 
 <!-- 13 ROADMAP -->
@@ -397,8 +407,8 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <tr><td><b>5 · Expansion</b></td><td>Cash-in, further corridors, bank and MFI destinations</td><td>Both</td><td>Beyond</td><td>Reviewed jointly</td></tr>
   </table>
   <p class="note">Phase 3 deliberately includes a rehearsed rail failure. We would rather show Sorted
-  how the system behaves when a vendor dies than describe it — we have a recent, dated example.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">13</div>
+  how the system behaves under one than describe it.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">13</div>
 </section>
 
 <!-- 14 RISK — the honest slide -->
@@ -427,9 +437,11 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     console reported an unreachable rail as operational. Both were fixed and deployed on 28 October,
     each with a regression test that fails against the previous behaviour. The vendor has since
     issued a new gateway and is being reconnected.</p></div>
-  <p class="note">Current status, 28 Oct 2026: one payout rail live and authenticating, float
+  <p class="note tech-only">Current status, 28 Oct 2026: one payout rail live and authenticating, float
   unfunded; one rail migrating; one inactive. Recipient verification restored and returning names.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">14</div>
+  <p class="note biz-only">Current status, 28 Oct 2026: the payout registry is live and
+  authenticating, pending float; recipient verification is restored and returning names.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">14</div>
 </section>
 
 <!-- 15 KPIs -->
@@ -446,9 +458,9 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <tr><td><b>Verified-recipient share</b></td><td>Payments confirmed against a returned operator name</td><td>Directly reduces irreversible misdirected payments</td><td>Both</td></tr>
     <tr><td><b>Contribution per transfer</b></td><td>Fee less rail and network cost</td><td>Decides whether the corridor scales</td><td>Both</td></tr>
   </table>
-  <p class="note">No baseline is claimed for any of these. Baselines are set together during Phase 1
-  and measured from the pilot's first live payment.</p>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">15</div>
+  <p class="note">Baselines are set together during Phase 1 and measured from the pilot's first
+  live payment.</p>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">15</div>
 </section>
 
 <!-- 16 EXPANSION -->
@@ -469,11 +481,41 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <h3>What we are explicit about</h3>
     <p>Connecting to a national switch requires licensed participation, held either by us or by a
     sponsoring institution. We hold no such posture today, and this deck claims none. It is a
-    decision to take together, with eyes open, not a capability to assume.</p></div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">16</div>
+    decision to take together, with eyes open, not a capability to assume. The posture we
+    <i>do</i> hold is on the next slide.</p></div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">16</div>
 </section>
 
-<!-- 17 PROPOSAL -->
+<!-- 17 COMPLIANCE -->
+<section class="s">
+  <div class="rule"></div>
+  <div class="kicker">Compliance and regulatory posture</div>
+  <h2>Who is accountable, what is monitored, and what we are applying for.</h2>
+  <p class="sub" style="margin-bottom:18px">The previous slide says what we do not hold. This one
+  says what we do.</p>
+  <div class="grid g2" style="gap:14px">
+    <div class="card"><h3>Settlement through licensed partners</h3><p>Every Mobile Money leg is
+    executed by a payment institution licensed in the market it settles in<span class="tech-only">
+    — CamPay today, with Peexit and PawaPay as alternates</span>. We orchestrate, route and
+    reconcile; we do not hold user funds on the payout leg.</p></div>
+    <div class="card"><h3>Named accountability</h3><p>A compliance officer and a deputy are
+    appointed, with standing responsibility for AML/CFT decisions, sanctions and PEP outcomes,
+    and for filing suspicious-transaction reports to ANIF.</p></div>
+    <div class="card"><h3>Continuous monitoring — Sumsub</h3><p>Identity verification, sanctions
+    and PEP screening and ongoing transaction monitoring run through Sumsub. Screening is a gate
+    inside the payment flow, not a periodic batch: a payment that cannot be screened does not settle.</p></div>
+    <div class="card"><h3>Licence pathway — COSUMAF</h3><p>A COSUMAF licence application is the
+    route we are taking to hold posture in our own name rather than borrowing a sponsor's. Until
+    it is granted, every regulated act sits with a licensed partner.</p></div>
+  </div>
+  <div class="card" style="margin-top:14px;background:var(--surface-2)">
+    <h3>The audit record</h3><p>Every screening result, compliance decision and filing is written
+    to a hash-chained, tamper-evident log, aligned to CEMAC Règlement 02/24 — a month can be
+    reconstructed in order and shown to a regulator, with any alteration detectable.</p></div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">17</div>
+</section>
+
+<!-- 18 PROPOSAL -->
 <section class="s">
   <div class="rule"></div>
   <div class="kicker">The partnership proposal</div>
@@ -484,12 +526,14 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
         <li>A <b>technology and settlement partnership</b>, not a software licence</li>
         <li>Scope one: <b>cash-out from Sorted to MTN and Orange in Cameroon</b></li>
         <li>A <b>bounded pilot</b> under jointly agreed caps</li>
-        <li>A <b>negotiated per-transaction rate</b> fixed before launch</li>
+        <li>The <b>business partner tier</b> — $1,500 per month plus 0.5% per transfer, with
+        rail cost passed through at cost and a volume step-down fixed before launch</li>
         <li>Joint monthly review against the measures on slide 15</li></ul></div>
     <div class="card"><h3>We are asking Sorted for</h3>
       <ul style="margin-top:9px">
         <li>A named technical and a named commercial counterpart</li>
-        <li>Expected volume and average transfer size, to model economics honestly</li>
+        <li>Expected volume, average transfer size and Sorted's own end-user price, so both
+        margins can be modelled honestly</li>
         <li>Agreement on the pilot cohort and its caps</li>
         <li>Confirmation of Sorted's compliance requirements for a settlement partner</li>
         <li>A decision on Phase 1 — scope, not commitment</li></ul></div>
@@ -499,21 +543,21 @@ li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;bord
     <p>A funded payout float with per-carrier balances visible to both parties; a rehearsed failover
     drill; and written confirmation of rail status on the day of launch. We will not ask Sorted to
     send a user's money through a rail we cannot currently reach.</p></div>
-  <div class="wm">MoMo›Me × Sorted</div><div class="pg">17</div>
+  <div class="wm">WUL + MoMo›Me × Sorted</div><div class="pg">18</div>
 </section>
 
-<!-- 18 CLOSE -->
+<!-- 19 CLOSE -->
 <section class="s dark" style="justify-content:center;align-items:center;text-align:center">
-  <div class="mark" style="color:oklch(0.97 0.006 95);position:absolute;top:62px;left:76px"><span class="dot"></span>MoMo<span style="color:var(--brand)">›</span>Me</div>
+  <div class="mark" style="color:oklch(0.97 0.006 95);position:absolute;top:62px;left:76px"><span class="dot"></span>WUL<span style="color:oklch(0.62 0.01 90);font-weight:400"> + </span>MoMo<span style="color:var(--brand)">›</span>Me</div>
   <h1 style="font-size:54px;line-height:1.08;max-width:960px;margin-bottom:26px">
     Sorted holds the balance.<br>We make it land.</h1>
   <p style="font-size:19px;color:oklch(0.82 0.008 90);max-width:760px;line-height:1.5;font-weight:600">
-    A wallet is judged by whether money arrives. That is the part we have built, tested and —
-    this month — watched fail safely under a vendor outage.</p>
+    A wallet is judged by whether money arrives. That is the part we have built, tested, and
+    proven under failure.</p>
   <div style="margin-top:42px;font-family:var(--font-display);font-size:24px;color:var(--brand);font-weight:600">
     Every Number. Every Network. One Payment Layer.</div>
   <div style="position:absolute;bottom:62px;font-size:13px;color:oklch(0.66 0.01 90);font-weight:700">
-    MoMo›Me × Sorted Wallet · 28 October 2026 · Confidential</div>
+    WUL + MoMo›Me × Sorted Wallet · 28 October 2026 · Confidential</div>
 </section>
 
 </body></html>

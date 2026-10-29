@@ -163,6 +163,18 @@ export async function collectStatus(trackId: string): Promise<PayoutStatus | nul
   } catch { return null; }
 }
 
+/** Say — once a minute per payout, not on every 30-second tick — that an authoritative
+ *  re-query could not establish an outcome, and why. A payout nobody can resolve is held
+ *  indefinitely by design (inventing a verdict would release crypto against a payment that
+ *  may never have landed); the fault was doing it without a word. */
+const unresolvedAt = new Map<string, number>();
+function unresolved(key: string, why: string): void {
+  const last = unresolvedAt.get(key) ?? 0;
+  if (Date.now() - last < 60_000) return;
+  unresolvedAt.set(key, Date.now());
+  console.warn(`[peexit] ${key}: status UNRESOLVED — ${why}. Holding the payout as PENDING; it will not settle or refund until the rail answers.`);
+}
+
 export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus | null> {
   const local = byKey.get(idempotencyKey);
   if (!local) return null;
@@ -177,7 +189,12 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     const res = await peex(`/disbursement/all_requests?track_id=${encodeURIComponent(idempotencyKey)}`, { method: "GET" });
     // 404 = "Transactions not found on your listing! (3 days)" → outside the
     // window (too new or >3 days); keep the last known status.
-    if (res.status === 404 || !res.ok) return cached;
+    // EVERY "we could not establish it" path below returns the last known status, which is
+    // right — a payout's outcome must never be invented. But all three were SILENT, and
+    // reconcileStuckPayouts only acts on COMPLETED or FAILED, so a payout the rail has no
+    // record of sits in PAYOUT_REQUESTED for ever with the crypto held and the sender
+    // watching a spinner. Nothing anywhere said why. Say why.
+    if (res.status === 404 || !res.ok) { unresolved(idempotencyKey, res.status === 404 ? "404 — not in the rail's 3-day listing (too new, or older than the window)" : `HTTP ${res.status} from all_requests`); return cached; }
     const arr = (await res.json()) as Array<{ track_id?: string; status?: string; payment_proof?: string; message?: string; fees?: number }>;
     // Require an EXACT track_id match — the endpoint "returns our requests from the
     // last 3 days", so if Peexit's server-side track_id filter is ignored/loose, a
@@ -186,7 +203,8 @@ export async function queryStatus(idempotencyKey: string): Promise<PayoutStatus 
     // refund a paid one). No match → keep the last known status, exactly like 404.
     const row = Array.isArray(arr) ? arr.find((r) => r.track_id === idempotencyKey) : undefined;
     if (row && typeof row.fees === "number") feeByRef.set(idempotencyKey, row.fees);
-    if (!row?.status) return cached;
+    if (!row) { unresolved(idempotencyKey, `the rail returned ${Array.isArray(arr) ? arr.length : 0} row(s), none with this track_id — it has no record of this payout`); return cached; }
+    if (!row.status) { unresolved(idempotencyKey, "the rail's row for this payout carries no status field"); return cached; }
     const mapped = mapStatus(row.status);
     statusByRef.set(idempotencyKey, mapped);
     // Capture the rejection reason (e.g. INSUFFICIENT_FUND_TO_PAY_TX) so callers can

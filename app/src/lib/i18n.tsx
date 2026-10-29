@@ -203,6 +203,10 @@ export const STRINGS: Dict = {
   proc_review_sub: ["We couldn't complete this one automatically. Our team is reviewing it and no funds are lost — check Activity for updates.", "Nous n'avons pas pu finaliser ce paiement automatiquement. Notre équipe le vérifie et aucun fonds n'est perdu — consultez Activité."],
   proc_failed_title: ["Payment couldn't be completed", "Paiement non abouti"],
   proc_failed_sub: ["This payment was not delivered and is being refunded to you automatically.", "Ce paiement n'a pas été livré et vous est remboursé automatiquement."],
+  // Shown once the client STOPS watching. The animated step list keeps rendering, so
+  // without this a payment that resolved and one that is genuinely stuck look identical.
+  proc_stopped_title: ["We've stopped checking this page", "Nous avons cessé de vérifier cette page"],
+  proc_stopped_sub: ["Your payment is still being processed — nothing is lost. Open Activity to see where it got to, or come back later; it updates there automatically.", "Votre paiement est toujours en cours de traitement — rien n'est perdu. Ouvrez Activité pour voir où il en est, ou revenez plus tard : la mise à jour y est automatique."],
   proc_slow_title: ["Still working on it…", "Toujours en cours…"],
   proc_slow_sub: ["This is taking longer than usual. You can safely close this page — it'll appear in Activity once delivered.", "Cela prend plus de temps que d'habitude. Vous pouvez fermer cette page — le paiement apparaîtra dans Activité une fois livré."],
   try_again: ["Try again", "Réessayer"], view_activity: ["View activity", "Voir l'activité"],

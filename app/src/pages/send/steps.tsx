@@ -898,9 +898,19 @@ const ORDER: PaymentState[] = ["INBOUND_DETECTED", "INBOUND_CONFIRMED", "FX_LOCK
 // normally-settling payment shouldn't trip this early — it settles server-side in a
 // second or two and appears in Activity regardless.
 const SLOW_AFTER_MS = 45_000;
-// Hard cap: stop polling after a few minutes rather than hammering the backend
-// forever. The payment keeps settling server-side and appears in Activity.
-const MAX_POLL_MS = 4 * 60_000;
+// Hard cap: stop watching eventually rather than holding a connection for ever.
+//
+// THIS USED TO BE FOUR MINUTES, AND THE SERVER'S BACKSTOP RUNS AT FIVE. A payment left
+// mid-settlement — the inbound booked, no payout requested yet — is resumed by
+// resumeStalledSettlements once it has been idle for 5 minutes (stateMachine.ts), which
+// then either pays it out or moves it to REFUND_PENDING. The sender stopped watching one
+// minute BEFORE the thing that unsticks them ran, every time, so the screen sat on
+// "Still working on it…" and never moved. The payment resolved; nobody saw it.
+//
+// Ten minutes covers the 5-minute idle window plus the reconcile tick that follows it.
+// This is not a busy loop: waitPayment long-polls, so the client holds one request and
+// the server answers the moment the state changes.
+const MAX_POLL_MS = 10 * 60_000;
 
 export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivity }: { paymentId: string; method: Method; onDone: () => void; reset: () => void; onViewActivity: () => void }) {
   const { t } = useI18n();
@@ -908,6 +918,10 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
   const [outcome, setOutcome] = useState<"pending" | "review" | "failed" | "refund" | "refunded">("pending");
   const [payment, setPayment] = useState<Payment | null>(null);
   const [slow, setSlow] = useState(false);
+  // When the cap is reached the component keeps rendering an animated step list while
+  // fetching nothing — which reads as "still working" and is how a resolved payment looks
+  // identical to a stuck one. Say plainly that we have stopped watching.
+  const [stoppedWatching, setStoppedWatching] = useState(false);
 
   // onDone is recreated on every parent (SendApp) render. Keep the latest in a
   // ref so the poll effect can depend on `paymentId` alone — depending on onDone
@@ -955,7 +969,7 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
       const elapsed = Date.now() - started;
       if (elapsed > SLOW_AFTER_MS) setSlow(true);
       // Stop polling at the cap; the slow screen already offers "View activity".
-      if (elapsed > MAX_POLL_MS) return;
+      if (elapsed > MAX_POLL_MS) { setStoppedWatching(true); return; }
       // With the long-poll the wait itself does the pacing; only the fallback needs a gap.
       timer = setTimeout(poll, waitFailedRef.current ? pollMs(elapsed > SLOW_AFTER_MS ? 2500 : 800, elapsed > SLOW_AFTER_MS ? 6000 : 2500) : 150);
     };
@@ -999,10 +1013,10 @@ export function ProcessingStep({ paymentId, method, onDone, reset, onViewActivit
     <FlowCard>
       <div style={{ display: "flex", alignItems: "center", gap: 13, marginTop: 4 }}>
         <Momo size={52} mood="happy" className="momo-bob" />
-        <h2 style={{ fontSize: 22, margin: 0 }}>{slow ? t("proc_slow_title") : t("proc_title")}</h2>
+        <h2 style={{ fontSize: 22, margin: 0 }}>{stoppedWatching ? t("proc_stopped_title") : slow ? t("proc_slow_title") : t("proc_title")}</h2>
       </div>
-      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "12px 0 24px", lineHeight: 1.5 }}>{slow ? t("proc_slow_sub") : t("proc_sub")}</p>
-      {slow && (
+      <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "12px 0 24px", lineHeight: 1.5 }}>{stoppedWatching ? t("proc_stopped_sub") : slow ? t("proc_slow_sub") : t("proc_sub")}</p>
+      {(slow || stoppedWatching) && (
         <button className="btn btn-ghost" onClick={onViewActivity} style={{ width: "100%", marginBottom: 16 }}>{t("view_activity")}</button>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }} aria-live="polite">

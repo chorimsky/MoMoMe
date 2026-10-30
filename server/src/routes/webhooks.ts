@@ -55,7 +55,16 @@ function handlePayoutCallback(name: string, req: Request, res: Response): Respon
   const adapter = payoutByName(name);
   if (!adapter) return res.status(404).json({ error: "unknown_aggregator" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  if (adapter.verifyCallback && !adapter.verifyCallback(raw, req.headers)) {
+  // Fail closed, for the reason spelled out on handleCollectCallback: an adapter that
+  // implements no verifyCallback must be refused, not waved through. Every payout rail
+  // today implements one, so this changes nothing now — it stops the next one being added
+  // with an auth check that silently does not run.
+  if (!adapter.verifyCallback) {
+    recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "adapter authenticates nothing" });
+    console.warn(`[webhook] ${name}: payout callback REFUSED — this adapter implements no verifyCallback, so its callbacks cannot be authenticated.`);
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  if (!adapter.verifyCallback(raw, req.headers)) {
     recordEvent({ provider: name, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
     // A rejected payout callback was recorded and never SAID. It is one of the two ways a
     // payout reaches a verdict (the other is our own re-query), so a rail posting
@@ -123,13 +132,35 @@ export function referenceFromBody(body: Record<string, unknown>): string | undef
   return undefined;
 }
 
-function handleCollectCallback(name: string, req: Request, res: Response): Response | void {
+/** `preAuthenticated` is for a route that has ALREADY established the caller, i.e. the
+ *  MTN path-secret route below. Everything else must authenticate here. */
+function handleCollectCallback(name: string, req: Request, res: Response, preAuthenticated = false): Response | void {
   const rail = collectorByName(name);
   if (!rail) return res.status(404).json({ error: "unknown_rail" });
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-  if (rail.verifyCallback && !rail.verifyCallback(raw, req.headers)) {
-    recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
-    return res.status(401).json({ error: "unauthorized" });
+  // FAIL CLOSED on a rail that cannot authenticate itself.
+  //
+  // This read `rail.verifyCallback && !rail.verifyCallback(...)`, so a rail that implements
+  // no verifyCallback skipped the check entirely rather than failing it. MTN Collections is
+  // exactly that rail — it signs nothing — which is why it was given a URL only it knows,
+  // /collect/mtn/<secret>, guarded by a constant-time compare. But the generic route still
+  // matched /collect/mtn, and reached this optional check, so the secret was effectively
+  // optional: a caller who simply omitted it was let in.
+  //
+  // Money was never the exposure — settlement is gated on the authoritative status()
+  // re-query, not on the posted body. The audit trail was: an unauthenticated caller could
+  // write their own bytes into the event log marked `status: "verified"`, and make us
+  // re-query MTN for any reference they cared to guess.
+  if (!preAuthenticated) {
+    if (!rail.verifyCallback) {
+      recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "rail authenticates nothing — the generic route refuses it; it must use its own path-secret route" });
+      console.warn(`[webhook] collect:${rail.name}: REFUSED on the generic route — this rail signs nothing, so it must call its path-secret URL.`);
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    if (!rail.verifyCallback(raw, req.headers)) {
+      recordEvent({ provider: `collect:${rail.name}`, eventType: "callback.rejected", rawBody: raw, status: "rejected", detail: "signature/auth failed" });
+      return res.status(401).json({ error: "unauthorized" });
+    }
   }
   // Which of our collections is this about? Rails differ in what they call the field, so
   // every documented spelling of "the reference you gave us" is accepted — and nothing else.
@@ -157,7 +188,7 @@ webhooks.post("/collect/mtn/:secret", express.raw({ type: "*/*" }), (req, res) =
     recordEvent({ provider: "collect:mtn", eventType: "callback.rejected", rawBody: "", status: "rejected", detail: "bad or missing callback path secret" });
     return res.status(401).json({ error: "unauthorized" });
   }
-  return handleCollectCallback("mtn", req, res);
+  return handleCollectCallback("mtn", req, res, true); // the path secret IS the authentication
 });
 
 /* ---------- CamPay: ONE callback URL, both directions ----------

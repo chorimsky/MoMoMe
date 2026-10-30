@@ -308,6 +308,11 @@ export function Chip({
   return (
     <Pressable
       onPress={onPress}
+      // Selected state was carried by fill colour alone, so a screen reader read every chip
+      // identically and a filter already applied was indistinguishable from one that was not.
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active, disabled: !onPress }}
       style={({ pressed }) => [
         styles.chip,
         {
@@ -423,13 +428,19 @@ export function Segmented<T extends string>({
 }) {
   const t = useTheme();
   return (
-    <View style={[styles.segTrack, { backgroundColor: t.surface2 }, style]}>
+    // A segmented control is a single choice among several: announced as a radio group, each
+    // option carries its own selected state. Without it the active segment was conveyed only
+    // by surface and colour, so VoiceOver gave no way to tell which one was in effect.
+    <View accessibilityRole="radiogroup" style={[styles.segTrack, { backgroundColor: t.surface2 }, style]}>
       {options.map((o) => {
         const active = o.key === value;
         return (
           <Pressable
             key={o.key}
             onPress={() => onChange(o.key)}
+            accessibilityRole="radio"
+            accessibilityLabel={o.label}
+            accessibilityState={{ selected: active, checked: active }}
             style={({ pressed }) => [
               styles.segItem,
               active && [{ backgroundColor: t.surface }, Shadow.sm],

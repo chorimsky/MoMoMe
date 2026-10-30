@@ -350,7 +350,13 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
 
           <Label style={{ marginTop: Spacing.three }}>{tr('c_number')}</Label>
           <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
-            <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
+            <Pressable
+                onPress={() => setPickCountry((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={`${tr('a11y_country')} ${COUNTRIES[country].dial}`}
+                accessibilityState={{ expanded: pickCountry }}
+                style={styles.countryBtn}
+                hitSlop={8}>
               <Flag country={country} size={18} />
               <Body style={{ color: t.muted, fontFamily: Fonts.bodyBold }}>{COUNTRIES[country].dial}</Body>
               <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
@@ -403,6 +409,9 @@ function EditModal({ contact, existing, onClose, onSaved }: { contact: Contact |
                     setCountry(c);
                     setPickCountry(false);
                   }}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${COUNTRIES[c].name} ${COUNTRIES[c].dial}`}
+                  accessibilityState={{ selected: c === country, checked: c === country }}
                   style={[
                     styles.countryChip,
                     { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },

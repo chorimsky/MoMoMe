@@ -72,7 +72,12 @@ export default function MoreScreen() {
             {g.items.map((item, i) => {
               const c = toneColor[item.tone];
               return (
-                <Pressable key={item.labelKey} onPress={() => router.push(item.route)}>
+                <Pressable
+                  key={item.labelKey}
+                  onPress={() => router.push(item.route)}
+                  accessibilityRole="button"
+                  accessibilityLabel={tr(item.labelKey)}
+                  accessibilityHint={item.subKey ? tr(item.subKey) : undefined}>
                   {({ pressed }) => (
                     <View
                       style={[

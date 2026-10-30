@@ -750,7 +750,13 @@ export default function SendScreen() {
               ) : null}
             </View>
             <View style={[styles.phoneWrap, { backgroundColor: t.surface2, borderColor: t.line }]}>
-              <Pressable onPress={() => setPickCountry((v) => !v)} style={styles.countryBtn} hitSlop={8}>
+              <Pressable
+                onPress={() => setPickCountry((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={`${tr('a11y_country')} ${COUNTRIES[country].dial}`}
+                accessibilityState={{ expanded: pickCountry }}
+                style={styles.countryBtn}
+                hitSlop={8}>
                 <Flag country={country} size={18} />
                 <Text style={[styles.dial, { color: t.muted }]}>{COUNTRIES[country].dial}</Text>
                 <Ionicons name={pickCountry ? 'chevron-up' : 'chevron-down'} size={14} color={t.muted} />
@@ -778,6 +784,9 @@ export default function SendScreen() {
                       setCountry(c);
                       setPickCountry(false);
                     }}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${COUNTRIES[c].name} ${COUNTRIES[c].dial}`}
+                    accessibilityState={{ selected: c === country, checked: c === country }}
                     style={[
                       styles.countryChip,
                       { borderColor: c === country ? t.accent : t.line, backgroundColor: c === country ? t.accentWash : t.surface },
@@ -933,6 +942,10 @@ export default function SendScreen() {
             {networkOpen ? (
               /* The network: Mobile Money to another country. Only while a corridor is open. */
               <Pressable disabled={busy} onPress={() => { track('method_chosen', { method: 'ABROAD' }); router.push('/send-abroad' as Href); }}
+                accessibilityRole="button"
+                accessibilityLabel={tr('ab_title')}
+                accessibilityHint={tr('ab_tile_sub')}
+                accessibilityState={{ disabled: busy }}
                 style={({ pressed }) => [styles.methodCard, { backgroundColor: t.surface, borderColor: t.line, opacity: pressed ? 0.9 : 1 }, Shadow.sm]}>
                 <IconCircle name="earth-outline" color={t.accent} bg={t.accentWash} />
                 <View style={{ flex: 1 }}>
@@ -946,6 +959,10 @@ export default function SendScreen() {
             {features.momoTransfer && detected ? (
               /* Admin-gated: pay from the payer's OWN Mobile Money, any network to any network. */
               <Pressable disabled={busy} onPress={() => { track('method_chosen', { method: 'MOMO' }); setStep('momo'); }}
+                accessibilityRole="button"
+                accessibilityLabel={tr('mt_tile_name')}
+                accessibilityHint={tr('mt_tile_sub')}
+                accessibilityState={{ disabled: busy }}
                 style={({ pressed }) => [styles.methodCard, { backgroundColor: t.surface, borderColor: t.line, opacity: pressed ? 0.9 : 1 }, Shadow.sm]}>
                 <IconCircle name="phone-portrait-outline" color={t.recv} bg={t.recvWash} />
                 <View style={{ flex: 1 }}>
@@ -968,6 +985,13 @@ export default function SendScreen() {
                   key={m}
                   disabled={busy || !!why}
                   onPress={() => pickMethod(m)}
+                  accessibilityRole="button"
+                  accessibilityLabel={METHOD_LABEL[m]}
+                  // `why` is the reason a rail is unavailable right now. On screen it sits
+                  // under the name; without it here the card was simply inert, with nothing
+                  // to say the option existed but could not be used, or why.
+                  accessibilityHint={why ? `${tr('m_unavailable_now')} · ${why}` : tr(meta.network)}
+                  accessibilityState={{ disabled: busy || !!why, selected: isRec && !why }}
                   style={({ pressed }) => [
                     styles.methodCard,
                     { backgroundColor: t.surface, borderColor: isRec && !why ? t.accent : t.line, opacity: why ? 0.55 : pressed ? 0.9 : 1 },
@@ -1064,7 +1088,15 @@ export default function SendScreen() {
           </Card>
 
           {!nameVerified ? (
-            <Pressable onPress={() => setAck((v) => !v)} style={[styles.ackRow, { borderColor: t.line }]}>
+            <Pressable
+              onPress={() => setAck((v) => !v)}
+              // This box gates an irreversible payment. Without a checkbox role and a checked
+              // state it read as plain text, so a VoiceOver user had no way to tell whether
+              // they had acknowledged — on the one control in the app that cannot be undone.
+              accessibilityRole="checkbox"
+              accessibilityLabel={tr('ack_irreversible')}
+              accessibilityState={{ checked: ack }}
+              style={[styles.ackRow, { borderColor: t.line }]}>
               <Ionicons
                 name={ack ? 'checkbox' : 'square-outline'}
                 size={22}

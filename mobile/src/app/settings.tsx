@@ -57,13 +57,16 @@ export default function SettingsScreen() {
       <View style={{ gap: Spacing.two, marginBottom: Spacing.four }}>
         <Label>{tr('appearance')}</Label>
         <Card padded>
-          <View style={styles.modes}>
+          <View accessibilityRole="radiogroup" style={styles.modes}>
             {MODES.map((m) => {
               const active = mode === m.key;
               return (
                 <Pressable
                   key={m.key}
                   onPress={() => setThemeMode(m.key)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={tr(m.labelKey)}
+                  accessibilityState={{ selected: active, checked: active }}
                   style={[
                     styles.mode,
                     { borderColor: active ? t.accent : t.line, backgroundColor: active ? t.accentWash : t.surface },
@@ -98,13 +101,16 @@ export default function SettingsScreen() {
       <View style={{ gap: Spacing.two, marginBottom: Spacing.four }}>
         <Label>{tr('language')}</Label>
         <Card padded>
-          <View style={styles.modes}>
+          <View accessibilityRole="radiogroup" style={styles.modes}>
             {LANGS.map((l) => {
               const active = lang === l.key;
               return (
                 <Pressable
                   key={l.key}
                   onPress={() => setLang(l.key)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={l.label}
+                  accessibilityState={{ selected: active, checked: active }}
                   style={[
                     styles.mode,
                     { borderColor: active ? t.accent : t.line, backgroundColor: active ? t.accentWash : t.surface },

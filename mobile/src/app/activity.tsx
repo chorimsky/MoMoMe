@@ -103,6 +103,11 @@ export default function ActivityScreen() {
               <Pressable
                 key={p.id}
                 onPress={onPress}
+                // Rows without a receipt are not actionable; saying so stops a screen reader
+                // offering a tap that does nothing.
+                accessibilityRole={onPress ? 'button' : undefined}
+                accessibilityLabel={`${p.recipient.name || p.recipient.phone}, ${xaf(p.xaf)}, ${tr(statusKey(p.state))}`}
+                accessibilityState={{ disabled: !onPress }}
                 style={({ pressed }) => [
                   styles.row,
                   {

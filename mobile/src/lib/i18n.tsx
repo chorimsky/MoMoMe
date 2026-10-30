@@ -536,8 +536,15 @@ export const STRINGS = {
   tier_rep: ['Rep', 'Rep'],
   tier_city: ['City Lead', 'Responsable ville'],
   tier_regional: ['Regional Lead', 'Responsable régional'],
-  doc_fallback: ['See momome.xyz for the full document.', 'Consultez momome.xyz pour le document complet.'],
-  doc_error: ['Could not load right now. Please check your connection.', 'Chargement impossible pour le moment. Vérifiez votre connexion.'],
+  /* The country selector is a flag plus a dial code, so a screen reader announced "+237"
+     and nothing else — no hint that it was a control, or what it would change. */
+  a11y_country: ['Country', 'Pays'],
+  doc_intro: [
+    'The current version is published on momome.xyz. It opens here, without leaving the app.',
+    'La version en vigueur est publiée sur momome.xyz. Elle s’ouvre ici, sans quitter l’application.',
+  ],
+  doc_open: ['Read the full document', 'Lire le document complet'],
+  doc_error: ['Could not open it right now. Please check your connection.', 'Ouverture impossible pour le moment. Vérifiez votre connexion.'],
   share_send_text: [
     'Send money to any Mobile Money number, instantly, with MoMo›Me — ',
     'Envoyez de l’argent vers n’importe quel numéro Mobile Money, instantanément, avec MoMo›Me — ',

@@ -185,11 +185,14 @@ function Onboard({
           ))}
         </View>
         <Label>{tr('account_type')}</Label>
-        <View style={{ flexDirection: 'row', gap: Spacing.three }}>
+        <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', gap: Spacing.three }}>
           {(['individual', 'business'] as const).map((tv) => (
             <Pressable
               key={tv}
               onPress={() => setTier(tv)}
+              accessibilityRole="radio"
+              accessibilityLabel={tr(tv === 'individual' ? 'm_individual' : 'm_business')}
+              accessibilityState={{ selected: tier === tv, checked: tier === tv }}
               style={[
                 styles.seg,
                 { borderColor: tier === tv ? t.accent : t.line, backgroundColor: tier === tv ? t.accentWash : 'transparent' },
@@ -479,7 +482,12 @@ function LightningCard({ merchant }: { merchant: MerchantAccount }) {
   const copy = async () => { await Clipboard.setStringAsync(ln.address); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   return (
     <Card padded>
-      <Pressable onPress={() => setOpen((v) => !v)} style={styles.posterHead}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={tr('ln_title')}
+        accessibilityState={{ expanded: open }}
+        style={styles.posterHead}>
         <Ionicons name="flash" size={20} color={ln.enabled ? t.accent : t.muted} />
         <View style={{ flex: 1 }}>
           <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('ln_title')}</Body>
@@ -490,7 +498,11 @@ function LightningCard({ merchant }: { merchant: MerchantAccount }) {
       {open ? (
         <View style={{ marginTop: Spacing.two, gap: Spacing.two }}>
           <Body muted style={{ fontSize: 12.5 }}>{tr('ln_desc')}</Body>
-          <Pressable onPress={copy} style={[styles.lnAddr, { borderColor: t.line }]}>
+          <Pressable
+            onPress={copy}
+            accessibilityRole="button"
+            accessibilityLabel={`${tr('copy')} ${ln.address}`}
+            style={[styles.lnAddr, { borderColor: t.line }]}>
             <Mono style={{ fontSize: 13, flex: 1 }}>{ln.address}</Mono>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={t.accent} />
           </Pressable>
@@ -516,7 +528,12 @@ function Poster({ merchant }: { merchant: MerchantAccount }) {
   const url = `${WEB_ORIGIN}/m/${merchant.code}`;
   return (
     <Card padded>
-      <Pressable onPress={() => setOpen((v) => !v)} style={styles.posterHead}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={tr('counter_poster')}
+        accessibilityState={{ expanded: open }}
+        style={styles.posterHead}>
         <Ionicons name="qr-code" size={20} color={t.accent} />
         <View style={{ flex: 1 }}>
           <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('counter_poster')}</Body>
@@ -563,7 +580,13 @@ function ListingToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
     }
   };
   return (
-    <Pressable onPress={toggle} style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
+    <Pressable
+      onPress={toggle}
+      accessibilityRole="switch"
+      accessibilityLabel={tr('list_in_discover')}
+      accessibilityHint={tr('list_sub')}
+      accessibilityState={{ checked: on }}
+      style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
       <Ionicons name="map" size={20} color={t.accent} />
       <View style={{ flex: 1 }}>
         <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('list_in_discover')}</Body>
@@ -594,7 +617,13 @@ function FeeModeToggle({ merchant, onChange, setError }: { merchant: MerchantAcc
     }
   };
   return (
-    <Pressable onPress={toggle} style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
+    <Pressable
+      onPress={toggle}
+      accessibilityRole="switch"
+      accessibilityLabel={tr('feemode_title')}
+      accessibilityHint={on ? tr('feemode_on') : tr('feemode_off')}
+      accessibilityState={{ checked: on }}
+      style={[styles.toggleRow, { backgroundColor: t.surface, borderColor: t.line }]}>
       <Ionicons name="pricetag" size={20} color={t.accent} />
       <View style={{ flex: 1 }}>
         <Body style={{ color: t.text, fontFamily: Fonts.bodyBold }}>{tr('feemode_title')}</Body>

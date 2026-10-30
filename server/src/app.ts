@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import crypto from "node:crypto";
 import { egressStatus } from "./core/egress.js";
+import { payoutByOperator, asymmetries } from "./core/payoutByOperator.js";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { api } from "./routes/api.js";
@@ -289,6 +290,13 @@ export function createApp() {
     // so anonymous polling (the deploy gate) never pays for the lookup. The module caches
     // for 10 minutes and never throws.
     const egress = detailed ? await egressStatus().catch(() => null) : null;
+    /* Per-rail success cannot express "this rail pays MTN and not Orange" — and the gap is
+       not cosmetic: a payout a rail accepts and never executes produces no FAILED, so it
+       never dents a success rate built from verdicts. Submitted-vs-resolved per operator
+       does express it. Token-gated with the rest of the detail: it names operators and
+       counts, which is operator information, not public. */
+    const byOperator = detailed ? await payoutByOperator().catch(() => []) : [];
+    const railAsymmetries = asymmetries(byOperator);
     // Redact the money for an anonymous caller: the VERDICT is public, the figures are not.
     // A problem string may carry a figure too (the stranded-float one names the amount), so
     // strip digits from those rather than leaking the balance through the back door.
@@ -299,7 +307,7 @@ export function createApp() {
       // without saying how much it holds.
       return { ...rest, funded: spendableXaf == null ? null : spendableXaf > 0 };
     });
-    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems: safeProblems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails: safeRails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), ...(egress ? { egress } : {}), version: appVersion() });
+    res.status(problems.length ? 503 : 200).json({ ok: problems.length === 0, problems: safeProblems, railsMode: config.railsMode, store, jobs, fx: { fresh: fx.fresh, source: fx.source, updatedAt: fx.updatedAt }, rails: safeRails, collect: collectRails, identity, alerts: alerts.map((a) => ({ key: a.key, since: a.firstAt })), ...(egress ? { egress } : {}), ...(byOperator.length ? { payoutByOperator: byOperator } : {}), ...(railAsymmetries.length ? { railAsymmetries } : {}), version: appVersion() });
   });
   // Lightning Address (LNURL-pay) at the domain root — every Mobile Money number
   // is reachable as <number>@momome.xyz. Mounted before /api (.well-known root).

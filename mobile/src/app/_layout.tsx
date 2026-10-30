@@ -32,6 +32,21 @@ import { useResolvedScheme } from '@/hooks/use-theme';
 
 SplashScreen.preventAutoHideAsync();
 
+/* The screen that sits UNDER a deep-linked one.
+ *
+ *  Every universal link we register — /pay, /m, /send on both hosts (see app.config.ts) —
+ *  cold-starts the app directly on that route. Without an anchor the stack contains that
+ *  screen and nothing else: iOS draws no back chevron, and Android's hardware back exits
+ *  the app outright. So someone who scanned a merchant's counter poster or tapped a pay
+ *  link in WhatsApp arrived on the pay screen with no way into the rest of MoMo›Me — not
+ *  even to Activity, to see the payment they had just made.
+ *
+ *  Naming the tab group here makes expo-router place it beneath any deep-linked screen, so
+ *  back always exists and always lands on Home. One symptom of this was already being
+ *  patched by hand in pay/[code] (`canGoBack() ? back() : replace('/')`); that guard is
+ *  still correct, but it was treating a missing parent one button at a time. */
+export const unstable_settings = { anchor: '(tabs)' };
+
 /** Navigation theme built from MoMo tokens so pushed-screen chrome matches the app. */
 function navTheme(scheme: 'light' | 'dark') {
   const c = Colors[scheme];
@@ -115,6 +130,11 @@ export default function RootLayout() {
           <Stack.Screen name="contacts-backup" options={{ title: 'Back up & restore' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
           <Stack.Screen name="legal/[doc]" options={{ title: 'Legal' }} />
+          <Stack.Screen name="delete-account" options={{ title: 'Delete account' }} />
+          {/* Pure redirects — they render no content, so a header would be a bar with the
+              raw route name ("send", "[code]") flashing before the redirect lands. */}
+          <Stack.Screen name="send" options={{ headerShown: false }} />
+          <Stack.Screen name="m/[code]" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />
         </Stack>
         <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />

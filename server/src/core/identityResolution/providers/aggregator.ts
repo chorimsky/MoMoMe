@@ -13,9 +13,34 @@ import type { IdentityProvider, IdentityContext, ProviderAnswer } from "./types.
 import type { NormalizedIdentifier, IdentityProviderHealth } from "../../../../../shared/identity.js";
 import { IdentityError } from "../errors.js";
 import { PROVIDER_CODES } from "../../network/pawapayMarkets.js";
+import { COUNTRIES } from "../../../../../shared/domain.js";
 
-const ISO3: Record<string, string> = { CM: "CMR", KE: "KEN", GH: "GHA", NG: "NGA", SN: "SEN", CI: "CIV", GA: "GAB", CG: "COG", TD: "TCD" };
 const CM_CODES: Record<string, string> = { MTN: "MTN_MOMO_CMR", ORANGE: "ORANGE_CMR" };
+
+/** The markets PawaPay can answer for: every market that has provider codes, plus Cameroon,
+ *  whose codes live in CM_CODES above.
+ *
+ *  This was a hand-written list of nine countries sitting next to PROVIDER_CODES — the real
+ *  table — and mapping each to an ISO alpha-3 string that nothing in this file ever read.
+ *  Two lists of the same fact drift, and this drift is silent in the worst direction: add a
+ *  market to PROVIDER_CODES and supports() keeps answering "no" for it, so the provider is
+ *  quietly skipped there and nobody sees an error. Derive it instead. */
+const COVERED = (): string[] => [...new Set(["CM", ...Object.keys(PROVIDER_CODES)])];
+
+/** Countries this provider covers AND the product actually serves, for the console.
+ *
+ *  COVERED() is PawaPay's own footprint, and reporting it raw said recipient verification
+ *  covered nine markets (CM/KE/GH/NG/SN/CI/GA/CG/TD). Five of them (KE, GH, NG, SN, CI) are
+ *  not in COUNTRIES at all, and of the rest only Cameroon is active — so an operator
+ *  reading Admin → Identities saw coverage the product does not have. `supports()` still
+ *  answers for the full footprint, because that is a fact about the rail; this is only
+ *  what we claim to an operator. */
+function servedCountries(): string[] {
+  return COVERED().filter((c) => {
+    const entry = (COUNTRIES as Record<string, { active?: boolean } | undefined>)[c];
+    return !!entry?.active;
+  });
+}
 /** Map a PawaPay provider code back to the market's operator id. */
 function operatorFor(country: string, code: string): string | null {
   const table = country === "CM" ? CM_CODES : PROVIDER_CODES[country] ?? {};
@@ -28,7 +53,7 @@ export const aggregator: IdentityProvider = {
   name: "pawapay",
   authoritative: false, // it confirms reachability/operator, not identity
   configured: () => pawapayConfigured(),
-  supports: (country) => country in ISO3,
+  supports: (country) => COVERED().includes(country),
   async resolve(id: NormalizedIdentifier, ctx: IdentityContext): Promise<ProviderAnswer> {
     const t0 = Date.now();
     try {
@@ -47,6 +72,6 @@ export const aggregator: IdentityProvider = {
   },
   async health(): Promise<IdentityProviderHealth> {
     const rate = stats.calls ? stats.ok / stats.calls : null;
-    return { name: this.name, configured: this.configured(), status: !this.configured() ? "NOT_CONFIGURED" : config.pawapay.env !== "production" ? "SANDBOX" : rate == null ? "UNKNOWN" : rate < 0.5 ? "DOWN" : "OPERATIONAL", supports: { operators: ["*"], countries: Object.keys(ISO3), resolve: false, verify: false }, latencyMs: stats.latency.length ? Math.round(stats.latency.reduce((a, b) => a + b, 0) / stats.latency.length) : null, successRate: rate, lastError: stats.lastError || undefined };
+    return { name: this.name, configured: this.configured(), status: !this.configured() ? "NOT_CONFIGURED" : config.pawapay.env !== "production" ? "SANDBOX" : rate == null ? "UNKNOWN" : rate < 0.5 ? "DOWN" : "OPERATIONAL", supports: { operators: ["*"], countries: servedCountries(), resolve: false, verify: false }, latencyMs: stats.latency.length ? Math.round(stats.latency.reduce((a, b) => a + b, 0) / stats.latency.length) : null, successRate: rate, lastError: stats.lastError || undefined };
   },
 };

@@ -36,14 +36,20 @@ export const peexitVerify: IdentityProvider = {
     // "Account not found on the provider network" apart from LoopBack's 404 "Endpoint …
     // not found." (the route missing on this base). The first is an answer about the
     // account; the second is our problem and must never reach a sender as "not found".
-    for (const [i, candidate] of ["/clients/verify_wallet", "/clients/verify-wallet"].entries()) {
-      path = candidate;
+    // The two documented shapes disagree on the case of countryCode — "cm" for
+    // verify_wallet, "CM" for verify-wallet (see the header). Sending one case to both
+    // endpoints earns a 422 from whichever one we guessed wrong, and because the second is
+    // only ever reached as a fallback that 422 would surface as "can't be verified yet"
+    // for every sender on the day the first endpoint moves. Send each its own case.
+    for (const [i, candidate] of ([["/clients/verify_wallet", "lower"], ["/clients/verify-wallet", "upper"]] as const).entries()) {
+      const [cand, caseOf] = candidate;
+      path = cand;
       try {
-        res = await peex(candidate, { method: "POST", body: JSON.stringify({ countryCode: id.country.toLowerCase(), accountNumber: national }) }, ctx.timeoutMs);
+        res = await peex(cand, { method: "POST", body: JSON.stringify({ countryCode: caseOf === "upper" ? id.country.toUpperCase() : id.country.toLowerCase(), accountNumber: national }) }, ctx.timeoutMs);
       } catch (e) {
         lastLatency = Date.now() - t0; lastOk = false; lastError = (e as Error)?.name ?? "network";
         const timeout = /abort|timeout/i.test(String((e as Error)?.name ?? e));
-        throw new IdentityError(timeout ? "IDENTITY_PROVIDER_TIMEOUT" : "IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit ${candidate} …${last4(id.identifier)}: ${(e as Error)?.message ?? e}`, true);
+        throw new IdentityError(timeout ? "IDENTITY_PROVIDER_TIMEOUT" : "IDENTITY_PROVIDER_UNAVAILABLE", "Recipient verification is temporarily unavailable.", `peexit ${cand} …${last4(id.identifier)}: ${(e as Error)?.message ?? e}`, true);
       }
       text = await res.text().catch(() => "");
       try { body = text ? (JSON.parse(text) as Body) : {}; } catch { body = {}; }
@@ -71,10 +77,23 @@ export const peexitVerify: IdentityProvider = {
     const op = operator === "MTN" || operator === "ORANGE" ? operator : id.operator;
     // "valid" = the wallet can transact. valid:false with a status that says why → INACTIVE;
     // valid:false with nothing else → the network has no such wallet → NOT_FOUND.
-    const active = validFlag !== false && (statusStr === "" || statusStr === "ACTIVE");
-    if (validFlag === false && !name && !/INACTIVE|BLOCK|SUSPEND|BARR|CLOSED|DORMANT/i.test(statusStr)) return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "peexit_verify" }, error: "IDENTITY_NOT_FOUND", operator: op };
+    const saysInactive = /INACTIVE|BLOCK|SUSPEND|BARR|CLOSED|DORMANT/i.test(statusStr);
+    if (validFlag === false && !name && !saysInactive) return { status: "NOT_FOUND", verified: false, accountStatus: "UNKNOWN", capabilities: caps(false), provider: { name: "peexit_verify" }, error: "IDENTITY_NOT_FOUND", operator: op };
     const verifiedAt = new Date().toISOString();
-    if (!active) return { status: "INACTIVE", verified: false, accountStatus: "INACTIVE", capabilities: caps(false), provider: { name: "peexit_verify", verifiedAt }, error: "IDENTITY_INACTIVE", operator: op };
+    // INACTIVE is a claim about someone's wallet, and the sender is shown it as a reason
+    // not to pay. Only Peexit's own words earn it: either valid:false, or a status that
+    // actually names a block. A status string we have never seen before — "ENABLED", a
+    // French label, a new enum member — used to land here too, so one vocabulary change at
+    // Peexit would have told every sender their recipient's account was closed. An
+    // unrecognised status is UNKNOWN: reachable, nothing claimed about the name, and left
+    // payable, since validFlag (not the label) is what says the wallet can transact. The
+    // string is recorded in health.lastError so the operator sees what Peexit actually sent.
+    if (saysInactive || validFlag === false) return { status: "INACTIVE", verified: false, accountStatus: "INACTIVE", capabilities: caps(false), provider: { name: "peexit_verify", verifiedAt }, error: "IDENTITY_INACTIVE", operator: op };
+    if (statusStr !== "" && statusStr !== "ACTIVE") {
+      lastError = `http ${res.status} ${path}: unrecognised accountStatus "${statusStr}" — treated as UNKNOWN, not INACTIVE`;
+      console.warn(`[identity] peexit ${path} …${last4(id.identifier)} → ${lastError}`);
+      return { status: "UNKNOWN", verified: false, accountStatus: "UNKNOWN", capabilities: caps(true), provider: { name: "peexit_verify", verifiedAt }, operator: op };
+    }
     if (!name) return { status: "UNKNOWN", verified: false, accountStatus: "ACTIVE", capabilities: caps(true), provider: { name: "peexit_verify", verifiedAt }, operator: op };
     return { status: "VERIFIED", verified: true, displayName: name, accountStatus: "ACTIVE", capabilities: caps(true), provider: { name: "peexit_verify", verifiedAt }, operator: op };
   },

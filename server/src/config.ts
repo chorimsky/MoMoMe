@@ -173,6 +173,20 @@ export const config = {
     // per Peexit docs is peex/peex_callback; production creds are ours to set.
     callbackUser: secret("PEEXIT_CALLBACK_USER", "peex"),
     callbackPass: secret("PEEXIT_CALLBACK_PASS"),
+    /* The SENDER on a disbursement — us, the remitter. Peexit's request_payment body
+     * carries sender_first_name / sender_last_name / sender_mobile_phone beside `purpose`
+     * and `fund_origin`, which reads as remittance (AML) metadata rather than routing.
+     *
+     * It was hardcoded to "677000000", and 677 is an MTN prefix. While Peexit was paying
+     * MTN and not Orange, that placeholder sat in the one field in the whole payload that
+     * names a network — so it could not be ruled out as the cause without being able to
+     * change it, and changing it meant a code edit and a deploy on a live money path.
+     * Configurable now, defaulting to exactly what was being sent, so the behaviour is
+     * unchanged until someone deliberately changes it. If Peexit confirms the field is
+     * routing rather than metadata, this is the knob; if they confirm it is metadata, it
+     * should still become a real number we own rather than a placeholder. */
+    senderName: env("PEEXIT_SENDER_NAME", "MoMoMe Pay"),
+    senderPhone: env("PEEXIT_SENDER_PHONE", "677000000"),
     // Optional HTTP CONNECT proxy for OUTBOUND Peexit calls. server.peexit.com is
     // IP-allowlisted and 403s any non-allowlisted egress regardless of SECRETKEY, so the
     // rail only works from an IP Peexit has whitelisted. Pointing this at a fixed-IP proxy

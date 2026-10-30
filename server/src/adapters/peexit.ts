@@ -30,6 +30,15 @@ function localMsisdn(phone: string): string {
   return d.startsWith("237") ? d.slice(3) : d;
 }
 
+/** The remitter on a disbursement, from config rather than baked in. See config.peexit —
+ *  the phone was a hardcoded MTN-prefixed placeholder in the only field of the payload that
+ *  names a network, which made it impossible to rule out during the Orange outage without
+ *  editing code on a live money path. */
+function senderFields(): { sender_first_name: string; sender_last_name: string; sender_mobile_phone: string } {
+  const { first, last } = splitName(config.peexit.senderName);
+  return { sender_first_name: first, sender_last_name: last, sender_mobile_phone: config.peexit.senderPhone };
+}
+
 function splitName(name?: string): { first: string; last: string } {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return { first: "MoMoMe", last: "Recipient" };
@@ -94,7 +103,7 @@ async function liveSubmit(req: DisburseRequest): Promise<string> {
       track_id: req.idempotencyKey,
       mobile_phone: localMsisdn(req.phone),
       currency: "XAF",
-      sender_first_name: "MoMoMe", sender_last_name: "Pay", sender_mobile_phone: "677000000",
+      ...senderFields(),
       first_name: first, last_name: last,
       country: req.country, // ISO Alpha-2 (e.g. CM)
       purpose: "FAMILY", fund_origin: "SALARY",

@@ -1,54 +1,74 @@
 # Message to the Peexit team
 
-*Updated 29 October 2026, after testing the new gateway end to end and confirming our own
-egress address. Fill in your name before sending.*
+*Updated 30 October 2026. The gateway question is settled; this is about disbursements
+that are accepted and never executed. Fill in your name before sending.*
 
-## What we established on our side
+## What we observe
 
-| Layer | Result |
+Our disbursement requests are **accepted** by the new gateway and then stay at status
+`new` indefinitely. Our own re-query of `/disbursement/all_requests?track_id=` returns the
+row with `status: "new"` every time, for hours.
+
+| Fact | Value |
 | --- | --- |
-| DNS — `px-gw-c2810.peexit.com` | resolves: `18.236.19.78`, `32.190.82.249` |
-| TCP + TLS | completes normally |
-| HTTP | **403** from `server: awselb/2.0`, on every path |
-| With vs without `SECRETKEY` | identical — the refusal is before any application logic |
-| GET vs POST, any `Host` header, either ALB IP | identical |
-| From our production egress (`152.55.177.87`) | **also 403** |
+| Gateway | `https://px-gw-c2810.peexit.com/api/v1` |
+| Our egress IP | `152.55.177.87` (the one you whitelisted — allowlist now working) |
+| Disbursement balance we can read | **224 832 XAF** — funded |
+| Longest request stuck at `new` | **358 minutes** (~6 hours) |
+| Affected track_ids | `MMM-2026-418965`, `MMM-2026-418966`, `MMM-2026-418968` |
 
-Our outbound address is `152.55.177.87` — the exact IP Peexit whitelisted for us. It has
-not changed. So this is a blanket deny at their load balancer, and nothing on our side
-changes it.
+This is not a connectivity, credential or balance problem on our side, and we have ruled
+each out rather than assuming:
 
-One caveat worth stating: we measure our egress address by asking an IP-echo service, and
-that is the address a request *to that service* leaves from. If the platform routes to
-different destinations through different NAT addresses, the IP Peexit's load balancer sees
-could differ. Only their logs can settle it — which is why that is the first question.
+- the allowlist works — requests reach your application (403 became 404, then 200)
+- the base path is correct — `/api/v1` resolves; `/disbursement/me` returns our balance
+- the SECRETKEY is accepted — the balance read authenticates
+- the account is funded — 224 832 XAF available, each request is 500 XAF
+- we are not mis-reading the status — `new` is a pending state in our mapping, and we
+  deliberately hold rather than guess
+
+## What we are asking
+
+1. **Why do accepted disbursements remain at `new`?** Is execution enabled for our account
+   on the new gateway, or did that permission not carry over from `server.peexit.com`?
+2. **Is there an activation or approval step** on the new platform that we have not
+   completed?
+3. **What are the terminal statuses** we should expect, and roughly how long should a
+   disbursement take to leave `new`?
+4. **Please confirm our notification callback** is registered for the new gateway:
+   `https://momome-api-production.up.railway.app/webhooks/peexit` (HTTP Basic). We have
+   seen no callbacks; we are resolving purely by re-query.
+
+## What we are doing meanwhile
+
+Nothing is double-sent and no customer funds are at risk: a payout with no verdict is held,
+never retried blindly, and after 30 minutes it is raised to our operations desk while your
+request remains live under the same `track_id`. If you settle any of the above later, our
+system will still record it correctly.
 
 ---
 
-**Subject: 403 on px-gw-c2810 from the IP you whitelisted (account Umdeny)**
+**Subject: Disbursements accepted but stuck at status `new` for 6 hours (account Umdeny)**
 
 Hello,
 
-We've moved to `https://px-gw-c2810.peexit.com/api` and every request returns **403** from
-your load balancer (`server: awselb/2.0`) — on every path, with and without our SECRETKEY,
-so it is being refused before it reaches your application.
+Since reconnecting to `px-gw-c2810.peexit.com/api/v1`, our disbursement requests are
+accepted by the gateway and then remain at status **`new`** indefinitely — the longest is
+now **358 minutes**. Re-querying `/disbursement/all_requests?track_id=` returns the row
+each time, still `new`.
 
-We've confirmed our outbound address is **152.55.177.87**, the exact IP you whitelisted for
-us, and it has not changed.
+Affected track_ids: **MMM-2026-418965, MMM-2026-418966, MMM-2026-418968** (500 XAF each).
 
-Three things would unblock us:
+We have ruled out our side: the allowlist works (we reach your application), `/api/v1` is
+correct, the SECRETKEY authenticates, and our disbursement balance reads **224 832 XAF**.
 
-1. **Which source IP do you see on the rejected requests?** Your ALB logs will show it.
-   That is the one fact we cannot determine from outside, and it settles immediately
-   whether the allowlist entry is simply attached to the wrong place.
-2. **Please confirm the allowlist for 152.55.177.87 is applied to the new gateway.** We
-   suspect it is still attached to the retired `server.peexit.com`.
-3. **Please confirm the base path** — should our calls be
-   `/api/disbursement/request_payment` or `/api/v1/disbursement/request_payment`? We cannot
-   test this ourselves: the 403 happens before routing, so every path looks identical.
+Could you check whether **disbursement execution is enabled for our account on the new
+gateway** — or whether there is an activation step we have missed? If there is an expected
+delay before a request leaves `new`, please tell us what it is.
 
-Once we are reconnected we will also want to confirm the notification callback credentials
-and whether our SECRETKEY is unchanged — but those can wait until traffic flows.
+Separately, we have received **no notification callbacks** on the new gateway. Our endpoint
+is `https://momome-api-production.up.railway.app/webhooks/peexit` (HTTP Basic, the
+credentials previously registered). Please confirm it is configured.
 
 Thank you,
 

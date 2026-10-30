@@ -15,7 +15,7 @@ const ok = (n: string, c: boolean, d = "") => {
 
 async function main() {
   console.log("\nQR round-trip — what we draw, we can read");
-  const { lnAddressNumber, LN_ADDRESS_DOMAIN } = await import("../../shared/domain.js");
+  const { lnAddressNumber, LN_ADDRESS_DOMAIN, receiveLink, parseReceiveLink, classifyScan } = await import("../../shared/domain.js");
   const D = LN_ADDRESS_DOMAIN;
 
   // ---- the Receive QR the app draws, read back ----
@@ -39,6 +39,28 @@ async function main() {
   ok("an empty scan", lnAddressNumber("") === null);
   // A BOLT11 is a wallet's business, not a Mobile-Money payout target.
   ok("a raw bolt11 is not an address", lnAddressNumber("lightning:lnbc2500u1pvjluez") === null);
+
+  console.log("\nThe PRIMARY /receive QR: the payment link itself\n");
+  // Everything above tests the Lightning Address. The code actually shown on /receive is
+  // the LINK — what a phone camera opens, and the only payload that reaches all four
+  // assets, because the send flow it opens offers Lightning, USDT, USDC and on-chain BTC.
+  // It had no round-trip test at all, so a change at either end could have silently broken
+  // the one QR every payer scans.
+  const built = receiveLink("https://www.momome.xyz", "670000001");
+  ok("the Receive page builds a /send link carrying the number", /\/send\?to=237670000001$/.test(built), built);
+  ok("…and it parses back to the same number", parseReceiveLink(built)?.to === "237670000001", JSON.stringify(parseReceiveLink(built)));
+  ok("…and the scanner calls it a payment to send", classifyScan(built).kind === "send", classifyScan(built).kind);
+
+  const withAmount = receiveLink("https://www.momome.xyz", "670000001", 5000);
+  ok("an amount survives the round trip", parseReceiveLink(withAmount)?.amountXaf === 5000, withAmount);
+  ok("…and the scanner reads that amount too", classifyScan(withAmount).amountXaf === 5000, String(classifyScan(withAmount).amountXaf));
+
+  // A payer whose wallet is already open scans the second code instead. Both must work.
+  ok("the Lightning code the page renders is understood", classifyScan("lightning:237670000001@momome.xyz").kind === "send");
+  // bitcoin:, ethereum: and lightning: are disjoint namespaces that no single wallet reads,
+  // which is WHY the link carries every asset. These must be recognised, not dropped.
+  ok("a bitcoin: URI is recognised as a wallet code", classifyScan("bitcoin:bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh").walletKind === "bitcoin");
+  ok("a bare 0x address is recognised as a wallet code", classifyScan("0xdAC17F958D2ee523a2206206994597C13D831ec7").walletKind === "ethereum");
 
   console.log(fail ? `\n❌ ${fail} failed, ${pass} passed` : `\n✅ ${pass} assertions passed`);
   if (fail) process.exit(1);

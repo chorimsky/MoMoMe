@@ -6,7 +6,15 @@
 .cta-sm { font-size: 14px; padding: 11px 18px; text-decoration: none; box-shadow: none; }
 
 .hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(36px, 6vw, 80px); align-items: center; padding-bottom: clamp(64px, 11vw, 128px); }
-@media (max-width: 820px) { .hero { grid-template-columns: 1fr; gap: 40px; } .hero-visual { order: -1; } }
+/* THE PROPOSITION COMES FIRST ON A PHONE.
+   This used to set `.hero-visual { order: -1 }`, putting the mascot and the demo receipt
+   above the headline. Measured on a 360×640 Android — the size most of this product's
+   users actually hold — that pushed "Send money to any Mobile Money number." 19px BELOW
+   the fold, so a first-time visitor saw a cartoon and a stranger's receipt and never the
+   sentence explaining what this is. On a 812px phone it sat exactly at the fold, half cut.
+   The receipt is good proof, but proof answers a question the visitor has not been asked
+   yet. Text first; the mascot and receipt follow immediately after it. */
+@media (max-width: 820px) { .hero { grid-template-columns: 1fr; gap: 32px; } }
 .eyebrow { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-body); font-size: 13.5px; font-weight: 700; color: var(--brand-ink); background: var(--brand-wash); border: 1.5px solid var(--brand); padding: 6px 14px; border-radius: 999px; letter-spacing: 0; text-transform: none; }
 .lp h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(40px, 6.4vw, 64px); line-height: 1.04; letter-spacing: -0.02em; margin: 20px 0 0; text-wrap: balance; }
 

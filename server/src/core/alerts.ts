@@ -61,8 +61,31 @@ export async function conditions(now = Date.now()): Promise<AlertCondition[]> {
   // deferred payout would be a false alarm per payment, which is how an operator learns to
   // skim the one alarm that matters. Deferred rails have their own, slower alarm
   // (deferred:*:unsettled) that watches for DEBITED-and-unproven instead.
-  const stuck = pays.filter((p) => p.state === "PAYOUT_REQUESTED" && !isDeferredRail(p.aggregator) && now - Date.parse(p.updatedAt) > STUCK_PAYOUT_MIN * 60_000);
-  if (stuck.length) out.push({ key: "payments:stuck", severity: "critical", body: `${stuck.length} payout(s) in PAYOUT_REQUESTED for over ${STUCK_PAYOUT_MIN} min: ${stuck.slice(0, 3).map((p) => p.ref).join(", ")}${stuck.length > 3 ? "…" : ""}. Admin → Payments.` });
+  /* A payout that has been ESCALATED is more stuck, not less.
+   *
+   * This counted only PAYOUT_REQUESTED, so the critical alarm cleared itself at the
+   * 30-minute mark — not because anyone was paid, but because reconcileStuckPayouts moved
+   * the payment to MANUAL_REVIEW and it no longer matched the filter. Severity therefore
+   * FELL as the problem deepened (critical → nothing → warning), and between the
+   * escalation at 30 min and payments:review at 60 min in review there was a half-hour
+   * window in which undelivered money had no alarm at all. An operator watching severity
+   * would have seen a stuck payout "resolve" while the rail still had not paid it.
+   *
+   * An escalated payout still has the rail holding it — payoutUnresolvedSince is set
+   * precisely because no verdict came — so it belongs in the same alarm until it is paid,
+   * failed or refunded. payments:review still fires too: that one says "a person needs to
+   * act", this one says "money has not been delivered". They are different facts. */
+  const stuckRequested = pays.filter((p) => p.state === "PAYOUT_REQUESTED" && !isDeferredRail(p.aggregator) && now - Date.parse(p.updatedAt) > STUCK_PAYOUT_MIN * 60_000);
+  const stuckEscalated = pays.filter((p) => p.state === "MANUAL_REVIEW" && !isDeferredRail(p.aggregator) && !!p.payoutUnresolvedSince);
+  const stuck = [...stuckRequested, ...stuckEscalated];
+  if (stuck.length) {
+    const oldestMin = Math.max(...stuck.map((p) => Math.floor((now - Date.parse(p.payoutUnresolvedSince ?? p.updatedAt)) / 60_000)));
+    out.push({
+      key: "payments:stuck",
+      severity: "critical",
+      body: `${stuck.length} payout(s) undelivered — ${stuckRequested.length} awaiting a verdict over ${STUCK_PAYOUT_MIN} min, ${stuckEscalated.length} escalated to review with the rail still holding them; oldest ${oldestMin} min: ${stuck.slice(0, 3).map((p) => p.ref).join(", ")}${stuck.length > 3 ? "…" : ""}. Admin → Payments.`,
+    });
+  }
   // A refund the sender has not claimed is money we owe and still hold: page after an hour.
   const unclaimed = pays.filter((p) => p.state === "REFUND_PENDING" && p.refundNeedsDestination && now - Date.parse(p.updatedAt) > 60 * 60_000);
   if (unclaimed.length) out.push({ key: "payments:refund_unclaimed", severity: "warning", body: `${unclaimed.length} refund(s) unclaimed for over 1 h: ${unclaimed.slice(0, 3).map((p) => p.ref).join(", ")}. The sender can retry delivery or paste an invoice; Admin → Payments can retry on another rail.` });

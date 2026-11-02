@@ -7,6 +7,15 @@
 process.env.DB_PATH = ":memory:";
 process.env.RAILS_MODE = "sandbox";
 
+/* This suite needs an AUTHENTICATED CALLER; it is not a test OF authentication. It sends a
+   bare x-mm-sender and relied on the legacy-bearer window being open — with no pin, that
+   means reading the wall clock. On 2026-11-01 the default LEGACY_SENDER_UNTIL passed and
+   this suite began failing with nobody having changed a line of code.
+   Pinned OPEN here, the same way device-signing / network / identity-resolution / upi pin
+   it CLOSED to test the post-migration gate. Production has closed this window for real, so
+   the standing debt is to move these suites onto enrolled, signed requests. */
+process.env.LEGACY_SENDER_UNTIL = "2099-01-01T00:00:00Z";
+
 import type { AddressInfo } from "node:net";
 
 let pass = 0, fail = 0;

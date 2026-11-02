@@ -6,6 +6,16 @@
    REVIEW_PHONE / REVIEW_OTP set, that one number gets a fixed code and never gets paid.
    This test runs with REVIEW_PHONE=670000000 REVIEW_OTP=246810 (see package.json).
    ============================================================ */
+/* This suite needs an AUTHENTICATED CALLER; it is not a test OF authentication. It sends a
+   bare x-mm-sender and relied on the legacy-bearer window being open — with no pin, that
+   means reading the wall clock. On 2026-11-01 the default LEGACY_SENDER_UNTIL passed and
+   this suite began failing with nobody having changed a line of code.
+   Pinned OPEN here, the same way device-signing / network / identity-resolution / upi pin
+   it CLOSED to test the post-migration gate. Production has closed this window for real, so
+   the standing debt is to move these suites onto enrolled, signed requests.
+   Set before the app is imported — createApp reads this at module load. */
+process.env.LEGACY_SENDER_UNTIL = "2099-01-01T00:00:00Z";
+
 import type { AddressInfo } from "node:net";
 
 let pass = 0, fail = 0;

@@ -14,6 +14,17 @@
 process.env.DB_PATH = ":memory:";
 process.env.RAILS_MODE = "sandbox";
 process.env.ADMIN_SESSION_SECRET = "pending-audit-secret";
+/* These suites need an AUTHENTICATED CALLER; they are not tests OF authentication. They
+   send a bare x-mm-sender and relied on the legacy-bearer window being open — which, with
+   no pin, means they read the wall clock. On 2026-11-01 the default LEGACY_SENDER_UNTIL
+   passed and sixteen suites began failing with nobody having changed a line of code; a gate
+   that can fail on a calendar day is not a gate.
+   Pinned OPEN here, the same way device-signing / network / identity-resolution / upi pin
+   it CLOSED to test the post-migration gate. Production has closed this window for real, so
+   the standing debt is to move these suites onto enrolled, signed requests and delete the
+   legacy path. */
+process.env.LEGACY_SENDER_UNTIL = "2099-01-01T00:00:00Z";
+
 import type { AddressInfo } from "node:net";
 
 let pass = 0, fail = 0;

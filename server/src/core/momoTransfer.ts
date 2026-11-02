@@ -55,20 +55,74 @@ const collectTtlMs = () => Math.max(1, getSettings().rails.collect.ttlMinutes ||
 export function enabled(): boolean { return !!getSettings().features.momoTransfer; }
 export function getTransfer(tid: string): MomoTransfer | undefined { return transfers.get(tid); }
 
+/* ONE SETTLEMENT AT A TIME, PER TRANSFER.
+ *
+ * Settling reads the state, then asks the rail, then acts:
+ *
+ *     if (t.state !== "AWAITING_PAYER") return;   // check
+ *     const s = await rail.status(t.id);          // ← yields the event loop
+ *     if (s === "COMPLETED") await onCollected(t) // act
+ *
+ * and TWO callers run that shape against the same transfer: this function, driven by the
+ * rail's webhook, and reconcileTransfers, driven by the job tick. The `await` yields, so
+ * both can pass the check before either changes the state, and both then run onCollected.
+ *
+ * They do not collide by bad luck — they collide by construction. The rail posts its
+ * callback at the moment its status flips to COMPLETED, which is exactly the moment a
+ * concurrent tick would also read COMPLETED.
+ *
+ * What a double run costs: postCollection posts the collection AND the fee to the ledger
+ * twice (recordTxn mints a fresh txnId and appends — there is no idempotency key, and the
+ * ledger invariant is per-transaction balance, not uniqueness, so nothing would have caught
+ * it); and startPayout runs twice. The Mobile Money leg survives that, because disburse
+ * carries idempotencyKey `pay_<id>` and the adapter answers "duplicate" — but the Lightning
+ * leg does not: payLightningAddress takes no idempotency key and resolves and pays afresh
+ * on every call. Two runs, two real payments.
+ *
+ * Both call sites documented themselves as idempotent ("safe to call repeatedly", "every
+ * step re-reads the rail's word"). That is true SEQUENTIALLY — a later call sees the moved
+ * state and stops — and false CONCURRENTLY, because the re-read sits before an await with
+ * nothing holding the transfer across it.
+ *
+ * So: one settlement in flight per transfer id. A second caller joins the first rather than
+ * starting its own, and a caller arriving after it finishes re-reads a state that has moved
+ * and stops at the check, exactly as it did before. */
+const settling = new Map<string, Promise<"COMPLETED" | "FAILED" | "PENDING" | null>>();
+
+function settleExclusive(id: string, run: () => Promise<"COMPLETED" | "FAILED" | "PENDING" | null>) {
+  const already = settling.get(id);
+  if (already) return already;                       // join the run in flight; do not start a second
+  const p = (async () => { try { return await run(); } finally { settling.delete(id); } })();
+  settling.set(id, p);
+  return p;
+}
+
+/** Exposed for the reconcile tick, so BOTH paths share one in-flight slot per transfer. */
+export function settleTransferExclusive(t: MomoTransfer, run: () => Promise<"COMPLETED" | "FAILED" | "PENDING" | null>) {
+  return settleExclusive(t.id, run);
+}
+
 /** A collection callback names OUR key; this settles that one transfer NOW rather than on
  *  the next reconcile tick. The rail's own `status()` is still what decides — a callback
  *  body is a hint that something changed, never the fact that it changed. Returns what the
  *  rail said, or null when the key is unknown to us (another deployment's, or a stale one).
- *  Safe to call repeatedly: every step re-reads the rail and `move()` is idempotent. */
+ *  Safe to call repeatedly AND concurrently: repeat calls re-read the rail and stop at the
+ *  state check, concurrent ones join the settlement already in flight (see settleExclusive). */
 export async function settleCollectionNow(transferId: string): Promise<"COMPLETED" | "FAILED" | "PENDING" | null> {
-  const t = transfers.get(transferId);
-  if (!t || t.state !== "AWAITING_PAYER") return null;
-  const rail = collectorByName(t.collectRail);
-  if (!rail) return null;
-  const s = t.simulated ? "COMPLETED" : await rail.status(t.id).catch(() => null);
-  if (s === "COMPLETED") { await onCollected(t); return "COMPLETED"; }
-  if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); return "FAILED"; }
-  return s ?? null;
+  const t0 = transfers.get(transferId);
+  if (!t0) return null;
+  return settleExclusive(t0.id, async () => {
+    // Re-read inside the slot: by the time we hold it, an earlier settlement may have moved
+    // this transfer on.
+    const t = transfers.get(transferId);
+    if (!t || t.state !== "AWAITING_PAYER") return null;
+    const rail = collectorByName(t.collectRail);
+    if (!rail) return null;
+    const s = t.simulated ? "COMPLETED" : await rail.status(t.id).catch(() => null);
+    if (s === "COMPLETED") { await onCollected(t); return "COMPLETED"; }
+    if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); return "FAILED"; }
+    return s ?? null;
+  });
 }
 export function transfersOf(owner: string): MomoTransfer[] { return [...transfers.values()].filter((t) => t.owner === owner).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
 export function allTransfers(limit = 200): MomoTransfer[] { return [...transfers.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit); }
@@ -375,12 +429,22 @@ export async function reconcileTransfers(now = Date.now()): Promise<void> {
   for (const t of transfers.values()) {
     try {
       if (t.state === "AWAITING_PAYER") {
-        // Ask the rail that TOOK the request — not whichever one happens to be first now.
-        const rail = collectorByName(t.collectRail);
-        const s = t.simulated ? "COMPLETED" : rail ? await rail.status(t.id).catch(() => null) : null;
-        if (s === "COMPLETED") { await onCollected(t); continue; }
-        if (s === "FAILED") { move(t, "FAILED", "the payer declined or the request failed"); continue; }
-        if (Date.parse(t.expiresAt) < now) move(t, "EXPIRED", "the payer did not approve in time");
+        // Through the SAME in-flight slot the webhook path uses. Without it this tick and a
+        // callback arriving mid-`status()` both pass the state check and both settle — see
+        // settleExclusive. The expiry below stays outside the slot: it is a local clock
+        // decision with no rail call and no ledger posting.
+        const outcome = await settleTransferExclusive(t, async () => {
+          const cur = transfers.get(t.id);
+          if (!cur || cur.state !== "AWAITING_PAYER") return null;
+          // Ask the rail that TOOK the request — not whichever one happens to be first now.
+          const rail = collectorByName(cur.collectRail);
+          const s = cur.simulated ? "COMPLETED" : rail ? await rail.status(cur.id).catch(() => null) : null;
+          if (s === "COMPLETED") { await onCollected(cur); return "COMPLETED"; }
+          if (s === "FAILED") { move(cur, "FAILED", "the payer declined or the request failed"); return "FAILED"; }
+          return s ?? null;
+        });
+        if (outcome === "COMPLETED" || outcome === "FAILED") continue;
+        if (t.state === "AWAITING_PAYER" && Date.parse(t.expiresAt) < now) move(t, "EXPIRED", "the payer did not approve in time");
       } else if (t.state === "EXPIRED" && !t.simulated && Date.parse(t.expiresAt) > now - LATE_APPROVAL_GRACE_MS) {
         /* A LATE APPROVAL. Our window and the rail's need not be the same, and a payer who
            approves a minute after we gave up is debited all the same. Nothing used to look

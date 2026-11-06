@@ -30,7 +30,8 @@
       "browserslist": "^4.28.8",
       "proxy-addr": "^2.0.8",
       "source-map-js": "^1.2.2",
-      "fflate": "^0.7.5"
+      "fflate": "^0.7.5",
+      "zod": "^4.6.6"
     }
   }
 }

@@ -113,10 +113,18 @@ number users actually feel.
 
 ## 3. Instrumentation gaps blocking a real Phase 1
 
+**Correction (2026-11-06, after first publication):** an earlier revision of this table
+said p50/p95/p99 collection was absent. **That was wrong.** It rested on a grep for
+`@sentry|opentelemetry|otel`, which could not have found what does exist. Server-side
+percentiles are implemented and exposed; the table below is corrected, and the server-side
+figures are now the best source for §1's missing percentiles — far better than the three
+curl samples above.
+
 | Required by the plan | Status |
 | --- | --- |
-| p50 / p95 / p99 API latency | **Absent.** No percentile collection; 3 samples cannot produce one. |
-| Real-user monitoring | **Absent.** |
+| p50 / p95 / p99 API latency | **Implemented.** `core/interop/metrics.ts` — `latencyMiddleware` times every request and `latencyReport()` returns p50/p95/p99 + 4xx/5xx per normalised route class, over 2,000-sample bounded rings capped at 300 routes. Exposed via `observability()` at `routes/v1.ts:259`. |
+| Per-stage payment percentiles | **Implemented.** `core/stageLatency.ts` derives p50/p95/p99 for 7 named stages from the transition timestamps already on each payment — no new writes on the money path. Exposed at `routes/api.ts:3567`. |
+| Real-user monitoring | **Partly present, then extended.** `app/src/lib/analytics.ts` already beacons product events to `/api/telemetry` (anonymous ids, route-class views, actions; DNT honoured; `/admin` and `/ops` excluded) but collects **no timings**. Performance RUM added 2026-11-06 as `app/src/lib/rum.ts` → `POST /api/rum` → `server/src/core/rum.ts`. |
 | Core Web Vitals (LCP, INP, CLS) | **Absent.** |
 | Multi-region synthetic probes | **Absent.** Single vantage only. |
 | African mobile-network measurement | **Absent.** The plan rightly warns a nearby cloud region may not be the fastest route; unverifiable from here. |

@@ -15,6 +15,7 @@ import type { Request, Response, NextFunction } from "express";
 import { store } from "../../db/store.js";
 import { eventStats } from "./events.js";
 import { cryptoProviders, payoutProviders, railOfMethod } from "./rails.js";
+import { rumReport } from "../rum.js";
 
 /* ---------- request latency ---------- */
 const SAMPLES = 2000;
@@ -101,6 +102,9 @@ export async function observability(windowHours = 24) {
   return {
     generatedAt: new Date().toISOString(),
     api: latencyReport(),
+    // What the server's own timer cannot see: DNS, TLS and the last mile, reported by real
+    // browsers (core/rum.ts). Empty until the client beacon is deployed and seen.
+    rum: rumReport(),
     payments,
     providers: [...cryptoProviders(), ...payouts].map((p) => ({ id: p.id, rail: p.rail, health: p.health, successRate: p.successRate, avgLatencyMs: p.avgLatencyMs, liquidity: p.liquidity ?? null })),
     webhooks: eventStats(),

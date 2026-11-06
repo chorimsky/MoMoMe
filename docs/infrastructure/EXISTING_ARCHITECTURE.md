@@ -134,9 +134,20 @@ live money path must never depend on it."* `/health` is shallow; `/health/deep`
 age and staleness, FX freshness, and per-rail counters (`samples`, `successRate`,
 `avgLatencyMs`, `routable`, `funded`).
 
-**There is no distributed tracing.** `tracesSampleRate: 0` means Sentry carries errors only,
-and no OpenTelemetry dependency exists in `server/package.json`. Phase 1's trace correlation
-is unimplemented.
+Beyond errors, there is a real metrics layer that this audit initially missed and records
+here as a correction. `core/interop/metrics.ts` installs `latencyMiddleware` (`app.ts:159`)
+and reports p50/p95/p99 with 4xx/5xx per normalised route class; `paymentMetrics()` derives
+funnel timings and per-rail success over a window; `core/stageLatency.ts` derives
+percentiles for 7 named payment stages from transition timestamps already on each payment.
+Both percentile sources withhold figures below a minimum sample count instead of printing a
+misleading number, and exclude in-flight payments from unfinished stages. Exposed at
+`routes/v1.ts:259` and `routes/api.ts:3567`.
+
+**What is absent is tracing and client-side measurement**, not percentiles:
+`tracesSampleRate: 0` means Sentry carries errors only, no OpenTelemetry dependency exists
+in any `package.json`, and there is no RUM — no `web-vitals`, `PerformanceObserver` or
+beacon in `app/src` or `mobile/src`. Phase 1's trace correlation and real-user measurement
+are unimplemented; its percentile requirement is already met server-side.
 
 ### 2.8 CI/CD
 
@@ -169,8 +180,9 @@ rail with no `verifyCallback` is rejected 401 rather than trusted (commit `44313
 | Hashed asset cache headers | **Optimise** — RISK-01, measured |
 | Apex → www redirect | **Optimise** — RISK-02, measured |
 | `/api/config` 29.8 KB `no-store` on boot | **Optimise** — RISK-04 |
+| Per-route + per-stage percentiles (`interop/metrics.ts`, `stageLatency.ts`) | **Preserve** — exists, and is the honest source for Phase 1 percentiles |
 | Distributed tracing / OTel | **Not implemented** |
-| RUM, regional synthetic monitoring | **Not implemented** |
+| RUM / Core Web Vitals, regional synthetic monitoring | **Not implemented** — the real Phase 1 gap |
 | Postgres repos (`db/repo.ts`) | **Implemented but not wired** — the keystone gap |
 | Read replicas, regional execution, geo routing | **Not implemented, and blocked** (§4) |
 | `deploy-hostinger.yml` | **Review before removal** — RISK-03 |

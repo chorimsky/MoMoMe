@@ -18,6 +18,7 @@ import { lnurl } from "./routes/lnurl.js";
 import { applinks } from "./routes/applinks.js";
 import { share } from "./routes/share.js";
 import { cron } from "./routes/cron.js";
+import { rum } from "./routes/rum.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
 import { jobsHealth } from "./jobs.js";
@@ -324,6 +325,9 @@ export function createApp() {
   app.use("/v1", publicV1);
   app.use("/api/developers", developers); // developer dashboard backend (docs/api-v1 §29)
   app.use("/api/v1", v1);
+  // Unauthenticated real-user timing beacon. Mounted before /api so the monolith's
+  // catch-alls cannot shadow it; it is rate-limited in its own router.
+  app.use("/api/rum", rum);
   // The interoperability network (docs/interop-v2): its own surface beside the live one,
   // 404 unless INTEROPERABILITY_V2 is on (always reachable in the sandbox for rehearsal).
   app.use("/api/network", network);

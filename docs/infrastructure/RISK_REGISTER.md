@@ -24,7 +24,7 @@ observed it directly; "unverified" means it needs access this audit did not have
 | RISK-12 | Data residency for CEMAC not established | **High (legal)** | Unverified | Operator + counsel |
 | RISK-14 | Every push to `main` deploys the live money API **ungated** — the gate lives in a GitHub workflow that cannot run | **Critical** | Verified twice empirically | Engineering + Operator |
 | RISK-15 | GitHub Actions has been dead since ~2026-09-19 (account billing lock) — no CI on any commit | **High** | Verified 2026-11-06 | Operator |
-| RISK-13 | `trust proxy 1` is wrong for Railway: `req.ip` is not the client, so every IP rate limit is inert and the audit log's IP is wrong | **High** | **Fixed** `core/trustProxy.ts` — pending production confirmation | Engineering |
+| RISK-13 | `req.ip` is a per-CONNECTION platform address: IP rate limits are bypassed by opening a new connection, and the audit log's IP is wrong | **High** | Diagnosed precisely; one-line fix pending the `[proxy]` log line | Engineering + Operator |
 
 ## Detail on the ones that change a decision
 
@@ -268,10 +268,117 @@ still throttles at request 61.
 that address — exactly what `1` did. No regression, but no fix either.
 
 **Confirmation is empirical, and the limiter is its own oracle** — the same method that
-found the bug. After deploy, send more than 60 requests to `/api/rum` from one machine: a
-429 means `req.ip` is now the caller. That needs no header dump and no dashboard.
+found the bug: send more than 60 requests to `/api/rum` from one machine and look for a 429.
 
-36 assertions, wired into the gate chain.
+### Correction: "every IP rate limit is inert" was wrong, and so was my test
+
+Two statements earlier in this register were overstated, and the cause was the measurement
+method rather than the code.
+
+**The limiter works.** Over a single reused TCP connection, `/api/rum` returns exactly
+**60 × 204 then 429** — the limit engages precisely as written.
+
+**The key is per CONNECTION.** Three batches of 40 over three separate connections: 120
+requests, **all 204**, no throttle. A new connection gets a fresh bucket.
+
+So `req.ip` is stable *within* a connection and different *across* connections, which means
+it is a platform address assigned per connection — not the caller, and not constant.
+
+**Why my first measurement misled me.** The original probe ran one `curl` process per
+request, so 75 requests meant 75 TCP connections and 75 distinct keys. "No 429 in 75" was
+real, but it measured a bypass rather than a dead limiter, and I reported it as the latter.
+A browser, which reuses connections, **is** limited today.
+
+**The corrected severity, which is still High but for a sharper reason:**
+
+| | |
+| --- | --- |
+| A browser or any keepalive client | limited correctly |
+| A script opening a new connection per request | **bypasses the limit entirely** — trivially, and that is the attacker's case |
+| Aggregation across connections | none |
+| The `ip` on operator audit records | a per-connection platform address, so still wrong |
+
+Rate limiting is therefore **weak and bypassable**, not absent. The audit-trail finding is
+unchanged.
+
+### The result: the predicate did NOT resolve the caller
+
+Deployed as `6ec6462` and confirmed live on `/health/deep`. Re-ran the probe: **75 requests,
+still no 429.** The change is correct in itself — 36 assertions, including the exact
+production shape — but it did not resolve the caller in production, so `req.ip` is still not
+a usable client identifier there.
+
+**Ruled out: more than one instance.** That would split the in-memory buckets and produce
+the same symptom for an unrelated reason. Twelve probes of `/health/deep` returned an
+identical `jobs.lastTickAt`, so one process is serving these requests.
+
+**What remains**, and the limitation was named before the deploy rather than after: a
+platform hop that presents as a **public** address. The predicate trusts internal ranges, so
+a public hop is where it stops — exactly what `1` did.
+
+The per-connection evidence above now points at a specific chain. If Express sees
+`[socket=internal, edge=public, client]`, then: `trust proxy: 1` stops at `edge`; the
+internal-ranges predicate also stops at `edge` (public, so untrusted) — which is precisely
+why the deploy changed nothing; and **`trust proxy: 2` would reach the client**.
+
+That makes `2` the likely one-line fix. It is **not** being applied on the strength of an
+inference, because the cost of being wrong is asymmetric: if the platform ever presents one
+hop instead of two, `2` walks into client-supplied bytes and the address becomes forgeable —
+written into the audit log and usable to evade limits. The `[proxy]` line settles the hop
+count definitively, and it is one minute of an operator's time against a silent security
+regression.
+
+**That is now a hypothesis with a cheap test rather than another guess.** Guessing is how
+this stayed broken, so the server reports what it actually sees:
+`logProxyShapeOnce` in `core/trustProxy.ts` logs one line per process with the **shape** of
+the forwarded chain — each position as `internal` or `external`, plus what Express resolved
+and whether it is the leftmost or rightmost entry. **No address is logged**, so it is safe
+in an operator log and identifies nobody. It fires on the first request that actually
+carries a forwarded header — not merely the first request, which in production is a health
+prober with no header, and which would otherwise describe the prober and warn about an
+internal address that is genuinely internal.
+
+### Where external probing ran out
+
+Further black-box experiments produced results that no single topology explains, and are
+recorded here as a limit rather than a finding:
+
+| Experiment (production, same 5-minute window) | Result |
+| --- | --- |
+| 120 requests, no forwarded header, across 3 connections | all 204 — no throttle |
+| 80 requests, no forwarded header, one connection | 60 × 204, then 429 |
+| 40 with a forged `X-Forwarded-For: A`, one connection | 20 × 204, then 429 — as if 40 were already counted |
+| 40 with a forged `X-Forwarded-For: B`, same reuse | all 204 — a fresh bucket |
+
+The second forged value getting a fresh bucket suggests the supplied header reaches the
+key, which would mean the address is **already forgeable**. But the first forged batch
+throttling at 20 only makes sense if its bucket was not fresh, and the 120-across-connections
+result contradicts both. These probes share one window and a limiter whose keying is the
+unknown being measured, so each contaminates the next.
+
+Reasoning further from this data would repeat the original mistake — an inference presented
+as a measurement. **The server-side line settles it; black-box probing cannot.** Probing was
+stopped here.
+
+Note also that these probes wrote several hundred synthetic samples into the in-memory RUM
+rings (`path: /send`, fabricated timings). The first `rum.buckets` figures from 2026-11-06
+are mostly this test traffic and should be discarded; a restart clears them.
+
+**Operator step, one minute:** Railway → service → logs, search `[proxy]`. Then:
+
+Read `depth` together with `leftmost` — on a one-entry chain the leftmost entry IS the
+client and that is correct; on a longer chain the leftmost entry is whatever the caller sent.
+
+| Log line says | Meaning | Next |
+| --- | --- | --- |
+| `depth=1`, `resolved=external` | the only entry is the caller — correct | nothing; investigate elsewhere |
+| `depth>1`, `resolved_is_leftmost=true` | `req.ip` is the **caller-supplied** entry — **forgeable today** | highest priority: an attacker can set the audit-log IP and rotate past limits |
+| `depth>1`, `resolved_is_rightmost=true`, that position `external` | stopping on a public platform hop — what the deploy did not change | likely `trust proxy: 2`; confirm the count from `depth` |
+| `resolved=internal` (plus the WARNING line) | still our own plumbing | chain longer than assumed; trust one more hop |
+| `no x-forwarded-for on any of the first 50 requests` | the platform forwards nothing | `req.ip` is the socket peer; IP controls cannot work as written |
+
+Until that line is read, **every IP-keyed control should still be assumed inert** and the
+`ip` field on operator audit records should not be relied on.
 
 ### RISK-06 — narrowed, after reading the runbook this audit should have read first
 

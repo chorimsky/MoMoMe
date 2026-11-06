@@ -19,7 +19,7 @@ import { applinks } from "./routes/applinks.js";
 import { share } from "./routes/share.js";
 import { cron } from "./routes/cron.js";
 import { rum } from "./routes/rum.js";
-import { trustProxy } from "./core/trustProxy.js";
+import { trustProxy, logProxyShapeOnce } from "./core/trustProxy.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
 import { jobsHealth } from "./jobs.js";
@@ -162,6 +162,7 @@ export function createApp() {
   // polling of /payments/:id doesn't re-preflight every few seconds on some browsers.
   app.use(cors({ origin: corsOrigin, maxAge: 86400 }));
   app.use(securityHeaders);
+  app.use(logProxyShapeOnce); // one line per process: the forwarded chain's SHAPE, no addresses
   app.use(latencyMiddleware); // observability: p50/p95/p99 per route class
 
   // Webhooks need the raw body for signature verification — mount BEFORE express.json().

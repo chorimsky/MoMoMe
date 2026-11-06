@@ -229,3 +229,34 @@ reliability work available, and it is operator action, not engineering.
 Inventory verified and classified (§3). Prioritised plan: RISK-01/02/04 are measured,
 cheap and independent of everything else; the async rewire gates Phases 3–4; regional
 spend is not justified by present evidence. Nothing was deleted, deployed or reconfigured.
+
+---
+
+## Appendix — Phase 2 measured, 2026-11-06
+
+**Frontend delivery was already most of what the plan's Phase 2 asks for**, built before
+this audit: Vercel CDN with `x-vercel-cache: HIT`, brotli, content-hashed assets, CSP with
+per-script `sha256` plus a build-time `check-csp.mjs`, HSTS, atomic deploys and a rollback
+script. Two gaps existed, both now closed:
+
+| Item | Before | After |
+| --- | --- | --- |
+| Hashed-asset cache policy | `max-age=0, must-revalidate` | `immutable`, 1 year (`/assets/(.*)` only) |
+| Entry chunk | 634 KB raw / **159 KB br** | 523 KB raw / **135 KB br** (−15 %) |
+| JS chunks | 12 | 21 |
+
+**Route splitting already existed** and already covered the right things — admin (387 KB
+raw), capital (237 KB), SortedHub (171 KB), MerchantMap (152 KB), Scan (136 KB), checkout,
+ops, developer dashboard: roughly 1.2 MB raw deferred. An earlier revision of this document
+said there was no code splitting; that was wrong, inferred from `index.html` listing only
+the entry chunk, which is all it can list.
+
+What this session added was deferring the pages that are real but are nobody's first paint
+— Terms, Privacy, Contact, DeleteAccount, Developers, Merchant, Ambassador, Diaspora. The
+money path stays eager on purpose: `/`, `/send`, `/pay/:code`, `/receive` and `/discover`
+would otherwise pay a chunk round trip at ~200 ms RTT, which is the one place it is felt.
+`NotFound` stays eager too — it is small and answers every mistyped URL.
+
+**Remaining Phase 2 item:** none that is measured. Further splitting would now mean
+breaking up vendor code or the send flow itself, and neither is justified without the RUM
+data that is only starting to arrive.

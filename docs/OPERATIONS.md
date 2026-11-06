@@ -130,3 +130,50 @@ Once a sender's money is confirmed in, the payment MUST end in `DELIVERED` or `R
 5. **Admin → Reports → "Debited, not delivered"** (`GET /api/admin/payments/unsettled`): every such payment with age, cause and the one action — retry / mark refunded. It must read *clear*.
 
 Sandbox rehearsal: `peexit.simulatePayoutOutcome(key, "reject" | "fail")`, `setAggregatorUp(name, false)`; `test/settle-or-refund.test.ts` walks every path.
+
+## 9. Backing up the SQLite ledger — and proving the backup is good
+
+Added 2026-11-06. §1 remains the destination; this is what to do **until** the Postgres
+cutover happens, because the gap it leaves is the largest one engineering can close cheaply.
+
+**The gap.** Production still reports `store.backend: sqlite`. Nothing in this repository
+backs that file up: the only `copyFileSync` is the one-off pre-clean-sheet copy, to the
+**same volume**; there is no scheduled dump, no `VACUUM INTO`, no off-host copy, and no
+`backup` reference in `jobs.ts` or `cron.ts`. The 2026-09-17 drill in §1 rehearsed a
+*migration*, which is not the same as being able to come back from an arbitrary copy.
+
+**The weekly routine** (until §1 is done):
+
+1. Admin → Settings → Operations → *Accept payments* **off**. Wait until Admin → Payments
+   shows nothing in `PAYOUT_REQUESTED`. A copy taken mid-write can split a journal across
+   the snapshot boundary, which is exactly what check 3 below exists to catch.
+2. Download the file: Railway → service → volume → download.
+3. Turn *Accept payments* back **on**. The outage is the download, nothing more.
+4. **Verify it before trusting it**, on the copy, offline:
+
+   ```bash
+   node --import tsx server/scripts/verify-backup.ts ~/backups/momome-2026-11-06.db
+   ```
+
+   Exit `0` coherent · `1` an invariant failed · `2` unreadable. Add `--json` for a report
+   a script can read, so this can run unattended and alert on non-zero.
+
+5. Keep it off the machine that holds production, and keep more than one. A backup on the
+   same volume as the thing it protects is a copy, not a backup.
+
+**What the verifier checks**, cheapest and likeliest failure first: the file opens and has a
+`snapshot` table (a truncated download dies here) · every snapshot value parses (a partial
+copy dies here) · **every ledger journal balances, per currency** — the invariant that makes
+the ledger a ledger, and what a mid-write copy breaks · the ref index agrees with the
+payments in both directions, so a payer's reference still resolves after a restore · the
+compliance hash chain is continuous, since a gap means the tamper-evident record can no
+longer be shown to be untampered.
+
+It reports an empty ledger as "nothing to check, **NOT** a proof of balance", so a sandbox
+file cannot be mistaken for a verified one. It never writes, and it cannot tell you the
+backup is **recent** — only that it is coherent. Freshness is this schedule's job.
+
+`server/test/verify-backup.test.ts` (22 assertions, in the gate chain) builds backups broken
+in one specific way each and asserts the verifier catches that one, because a checker that
+always passes is worse than none: it turns "we have never tested a restore" into "we tested
+it and it passed".

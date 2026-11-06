@@ -19,6 +19,7 @@ import { applinks } from "./routes/applinks.js";
 import { share } from "./routes/share.js";
 import { cron } from "./routes/cron.js";
 import { rum } from "./routes/rum.js";
+import { trustProxy } from "./core/trustProxy.js";
 import { seed } from "./seed.js";
 import { config, liveMoney } from "./config.js";
 import { jobsHealth } from "./jobs.js";
@@ -149,9 +150,13 @@ export function createApp() {
   // so the tests that build several apps install it once.
   installJournalProducers();
   const app = express();
-  // Behind Railway/Vercel's single proxy hop — trust it so req.ip is the real
-  // client IP (rate limiting, webhook IP allowlist), not a spoofable XFF.
-  app.set("trust proxy", 1);
+  // Trust our OWN hops, however many there are, so req.ip is the caller — for rate
+  // limiting, the webhook IP allowlist and the operator audit trail's `ip` field. This was
+  // `1` ("exactly one proxy"), which took the RIGHTMOST forwarded entry; production has
+  // more than one hop, so req.ip was an internal address and every IP-keyed control was
+  // silently inert. A count is the wrong shape for this: too low disables the controls,
+  // too high walks past the client into attacker-supplied bytes. See core/trustProxy.ts.
+  app.set("trust proxy", trustProxy);
   app.disable("x-powered-by"); // no framework banner for scanners
   // maxAge caches the CORS preflight (OPTIONS) for a day, so the send-flow's rapid
   // polling of /payments/:id doesn't re-preflight every few seconds on some browsers.

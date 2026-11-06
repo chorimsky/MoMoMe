@@ -9,18 +9,10 @@ import { Claim } from "./pages/Claim.js";
 import { Receive } from "./pages/Receive.js";
 import { RouteTitle } from "./lib/routeTitle.js";
 import { AdminGate } from "./pages/admin/AdminGate.js";
-import { Terms } from "./pages/legal/Terms.js";
-import { Privacy } from "./pages/legal/Privacy.js";
-import { Contact } from "./pages/legal/Contact.js";
-import { DeleteAccount } from "./pages/legal/DeleteAccount.js";
 import { NotFound } from "./pages/legal/NotFound.js";
-import { Developers } from "./pages/Developers.js";
 const Checkout = lazy(() => import("./pages/Checkout.js").then((m) => ({ default: m.Checkout })));
 const DeveloperDashboard = lazy(() => import("./pages/developers/Dashboard.js").then((m) => ({ default: m.DeveloperDashboard })));
-import { Merchant } from "./pages/Merchant.js";
-import { Ambassador } from "./pages/Ambassador.js";
 import { Discover } from "./pages/Discover.js";
-import { Diaspora } from "./pages/Diaspora.js";
 import { Pay } from "./pages/Pay.js";
 
 /** Capture a referral once: a device arriving via ?ref=<code> is attributed to
@@ -43,6 +35,19 @@ function useReferralCapture() {
 // poor, metered mobile networks our senders are on.
 // Scan pulls in the jsQR software decoder (~130 KB) — only load it when the user
 // actually opens the scanner, keeping it out of the initial bundle.
+// Legal and marketing pages: real pages, but nobody's FIRST paint. A sender arrives on
+// /, /send, /pay/:code or /receive — those stay eager because a chunk fetch there is a
+// round trip on the money path, and at ~200 ms RTT that is the one place it is felt.
+// These are one navigation away, so they pay the fetch instead of the landing page.
+// NotFound stays eager: it is small and it answers every mistyped URL.
+const Terms = lazy(() => import("./pages/legal/Terms.js").then((m) => ({ default: m.Terms })));
+const Privacy = lazy(() => import("./pages/legal/Privacy.js").then((m) => ({ default: m.Privacy })));
+const Contact = lazy(() => import("./pages/legal/Contact.js").then((m) => ({ default: m.Contact })));
+const DeleteAccount = lazy(() => import("./pages/legal/DeleteAccount.js").then((m) => ({ default: m.DeleteAccount })));
+const Developers = lazy(() => import("./pages/Developers.js").then((m) => ({ default: m.Developers })));
+const Merchant = lazy(() => import("./pages/Merchant.js").then((m) => ({ default: m.Merchant })));
+const Ambassador = lazy(() => import("./pages/Ambassador.js").then((m) => ({ default: m.Ambassador })));
+const Diaspora = lazy(() => import("./pages/Diaspora.js").then((m) => ({ default: m.Diaspora })));
 const SendAbroad = lazy(() => import("./pages/SendAbroad.js").then((m) => ({ default: m.SendAbroad })));
 const Scan = lazy(() => import("./pages/Scan.js").then((m) => ({ default: m.Scan })));
 const Testing = lazy(() => import("./pages/Testing.js").then((m) => ({ default: m.Testing })));
@@ -98,21 +103,21 @@ export function App() {
       <Route path="/ai-copilot/*" element={<AdminGate brand={CAPITAL_BRAND}><Suspense fallback={<ChunkFallback />}><CapitalApp area="copilot" /></Suspense></AdminGate>} />
       <Route path="/investor/*" element={<AdminGate brand={PORTAL_BRAND}><Suspense fallback={<ChunkFallback />}><InvestorPortal /></Suspense></AdminGate>} />
       <Route path="/partners/sorted" element={<AdminGate brand={PARTNER_BRAND}><Suspense fallback={<ChunkFallback />}><SortedHub /></Suspense></AdminGate>} />
-      <Route path="/developers" element={<Developers />} />
+      <Route path="/developers" element={<Suspense fallback={<ChunkFallback />}><Developers /></Suspense>} />
       <Route path="/developers/dashboard" element={<Suspense fallback={null}><DeveloperDashboard /></Suspense>} />
-      <Route path="/merchant" element={<Merchant />} />
-      <Route path="/ambassador" element={<Ambassador />} />
+      <Route path="/merchant" element={<Suspense fallback={<ChunkFallback />}><Merchant /></Suspense>} />
+      <Route path="/ambassador" element={<Suspense fallback={<ChunkFallback />}><Ambassador /></Suspense>} />
       <Route path="/discover" element={<Discover />} />
-      <Route path="/diaspora" element={<Diaspora />} />
+      <Route path="/diaspora" element={<Suspense fallback={<ChunkFallback />}><Diaspora /></Suspense>} />
       <Route path="/scan" element={<Suspense fallback={<ChunkFallback />}><Scan /></Suspense>} />
       <Route path="/pay/:code" element={<Pay />} />
       <Route path="/p/:id" element={<Suspense fallback={null}><Checkout /></Suspense>} />
       <Route path="/m/:code" element={<Pay mode="merchant" />} />
-      <Route path="/terms" element={<Terms />} />
-      <Route path="/privacy" element={<Privacy />} />
-      <Route path="/contact" element={<Contact />} />
+      <Route path="/terms" element={<Suspense fallback={<ChunkFallback />}><Terms /></Suspense>} />
+      <Route path="/privacy" element={<Suspense fallback={<ChunkFallback />}><Privacy /></Suspense>} />
+      <Route path="/contact" element={<Suspense fallback={<ChunkFallback />}><Contact /></Suspense>} />
       {/* Public deletion URL — Google Play requires one reachable after uninstall. */}
-      <Route path="/delete-account" element={<DeleteAccount />} />
+      <Route path="/delete-account" element={<Suspense fallback={<ChunkFallback />}><DeleteAccount /></Suspense>} />
       <Route path="/test" element={<Testing />} />
       <Route path="*" element={<NotFound />} />
       </Routes>
